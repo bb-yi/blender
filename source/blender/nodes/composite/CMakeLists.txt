@@ -129,6 +129,7 @@ set(LIB
   PRIVATE bf::functions
   PRIVATE bf::gpu
   PRIVATE bf::imbuf
+  PRIVATE bf::intern::clog
   PRIVATE bf::intern::guardedalloc
   bf_compositor
   PRIVATE bf::render

@@ -578,7 +578,8 @@ static void ml_addpass_cb(void *base,
                           float *rect,
                           int totchan,
                           const char *chan_id,
-                          const char *view)
+                          const char *view,
+                          const ColorSpace *colorspace)
 {
   RenderResult *rr = static_cast<RenderResult *>(base);
   RenderLayer *rl = static_cast<RenderLayer *>(lay);
@@ -594,6 +595,7 @@ static void ml_addpass_cb(void *base,
   STRNCPY(rpass->chan_id, chan_id);
 
   RE_pass_set_buffer_data(rpass, rect);
+  rpass->ibuf->float_buffer.colorspace = colorspace;
 
   STRNCPY(rpass->name, name);
   STRNCPY(rpass->view, view);
@@ -694,8 +696,12 @@ static int order_render_passes(const void *a, const void *b)
   return (rpa->view_id < rpb->view_id);
 }
 
-RenderResult *render_result_new_from_exr(
-    ExrHandle *exrhandle, const char *colorspace, bool predivide, int rectx, int recty)
+RenderResult *render_result_new_from_exr(ExrHandle *exrhandle,
+                                         const char *colorspace,
+                                         bool predivide,
+                                         int rectx,
+                                         int recty,
+                                         bool use_part_colorspaces)
 {
   RenderResult *rr = MEM_new<RenderResult>(__func__);
   const char *to_colorspace = IMB_colormanagement_role_colorspace_name_get(
@@ -730,14 +736,22 @@ RenderResult *render_result_new_from_exr(
       copy_v2_v2_int(rpass.ibuf->display_offset, display_offset);
       copy_v2_v2_int(rpass.ibuf->data_offset, data_offset);
 
-      if (RE_RenderPassIsColor(&rpass)) {
+      const ColorSpace *part_colorspace = use_part_colorspaces ?
+                                              rpass.ibuf->float_buffer.colorspace :
+                                              nullptr;
+      const char *from_colorspace = part_colorspace ?
+                                        IMB_colormanagement_colorspace_get_name(part_colorspace) :
+                                        colorspace;
+      if (RE_RenderPassIsColor(&rpass) && !IMB_colormanagement_space_name_is_data(from_colorspace))
+      {
         IMB_colormanagement_transform_float(rpass.ibuf->float_data_for_write(),
                                             rpass.rectx,
                                             rpass.recty,
                                             rpass.channels,
-                                            colorspace,
+                                            from_colorspace,
                                             to_colorspace,
                                             predivide);
+        IMB_colormanagement_assign_float_colorspace(rpass.ibuf, to_colorspace);
       }
       else {
         IMB_colormanagement_assign_float_colorspace(rpass.ibuf, data_colorspace);

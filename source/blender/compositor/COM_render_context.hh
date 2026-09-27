@@ -9,12 +9,14 @@
 
 #include "BLI_map.hh"
 #include "BLI_math_vector_types.hh"
+#include "BLI_string_ref.hh"
 
 #include "DNA_scene_types.h"
 
 namespace blender {
 
 struct RenderResult;
+struct RenderPass;
 
 namespace compositor {
 
@@ -49,6 +51,7 @@ class FileOutput {
   RenderResult *render_result_;
   bool save_as_render_;
   Map<std::string, std::string> meta_data_;
+  Map<const RenderPass *, std::string> pass_colorspaces_;
 
  public:
   /* Allocate and initialize the internal render result of the file output using the give
@@ -77,7 +80,8 @@ class FileOutput {
   void add_pass(const char *pass_name,
                 const char *view_name,
                 const char *channels,
-                const Result &data);
+                const Result &data,
+                StringRefNull output_colorspace = "");
 
   /* Add meta data that will eventually be saved to the file if the format supports it. */
   void add_meta_data(std::string key, std::string value);

@@ -3,6 +3,10 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
+#include <string>
+
+#include "BLI_map.hh"
+
 #include "DNA_scene_types.h"
 
 namespace blender {
@@ -15,6 +19,7 @@ struct Image;
 struct ImageUser;
 struct Main;
 struct RenderResult;
+struct RenderPass;
 struct ReportList;
 struct Scene;
 
@@ -63,24 +68,28 @@ bool BKE_image_save(
  * Save single or multi-layer OpenEXR files from the render result.
  * Optionally saves only a specific view or layer.
  */
-bool BKE_image_render_write_exr(ReportList *reports,
-                                const RenderResult *rr,
-                                const char *filepath,
-                                const ImageFormatData *imf,
-                                bool save_as_render,
-                                const char *view,
-                                int layer);
+bool BKE_image_render_write_exr(
+    ReportList *reports,
+    const RenderResult *rr,
+    const char *filepath,
+    const ImageFormatData *imf,
+    bool save_as_render,
+    const char *view,
+    int layer,
+    const Map<const RenderPass *, std::string> *pass_colorspaces = nullptr);
 
 /**
  * \param filepath_basis: May be used as-is, or used as a basis for multi-view images.
  * \param format: The image format to use for saving, if null, the scene format will be used.
  */
-bool BKE_image_render_write(ReportList *reports,
-                            RenderResult *rr,
-                            const Scene *scene,
-                            bool stamp,
-                            const char *filepath_basis,
-                            const ImageFormatData *format = nullptr,
-                            bool save_as_render = true);
+bool BKE_image_render_write(
+    ReportList *reports,
+    RenderResult *rr,
+    const Scene *scene,
+    bool stamp,
+    const char *filepath_basis,
+    const ImageFormatData *format = nullptr,
+    bool save_as_render = true,
+    const Map<const RenderPass *, std::string> *pass_colorspaces = nullptr);
 
 }  // namespace blender

@@ -2657,7 +2657,9 @@ struct NodeCompositorFileOutputItem {
   /* Apply the render part of the display transform when saving non-linear images. Unused if
    * override_node_format is false or the node is saving multi-layer images. */
   char save_as_render = 0;
-  char _pad[7] = {};
+  /* Override the color space of this layer in multi-layer EXR override mode. */
+  char override_color_space = 0;
+  char _pad[6] = {};
   /* The unique name of the item. It is used as the file name when saving individual files and used
    * as the layer name when saving multi-layer images. */
   char *name = nullptr;

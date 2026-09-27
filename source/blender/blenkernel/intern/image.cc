@@ -784,6 +784,7 @@ static void image_init(Image *ima, eImageSource source, eImageType type)
 
   ima->source = source;
   ima->type = type;
+  ima->flag |= IMA_USE_EXR_PART_COLORSPACES;
 
   if (source == IMA_SRC_VIEWER) {
     ima->flag |= IMA_VIEW_AS_RENDER;
@@ -4315,7 +4316,12 @@ static void image_create_multilayer(Image *ima, ImBuf *ibuf, int framenr)
 
   /* only load rr once for multiview */
   if (!ima->rr) {
-    ima->rr = RE_MultilayerConvert(ibuf->exrhandle, colorspace, predivide, ibuf->x, ibuf->y);
+    ima->rr = RE_MultilayerConvert(ibuf->exrhandle,
+                                   colorspace,
+                                   predivide,
+                                   ibuf->x,
+                                   ibuf->y,
+                                   bool(ima->flag & IMA_USE_EXR_PART_COLORSPACES));
   }
 
   IMB_exr_close(ibuf->exrhandle);

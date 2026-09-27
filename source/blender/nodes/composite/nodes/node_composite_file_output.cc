@@ -4,6 +4,10 @@
 
 #include <cstring>
 
+#include <fmt/format.h>
+
+#include "CLG_log.h"
+
 #include "BLI_assert.h"
 #include "BLI_cpp_type.hh"
 #include "BLI_generic_pointer.hh"
@@ -36,6 +40,7 @@
 
 #include "WM_api.hh"
 
+#include "IMB_colormanagement.hh"
 #include "IMB_imbuf.hh"
 
 #include "GPU_state.hh"
@@ -56,6 +61,30 @@
 namespace blender::nodes::node_composite_file_output_cc {
 
 NODE_STORAGE_FUNCS(NodeCompositorFileOutput)
+
+static CLG_LogRef LOG = {"compositor.file_output"};
+
+static bool has_layer_color_overrides(const NodeCompositorFileOutput &storage)
+{
+  if (storage.format.imtype != R_IMF_IMTYPE_MULTILAYER ||
+      storage.format.color_management != R_IMF_COLOR_MANAGEMENT_OVERRIDE)
+  {
+    return false;
+  }
+  for (const NodeCompositorFileOutputItem &item : Span(storage.items, storage.items_count)) {
+    if (item.socket_type == SOCK_RGBA && item.override_color_space) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static const char *layer_color_space(const NodeCompositorFileOutput &storage,
+                                     const NodeCompositorFileOutputItem &item)
+{
+  return item.override_color_space ? item.format.linear_colorspace_settings.name :
+                                     storage.format.linear_colorspace_settings.name;
+}
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
@@ -205,7 +234,8 @@ static void node_draw_buttons(ui::Layout &layout, bContext * /*context*/, Pointe
 static void format_layout(ui::Layout *layout,
                           bContext *context,
                           PointerRNA *format_pointer,
-                          PointerRNA *node_or_item_pointer)
+                          PointerRNA *node_or_item_pointer,
+                          const bool allow_exr_interleave = true)
 {
   ui::Layout &col = layout->column(true);
   col.use_property_split_set(true);
@@ -216,7 +246,8 @@ static void format_layout(ui::Layout *layout,
            std::nullopt,
            ICON_NONE);
   const bool save_as_render = RNA_boolean_get(node_or_item_pointer, "save_as_render");
-  uiTemplateImageSettings(layout, context, format_pointer, save_as_render);
+  uiTemplateImageSettings(
+      layout, context, format_pointer, save_as_render, nullptr, allow_exr_interleave);
 
   if (!save_as_render) {
     ui::Layout *column = &layout->column(true);
@@ -306,6 +337,23 @@ static void item_layout(ui::Layout &layout,
   }
 
   if (is_multi_layer) {
+    const auto &storage = node_storage(*node_pointer->data_as<bNode>());
+    const auto &item = *item_pointer->data_as<NodeCompositorFileOutputItem>();
+    if (item.socket_type != SOCK_RGBA) {
+      layout.label(IFACE_("Data (No Color Conversion)"), ICON_INFO);
+      return;
+    }
+    ui::Layout &col = layout.column(false);
+    col.active_set(storage.format.color_management == R_IMF_COLOR_MANAGEMENT_OVERRIDE);
+    col.prop(item_pointer, "override_color_space", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    if (item.override_color_space) {
+      PointerRNA format = RNA_pointer_get(item_pointer, "format");
+      PointerRNA space = RNA_pointer_get(&format, "linear_colorspace_settings");
+      col.prop(&space, "name", UI_ITEM_NONE, IFACE_("Color Space"), ICON_NONE);
+    }
+    else {
+      col.label(IFACE_("Inherit Node Color Space"), ICON_NONE);
+    }
     return;
   }
 
@@ -335,7 +383,36 @@ static void node_draw_buttons_extended(ui::Layout &layout,
                               R_IMF_IMTYPE_MULTILAYER;
   layout.prop(&format_pointer, "media_type", ui::ITEM_R_EXPAND, std::nullopt, ICON_NONE);
   if (ui::Layout *panel = layout.panel(context, "node_format", false, IFACE_("Node Format"))) {
-    format_layout(panel, context, &format_pointer, node_pointer);
+    const auto &storage = node_storage(*node_pointer->data_as<bNode>());
+    format_layout(
+        panel, context, &format_pointer, node_pointer, !has_layer_color_overrides(storage));
+    if (is_multi_layer && storage.format.color_management == R_IMF_COLOR_MANAGEMENT_OVERRIDE) {
+      const ColorSpace *first_color_space = nullptr;
+      bool mixed_spaces = false;
+      for (const auto &item : Span(storage.items, storage.items_count)) {
+        if (item.socket_type != SOCK_RGBA) {
+          continue;
+        }
+        const ColorSpace *space = IMB_colormanagement_space_get_named(
+            layer_color_space(storage, item));
+        if (!space) {
+          panel->label(IFACE_("Output color space is unavailable"), ICON_ERROR);
+          continue;
+        }
+        if (IMB_colormanagement_space_is_data(space)) {
+          continue;
+        }
+        if (IMB_colormanagement_space_get_interop_id(space).is_empty()) {
+          panel->label(IFACE_("Color space has no interoperable EXR identifier"), ICON_INFO);
+        }
+        mixed_spaces |= first_color_space && first_color_space != space;
+        first_color_space = space;
+      }
+      if (mixed_spaces) {
+        panel->label(IFACE_("Mixed color spaces may not be supported by other applications"),
+                     ICON_INFO);
+      }
+    }
   }
 
   const char *panel_name = is_multi_layer ? IFACE_("Layers") : IFACE_("Images");
@@ -541,7 +618,39 @@ class FileOutputOperation : public NodeOperation {
       return;
     }
 
-    const ImageFormatData format = node_storage(this->node()).format;
+    const NodeCompositorFileOutput &storage = node_storage(node());
+    ImageFormatData format = storage.format;
+    const bool override_colors = format.color_management == R_IMF_COLOR_MANAGEMENT_OVERRIDE;
+    if (has_layer_color_overrides(storage)) {
+      format.exr_flag |= R_IMF_EXR_FLAG_MULTIPART;
+    }
+    if (override_colors) {
+      /* Validate all destinations before registering any passes for this file. */
+      for (const auto &item : Span(storage.items, storage.items_count)) {
+        if (item.socket_type != SOCK_RGBA) {
+          continue;
+        }
+        const char *name = layer_color_space(storage, item);
+        const ColorSpace *space = IMB_colormanagement_space_get_named(name);
+        if (!space) {
+          const std::string message = fmt::format(
+              "File Output '{}', layer '{}': unavailable color space '{}'",
+              node().name,
+              item.name,
+              name);
+          context().set_info_message(message);
+          CLOG_ERROR(&LOG, "%s", message.c_str());
+          return;
+        }
+        if (IMB_colormanagement_space_get_interop_id(space).is_empty()) {
+          CLOG_WARN(&LOG,
+                    "File Output '%s', layer '%s': color space '%s' has no EXR interop ID",
+                    node().name,
+                    item.name,
+                    name);
+        }
+      }
+    }
     const bool store_views_in_single_file = this->is_multi_view_exr();
     const char *view = this->context().get_view_name().data();
 
@@ -563,12 +672,14 @@ class FileOutputOperation : public NodeOperation {
     const char *pass_view = store_views_in_single_file ? view : "";
     file_output.add_view(pass_view);
 
-    const NodeCompositorFileOutput &storage = node_storage(node());
     for (const int i : IndexRange(storage.items_count)) {
       const NodeCompositorFileOutputItem &item = storage.items[i];
       const std::string identifier = FileOutputItemsAccessor::socket_identifier_for_item(item);
       const Result &input_result = this->get_input(identifier);
-      this->add_pass_for_result(file_output, input_result, item.name, pass_view);
+      const char *color_space = override_colors && item.socket_type == SOCK_RGBA ?
+                                    layer_color_space(storage, item) :
+                                    "";
+      this->add_pass_for_result(file_output, input_result, item.name, pass_view, color_space);
 
       this->add_meta_data_for_result(file_output, input_result, item.name);
     }
@@ -579,7 +690,8 @@ class FileOutputOperation : public NodeOperation {
   void add_pass_for_result(FileOutput &file_output,
                            const Result &result,
                            const char *pass_name,
-                           const char *view_name)
+                           const char *view_name,
+                           const StringRefNull output_colorspace = "")
   {
     Result data = this->context().create_result(result.type());
     if (result.is_single_value()) {
@@ -602,14 +714,17 @@ class FileOutputOperation : public NodeOperation {
 
     switch (result.type()) {
       case ResultType::Color:
-        /* Use lowercase rgba for Cryptomatte layers because the EXR internal compression rules
-         * specify that all uppercase RGBA channels will be compressed, and Cryptomatte should not
-         * be compressed. */
-        if (result.meta_data.is_cryptomatte_layer()) {
+        /* Lowercase channels store non-color data at full precision and avoid DWA color
+         * compression. In Override mode only the selected output space decides this;
+         * preserve the legacy Cryptomatte behavior when following the scene. */
+        if (output_colorspace.is_empty() ?
+                result.meta_data.is_cryptomatte_layer() :
+                IMB_colormanagement_space_name_is_data(output_colorspace.c_str()))
+        {
           file_output.add_pass(pass_name, view_name, "rgba", data);
         }
         else {
-          file_output.add_pass(pass_name, view_name, "RGBA", data);
+          file_output.add_pass(pass_name, view_name, "RGBA", data, output_colorspace);
         }
         break;
       case ResultType::Float3:

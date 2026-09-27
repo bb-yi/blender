@@ -115,13 +115,17 @@ void FileOutput::add_view(const char *view_name, const Result &data)
 void FileOutput::add_pass(const char *pass_name,
                           const char *view_name,
                           const char *channels,
-                          const Result &data)
+                          const Result &data,
+                          const StringRefNull output_colorspace)
 {
   /* Passes can only be added for EXR images. */
   BLI_assert(ELEM(format_.imtype, R_IMF_IMTYPE_OPENEXR, R_IMF_IMTYPE_MULTILAYER));
 
   RenderLayer *render_layer = static_cast<RenderLayer *>(render_result_->layers.first);
   RenderPass *render_pass = MEM_new<RenderPass>("Render Pass For File Output.");
+  if (!output_colorspace.is_empty()) {
+    pass_colorspaces_.add(render_pass, output_colorspace);
+  }
   BLI_addtail(&render_layer->passes, render_pass);
   STRNCPY(render_pass->name, pass_name);
   STRNCPY(render_pass->view, view_name);
@@ -177,8 +181,14 @@ void FileOutput::save(Scene *scene)
     BKE_scene_ppm_get(&scene->r, render_result_->ppm);
   }
 
-  BKE_image_render_write(
-      &reports, render_result_, scene, true, path_.c_str(), &format_, save_as_render_);
+  BKE_image_render_write(&reports,
+                         render_result_,
+                         scene,
+                         true,
+                         path_.c_str(),
+                         &format_,
+                         save_as_render_,
+                         &pass_colorspaces_);
 
   BKE_reports_free(&reports);
 }

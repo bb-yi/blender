@@ -165557,3 +165557,33 @@ msgstr "先累加漫反射光能再统一映射颜色；补光可以扩大亮部
 
 msgid "Map the strongest diffuse intensity once, with smoothly blended light colors; highlights still sum GGX responses"
 msgstr "对最强漫反射强度统一映射，并平滑混合灯光颜色；高光仍累加 GGX 响应"
+
+msgid "Override Color Space"
+msgstr "覆盖色彩空间"
+
+msgid "Use this layer's color space instead of the node color space when saving multi-layer EXR in Override mode"
+msgstr "在覆盖模式下保存多层 EXR 时，使用此层的色彩空间替代节点设置"
+
+msgid "Inherit Node Color Space"
+msgstr "继承节点色彩空间"
+
+msgid "Data (No Color Conversion)"
+msgstr "数据（不转换色彩）"
+
+msgid "Layer color spaces require Multipart EXR"
+msgstr "逐层色彩空间需要使用多部分 EXR"
+
+msgid "Output color space is unavailable"
+msgstr "输出色彩空间不可用"
+
+msgid "Color space has no interoperable EXR identifier"
+msgstr "此色彩空间没有可互通的 EXR 标识"
+
+msgid "Mixed color spaces may not be supported by other applications"
+msgstr "其他软件可能不支持混合色彩空间"
+
+msgid "Use File Layer Color Spaces"
+msgstr "使用文件各层色彩空间"
+
+msgid "Interpret multi-layer EXR using each part's color space metadata; fall back to the file or image color space for untagged parts"
+msgstr "使用各部分的色彩空间元数据解释多层 EXR；没有标记的部分回退到文件或图像色彩空间"

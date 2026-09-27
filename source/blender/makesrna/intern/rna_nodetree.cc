@@ -9541,7 +9541,16 @@ static void rna_def_cmp_file_output_item(BlenderRNA *brna)
 
   rna_def_node_item_array_socket_item_common(srna, "FileOutputItemsAccessor", true, true);
 
-  PropertyRNA *prop = RNA_def_property(srna, "override_node_format", PROP_BOOLEAN, PROP_NONE);
+  PropertyRNA *prop = RNA_def_property(srna, "override_color_space", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "override_color_space", 1);
+  RNA_def_property_ui_text(prop,
+                           "Override Color Space",
+                           "Use this layer's color space instead of the node color space when "
+                           "saving multi-layer EXR in Override mode");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_Node_ItemArray_item_update<FileOutputItemsAccessor>");
+
+  prop = RNA_def_property(srna, "override_node_format", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "override_node_format", 1);
   RNA_def_property_ui_text(prop,
                            "Override Node Format",

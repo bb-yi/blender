@@ -24,6 +24,10 @@ namespace blender {
 
 struct StampData;
 struct ExrHandle;
+namespace ocio {
+class ColorSpace;
+}
+using ColorSpace = ocio::ColorSpace;
 
 ExrHandle *IMB_exr_get_handle(bool write_multipart = false);
 
@@ -82,7 +86,8 @@ void IMB_exr_multilayer_convert(ExrHandle *handle,
                                                 float *rect,
                                                 int totchan,
                                                 const char *chan_id,
-                                                const char *view));
+                                                const char *view,
+                                                const ColorSpace *colorspace));
 
 void IMB_exr_close(ExrHandle *handle);
 

@@ -330,7 +330,8 @@ static void studiolight_multilayer_addpass(void *base,
                                            float *rect,
                                            int num_channels,
                                            const char * /*chan_id*/,
-                                           const char * /*view_name*/)
+                                           const char * /*view_name*/,
+                                           const ColorSpace * /*colorspace*/)
 {
   MultilayerConvertContext *ctx = static_cast<MultilayerConvertContext *>(base);
   /* NOTE: This function must free pass pixels data if it is not used, this
