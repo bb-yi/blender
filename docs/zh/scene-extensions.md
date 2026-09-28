@@ -1,5 +1,24 @@
 # Scene 级 Eevee 扩展
 
+## DLSS NR 与 Super Resolution {#dlss}
+
+入口：`Render Properties > DLSS5`（默认折叠）。这是两项独立能力：**SR** 从较低输入分辨率重建颜色，**NR** 在 SR / Film 之后增强颜色；并非帧生成。
+
+1. 当前运行路径要求 Windows、Vulkan、兼容的 NVIDIA GPU / 驱动及对应运行库。在 `Preferences > System > GPU Backend` 选择 Vulkan 后，完全退出并重启 Blender。
+2. 确认面板显示的实际 `GPU Backend` 为 Vulkan，再设置视口和最终渲染各自的 SR 品质。
+3. `Custom` 允许分别设置 50–100% 的输入宽高比例，默认 80%；这是每条边的比例，不是总像素比例。实际输入会受运行库可用范围限制，以状态栏报告尺寸为准；100% 不是独立 DLAA 模式。
+4. 需要 NR 时选择 `DLSSNR` 模式，再调整强度与风格。检查 `Viewport SR / Render SR / Viewport NR / Render NR` 状态，不能仅凭开关已启用就判断成功。
+
+### 输出、遮罩与回退
+
+- 辅助通道、Color / Value AOV、覆盖率和 Cryptomatte 由 Film 重建，不是由神经网络重新生成。ID 保留，但通道边缘不保证与神经颜色边缘逐像素一致。
+- AOV 的 `use_sr_nearest` 用于离散采样；一般颜色 AOV 保持连续重采样。多层 EXR、合成器与辅助输出本身不会直接关闭 SR。
+- NR 可选 Value AOV 遮罩：黑色保留基础图，白色使用 NR 结果，Alpha 沿用基础图；遮罩缺失或无效时 NR 旁路。
+- 选中遮罩并启用 `Output Precise Mask AOV` 会要求原生渲染；清空遮罩选择后，该遮罩专用的退出 SR 条件不再生效。
+- NR 和 SR 运行库相互独立，缺少其中之一不应阻止另一项；不满足运行条件、尺寸过小或运行失败时检查状态中的旁路/回退提示。
+
+高采样离线 SR 会逐样本处理，不能保证比原生更快。景深、运动模糊、动画和细线应按工程实测。Linux / macOS 发布包不表示已具备同等 DLSS 支持；本节不是全显卡兼容性承诺。
+
 ## 1. Render Textures
 
 #### 功能说明

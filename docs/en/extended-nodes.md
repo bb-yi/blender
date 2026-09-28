@@ -103,6 +103,58 @@ These are “portal” nodes used to organize node links.
 
 ## 2. Eevee Object Material Nodes
 
+### Principled NPR V2 {#principled-npr-v2}
+
+Entry: `Shader Editor > Add > NPR > Principled NPR` in an object material. This is a regular object-material node; an NPR Tree is not required.
+
+1. Select Eevee, add `Principled NPR`, and connect `Shader` to `Material Output > Surface`.
+2. Set `Base Color`, then use `Color Mapping` for shadow/lit colors, boundary and softness. Select a ramp mode for multi-band shading.
+3. Choose lighting and shadow modes under `Lights and Shadows`. `Total Lighting` maps the combined lighting; `Max Lighting` uses the strongest lighting. Per-light shadow classification distinguishes self shadows from other-object cast shadows.
+4. Use `Highlights` for shape, softness and anisotropy, `Environment` for indirect diffuse/specular, and `Rim` for rim lighting.
+
+Outputs include `Shader`, `Local Color`, `Alpha` and `Diffuse / Highlight / Rim / Emission`. `Local Color` is local NPR shading, **not** the final Combined result: it excludes later SSS, SSR, refraction and full native coat / sheen / transmission lighting.
+
+Legacy nodes preserve their behavior. When `Legacy V1` or `Legacy Lighting (Preserved)` is shown, use `Create V2 Copy` / `Create Simplified Copy` and compare the copy's connections and appearance before replacing the original. The new model is not a promise of identical shading.
+
+### NPR Surface Diffusion {#npr-surface-diffusion}
+
+Entry: `Shader Editor > Add > NPR > NPR Surface Diffusion`.
+
+Connect `existing Shader or shaded Color → NPR Surface Diffusion → Material Output Surface`. It diffuses already shaded color, without applying lighting a second time. Highlights inside the input branch also diffuse; add sharp highlights outside the node afterward.
+
+| Input | Meaning |
+|---|---|
+| Shader | Shader branch to diffuse; also accepts color |
+| Strength | Blend between original and diffused result; 0 bypasses |
+| Radius | Relative RGB diffusion distances; default `(1, 1, 1)`; a zero channel does not diffuse |
+| Scale | World-space distance; default `0.005`; 0 bypasses |
+
+Screen-space diffusion runs on Eevee **Dithered** surfaces. Blended surfaces and probe captures keep the undiffused input. Alpha, Holdout and coverage are not blurred. Shader to RGB after diffusion cannot read this later screen-space result; nesting does not provide repeated convolution. Off-screen/backface scattering is not available.
+
+### NPR Rim Light {#npr-rim}
+
+Entry: `Shader Editor > Add > NPR > NPR Rim Light`. Its `Color` and `Factor` outputs can be composed independently.
+
+- Fresnel mode uses normals and view angle, with Thickness, Angle, Length and falloff controls.
+- Depth mode uses `Width (Pixels)`, `Depth Threshold`, Softness and Samples, and requires an **opaque Eevee deferred surface**. Match Alpha to surface opacity; fractional alpha disables depth rim.
+- `Light Factor` supplies the lighting coordinate for `Light Bias`; `Mask` limits the effect.
+
+### Outline Shell Output {#outline-shell-output}
+
+Entry: `Shader Editor > Add > Output > Outline Shell Output` in an object material.
+
+Keep the original `Material Output` and add this output at the same material's top level. It draws the surface again through an independent material variant. Do not connect it to Material Output; this is separate from `Outline Control` screen-space outlines.
+
+| Input | Meaning |
+|---|---|
+| Color | Unlit shell color; its alpha is ignored |
+| Displacement | World-space vertex offset direction; defaults to vertex normals when unconnected |
+| Strength | Offset scale, default `0.01`; not a fixed pixel width |
+
+Use `Material Properties > Settings > Outline Shell` for `Render Method`, culling, `ZTest`, `Depth Write`, `Cast Shadow` and `Max Distance`. Inverted-hull outlines normally use front-face culling. Check Max Distance when increasing displacement to avoid bounds-related clipping. Also inspect the material Surface / Stencil settings when using stencil effects.
+
+This release preserves shell shadows from camera-hidden objects that still cast shadows. Camera visibility and Cast Shadow are distinct controls. Shell and screen-space outlines may coexist; check each path independently.
+
 
 ### Outline Control
 
@@ -1035,6 +1087,8 @@ Generates an approximate beveled normal in `Eevee` so hard edges can look smooth
 - World-sun style interference is excluded from these direct-light outputs
 
 ### Light Info
+
+New in 5.2.2: selecting a light exposes dynamic outputs for its `Shader Parameters`, with corresponding Exists outputs. Parameters support animation, drivers and light-data remapping. See [Light shader parameters](interface-guide.md#light-shader-parameters) for setup and boundaries. The fixed outputs below remain available.
 
 #### Entry
 

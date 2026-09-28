@@ -1,5 +1,24 @@
 # 界面与工作流补充
 
+## 灯光着色参数 {#light-shader-parameters}
+
+入口：Eevee 下的 `Light Data Properties > Shader Parameters`。这是一组供着色器读取的命名参数，与已有 `Lightgroup ID` 分组不同。
+
+1. 添加参数，设置名称、类型和值。支持 Float、Integer、Boolean、向量与 Color 等类型，并可配置描述、范围及硬限制。
+2. 对参数值插入关键帧或添加驱动；在物体材质的 `Light Info` 节点选择这盏灯，读取动态输出与对应 Exists 输出。
+3. 重命名、重排或重映射灯光数据后检查连线。删除参数会移除其本地驱动，但不会删除共享 Action；复制参数只复制值，不复制动画。
+
+`GLSL Function` 可通过 `glsl_light_parameter_float/int/bool/vec2/vec3/vec4/color` 系列函数读取参数。调用格式为 `(light, "parameter name", fallback, is_valid)`，参数名称必须是非空字符串字面量。应按参数类型选择函数并检查 `is_valid`，不要把参数缺失与合法零值混淆。
+
+## 多层 EXR 逐层色彩空间 {#exr-layer-color-spaces}
+
+入口：合成器 `File Output` 节点，输出类型选择多层图像 / OpenEXR。选择具体输出层，在层设置中使用色彩空间覆盖；未覆盖的颜色层显示 `Inherit Node Color Space`，继承节点的目标空间。
+
+- 颜色层可以继承节点设置，或单独选择 OCIO 色彩空间，例如 Linear Rec.709、ACEScg、sRGB；这是像素转换并写入元数据，不只是改标签。
+- Float / Vector 数据层保持 Non-Color；颜色插槽也可显式选 Non-Color 来保存数据。不要对深度、法线或 ID 应用显示色彩变换。
+- Alpha 保持原语义；读取多层文件时需让下游按各层/part 的色彩元数据解释，不能把整文件统一当作一个颜色空间。
+- 旧文件没有逐层覆盖时继续继承节点设置。不同层使用不同空间后，应在目标合成软件中逐层检查，不要只看单张预览判断数据是否正确。
+
 ## 1. Eevee Performance
 
 ### 作用
@@ -230,7 +249,7 @@
 ### 当前显示格式
 
 - `版本号 + npr post + 构建日期`
-- 例如：`5.2.0 npr post 2026-08-11`
+- 例如：`5.2.2 npr post 2026-09-28`
 
 ## 8. IME 输入
 

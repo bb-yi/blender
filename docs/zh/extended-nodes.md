@@ -103,6 +103,58 @@
 
 ## 2. Eevee 物体材质节点
 
+### Principled NPR V2（原理化 NPR） {#principled-npr-v2}
+
+入口：物体材质的 `Shader Editor > Add > NPR > Principled NPR`。这是普通物体材质节点，不需要先创建 NPR Tree。
+
+1. 使用 Eevee，在材质中添加 `Principled NPR`，将 `Shader` 接到 `Material Output > Surface`。
+2. 先调 `Base Color`，再用 `Color Mapping` 的明暗颜色、边界与柔化控制卡通分区；需要多段色带时切换映射模式。
+3. 在 `Lights and Shadows` 中选择光照合并与阴影模式。`Total Lighting` 先合并总光照再映射，`Max Lighting` 使用最强光照；逐灯阴影分类可区分自身与其他物体投影。
+4. 用 `Highlights` 控制高光形状、柔化和各向异性，用 `Environment` 控制间接漫反射/高光；需要边缘光时展开 `Rim`。
+
+输出包含 `Shader`、`Local Color`、`Alpha` 以及 `Diffuse / Highlight / Rim / Emission` 分量。`Local Color` 是局部 NPR 着色结果，**不包含**后续 SSS、SSR、折射及原生 coat / sheen / transmission 的完整结果，不能当成最终 Combined 替代品。
+
+旧节点保留兼容行为。显示 `Legacy V1` 或 `Legacy Lighting (Preserved)` 时，可用 `Create V2 Copy` / `Create Simplified Copy` 创建新版本副本，再人工对比接线与画面；不要把升级理解为完全相同的着色模型。
+
+### NPR Surface Diffusion（NPR 表面扩散） {#npr-surface-diffusion}
+
+入口：`Shader Editor > Add > NPR > NPR Surface Diffusion`。
+
+接法：`已有 Shader 或已着色 Color → NPR Surface Diffusion → Material Output Surface`。它扩散已经着色的颜色，不是再次乘灯光的 BSDF；节点内部的高光也会扩散，要保留锐利高光请在节点外最后合成。
+
+| 输入 | 含义 |
+|---|---|
+| Shader | 要扩散的 Shader 分支，也接受颜色 |
+| Strength | 原结果与扩散结果混合；0 为旁路 |
+| Radius | RGB 相对扩散距离，默认 `(1, 1, 1)`；零通道不扩散 |
+| Scale | 世界单位距离，默认 `0.005`；0 为旁路 |
+
+仅在 Eevee **Dithered** 表面执行屏幕空间扩散，Blended 与探针捕获保留未扩散输入。Alpha、Holdout 和物体覆盖率不随颜色模糊。扩散后再接 Shader to RGB 无法读取后续屏幕处理结果；嵌套也不代表连续多次模糊。不支持从离屏/背面取得散射颜色。
+
+### NPR Rim Light（NPR 边缘光） {#npr-rim}
+
+入口：`Shader Editor > Add > NPR > NPR Rim Light`，输出 `Color` 和 `Factor`，可单独合成边缘光。
+
+- Fresnel 模式使用法线和视角，调整 Thickness、Angle、Length 与衰减。
+- Depth 模式使用 `Width (Pixels)`、`Depth Threshold`、Softness 和 Samples 塑形，需要 **不透明 Eevee 延迟表面**；把 Alpha 与实际表面透明度保持一致，半透明会禁用深度边缘光。
+- `Light Factor` 为 `Light Bias` 提供光照调制坐标，`Mask` 控制作用范围。
+
+### Outline Shell Output（外壳描边输出） {#outline-shell-output}
+
+入口：物体材质的 `Shader Editor > Add > Output > Outline Shell Output`。
+
+保留原有 `Material Output`，在同一材质顶层添加此输出节点，即可用独立材质变体再次绘制表面。不需要把它接到 `Material Output`，它也不是 `Outline Control` 的屏幕空间描边。
+
+| 输入 | 含义 |
+|---|---|
+| Color | 不受灯光影响的外壳颜色；此颜色的 Alpha 被忽略 |
+| Displacement | 世界空间顶点偏移方向；未连接时使用顶点法线 |
+| Strength | 偏移倍率，默认 `0.01`；不是固定像素描边宽度 |
+
+在 `Material Properties > Settings > Outline Shell` 设置 `Render Method`、剔除面、`ZTest`、`Depth Write`、`Cast Shadow` 与 `Max Distance`。反转外壳通常使用正面剔除；扩大位移时同时检查 Max Distance，避免包围范围不足造成裁切。模板行为还需结合材质 Surface / Stencil 设置检查。
+
+新版保留「相机隐藏但仍参与阴影」物体的外壳阴影；相机可见性和 Cast Shadow 是不同控制。屏幕空间 Outline 与外壳可以同时存在，应分别检查两条描边路径。
+
 
 ### Outline Control
 
@@ -1042,6 +1094,8 @@ mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
 - 当前实现会排除 world sun 对这些输出的干扰，避免 HDRI 或世界环境里的“太阳光”混入直接结果
 
 ### Light Info
+
+5.2.2 新增：选择灯光后，节点会根据其 `Shader Parameters` 生成动态参数输出，并提供对应 Exists 输出检查参数是否存在。参数支持动画、驱动和灯光数据重映射；配置入口与限制见 [灯光着色参数](interface-guide.md#light-shader-parameters)。下方固定输出继续保留。
 
 #### 入口
 

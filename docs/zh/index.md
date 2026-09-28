@@ -6,7 +6,7 @@ hide:
 
 <div class="npr-hero" markdown>
 
-<div class="npr-eyebrow">Blender 5.2.0 LTS · NPR Port · fd9fabb4f531</div>
+<div class="npr-eyebrow">Blender 5.2.2 LTS · NPR Port · 02993970c8cd</div>
 
 # Eevee 上的风格化渲染扩展
 
@@ -16,14 +16,14 @@ hide:
 </p>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" data-npr-latest-win href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip">下载正式版</a>
+<a class="npr-btn npr-btn--primary" href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip">下载正式版</a>
 <a class="npr-btn npr-btn--outline" href="#modules">功能模块</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender">GitHub</a>
 </div>
 
 <div class="npr-meta">
-<span class="npr-chip">测试 <strong>110/110 · Win</strong></span>
-<span class="npr-chip">日期 <strong>2026-08-11</strong></span>
+<span class="npr-chip">测试 <strong>129/129 · Win</strong></span>
+<span class="npr-chip">日期 <strong>2026-09-28</strong></span>
 <span class="npr-chip">平台 <strong>Win · Linux · macOS</strong></span>
 <span class="npr-chip">引擎 <strong>Eevee</strong></span>
 </div>
@@ -102,7 +102,7 @@ hide:
 <p class="blurb">补齐屏幕空间、物体材质和自定义 GLSL 所需节点；Filter 域节点单独成类，见下方节点一览。</p>
 
 - **通用辅助**：Render Info、Scene Time、Screen Derivative、Portal
-- **物体材质**：Outline Control、Screenspace Info、World / Probe
+- **物体材质**：Principled NPR V2、NPR Surface Diffusion / Rim、Outline Shell Output
 - **GLSL / 程序化**：Function、Script Expression、SDF、OKLab、Parallax
 - **Filter 域**：Object Info、Mask、Scene Color、Pass I/O
 
@@ -154,7 +154,7 @@ hide:
 
 - **Eevee Performance**：阴影 / 探针成本归因
 - **材质状态**：预览、剔除、ZTest / Stencil / Write
-- **灯光**：Lightgroup ID、太阳光 Shadow Map Scale
+- **灯光**：Lightgroup ID、Shader Parameters、太阳光 Shadow Map Scale
 - **生产辅助**：启动图版本、IME、骨骼 Outliner 显示
 
 <div class="npr-tags">
@@ -178,6 +178,7 @@ hide:
 
 ## 新增节点一览
 <p>相对官方 Blender，本 Port 在着色器、NPR Tree 与 Filter 域新增的节点分三类集中展示。详细参数见对应文档页。</p>
+<p>总览截图未包含本次新增节点；5.2.2 的节点以以下列表和对应说明为准。</p>
 </div>
 
 <div class="npr-node-catalog" markdown>
@@ -189,6 +190,7 @@ hide:
 
 - Render Info / Screen Derivative / Portal In·Out  
 - Outline Control / Render Texture / Screenspace Info  
+- Principled NPR V2 / NPR Surface Diffusion / NPR Rim / Outline Shell Output
 - World Environment / Light Probe Color / World To Tangent  
 - GLSL Function / Script Expression / Image to Closure  
 - Basis Transform / Twirl / Water Ripples / Hex Grid / Parallax  
@@ -225,27 +227,28 @@ hide:
 <div class="npr-section-head" markdown>
 <div class="npr-eyebrow">This build</div>
 
-## 本版变更 · fd9fabb4f531
-<p>正式包重点：折射体积、GLSL 矩阵 helper、阴影细节、输入体验。</p>
+## 本版变更 · 02993970c8cd
+<p>Blender 5.2.2 LTS 基线：原理化 NPR、表面扩散、外壳描边、灯光参数、EXR 与 DLSS。</p>
 </div>
 
 <div class="npr-delta" markdown>
 
 <div markdown>
 ### 新增
-- EEVEE NPR 折射体积近似，并完成采样 / 捕获隔离与背景漏光修复
-- `GLSL Function` 提供 draw-view 矩阵 helper（view / projection / model 及 inverse；详见节点文档）
-- 视口 Shadow LOD 可视化
-- 改进 IME（适配 5.2 API，修正文本编辑器光标度量）
+- [Principled NPR V2、表面扩散与独立 Rim](extended-nodes.md#principled-npr-v2)：逐灯阴影、明暗映射、高光与边缘光
+- [Outline Shell Output](extended-nodes.md#outline-shell-output)：独立反转外壳描边
+- [灯光着色参数](interface-guide.md#light-shader-parameters)：动态 Light Info 输出、动画与驱动
+- [多层 EXR 色彩空间](interface-guide.md#exr-layer-color-spaces)：逐层 OCIO 目标与 Non-Color 数据层
+- [DLSS NR / Super Resolution](scene-extensions.md#dlss)：独立视口/渲染 SR 品质与自定义输入比例
 </div>
 
 <div markdown>
 ### 修复
-- 折射体积下 Image Sample 偏移黑洞、背景 miss、深度映射
-- 太阳光 `Shadow Map Scale` 正确作用于 tilemap
-- 未连接 GLSL sampler 回退为白色
-- 恢复 NPR Tree AOV 输出
-- 稳定 Render Texture 资源生命周期
+- 合入 Blender 5.2.1 / 5.2.2 官方修复
+- 修复 DLSS SR 对齐、运动矢量、历史重置与辅助通道重建
+- 修复 NR 默认值、小尺寸回退、运行库部署与失败恢复
+- 保留相机隐藏物体的 Outline Shell 阴影
+- 降低 Principled NPR 编译开销，修复 For Each Light 阴影资源绑定
 </div>
 
 </div>
@@ -263,7 +266,7 @@ hide:
 
 ## Windows x64 正式包
 
-<p>完整验证基线为 Windows（110/110）；同版本附带 Linux / macOS，含 SHA256。</p>
+<p>完整验证基线为 Windows（129/129）；同版本附带 Linux / macOS，含 SHA256。</p>
 
 <div class="npr-actions">
 <a class="npr-btn npr-btn--primary" href="release.html">打开下载页</a>

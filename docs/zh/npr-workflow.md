@@ -1,5 +1,8 @@
 # NPR Tree 工作流
 
+!!! note "5.2.2：区分物体材质与 NPR Tree"
+    `Principled NPR`、`NPR Surface Diffusion` 和 `NPR Rim Light` 位于普通物体材质的 **Add > NPR** 菜单，并不要求创建这里的 NPR Tree。`Outline Shell Output` 同样属于物体材质输出。具体接法见 [扩展节点](extended-nodes.md#principled-npr-v2)。本版同时修复了 For Each Light 在延迟 NPR / EEVEE Color Bake 中的阴影资源绑定。
+
 ## 1. 基本概念
 
 `NPR Tree` 是挂在普通物体材质之外的第二套表现节点树，用来对 Eevee 的材质结果做 NPR 风格重组和二次表现。

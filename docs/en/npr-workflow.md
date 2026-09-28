@@ -1,5 +1,8 @@
 # NPR Tree Workflow
 
+!!! note "5.2.2: object materials versus NPR Tree"
+    `Principled NPR`, `NPR Surface Diffusion` and `NPR Rim Light` live in a regular object material's **Add > NPR** menu; they do not require the NPR Tree described here. `Outline Shell Output` is also an object-material output. See [Extended nodes](extended-nodes.md#principled-npr-v2). This release also corrects For Each Light shadow-resource bindings in deferred NPR / EEVEE Color Bake.
+
 ## 1. Basic Concept
 
 `NPR Tree` is a second shading graph attached to a regular object material. It is used to reorganize and stylize Eevee material results in an NPR-oriented way.

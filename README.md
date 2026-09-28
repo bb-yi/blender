@@ -7,14 +7,14 @@
 - 中文：<https://blendernpr.fun/>
 - English: <https://blendernpr.fun/en/>
 - 旧地址（仍可用）：<https://bb-yi.github.io/blender/>
-- 正式版本：[Blender 5.2.0 LTS NPR Port](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604)
+- 正式版本：[Blender 5.2.2 LTS NPR Port](https://github.com/bb-yi/blender/releases/tag/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554)
 
 ## 目录
 
 ```text
 docs/zh/                 中文文档（含 stylesheets/extra.css）
 docs/en/                 英文文档（含 stylesheets/extra.css）
-overrides/               Material 主题覆盖（main.html）
+overrides/               Material 主题覆盖（main.html、语言切换菜单）
 mkdocs.yml               中文站配置
 mkdocs.en.yml            英文站配置
 build_multilingual.py    双语严格构建入口
@@ -49,10 +49,14 @@ python .\build_multilingual.py
 按线上 `/blender/` 路径预览：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\preview-ghpages.ps1
+pwsh -NoProfile -File .\preview-ghpages.ps1
 ```
 
 打开 <http://127.0.0.1:8000/blender/>。
+
+预览服务只绑定 `127.0.0.1`。构建失败或缺少必要双语页面时，脚本会立即停止并保留上次预览；`-SkipBuild` 也会检查必要页面。多 Python 环境可通过 `-Python "C:\path\to\python.exe"` 指定已安装 MkDocs 的解释器。
+
+语言菜单会切换到同一文档的另一语言版本，不再回到首页；不同语言的章节锚点可能不同，因此不继承原页面的片段定位。404 页面仍回到相应语言首页。
 
 ## 部署
 

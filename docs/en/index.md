@@ -6,7 +6,7 @@ hide:
 
 <div class="npr-hero" markdown>
 
-<div class="npr-eyebrow">Blender 5.2.0 LTS · NPR Port · fd9fabb4f531</div>
+<div class="npr-eyebrow">Blender 5.2.2 LTS · NPR Port · 02993970c8cd</div>
 
 # Stylized rendering extensions on Eevee
 
@@ -16,14 +16,14 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </p>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" data-npr-latest-win href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip">Download stable</a>
+<a class="npr-btn npr-btn--primary" href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip">Download stable</a>
 <a class="npr-btn npr-btn--outline" href="#modules">Modules</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender">GitHub</a>
 </div>
 
 <div class="npr-meta">
-<span class="npr-chip">Tests <strong>110/110 · Win</strong></span>
-<span class="npr-chip">Date <strong>2026-08-11</strong></span>
+<span class="npr-chip">Tests <strong>129/129 · Win</strong></span>
+<span class="npr-chip">Date <strong>2026-09-28</strong></span>
 <span class="npr-chip">Platforms <strong>Win · Linux · macOS</strong></span>
 <span class="npr-chip">Engine <strong>Eevee</strong></span>
 </div>
@@ -103,7 +103,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 
 - **Filter domain**: Object Info, Mask, Scene Color
 - **General helpers**: Render Info, Scene Time, Screen Derivative, Portal
-- **Object materials**: Outline Control, Screenspace Info, World / Probe
+- **Object materials**: Principled NPR V2, NPR Surface Diffusion / Rim, Outline Shell Output
 - **GLSL / procedural**: Function, Script Expression, SDF, OKLab
 
 <div class="npr-tags">
@@ -154,7 +154,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 
 - **Eevee Performance**: shadow / probe cost attribution
 - **Material state**: preview, culling, ZTest / Stencil / Write
-- **Lights**: Lightgroup ID, Sun Shadow Map Scale
+- **Lights**: Lightgroup ID, Shader Parameters, Sun Shadow Map Scale
 - **Production helpers**: splash version tag, IME, pose-bone Outliner visibility
 
 <div class="npr-tags">
@@ -179,6 +179,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 
 ## New nodes at a glance
 <p>Relative to stock Blender, this Port adds nodes across shader trees, NPR Tree, and the Filter domain. Full parameters live on the linked pages.</p>
+<p>The overview screenshots predate the new nodes in this release. Refer to the lists and linked descriptions for 5.2.2 additions.</p>
 </div>
 
 <div class="npr-node-catalog" markdown>
@@ -190,6 +191,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 
 - Render Info / Screen Derivative / Portal In·Out  
 - Outline Control / Render Texture / Screenspace Info  
+- Principled NPR V2 / NPR Surface Diffusion / NPR Rim / Outline Shell Output
 - World Environment / Light Probe Color / World To Tangent  
 - GLSL Function / Script Expression / Image to Closure  
 - Basis Transform / Twirl / Water Ripples / Hex Grid / Parallax  
@@ -226,27 +228,28 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 <div class="npr-section-head" markdown>
 <div class="npr-eyebrow">This build</div>
 
-## Build notes · fd9fabb4f531
-<p>This stable package focuses on refraction volume, GLSL matrix helpers, shadow detail, and input comfort.</p>
+## Build notes · 02993970c8cd
+<p>Blender 5.2.2 LTS: Principled NPR, surface diffusion, outline shells, light parameters, EXR and DLSS.</p>
 </div>
 
 <div class="npr-delta" markdown>
 
 <div markdown>
 ### New
-- EEVEE NPR refraction volume approximation, with sampling/capture isolation and background-leak fixes
-- `GLSL Function` draw-view matrix helpers (view / projection / model and inverses; see node docs)
-- Viewport Shadow LOD visualization
-- Improved IME support (5.2 API adaptation and text-editor cursor metrics)
+- [Principled NPR V2, Surface Diffusion and standalone Rim](extended-nodes.md#principled-npr-v2): per-light shadows, color mapping, highlights and rim lighting
+- [Outline Shell Output](extended-nodes.md#outline-shell-output): independent inverted-hull outlines
+- [Light shader parameters](interface-guide.md#light-shader-parameters): dynamic Light Info outputs, animation and drivers
+- [Per-layer EXR color spaces](interface-guide.md#exr-layer-color-spaces): OCIO targets and Non-Color data layers
+- [DLSS NR / Super Resolution](scene-extensions.md#dlss): separate viewport/render SR quality and custom input scale
 </div>
 
 <div markdown>
 ### Fixed
-- Refraction-volume Image Sample offset black holes, background misses, depth mapping
-- Sun `Shadow Map Scale` correctly applied to tilemaps
-- White fallback for unconnected GLSL samplers
-- Restored NPR Tree AOV output
-- Stabilized Render Texture resource lifetime
+- Upstream Blender 5.2.1 / 5.2.2 fixes
+- DLSS SR alignment, motion vectors, history reset and auxiliary-pass reconstruction
+- NR defaults, small-render fallback, runtime deployment and failure recovery
+- Outline Shell shadows retained for camera-hidden objects
+- Lower Principled NPR compilation cost and corrected For Each Light shadow-resource bindings
 </div>
 
 </div>
@@ -264,7 +267,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 
 ## Windows x64 stable package
 
-<p>Windows is the fully validated baseline (110/110). Linux / macOS companion builds ship in the same release with SHA256.</p>
+<p>Windows is the fully validated baseline (129/129). Linux / macOS companion builds ship in the same release with SHA256.</p>
 
 <div class="npr-actions">
 <a class="npr-btn npr-btn--primary" href="release.html">Open download page</a>

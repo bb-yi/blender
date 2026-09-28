@@ -1,5 +1,24 @@
 # Scene-Level Eevee Extensions
 
+## DLSS NR and Super Resolution {#dlss}
+
+Entry: `Render Properties > DLSS5` (collapsed by default). These are independent features: **SR** reconstructs color from a lower input resolution; **NR** enhances color after SR / Film. This is not frame generation.
+
+1. The current runtime path requires Windows, Vulkan, a compatible NVIDIA GPU / driver and the relevant runtimes. Select Vulkan in `Preferences > System > GPU Backend`, then fully quit and restart Blender.
+2. Confirm the panel's actual `GPU Backend` is Vulkan, then choose separate viewport and final-render SR quality settings.
+3. `Custom` provides independent 50–100% input width/height scales, default 80%. This is a per-axis scale, not a pixel-count percentage. Runtime limits may clamp the effective size; inspect the status dimensions. 100% is not a separate DLAA mode.
+4. Select `DLSSNR` for NR and adjust intensity/style. Check `Viewport SR / Render SR / Viewport NR / Render NR` status; an enabled setting alone does not prove successful evaluation.
+
+### Outputs, masks and fallback
+
+- Film reconstructs auxiliary passes, Color / Value AOVs, coverage and Cryptomatte; the neural model does not generate them. IDs remain intact, but pass edges are not guaranteed to match neural color edges pixel for pixel.
+- AOV `use_sr_nearest` preserves discrete samples; ordinary color AOVs retain continuous resampling. Multilayer EXR, compositor inputs and auxiliary outputs do not by themselves disable SR.
+- An optional Value AOV masks NR: black keeps the base, white uses NR, and alpha remains the base alpha. Missing or invalid masks bypass NR.
+- With a mask selected, `Output Precise Mask AOV` requests native rendering. Clearing the mask selection disables this mask-specific SR opt-out.
+- NR and SR runtimes are independent; missing one should not prevent the other. Inspect status for bypass/fallback when conditions are unsupported, dimensions are too small, or evaluation fails.
+
+Offline SR evaluates each sample and is not guaranteed to beat native rendering at high sample counts. Test depth of field, motion blur, animation and fine lines in your project. Linux / macOS packages do not imply equivalent DLSS support; this is not an all-GPU compatibility guarantee.
+
 ## 1. Render Textures
 
 #### Feature Description

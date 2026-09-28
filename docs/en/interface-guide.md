@@ -1,5 +1,24 @@
 # Interface and Workflow Additions
 
+## Light shader parameters {#light-shader-parameters}
+
+Entry: `Light Data Properties > Shader Parameters` in Eevee. These named shader values are separate from the existing `Lightgroup ID` filter.
+
+1. Add a parameter and set its name, type and value. Float, Integer, Boolean, vector and Color types are supported, with description, range and hard-limit settings.
+2. Keyframe or drive the value. Select this light in an object material's `Light Info` node to read dynamic parameter outputs and corresponding Exists outputs.
+3. Check connections after renaming, reordering or remapping light data. Removing a parameter removes its local drivers but preserves shared Actions; duplicating it copies values, not animation.
+
+`GLSL Function` reads parameters through the `glsl_light_parameter_float/int/bool/vec2/vec3/vec4/color` family. The signature is `(light, "parameter name", fallback, is_valid)`; names must be nonempty string literals. Choose the matching type and check `is_valid`; a missing parameter is not the same as a valid zero.
+
+## Per-layer EXR color spaces {#exr-layer-color-spaces}
+
+Entry: compositor `File Output`, set to multilayer image / OpenEXR. Select an output layer and enable its color-space override. Unoverridden color layers show `Inherit Node Color Space` and inherit the node's target.
+
+- Color layers can inherit or select an OCIO target such as Linear Rec.709, ACEScg or sRGB. This transforms pixel values and writes metadata; it is not merely relabeling.
+- Float / Vector data layers remain Non-Color. Color sockets may explicitly use Non-Color for data. Do not apply display color transforms to depth, normals or IDs.
+- Alpha keeps its semantics. Downstream readers should honor each layer/part's color metadata instead of assuming one color space for the entire file.
+- Legacy files without per-layer overrides continue to inherit node settings. Verify mixed-space outputs layer by layer in the target compositor, not just through a single preview.
+
 ## 1. Eevee Performance
 
 ### Purpose
@@ -230,7 +249,7 @@ Appends the current NPR build tag and build date to the version text in the top-
 ### Current Format
 
 - `version + npr post + build date`
-- Example: `5.2.0 npr post 2026-08-11`
+- Example: `5.2.2 npr post 2026-09-28`
 
 ## 8. IME Input
 

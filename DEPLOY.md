@@ -65,7 +65,7 @@ GitHub Pages 可能需要数分钟刷新。核对页面中的 5.2 LTS 标识、�
 ## 本地等路径预览
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\preview-ghpages.ps1
+pwsh -NoProfile -File .\preview-ghpages.ps1
 ```
 
-该脚本会把双语构建结果复制到被忽略的 `.preview_root/blender/`，并在 <http://127.0.0.1:8000/blender/> 提供预览。
+该脚本会检查构建退出码与必要双语页面，通过后才替换被忽略的 `.preview_root/blender/`，仅绑定 `127.0.0.1` 并在 <http://127.0.0.1:8000/blender/> 提供预览。可用 `-Python` 指定已安装 MkDocs 的 Python 可执行文件；`-SkipBuild` 不跳过产物完整性检查。
