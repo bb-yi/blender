@@ -147,7 +147,9 @@
       <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
     
     
-      <div class="md-header__option">
+      
+
+<div class="md-header__option">
   <div class="md-select">
     
     <button class="md-header__button md-icon" aria-label="选择当前语言">
@@ -157,13 +159,13 @@
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href="./" hreflang="zh" class="md-select__link">
+            <a href="extended-nodes.html" hreflang="zh" class="md-select__link">
               中文
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href="en/" hreflang="en" class="md-select__link">
+            <a href="en/extended-nodes.html" hreflang="en" class="md-select__link">
               English
             </a>
           </li>
@@ -797,6 +799,42 @@
   
     <nav class="md-nav" aria-label="2. Eevee 物体材质节点">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#principled-npr-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Principled NPR V2（原理化 NPR）
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#npr-surface-diffusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      NPR Surface Diffusion（NPR 表面扩散）
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#npr-rim" class="md-nav__link">
+    <span class="md-ellipsis">
+      NPR Rim Light（NPR 边缘光）
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outline-shell-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outline Shell Output（外壳描边输出）
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#outline-control" class="md-nav__link">
@@ -2522,6 +2560,42 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#principled-npr-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Principled NPR V2（原理化 NPR）
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#npr-surface-diffusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      NPR Surface Diffusion（NPR 表面扩散）
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#npr-rim" class="md-nav__link">
+    <span class="md-ellipsis">
+      NPR Rim Light（NPR 边缘光）
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outline-shell-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outline Shell Output（外壳描边输出）
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#outline-control" class="md-nav__link">
     <span class="md-ellipsis">
       Outline Control
@@ -4053,6 +4127,80 @@
 <li>只在同一个 shader node tree 内识别，不支持跨节点树和跨节点组自动穿透</li>
 </ul>
 <h2 id="2-eevee">2. Eevee 物体材质节点<a class="headerlink" href="#2-eevee" title="Permanent link">&para;</a></h2>
+<h3 id="principled-npr-v2">Principled NPR V2（原理化 NPR）<a class="headerlink" href="#principled-npr-v2" title="Permanent link">&para;</a></h3>
+<p>入口：物体材质的 <code>Shader Editor &gt; Add &gt; NPR &gt; Principled NPR</code>。这是普通物体材质节点，不需要先创建 NPR Tree。</p>
+<ol>
+<li>使用 Eevee，在材质中添加 <code>Principled NPR</code>，将 <code>Shader</code> 接到 <code>Material Output &gt; Surface</code>。</li>
+<li>先调 <code>Base Color</code>，再用 <code>Color Mapping</code> 的明暗颜色、边界与柔化控制卡通分区；需要多段色带时切换映射模式。</li>
+<li>在 <code>Lights and Shadows</code> 中选择光照合并与阴影模式。<code>Total Lighting</code> 先合并总光照再映射，<code>Max Lighting</code> 使用最强光照；逐灯阴影分类可区分自身与其他物体投影。</li>
+<li>用 <code>Highlights</code> 控制高光形状、柔化和各向异性，用 <code>Environment</code> 控制间接漫反射/高光；需要边缘光时展开 <code>Rim</code>。</li>
+</ol>
+<p>输出包含 <code>Shader</code>、<code>Local Color</code>、<code>Alpha</code> 以及 <code>Diffuse / Highlight / Rim / Emission</code> 分量。<code>Local Color</code> 是局部 NPR 着色结果，<strong>不包含</strong>后续 SSS、SSR、折射及原生 coat / sheen / transmission 的完整结果，不能当成最终 Combined 替代品。</p>
+<p>旧节点保留兼容行为。显示 <code>Legacy V1</code> 或 <code>Legacy Lighting (Preserved)</code> 时，可用 <code>Create V2 Copy</code> / <code>Create Simplified Copy</code> 创建新版本副本，再人工对比接线与画面；不要把升级理解为完全相同的着色模型。</p>
+<h3 id="npr-surface-diffusion">NPR Surface Diffusion（NPR 表面扩散）<a class="headerlink" href="#npr-surface-diffusion" title="Permanent link">&para;</a></h3>
+<p>入口：<code>Shader Editor &gt; Add &gt; NPR &gt; NPR Surface Diffusion</code>。</p>
+<p>接法：<code>已有 Shader 或已着色 Color → NPR Surface Diffusion → Material Output Surface</code>。它扩散已经着色的颜色，不是再次乘灯光的 BSDF；节点内部的高光也会扩散，要保留锐利高光请在节点外最后合成。</p>
+<table>
+<thead>
+<tr>
+<th>输入</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Shader</td>
+<td>要扩散的 Shader 分支，也接受颜色</td>
+</tr>
+<tr>
+<td>Strength</td>
+<td>原结果与扩散结果混合；0 为旁路</td>
+</tr>
+<tr>
+<td>Radius</td>
+<td>RGB 相对扩散距离，默认 <code>(1, 1, 1)</code>；零通道不扩散</td>
+</tr>
+<tr>
+<td>Scale</td>
+<td>世界单位距离，默认 <code>0.005</code>；0 为旁路</td>
+</tr>
+</tbody>
+</table>
+<p>仅在 Eevee <strong>Dithered</strong> 表面执行屏幕空间扩散，Blended 与探针捕获保留未扩散输入。Alpha、Holdout 和物体覆盖率不随颜色模糊。扩散后再接 Shader to RGB 无法读取后续屏幕处理结果；嵌套也不代表连续多次模糊。不支持从离屏/背面取得散射颜色。</p>
+<h3 id="npr-rim">NPR Rim Light（NPR 边缘光）<a class="headerlink" href="#npr-rim" title="Permanent link">&para;</a></h3>
+<p>入口：<code>Shader Editor &gt; Add &gt; NPR &gt; NPR Rim Light</code>，输出 <code>Color</code> 和 <code>Factor</code>，可单独合成边缘光。</p>
+<ul>
+<li>Fresnel 模式使用法线和视角，调整 Thickness、Angle、Length 与衰减。</li>
+<li>Depth 模式使用 <code>Width (Pixels)</code>、<code>Depth Threshold</code>、Softness 和 Samples 塑形，需要 <strong>不透明 Eevee 延迟表面</strong>；把 Alpha 与实际表面透明度保持一致，半透明会禁用深度边缘光。</li>
+<li><code>Light Factor</code> 为 <code>Light Bias</code> 提供光照调制坐标，<code>Mask</code> 控制作用范围。</li>
+</ul>
+<h3 id="outline-shell-output">Outline Shell Output（外壳描边输出）<a class="headerlink" href="#outline-shell-output" title="Permanent link">&para;</a></h3>
+<p>入口：物体材质的 <code>Shader Editor &gt; Add &gt; Output &gt; Outline Shell Output</code>。</p>
+<p>保留原有 <code>Material Output</code>，在同一材质顶层添加此输出节点，即可用独立材质变体再次绘制表面。不需要把它接到 <code>Material Output</code>，它也不是 <code>Outline Control</code> 的屏幕空间描边。</p>
+<table>
+<thead>
+<tr>
+<th>输入</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Color</td>
+<td>不受灯光影响的外壳颜色；此颜色的 Alpha 被忽略</td>
+</tr>
+<tr>
+<td>Displacement</td>
+<td>世界空间顶点偏移方向；未连接时使用顶点法线</td>
+</tr>
+<tr>
+<td>Strength</td>
+<td>偏移倍率，默认 <code>0.01</code>；不是固定像素描边宽度</td>
+</tr>
+</tbody>
+</table>
+<p>在 <code>Material Properties &gt; Settings &gt; Outline Shell</code> 设置 <code>Render Method</code>、剔除面、<code>ZTest</code>、<code>Depth Write</code>、<code>Cast Shadow</code> 与 <code>Max Distance</code>。反转外壳通常使用正面剔除；扩大位移时同时检查 Max Distance，避免包围范围不足造成裁切。模板行为还需结合材质 Surface / Stencil 设置检查。</p>
+<p>新版保留「相机隐藏但仍参与阴影」物体的外壳阴影；相机可见性和 Cast Shadow 是不同控制。屏幕空间 Outline 与外壳可以同时存在，应分别检查两条描边路径。</p>
 <h3 id="outline-control">Outline Control<a class="headerlink" href="#outline-control" title="Permanent link">&para;</a></h3>
 <h4 id="_15">入口<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Output &gt; Outline Control</code></p>
@@ -4936,6 +5084,7 @@
 <li>当前实现会排除 world sun 对这些输出的干扰，避免 HDRI 或世界环境里的“太阳光”混入直接结果</li>
 </ul>
 <h3 id="light-info">Light Info<a class="headerlink" href="#light-info" title="Permanent link">&para;</a></h3>
+<p>5.2.2 新增：选择灯光后，节点会根据其 <code>Shader Parameters</code> 生成动态参数输出，并提供对应 Exists 输出检查参数是否存在。参数支持动画、驱动和灯光数据重映射；配置入口与限制见 <a href="interface-guide.html#light-shader-parameters">灯光着色参数</a>。下方固定输出继续保留。</p>
 <h4 id="_95">入口<a class="headerlink" href="#_95" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Input &gt; Light Info</code></p>
 <div align="center">

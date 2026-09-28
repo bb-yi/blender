@@ -147,7 +147,9 @@
       <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
     
     
-      <div class="md-header__option">
+      
+
+<div class="md-header__option">
   <div class="md-select">
     
     <button class="md-header__button md-icon" aria-label="Select language">
@@ -157,13 +159,13 @@
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href=".././" hreflang="zh" class="md-select__link">
+            <a href="../npr-workflow.html" hreflang="zh" class="md-select__link">
               中文
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href="./" hreflang="en" class="md-select__link">
+            <a href="npr-workflow.html" hreflang="en" class="md-select__link">
               English
             </a>
           </li>
@@ -1187,6 +1189,10 @@
 
 
 <h1 id="npr-tree-workflow">NPR Tree Workflow<a class="headerlink" href="#npr-tree-workflow" title="Permanent link">&para;</a></h1>
+<div class="admonition note">
+<p class="admonition-title">5.2.2: object materials versus NPR Tree</p>
+<p><code>Principled NPR</code>, <code>NPR Surface Diffusion</code> and <code>NPR Rim Light</code> live in a regular object material's <strong>Add &gt; NPR</strong> menu; they do not require the NPR Tree described here. <code>Outline Shell Output</code> is also an object-material output. See <a href="extended-nodes.html#principled-npr-v2">Extended nodes</a>. This release also corrects For Each Light shadow-resource bindings in deferred NPR / EEVEE Color Bake.</p>
+</div>
 <h2 id="1-basic-concept">1. Basic Concept<a class="headerlink" href="#1-basic-concept" title="Permanent link">&para;</a></h2>
 <p><code>NPR Tree</code> is a second shading graph attached to a regular object material. It is used to reorganize and stylize Eevee material results in an NPR-oriented way.</p>
 <p>The regular object material still handles the base surface shading, while the <code>NPR Tree</code> adds an extra NPR presentation layer on top.</p>

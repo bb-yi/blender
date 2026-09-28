@@ -147,7 +147,9 @@
       <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
     
     
-      <div class="md-header__option">
+      
+
+<div class="md-header__option">
   <div class="md-select">
     
     <button class="md-header__button md-icon" aria-label="Select language">
@@ -157,13 +159,13 @@
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href=".././" hreflang="zh" class="md-select__link">
+            <a href="../scene-extensions.html" hreflang="zh" class="md-select__link">
               中文
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href="./" hreflang="en" class="md-select__link">
+            <a href="scene-extensions.html" hreflang="en" class="md-select__link">
               English
             </a>
           </li>
@@ -574,6 +576,30 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#dlss" class="md-nav__link">
+    <span class="md-ellipsis">
+      DLSS NR and Super Resolution
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DLSS NR and Super Resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#outputs-masks-and-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outputs, masks and fallback
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#1-render-textures" class="md-nav__link">
     <span class="md-ellipsis">
       1. Render Textures
@@ -925,6 +951,30 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#dlss" class="md-nav__link">
+    <span class="md-ellipsis">
+      DLSS NR and Super Resolution
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DLSS NR and Super Resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#outputs-masks-and-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outputs, masks and fallback
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#1-render-textures" class="md-nav__link">
     <span class="md-ellipsis">
       1. Render Textures
@@ -1181,6 +1231,23 @@
 
 
 <h1 id="scene-level-eevee-extensions">Scene-Level Eevee Extensions<a class="headerlink" href="#scene-level-eevee-extensions" title="Permanent link">&para;</a></h1>
+<h2 id="dlss">DLSS NR and Super Resolution<a class="headerlink" href="#dlss" title="Permanent link">&para;</a></h2>
+<p>Entry: <code>Render Properties &gt; DLSS5</code> (collapsed by default). These are independent features: <strong>SR</strong> reconstructs color from a lower input resolution; <strong>NR</strong> enhances color after SR / Film. This is not frame generation.</p>
+<ol>
+<li>The current runtime path requires Windows, Vulkan, a compatible NVIDIA GPU / driver and the relevant runtimes. Select Vulkan in <code>Preferences &gt; System &gt; GPU Backend</code>, then fully quit and restart Blender.</li>
+<li>Confirm the panel's actual <code>GPU Backend</code> is Vulkan, then choose separate viewport and final-render SR quality settings.</li>
+<li><code>Custom</code> provides independent 50–100% input width/height scales, default 80%. This is a per-axis scale, not a pixel-count percentage. Runtime limits may clamp the effective size; inspect the status dimensions. 100% is not a separate DLAA mode.</li>
+<li>Select <code>DLSSNR</code> for NR and adjust intensity/style. Check <code>Viewport SR / Render SR / Viewport NR / Render NR</code> status; an enabled setting alone does not prove successful evaluation.</li>
+</ol>
+<h3 id="outputs-masks-and-fallback">Outputs, masks and fallback<a class="headerlink" href="#outputs-masks-and-fallback" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Film reconstructs auxiliary passes, Color / Value AOVs, coverage and Cryptomatte; the neural model does not generate them. IDs remain intact, but pass edges are not guaranteed to match neural color edges pixel for pixel.</li>
+<li>AOV <code>use_sr_nearest</code> preserves discrete samples; ordinary color AOVs retain continuous resampling. Multilayer EXR, compositor inputs and auxiliary outputs do not by themselves disable SR.</li>
+<li>An optional Value AOV masks NR: black keeps the base, white uses NR, and alpha remains the base alpha. Missing or invalid masks bypass NR.</li>
+<li>With a mask selected, <code>Output Precise Mask AOV</code> requests native rendering. Clearing the mask selection disables this mask-specific SR opt-out.</li>
+<li>NR and SR runtimes are independent; missing one should not prevent the other. Inspect status for bypass/fallback when conditions are unsupported, dimensions are too small, or evaluation fails.</li>
+</ul>
+<p>Offline SR evaluates each sample and is not guaranteed to beat native rendering at high sample counts. Test depth of field, motion blur, animation and fine lines in your project. Linux / macOS packages do not imply equivalent DLSS support; this is not an all-GPU compatibility guarantee.</p>
 <h2 id="1-render-textures">1. Render Textures<a class="headerlink" href="#1-render-textures" title="Permanent link">&para;</a></h2>
 <h4 id="feature-description">Feature Description<a class="headerlink" href="#feature-description" title="Permanent link">&para;</a></h4>
 <p><code>Render Textures</code> is an additional scene-level Eevee render-texture system.</p>

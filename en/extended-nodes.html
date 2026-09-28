@@ -147,7 +147,9 @@
       <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
     
     
-      <div class="md-header__option">
+      
+
+<div class="md-header__option">
   <div class="md-select">
     
     <button class="md-header__button md-icon" aria-label="Select language">
@@ -157,13 +159,13 @@
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href=".././" hreflang="zh" class="md-select__link">
+            <a href="../extended-nodes.html" hreflang="zh" class="md-select__link">
               中文
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href="./" hreflang="en" class="md-select__link">
+            <a href="extended-nodes.html" hreflang="en" class="md-select__link">
               English
             </a>
           </li>
@@ -797,6 +799,42 @@
   
     <nav class="md-nav" aria-label="2. Eevee Object Material Nodes">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#principled-npr-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Principled NPR V2
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#npr-surface-diffusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      NPR Surface Diffusion
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#npr-rim" class="md-nav__link">
+    <span class="md-ellipsis">
+      NPR Rim Light
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outline-shell-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outline Shell Output
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#outline-control" class="md-nav__link">
@@ -2522,6 +2560,42 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#principled-npr-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Principled NPR V2
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#npr-surface-diffusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      NPR Surface Diffusion
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#npr-rim" class="md-nav__link">
+    <span class="md-ellipsis">
+      NPR Rim Light
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outline-shell-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outline Shell Output
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#outline-control" class="md-nav__link">
     <span class="md-ellipsis">
       Outline Control
@@ -4053,6 +4127,80 @@
 <li>Portals are only recognized inside the same shader node tree and do not automatically pass through node groups</li>
 </ul>
 <h2 id="2-eevee-object-material-nodes">2. Eevee Object Material Nodes<a class="headerlink" href="#2-eevee-object-material-nodes" title="Permanent link">&para;</a></h2>
+<h3 id="principled-npr-v2">Principled NPR V2<a class="headerlink" href="#principled-npr-v2" title="Permanent link">&para;</a></h3>
+<p>Entry: <code>Shader Editor &gt; Add &gt; NPR &gt; Principled NPR</code> in an object material. This is a regular object-material node; an NPR Tree is not required.</p>
+<ol>
+<li>Select Eevee, add <code>Principled NPR</code>, and connect <code>Shader</code> to <code>Material Output &gt; Surface</code>.</li>
+<li>Set <code>Base Color</code>, then use <code>Color Mapping</code> for shadow/lit colors, boundary and softness. Select a ramp mode for multi-band shading.</li>
+<li>Choose lighting and shadow modes under <code>Lights and Shadows</code>. <code>Total Lighting</code> maps the combined lighting; <code>Max Lighting</code> uses the strongest lighting. Per-light shadow classification distinguishes self shadows from other-object cast shadows.</li>
+<li>Use <code>Highlights</code> for shape, softness and anisotropy, <code>Environment</code> for indirect diffuse/specular, and <code>Rim</code> for rim lighting.</li>
+</ol>
+<p>Outputs include <code>Shader</code>, <code>Local Color</code>, <code>Alpha</code> and <code>Diffuse / Highlight / Rim / Emission</code>. <code>Local Color</code> is local NPR shading, <strong>not</strong> the final Combined result: it excludes later SSS, SSR, refraction and full native coat / sheen / transmission lighting.</p>
+<p>Legacy nodes preserve their behavior. When <code>Legacy V1</code> or <code>Legacy Lighting (Preserved)</code> is shown, use <code>Create V2 Copy</code> / <code>Create Simplified Copy</code> and compare the copy's connections and appearance before replacing the original. The new model is not a promise of identical shading.</p>
+<h3 id="npr-surface-diffusion">NPR Surface Diffusion<a class="headerlink" href="#npr-surface-diffusion" title="Permanent link">&para;</a></h3>
+<p>Entry: <code>Shader Editor &gt; Add &gt; NPR &gt; NPR Surface Diffusion</code>.</p>
+<p>Connect <code>existing Shader or shaded Color → NPR Surface Diffusion → Material Output Surface</code>. It diffuses already shaded color, without applying lighting a second time. Highlights inside the input branch also diffuse; add sharp highlights outside the node afterward.</p>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Shader</td>
+<td>Shader branch to diffuse; also accepts color</td>
+</tr>
+<tr>
+<td>Strength</td>
+<td>Blend between original and diffused result; 0 bypasses</td>
+</tr>
+<tr>
+<td>Radius</td>
+<td>Relative RGB diffusion distances; default <code>(1, 1, 1)</code>; a zero channel does not diffuse</td>
+</tr>
+<tr>
+<td>Scale</td>
+<td>World-space distance; default <code>0.005</code>; 0 bypasses</td>
+</tr>
+</tbody>
+</table>
+<p>Screen-space diffusion runs on Eevee <strong>Dithered</strong> surfaces. Blended surfaces and probe captures keep the undiffused input. Alpha, Holdout and coverage are not blurred. Shader to RGB after diffusion cannot read this later screen-space result; nesting does not provide repeated convolution. Off-screen/backface scattering is not available.</p>
+<h3 id="npr-rim">NPR Rim Light<a class="headerlink" href="#npr-rim" title="Permanent link">&para;</a></h3>
+<p>Entry: <code>Shader Editor &gt; Add &gt; NPR &gt; NPR Rim Light</code>. Its <code>Color</code> and <code>Factor</code> outputs can be composed independently.</p>
+<ul>
+<li>Fresnel mode uses normals and view angle, with Thickness, Angle, Length and falloff controls.</li>
+<li>Depth mode uses <code>Width (Pixels)</code>, <code>Depth Threshold</code>, Softness and Samples, and requires an <strong>opaque Eevee deferred surface</strong>. Match Alpha to surface opacity; fractional alpha disables depth rim.</li>
+<li><code>Light Factor</code> supplies the lighting coordinate for <code>Light Bias</code>; <code>Mask</code> limits the effect.</li>
+</ul>
+<h3 id="outline-shell-output">Outline Shell Output<a class="headerlink" href="#outline-shell-output" title="Permanent link">&para;</a></h3>
+<p>Entry: <code>Shader Editor &gt; Add &gt; Output &gt; Outline Shell Output</code> in an object material.</p>
+<p>Keep the original <code>Material Output</code> and add this output at the same material's top level. It draws the surface again through an independent material variant. Do not connect it to Material Output; this is separate from <code>Outline Control</code> screen-space outlines.</p>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Color</td>
+<td>Unlit shell color; its alpha is ignored</td>
+</tr>
+<tr>
+<td>Displacement</td>
+<td>World-space vertex offset direction; defaults to vertex normals when unconnected</td>
+</tr>
+<tr>
+<td>Strength</td>
+<td>Offset scale, default <code>0.01</code>; not a fixed pixel width</td>
+</tr>
+</tbody>
+</table>
+<p>Use <code>Material Properties &gt; Settings &gt; Outline Shell</code> for <code>Render Method</code>, culling, <code>ZTest</code>, <code>Depth Write</code>, <code>Cast Shadow</code> and <code>Max Distance</code>. Inverted-hull outlines normally use front-face culling. Check Max Distance when increasing displacement to avoid bounds-related clipping. Also inspect the material Surface / Stencil settings when using stencil effects.</p>
+<p>This release preserves shell shadows from camera-hidden objects that still cast shadows. Camera visibility and Cast Shadow are distinct controls. Shell and screen-space outlines may coexist; check each path independently.</p>
 <h3 id="outline-control">Outline Control<a class="headerlink" href="#outline-control" title="Permanent link">&para;</a></h3>
 <h4 id="entry_4">Entry<a class="headerlink" href="#entry_4" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Output &gt; Outline Control</code></p>
@@ -4928,6 +5076,7 @@
 <li>World-sun style interference is excluded from these direct-light outputs</li>
 </ul>
 <h3 id="light-info">Light Info<a class="headerlink" href="#light-info" title="Permanent link">&para;</a></h3>
+<p>New in 5.2.2: selecting a light exposes dynamic outputs for its <code>Shader Parameters</code>, with corresponding Exists outputs. Parameters support animation, drivers and light-data remapping. See <a href="interface-guide.html#light-shader-parameters">Light shader parameters</a> for setup and boundaries. The fixed outputs below remain available.</p>
 <h4 id="entry_23">Entry<a class="headerlink" href="#entry_23" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Input &gt; Light Info</code></p>
 <div align="center">

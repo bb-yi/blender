@@ -147,7 +147,9 @@
       <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
     
     
-      <div class="md-header__option">
+      
+
+<div class="md-header__option">
   <div class="md-select">
     
     <button class="md-header__button md-icon" aria-label="选择当前语言">
@@ -157,13 +159,13 @@
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href="./" hreflang="zh" class="md-select__link">
+            <a href="release.html" hreflang="zh" class="md-select__link">
               中文
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href="en/" hreflang="en" class="md-select__link">
+            <a href="en/release.html" hreflang="en" class="md-select__link">
               English
             </a>
           </li>
@@ -881,14 +883,14 @@
 
 
 <div class="npr-release-hero">
-<div class="npr-eyebrow">Release · fd9fabb4f531</div>
+<div class="npr-eyebrow">Release · 02993970c8cd</div>
 <h1 id="blender-npr-port">下载 Blender NPR Port<a class="headerlink" href="#blender-npr-port" title="Permanent link">&para;</a></h1>
 <p class="lead">
-正式版基于 Blender <strong>5.2.0 LTS</strong>，源代码 <code>fd9fabb4f531</code>，发布于 2026-08-11。
-<strong>Windows x64</strong> 为完整验证基线（Release 测试 110/110）；同版本另附 Linux / macOS 包。
+正式版基于 Blender <strong>5.2.2 LTS</strong>，源代码 <code>02993970c8cd</code>，发布于 2026-09-28（UTC+8；GitHub UTC 日期为 09-27）。
+<strong>Windows x64</strong> 为完整验证基线（Release 测试 129/129）；同版本另附 Linux / macOS 包。
 </p>
 <div class="npr-meta">
-<span class="npr-chip">Tests <strong>110/110 · Win</strong></span>
+<span class="npr-chip">Tests <strong>129/129 · Win</strong></span>
 <span class="npr-chip">Engine <strong>NPR = Eevee</strong></span>
 <span class="npr-chip">Also <strong>Linux · macOS</strong></span>
 </div>
@@ -896,17 +898,17 @@
 <div class="npr-download-card">
 <div>
 <h3 id="windows-x64">Windows x64 · 完整验证基线<a class="headerlink" href="#windows-x64" title="Permanent link">&para;</a></h3>
-<p class="file">blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip</p>
+<p class="file">blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip</p>
 <div class="npr-stats">
-<div class="npr-stat"><span class="label">Size</span><span class="value">≈ 385 MB</span></div>
-<div class="npr-stat"><span class="label">Bytes</span><span class="value">403,722,980</span></div>
+<div class="npr-stat"><span class="label">Size</span><span class="value">≈ 523 MiB</span></div>
+<div class="npr-stat"><span class="label">Bytes</span><span class="value">548,503,600</span></div>
 <div class="npr-stat"><span class="label">Platform</span><span class="value">Win x64</span></div>
 </div>
-<div class="npr-hash"><strong>SHA256</strong><br>63709e3aa4c43ed190a83c82b3814f8343376737694bd774e1d97ddf91c8fdd7</div>
+<div class="npr-hash"><strong>SHA256</strong><br>b606a95cf4b5c35f150e05ba8ed8aee2cb12fb3153c2ad6f0114a42fa61bfcda</div>
 </div>
 <div class="npr-dl-side">
-<p><a class="npr-btn npr-btn--primary" href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip" data-npr-latest-win>直接下载 ZIP</a></p>
-<p><a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604">GitHub Release</a></p>
+<p><a class="npr-btn npr-btn--primary" href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip">直接下载 ZIP</a></p>
+<p><a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/tag/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554">GitHub Release</a></p>
 <p><a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases">全部历史</a></p>
 </div>
 </div>
@@ -916,7 +918,7 @@
 </div>
 <div class="admonition note">
 <p class="admonition-title">验证范围</p>
-<p>Linux / macOS 与 Windows 同属 <code>fd9fabb4</code> 构建线，已随 GitHub Release 发布；<strong>未</strong>跑与 Windows 同等的完整 <code>110/110</code> Release 测试矩阵。生产关键路径请优先用 Windows 包验证，或在对应平台自行回归。</p>
+<p>Linux / macOS 与 Windows 同属 <code>02993970</code> 构建线，已随 GitHub Release 发布；<strong>未</strong>跑与 Windows 同等的完整 <code>129/129</code> Release 测试矩阵。生产关键路径请优先用 Windows 包验证，或在对应平台自行回归。</p>
 </div>
 <table>
 <thead>
@@ -930,21 +932,21 @@
 <tbody>
 <tr>
 <td>Linux x64</td>
-<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-linux64-fd9fabb4-20260811.tar.xz"><code>blender-5.2.0-npr-port-linux64-fd9fabb4-20260811.tar.xz</code></a></td>
-<td style="text-align: right;">334,871,792</td>
-<td><code>5cd57a808d90acbce26b82db652dad6cb03358666c8e6ad584214fae5b78909a</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-linux64-02993970-20260927.tar.xz"><code>blender-5.2.2-npr-port-linux64-02993970-20260927.tar.xz</code></a></td>
+<td style="text-align: right;">334,977,208</td>
+<td><code>afde4865d05fdf2d7531e57bd26963639e5b028b0c4d0a8cc7427251fcf6875b</code></td>
 </tr>
 <tr>
 <td>macOS</td>
-<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-macos-fd9fabb4-20260811.dmg"><code>blender-5.2.0-npr-port-macos-fd9fabb4-20260811.dmg</code></a></td>
-<td style="text-align: right;">391,756,886</td>
-<td><code>69f56e3eb70334b6a46093ad5a59b4be1472c11e0ee21c8270623af49023b0b8</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-macos-02993970-20260927.dmg"><code>blender-5.2.2-npr-port-macos-02993970-20260927.dmg</code></a></td>
+<td style="text-align: right;">380,036,136</td>
+<td><code>d069b10b7d61c6c0ef7ad710cfdb6aff53e8267fbd1a7491fa6c3e35ba767158</code></td>
 </tr>
 </tbody>
 </table>
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-linux64-fd9fabb4-20260811.tar.xz">下载 Linux tar.xz</a>
-<a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-macos-fd9fabb4-20260811.dmg">下载 macOS dmg</a>
+<a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-linux64-02993970-20260927.tar.xz">下载 Linux tar.xz</a>
+<a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-macos-02993970-20260927.dmg">下载 macOS dmg</a>
 </div>
 
 <div class="npr-section-head">
@@ -952,22 +954,23 @@
 <h2 id="_2">完整性校验<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 </div>
 <p>下载完成后请按平台核对 SHA256。</p>
+<p>本页下载链接、文件名、大小与校验值固定指向同一版 <code>02993970c8cd</code>，不会单独把按钮替换成未来版本。SHA256 与字节数来自 GitHub Release 资产信息；其他版本请到「全部历史」查看。</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Windows PowerShell</label><label for="__tabbed_1_2">Linux</label><label for="__tabbed_1_3">macOS</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><span class="nb">Get-FileHash</span> <span class="p">.\</span><span class="n">blender</span><span class="p">-</span><span class="n">5</span><span class="p">.</span><span class="n">2</span><span class="p">.</span><span class="n">0-npr-port-win64-fd9fabb4f531</span><span class="p">-</span><span class="n">20260811</span><span class="p">-</span><span class="n">235604</span><span class="p">.</span><span class="n">zip</span> <span class="n">-Algorithm</span> <span class="n">SHA256</span>
+<div class="highlight"><pre><span></span><code><span class="nb">Get-FileHash</span> <span class="p">.\</span><span class="n">blender</span><span class="p">-</span><span class="n">5</span><span class="p">.</span><span class="n">2</span><span class="p">.</span><span class="n">2-npr-port-win64</span><span class="p">-</span><span class="n">02993970c8cd</span><span class="p">-</span><span class="n">20260928</span><span class="p">-</span><span class="n">053554</span><span class="p">.</span><span class="n">zip</span> <span class="n">-Algorithm</span> <span class="n">SHA256</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code>sha256sum<span class="w"> </span>blender-5.2.0-npr-port-linux64-fd9fabb4-20260811.tar.xz
+<div class="highlight"><pre><span></span><code>sha256sum<span class="w"> </span>blender-5.2.2-npr-port-linux64-02993970-20260927.tar.xz
 <span class="c1"># 若校验 Windows zip：</span>
-<span class="c1"># sha256sum blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip</span>
+<span class="c1"># sha256sum blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code>shasum<span class="w"> </span>-a<span class="w"> </span><span class="m">256</span><span class="w"> </span>blender-5.2.0-npr-port-macos-fd9fabb4-20260811.dmg
+<div class="highlight"><pre><span></span><code>shasum<span class="w"> </span>-a<span class="w"> </span><span class="m">256</span><span class="w"> </span>blender-5.2.2-npr-port-macos-02993970-20260927.dmg
 <span class="c1"># 若校验 Windows zip：</span>
-<span class="c1"># shasum -a 256 blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip</span>
+<span class="c1"># shasum -a 256 blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip</span>
 </code></pre></div>
 </div>
 </div>
@@ -980,24 +983,27 @@
 <div>
 <h3 id="_4">新增<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
 <ul>
-<li>EEVEE NPR 折射体积近似，并完成采样 / 捕获隔离与背景漏光修复</li>
-<li><code>GLSL Function</code> draw-view 矩阵 helper：<code>glsl_view_matrix</code> / <code>glsl_projection_matrix</code> / <code>glsl_view_projection_matrix</code> 及 inverse，以及物体路径 <code>glsl_model_*</code> / <code>glsl_normal_matrix</code>（含 overscan / Film crop / TAA jitter）</li>
-<li>视口 Shadow LOD 可视化</li>
-<li>改进 IME 输入支持（5.2 API 适配与文本编辑器光标度量）</li>
+<li>更新到 Blender 5.2.2 LTS，合入 5.2.1 / 5.2.2 官方修复。</li>
+<li><a href="extended-nodes.html#principled-npr-v2">Principled NPR V2</a>：逐灯阴影分类、Total / Max Lighting、可控高光、深度边缘光和各向异性间接反射，保留旧材质兼容路径。</li>
+<li><a href="extended-nodes.html#npr-surface-diffusion">NPR Surface Diffusion 与 NPR Rim</a>：独立 NPR 添加菜单、屏幕空间表面扩散和边缘光塑形。</li>
+<li><a href="extended-nodes.html#outline-shell-output">Outline Shell Output</a>：独立材质变体、前向/延迟路由及剔除、深度、模板和阴影控制。</li>
+<li><a href="interface-guide.html#light-shader-parameters">灯光着色参数</a>：动态 Light Info 输出、动画、驱动、数据重映射与 GLSL Function 读取。</li>
+<li><a href="interface-guide.html#exr-layer-color-spaces">多层 EXR 逐层色彩空间</a>：节点继承 / OCIO 目标、色彩元数据和 Non-Color 数据层。</li>
+<li><a href="scene-extensions.html#dlss">DLSS NR 与 Super Resolution</a>：视口/渲染 SR 品质、自定义输入比例，以及辅助通道、AOV、覆盖率与 Cryptomatte 重建。</li>
 </ul>
 </div>
 <div>
 <h3 id="_5">修复<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
 <ul>
-<li>折射体积 Image Sample offset 黑洞、背景 miss、深度映射</li>
-<li>太阳阴影 <code>Shadow Map Scale</code> 对 tilemap 的应用，增大 scale 时细节同步提升</li>
-<li>未连接 GLSL sampler 使用白色 fallback</li>
-<li>恢复 NPR Tree AOV 输出</li>
-<li>稳定 Render Texture 资源生命周期</li>
+<li>修复 DLSS SR 重建对齐、运动矢量与历史重置；辅助输出不再直接触发原生回退。</li>
+<li>修复 DLSS NR 默认值、小尺寸渲染回退、运行库部署与失败恢复；移除冗余 Value Info 界面。</li>
+<li>修复相机隐藏但参与阴影的对象丢失 Outline Shell 阴影。</li>
+<li>Principled NPR 按实际功能裁剪着色器编译路径，降低默认材质编译开销。</li>
+<li>修复 NPR For Each Light 在延迟 NPR 与 EEVEE Color Bake 中缺少 shadow caster atlas 绑定导致的 OpenGL 编译失败。</li>
 </ul>
 </div>
 </div>
-<p>完整历史：<a href="https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md"><code>blender-npr-release-changelog.md</code></a>。矩阵 helper 细节见 <a href="extended-nodes.html#glsl-function">扩展节点 · GLSL Function</a>。</p>
+<p>正式说明以 <a href="https://github.com/bb-yi/blender/releases/tag/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554">本版 GitHub Release</a> 为准。完整历史：<a href="https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md"><code>blender-npr-release-changelog.md</code></a>。</p>
 <div class="npr-section-head">
 <div class="npr-eyebrow">Support</div>
 <h2 id="_6">支持范围<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
@@ -1007,7 +1013,9 @@
 <p>发布包包含 Cycles，但 NPR Port 扩展仅支持 <strong>EEVEE</strong>。</p>
 </div>
 <ul>
-<li><strong>Windows x64</strong>：完整验证基线，已通过 <code>110/110</code> Release 测试。</li>
+<li><strong>Windows x64</strong>：完整验证基线，已通过 <code>129/129</code> Release 测试。</li>
+<li>上述数字来自本版发布时的测试记录，不表示本次文档更新重新执行了 Blender 测试，也不保证所有显卡与驱动组合。</li>
+<li><strong>DLSS</strong>：当前运行路径要求 Windows、Vulkan、兼容的 NVIDIA GPU / 驱动与对应运行库；Linux / macOS 包不代表已具备相同 DLSS 支持。</li>
 <li><strong>Linux / macOS</strong>：同版本附带包，未跑同等完整测试矩阵；请自行验证关键路径。</li>
 <li>报错时请提供：平台、完整文件名、启动画面版本、最小复现步骤。</li>
 </ul>
@@ -1025,24 +1033,24 @@
 <tbody>
 <tr>
 <td>Windows x64</td>
-<td>完整 110/110</td>
-<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip"><code>...win64-fd9fabb4f531-20260811-235604.zip</code></a></td>
-<td style="text-align: right;">403,722,980</td>
-<td><code>63709e3aa4c43ed190a83c82b3814f8343376737694bd774e1d97ddf91c8fdd7</code></td>
+<td>完整 129/129</td>
+<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip"><code>...win64-02993970c8cd-20260928-053554.zip</code></a></td>
+<td style="text-align: right;">548,503,600</td>
+<td><code>b606a95cf4b5c35f150e05ba8ed8aee2cb12fb3153c2ad6f0114a42fa61bfcda</code></td>
 </tr>
 <tr>
 <td>Linux x64</td>
 <td>附带</td>
-<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-linux64-fd9fabb4-20260811.tar.xz"><code>...linux64-fd9fabb4-20260811.tar.xz</code></a></td>
-<td style="text-align: right;">334,871,792</td>
-<td><code>5cd57a808d90acbce26b82db652dad6cb03358666c8e6ad584214fae5b78909a</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-linux64-02993970-20260927.tar.xz"><code>...linux64-02993970-20260927.tar.xz</code></a></td>
+<td style="text-align: right;">334,977,208</td>
+<td><code>afde4865d05fdf2d7531e57bd26963639e5b028b0c4d0a8cc7427251fcf6875b</code></td>
 </tr>
 <tr>
 <td>macOS</td>
 <td>附带</td>
-<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-macos-fd9fabb4-20260811.dmg"><code>...macos-fd9fabb4-20260811.dmg</code></a></td>
-<td style="text-align: right;">391,756,886</td>
-<td><code>69f56e3eb70334b6a46093ad5a59b4be1472c11e0ee21c8270623af49023b0b8</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-macos-02993970-20260927.dmg"><code>...macos-02993970-20260927.dmg</code></a></td>
+<td style="text-align: right;">380,036,136</td>
+<td><code>d069b10b7d61c6c0ef7ad710cfdb6aff53e8267fbd1a7491fa6c3e35ba767158</code></td>
 </tr>
 </tbody>
 </table>
@@ -1056,6 +1064,16 @@
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>2026-09-11</td>
+<td><code>680997dc4ccb</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-680997dc4ccb-20260911-220732"><code>v5.2.0-npr-port-win64-680997dc4ccb-20260911-220732</code></a></td>
+</tr>
+<tr>
+<td>2026-08-11</td>
+<td><code>fd9fabb4f531</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604"><code>v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604</code></a></td>
+</tr>
 <tr>
 <td>2026-08-01</td>
 <td><code>1257abb95445</code></td>

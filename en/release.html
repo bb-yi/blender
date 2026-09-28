@@ -147,7 +147,9 @@
       <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
     
     
-      <div class="md-header__option">
+      
+
+<div class="md-header__option">
   <div class="md-select">
     
     <button class="md-header__button md-icon" aria-label="Select language">
@@ -157,13 +159,13 @@
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href=".././" hreflang="zh" class="md-select__link">
+            <a href="../release.html" hreflang="zh" class="md-select__link">
               中文
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href="./" hreflang="en" class="md-select__link">
+            <a href="release.html" hreflang="en" class="md-select__link">
               English
             </a>
           </li>
@@ -881,14 +883,14 @@
 
 
 <div class="npr-release-hero">
-<div class="npr-eyebrow">Release · fd9fabb4f531</div>
+<div class="npr-eyebrow">Release · 02993970c8cd</div>
 <h1 id="download-blender-npr-port">Download Blender NPR Port<a class="headerlink" href="#download-blender-npr-port" title="Permanent link">&para;</a></h1>
 <p class="lead">
-Stable build based on Blender <strong>5.2.0 LTS</strong>, source <code>fd9fabb4f531</code>, published 2026-08-11.
-<strong>Windows x64</strong> is the fully validated baseline (Release tests 110/110). Linux and macOS packages ship in the same release.
+Stable build based on Blender <strong>5.2.2 LTS</strong>, source <code>02993970c8cd</code>, published 2026-09-28 (UTC+8; September 27 in GitHub UTC).
+<strong>Windows x64</strong> is the fully validated baseline (Release tests 129/129). Linux and macOS packages ship in the same release.
 </p>
 <div class="npr-meta">
-<span class="npr-chip">Tests <strong>110/110 · Win</strong></span>
+<span class="npr-chip">Tests <strong>129/129 · Win</strong></span>
 <span class="npr-chip">Engine <strong>NPR = Eevee</strong></span>
 <span class="npr-chip">Also <strong>Linux · macOS</strong></span>
 </div>
@@ -896,17 +898,17 @@ Stable build based on Blender <strong>5.2.0 LTS</strong>, source <code>fd9fabb4f
 <div class="npr-download-card">
 <div>
 <h3 id="windows-x64-fully-validated-baseline">Windows x64 · fully validated baseline<a class="headerlink" href="#windows-x64-fully-validated-baseline" title="Permanent link">&para;</a></h3>
-<p class="file">blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip</p>
+<p class="file">blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip</p>
 <div class="npr-stats">
-<div class="npr-stat"><span class="label">Size</span><span class="value">≈ 385 MB</span></div>
-<div class="npr-stat"><span class="label">Bytes</span><span class="value">403,722,980</span></div>
+<div class="npr-stat"><span class="label">Size</span><span class="value">≈ 523 MiB</span></div>
+<div class="npr-stat"><span class="label">Bytes</span><span class="value">548,503,600</span></div>
 <div class="npr-stat"><span class="label">Platform</span><span class="value">Win x64</span></div>
 </div>
-<div class="npr-hash"><strong>SHA256</strong><br>63709e3aa4c43ed190a83c82b3814f8343376737694bd774e1d97ddf91c8fdd7</div>
+<div class="npr-hash"><strong>SHA256</strong><br>b606a95cf4b5c35f150e05ba8ed8aee2cb12fb3153c2ad6f0114a42fa61bfcda</div>
 </div>
 <div class="npr-dl-side">
-<p><a class="npr-btn npr-btn--primary" href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip" data-npr-latest-win>Download ZIP</a></p>
-<p><a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604">GitHub Release</a></p>
+<p><a class="npr-btn npr-btn--primary" href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip">Download ZIP</a></p>
+<p><a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/tag/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554">GitHub Release</a></p>
 <p><a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases">All releases</a></p>
 </div>
 </div>
@@ -916,7 +918,7 @@ Stable build based on Blender <strong>5.2.0 LTS</strong>, source <code>fd9fabb4f
 </div>
 <div class="admonition note">
 <p class="admonition-title">Validation scope</p>
-<p>Linux and macOS ship on the same <code>fd9fabb4</code> line via GitHub Release. They did <strong>not</strong> run the full Windows <code>110/110</code> Release test matrix. Prefer the Windows package for production-critical paths, or re-validate on your platform.</p>
+<p>Linux and macOS ship on the same <code>02993970</code> line via GitHub Release. They did <strong>not</strong> run the full Windows <code>129/129</code> Release test matrix. Prefer the Windows package for production-critical paths, or re-validate on your platform.</p>
 </div>
 <table>
 <thead>
@@ -930,21 +932,21 @@ Stable build based on Blender <strong>5.2.0 LTS</strong>, source <code>fd9fabb4f
 <tbody>
 <tr>
 <td>Linux x64</td>
-<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-linux64-fd9fabb4-20260811.tar.xz"><code>blender-5.2.0-npr-port-linux64-fd9fabb4-20260811.tar.xz</code></a></td>
-<td style="text-align: right;">334,871,792</td>
-<td><code>5cd57a808d90acbce26b82db652dad6cb03358666c8e6ad584214fae5b78909a</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-linux64-02993970-20260927.tar.xz"><code>blender-5.2.2-npr-port-linux64-02993970-20260927.tar.xz</code></a></td>
+<td style="text-align: right;">334,977,208</td>
+<td><code>afde4865d05fdf2d7531e57bd26963639e5b028b0c4d0a8cc7427251fcf6875b</code></td>
 </tr>
 <tr>
 <td>macOS</td>
-<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-macos-fd9fabb4-20260811.dmg"><code>blender-5.2.0-npr-port-macos-fd9fabb4-20260811.dmg</code></a></td>
-<td style="text-align: right;">391,756,886</td>
-<td><code>69f56e3eb70334b6a46093ad5a59b4be1472c11e0ee21c8270623af49023b0b8</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-macos-02993970-20260927.dmg"><code>blender-5.2.2-npr-port-macos-02993970-20260927.dmg</code></a></td>
+<td style="text-align: right;">380,036,136</td>
+<td><code>d069b10b7d61c6c0ef7ad710cfdb6aff53e8267fbd1a7491fa6c3e35ba767158</code></td>
 </tr>
 </tbody>
 </table>
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-linux64-fd9fabb4-20260811.tar.xz">Download Linux tar.xz</a>
-<a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-macos-fd9fabb4-20260811.dmg">Download macOS dmg</a>
+<a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-linux64-02993970-20260927.tar.xz">Download Linux tar.xz</a>
+<a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-macos-02993970-20260927.dmg">Download macOS dmg</a>
 </div>
 
 <div class="npr-section-head">
@@ -952,22 +954,23 @@ Stable build based on Blender <strong>5.2.0 LTS</strong>, source <code>fd9fabb4f
 <h2 id="integrity-check">Integrity check<a class="headerlink" href="#integrity-check" title="Permanent link">&para;</a></h2>
 </div>
 <p>Verify the SHA256 hash for your platform after downloading.</p>
+<p>Download links, filenames, sizes and hashes on this page are pinned to the same <code>02993970c8cd</code> release. Buttons do not silently switch to a future build. SHA256 and byte counts come from GitHub Release asset metadata; use “All releases” for other versions.</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Windows PowerShell</label><label for="__tabbed_1_2">Linux</label><label for="__tabbed_1_3">macOS</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><span class="nb">Get-FileHash</span> <span class="p">.\</span><span class="n">blender</span><span class="p">-</span><span class="n">5</span><span class="p">.</span><span class="n">2</span><span class="p">.</span><span class="n">0-npr-port-win64-fd9fabb4f531</span><span class="p">-</span><span class="n">20260811</span><span class="p">-</span><span class="n">235604</span><span class="p">.</span><span class="n">zip</span> <span class="n">-Algorithm</span> <span class="n">SHA256</span>
+<div class="highlight"><pre><span></span><code><span class="nb">Get-FileHash</span> <span class="p">.\</span><span class="n">blender</span><span class="p">-</span><span class="n">5</span><span class="p">.</span><span class="n">2</span><span class="p">.</span><span class="n">2-npr-port-win64</span><span class="p">-</span><span class="n">02993970c8cd</span><span class="p">-</span><span class="n">20260928</span><span class="p">-</span><span class="n">053554</span><span class="p">.</span><span class="n">zip</span> <span class="n">-Algorithm</span> <span class="n">SHA256</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code>sha256sum<span class="w"> </span>blender-5.2.0-npr-port-linux64-fd9fabb4-20260811.tar.xz
+<div class="highlight"><pre><span></span><code>sha256sum<span class="w"> </span>blender-5.2.2-npr-port-linux64-02993970-20260927.tar.xz
 <span class="c1"># For the Windows zip:</span>
-<span class="c1"># sha256sum blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip</span>
+<span class="c1"># sha256sum blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code>shasum<span class="w"> </span>-a<span class="w"> </span><span class="m">256</span><span class="w"> </span>blender-5.2.0-npr-port-macos-fd9fabb4-20260811.dmg
+<div class="highlight"><pre><span></span><code>shasum<span class="w"> </span>-a<span class="w"> </span><span class="m">256</span><span class="w"> </span>blender-5.2.2-npr-port-macos-02993970-20260927.dmg
 <span class="c1"># For the Windows zip:</span>
-<span class="c1"># shasum -a 256 blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip</span>
+<span class="c1"># shasum -a 256 blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip</span>
 </code></pre></div>
 </div>
 </div>
@@ -980,24 +983,27 @@ Stable build based on Blender <strong>5.2.0 LTS</strong>, source <code>fd9fabb4f
 <div>
 <h3 id="new">New<a class="headerlink" href="#new" title="Permanent link">&para;</a></h3>
 <ul>
-<li>EEVEE NPR refraction volume approximation, with sampling/capture isolation and background-leak fixes</li>
-<li><code>GLSL Function</code> draw-view matrix helpers: <code>glsl_view_matrix</code> / <code>glsl_projection_matrix</code> / <code>glsl_view_projection_matrix</code> and inverses, plus object-path <code>glsl_model_*</code> / <code>glsl_normal_matrix</code> (overscan / Film crop / TAA jitter)</li>
-<li>Viewport Shadow LOD visualization</li>
-<li>Improved IME support (5.2 API adaptation and text-editor cursor metrics)</li>
+<li>Blender 5.2.2 LTS baseline, including upstream 5.2.1 / 5.2.2 fixes.</li>
+<li><a href="extended-nodes.html#principled-npr-v2">Principled NPR V2</a>: per-light shadow classification, Total / Max Lighting, controlled highlights, depth rim lighting and anisotropic indirect reflections; legacy materials remain compatible.</li>
+<li><a href="extended-nodes.html#npr-surface-diffusion">NPR Surface Diffusion and NPR Rim</a>: dedicated NPR add menu, screen-space surface diffusion and standalone rim shaping.</li>
+<li><a href="extended-nodes.html#outline-shell-output">Outline Shell Output</a>: independent material variants, forward/deferred routing, culling, depth, stencil and shadow control.</li>
+<li><a href="interface-guide.html#light-shader-parameters">Light shader parameters</a>: dynamic Light Info outputs, animation, drivers, data remapping and GLSL Function access.</li>
+<li><a href="interface-guide.html#exr-layer-color-spaces">Per-layer EXR color spaces</a>: inherited / explicit OCIO targets, color metadata and Non-Color data layers.</li>
+<li><a href="scene-extensions.html#dlss">DLSS NR and Super Resolution</a>: separate viewport/render SR quality, custom input scale, auxiliary passes, AOVs, coverage and Cryptomatte reconstruction.</li>
 </ul>
 </div>
 <div>
 <h3 id="fixes">Fixes<a class="headerlink" href="#fixes" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Refraction-volume Image Sample offset black holes, background misses, depth mapping</li>
-<li>Sun <code>Shadow Map Scale</code> applied to tilemaps; higher scale increases effective detail</li>
-<li>White fallback for unconnected GLSL samplers</li>
-<li>Restored NPR Tree AOV output</li>
-<li>Stabilized Render Texture resource lifetime</li>
+<li>Corrected DLSS SR reconstruction alignment, motion vectors and history reset; auxiliary outputs no longer directly force native fallback.</li>
+<li>Corrected NR defaults, small-render fallback, runtime deployment and recovery; removed the redundant Value Info UI.</li>
+<li>Retained Outline Shell shadows from objects hidden from the camera.</li>
+<li>Specialized Principled NPR shader paths by enabled features to reduce default-material compilation cost.</li>
+<li>Fixed missing shadow caster atlas bindings for NPR For Each Light in deferred NPR and EEVEE Color Bake, which caused OpenGL shader compilation failures.</li>
 </ul>
 </div>
 </div>
-<p>Full history: <a href="https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md"><code>blender-npr-release-changelog.md</code></a>. Matrix helper details: <a href="extended-nodes.html#glsl-function">Extended nodes · GLSL Function</a>.</p>
+<p>Authoritative notes: <a href="https://github.com/bb-yi/blender/releases/tag/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554">this GitHub Release</a>. Full history: <a href="https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md"><code>blender-npr-release-changelog.md</code></a>.</p>
 <div class="npr-section-head">
 <div class="npr-eyebrow">Support</div>
 <h2 id="support-scope">Support scope<a class="headerlink" href="#support-scope" title="Permanent link">&para;</a></h2>
@@ -1007,7 +1013,9 @@ Stable build based on Blender <strong>5.2.0 LTS</strong>, source <code>fd9fabb4f
 <p>Cycles is included, but NPR Port extensions support <strong>EEVEE</strong> only.</p>
 </div>
 <ul>
-<li><strong>Windows x64</strong>: fully validated baseline; passed <code>110/110</code> Release tests.</li>
+<li><strong>Windows x64</strong>: fully validated baseline; passed <code>129/129</code> Release tests.</li>
+<li>This count comes from the release-time test record, not a new Blender test run for this documentation update or a guarantee for every GPU / driver combination.</li>
+<li><strong>DLSS</strong>: the current runtime path requires Windows, Vulkan, a compatible NVIDIA GPU / driver and the relevant runtime binaries. Linux / macOS packages do not imply equivalent DLSS support.</li>
 <li><strong>Linux / macOS</strong>: same-release companion builds; not covered by the full Windows test matrix — re-validate critical paths.</li>
 <li>When reporting issues, include platform, full filename, splash version, and minimal reproduction steps.</li>
 </ul>
@@ -1025,24 +1033,24 @@ Stable build based on Blender <strong>5.2.0 LTS</strong>, source <code>fd9fabb4f
 <tbody>
 <tr>
 <td>Windows x64</td>
-<td>Full 110/110</td>
-<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip"><code>...win64-fd9fabb4f531-20260811-235604.zip</code></a></td>
-<td style="text-align: right;">403,722,980</td>
-<td><code>63709e3aa4c43ed190a83c82b3814f8343376737694bd774e1d97ddf91c8fdd7</code></td>
+<td>Full 129/129</td>
+<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip"><code>...win64-02993970c8cd-20260928-053554.zip</code></a></td>
+<td style="text-align: right;">548,503,600</td>
+<td><code>b606a95cf4b5c35f150e05ba8ed8aee2cb12fb3153c2ad6f0114a42fa61bfcda</code></td>
 </tr>
 <tr>
 <td>Linux x64</td>
 <td>Companion</td>
-<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-linux64-fd9fabb4-20260811.tar.xz"><code>...linux64-fd9fabb4-20260811.tar.xz</code></a></td>
-<td style="text-align: right;">334,871,792</td>
-<td><code>5cd57a808d90acbce26b82db652dad6cb03358666c8e6ad584214fae5b78909a</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-linux64-02993970-20260927.tar.xz"><code>...linux64-02993970-20260927.tar.xz</code></a></td>
+<td style="text-align: right;">334,977,208</td>
+<td><code>afde4865d05fdf2d7531e57bd26963639e5b028b0c4d0a8cc7427251fcf6875b</code></td>
 </tr>
 <tr>
 <td>macOS</td>
 <td>Companion</td>
-<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-macos-fd9fabb4-20260811.dmg"><code>...macos-fd9fabb4-20260811.dmg</code></a></td>
-<td style="text-align: right;">391,756,886</td>
-<td><code>69f56e3eb70334b6a46093ad5a59b4be1472c11e0ee21c8270623af49023b0b8</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-macos-02993970-20260927.dmg"><code>...macos-02993970-20260927.dmg</code></a></td>
+<td style="text-align: right;">380,036,136</td>
+<td><code>d069b10b7d61c6c0ef7ad710cfdb6aff53e8267fbd1a7491fa6c3e35ba767158</code></td>
 </tr>
 </tbody>
 </table>
@@ -1056,6 +1064,16 @@ Stable build based on Blender <strong>5.2.0 LTS</strong>, source <code>fd9fabb4f
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>2026-09-11</td>
+<td><code>680997dc4ccb</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-680997dc4ccb-20260911-220732"><code>v5.2.0-npr-port-win64-680997dc4ccb-20260911-220732</code></a></td>
+</tr>
+<tr>
+<td>2026-08-11</td>
+<td><code>fd9fabb4f531</code></td>
+<td><a href="https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604"><code>v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604</code></a></td>
+</tr>
 <tr>
 <td>2026-08-01</td>
 <td><code>1257abb95445</code></td>

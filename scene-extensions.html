@@ -147,7 +147,9 @@
       <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
     
     
-      <div class="md-header__option">
+      
+
+<div class="md-header__option">
   <div class="md-select">
     
     <button class="md-header__button md-icon" aria-label="选择当前语言">
@@ -157,13 +159,13 @@
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href="./" hreflang="zh" class="md-select__link">
+            <a href="scene-extensions.html" hreflang="zh" class="md-select__link">
               中文
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href="en/" hreflang="en" class="md-select__link">
+            <a href="en/scene-extensions.html" hreflang="en" class="md-select__link">
               English
             </a>
           </li>
@@ -574,6 +576,30 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#dlss" class="md-nav__link">
+    <span class="md-ellipsis">
+      DLSS NR 与 Super Resolution
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DLSS NR 与 Super Resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      输出、遮罩与回退
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#1-render-textures" class="md-nav__link">
     <span class="md-ellipsis">
       1. Render Textures
@@ -584,7 +610,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
+  <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -593,7 +619,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       面板入口
     </span>
@@ -602,7 +628,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       可配置内容
     </span>
@@ -611,7 +637,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#_5" class="md-nav__link">
     <span class="md-ellipsis">
       基本使用方法
     </span>
@@ -635,7 +661,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
+  <a href="#_6" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -644,7 +670,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_6" class="md-nav__link">
+  <a href="#_7" class="md-nav__link">
     <span class="md-ellipsis">
       面板与编辑器入口
     </span>
@@ -671,7 +697,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_7" class="md-nav__link">
+  <a href="#_8" class="md-nav__link">
     <span class="md-ellipsis">
       基本使用方法
     </span>
@@ -680,7 +706,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_8" class="md-nav__link">
+  <a href="#_9" class="md-nav__link">
     <span class="md-ellipsis">
       执行阶段
     </span>
@@ -689,7 +715,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_9" class="md-nav__link">
+  <a href="#_10" class="md-nav__link">
     <span class="md-ellipsis">
       数据块与旧文件迁移
     </span>
@@ -713,7 +739,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_10" class="md-nav__link">
+  <a href="#_11" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -722,7 +748,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_11" class="md-nav__link">
+  <a href="#_12" class="md-nav__link">
     <span class="md-ellipsis">
       面板入口
     </span>
@@ -731,7 +757,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_12" class="md-nav__link">
+  <a href="#_13" class="md-nav__link">
     <span class="md-ellipsis">
       可配置内容
     </span>
@@ -749,7 +775,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_13" class="md-nav__link">
+  <a href="#_14" class="md-nav__link">
     <span class="md-ellipsis">
       基本使用方法
     </span>
@@ -758,7 +784,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_14" class="md-nav__link">
+  <a href="#_15" class="md-nav__link">
     <span class="md-ellipsis">
       重要说明
     </span>
@@ -782,7 +808,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_15" class="md-nav__link">
+  <a href="#_16" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -791,7 +817,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_16" class="md-nav__link">
+  <a href="#_17" class="md-nav__link">
     <span class="md-ellipsis">
       面板入口
     </span>
@@ -800,7 +826,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_17" class="md-nav__link">
+  <a href="#_18" class="md-nav__link">
     <span class="md-ellipsis">
       行为说明
     </span>
@@ -925,6 +951,30 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#dlss" class="md-nav__link">
+    <span class="md-ellipsis">
+      DLSS NR 与 Super Resolution
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DLSS NR 与 Super Resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      输出、遮罩与回退
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#1-render-textures" class="md-nav__link">
     <span class="md-ellipsis">
       1. Render Textures
@@ -935,7 +985,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
+  <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -944,7 +994,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       面板入口
     </span>
@@ -953,7 +1003,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       可配置内容
     </span>
@@ -962,7 +1012,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#_5" class="md-nav__link">
     <span class="md-ellipsis">
       基本使用方法
     </span>
@@ -986,7 +1036,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
+  <a href="#_6" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -995,7 +1045,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_6" class="md-nav__link">
+  <a href="#_7" class="md-nav__link">
     <span class="md-ellipsis">
       面板与编辑器入口
     </span>
@@ -1022,7 +1072,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_7" class="md-nav__link">
+  <a href="#_8" class="md-nav__link">
     <span class="md-ellipsis">
       基本使用方法
     </span>
@@ -1031,7 +1081,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_8" class="md-nav__link">
+  <a href="#_9" class="md-nav__link">
     <span class="md-ellipsis">
       执行阶段
     </span>
@@ -1040,7 +1090,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_9" class="md-nav__link">
+  <a href="#_10" class="md-nav__link">
     <span class="md-ellipsis">
       数据块与旧文件迁移
     </span>
@@ -1064,7 +1114,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_10" class="md-nav__link">
+  <a href="#_11" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -1073,7 +1123,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_11" class="md-nav__link">
+  <a href="#_12" class="md-nav__link">
     <span class="md-ellipsis">
       面板入口
     </span>
@@ -1082,7 +1132,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_12" class="md-nav__link">
+  <a href="#_13" class="md-nav__link">
     <span class="md-ellipsis">
       可配置内容
     </span>
@@ -1100,7 +1150,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_13" class="md-nav__link">
+  <a href="#_14" class="md-nav__link">
     <span class="md-ellipsis">
       基本使用方法
     </span>
@@ -1109,7 +1159,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_14" class="md-nav__link">
+  <a href="#_15" class="md-nav__link">
     <span class="md-ellipsis">
       重要说明
     </span>
@@ -1133,7 +1183,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_15" class="md-nav__link">
+  <a href="#_16" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -1142,7 +1192,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_16" class="md-nav__link">
+  <a href="#_17" class="md-nav__link">
     <span class="md-ellipsis">
       面板入口
     </span>
@@ -1151,7 +1201,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_17" class="md-nav__link">
+  <a href="#_18" class="md-nav__link">
     <span class="md-ellipsis">
       行为说明
     </span>
@@ -1181,18 +1231,35 @@
 
 
 <h1 id="scene-eevee">Scene 级 Eevee 扩展<a class="headerlink" href="#scene-eevee" title="Permanent link">&para;</a></h1>
+<h2 id="dlss">DLSS NR 与 Super Resolution<a class="headerlink" href="#dlss" title="Permanent link">&para;</a></h2>
+<p>入口：<code>Render Properties &gt; DLSS5</code>（默认折叠）。这是两项独立能力：<strong>SR</strong> 从较低输入分辨率重建颜色，<strong>NR</strong> 在 SR / Film 之后增强颜色；并非帧生成。</p>
+<ol>
+<li>当前运行路径要求 Windows、Vulkan、兼容的 NVIDIA GPU / 驱动及对应运行库。在 <code>Preferences &gt; System &gt; GPU Backend</code> 选择 Vulkan 后，完全退出并重启 Blender。</li>
+<li>确认面板显示的实际 <code>GPU Backend</code> 为 Vulkan，再设置视口和最终渲染各自的 SR 品质。</li>
+<li><code>Custom</code> 允许分别设置 50–100% 的输入宽高比例，默认 80%；这是每条边的比例，不是总像素比例。实际输入会受运行库可用范围限制，以状态栏报告尺寸为准；100% 不是独立 DLAA 模式。</li>
+<li>需要 NR 时选择 <code>DLSSNR</code> 模式，再调整强度与风格。检查 <code>Viewport SR / Render SR / Viewport NR / Render NR</code> 状态，不能仅凭开关已启用就判断成功。</li>
+</ol>
+<h3 id="_1">输出、遮罩与回退<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>辅助通道、Color / Value AOV、覆盖率和 Cryptomatte 由 Film 重建，不是由神经网络重新生成。ID 保留，但通道边缘不保证与神经颜色边缘逐像素一致。</li>
+<li>AOV 的 <code>use_sr_nearest</code> 用于离散采样；一般颜色 AOV 保持连续重采样。多层 EXR、合成器与辅助输出本身不会直接关闭 SR。</li>
+<li>NR 可选 Value AOV 遮罩：黑色保留基础图，白色使用 NR 结果，Alpha 沿用基础图；遮罩缺失或无效时 NR 旁路。</li>
+<li>选中遮罩并启用 <code>Output Precise Mask AOV</code> 会要求原生渲染；清空遮罩选择后，该遮罩专用的退出 SR 条件不再生效。</li>
+<li>NR 和 SR 运行库相互独立，缺少其中之一不应阻止另一项；不满足运行条件、尺寸过小或运行失败时检查状态中的旁路/回退提示。</li>
+</ul>
+<p>高采样离线 SR 会逐样本处理，不能保证比原生更快。景深、运动模糊、动画和细线应按工程实测。Linux / macOS 发布包不表示已具备同等 DLSS 支持；本节不是全显卡兼容性承诺。</p>
 <h2 id="1-render-textures">1. Render Textures<a class="headerlink" href="#1-render-textures" title="Permanent link">&para;</a></h2>
-<h4 id="_1">功能说明<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h4>
+<h4 id="_2">功能说明<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h4>
 <p><code>Render Textures</code> 是场景级的 Eevee 额外渲染纹理系统。</p>
 <p>它允许场景预先维护最多 <code>4</code> 个 Render Texture 槽位。每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质中通过 <code>Render Texture</code> 节点采样。</p>
-<h4 id="_2">面板入口<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h4>
+<h4 id="_3">面板入口<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h4>
 <p><code>Scene Properties &gt; Render Textures</code></p>
 <div align="center">
   <img src="images/render_textures_panel.png" alt="Render Textures" style="border-radius: 10px;">
   <br>
 </div>
 
-<h4 id="_3">可配置内容<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h4>
+<h4 id="_4">可配置内容<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h4>
 <p>每个 <code>Render Texture</code> 条目当前支持：</p>
 <ul>
 <li><code>Name</code></li>
@@ -1213,7 +1280,7 @@
 <li><code>R16F</code></li>
 <li><code>R32F</code></li>
 </ul>
-<h4 id="_4">基本使用方法<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h4>
+<h4 id="_5">基本使用方法<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h4>
 <ol>
 <li>打开 <code>Scene Properties &gt; Render Textures</code>。</li>
 <li>新建一个 <code>Render Texture</code> 条目。</li>
@@ -1223,9 +1290,9 @@
 <li>使用节点输出的 <code>Color</code> / <code>Alpha</code> 参与后续材质计算。</li>
 </ol>
 <h2 id="2-filter-graph">2. Filter Graph<a class="headerlink" href="#2-filter-graph" title="Permanent link">&para;</a></h2>
-<h4 id="_5">功能说明<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h4>
+<h4 id="_6">功能说明<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
 <p><code>Filter Graph</code> 是场景级的 Eevee 全屏滤镜执行图，用节点连接代替旧版按列表顺序执行的线性 Filter Materials。场景通过 <code>Scene.eevee.filter_graph</code> 指定唯一的权威图数据块，图中的图像句柄可以连接到多个 Filter Pass，并在不同渲染阶段输出结果。</p>
-<h4 id="_6">面板与编辑器入口<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
+<h4 id="_7">面板与编辑器入口<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h4>
 <ul>
 <li>在 <code>Scene Properties &gt; Filter Graph</code> 新建或指定场景使用的 Filter Graph。</li>
 <li>把任意区域的编辑器类型切换为 <code>Eevee Filter Graph</code>，即可编辑当前场景指定的图。</li>
@@ -1260,7 +1327,7 @@
   <sub>Pass Input、Image Sample、Filter Output 组成的默认 Filter 材质链</sub>
 </div>
 
-<h4 id="_7">基本使用方法<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h4>
+<h4 id="_8">基本使用方法<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
 <ol>
 <li>打开 <code>Scene Properties &gt; Filter Graph</code>，新建或指定一个图。</li>
 <li>切换到 <code>Eevee Filter Graph</code> 编辑器。</li>
@@ -1275,7 +1342,7 @@
   <sub>Filter Pass 支持的执行分辨率</sub>
 </div>
 
-<h4 id="_8">执行阶段<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
+<h4 id="_9">执行阶段<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Before Volume Fog</code></li>
 <li><code>Before PostFX</code></li>
@@ -1289,17 +1356,17 @@
 </div>
 
 <p>同一阶段即使放置多个 <code>Stage Output</code>，也只会使用其中一个 active 输出；其他阶段可以各自维护独立的 active 输出链路。</p>
-<h4 id="_9">数据块与旧文件迁移<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h4>
+<h4 id="_10">数据块与旧文件迁移<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h4>
 <ul>
 <li>从面板新建的 Filter Graph 和从 <code>Filter Pass</code> 新建的 Filter 材质都会自动启用 fake user；暂时从场景或节点解除关联不会让数据块在保存时立即丢失。</li>
 <li>打开使用 5.1 线性 Filter Materials 列表的旧文件时，条目会自动迁移为等价的 Filter Graph，并按原执行阶段和顺序生成连接。</li>
 <li>Filter 材质中仍可使用 <code>Filter Object Info</code>、<code>Filter Mask</code>、<code>GLSL Function</code> 等 Filter 域节点；场景缓冲和 AOV 的图级路由应优先在 Filter Graph 中完成。</li>
 </ul>
 <h2 id="3-native-camera-fx-outputs">3. Native Camera FX Outputs<a class="headerlink" href="#3-native-camera-fx-outputs" title="Permanent link">&para;</a></h2>
-<h4 id="_10">功能说明<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h4>
+<h4 id="_11">功能说明<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h4>
 <p><code>Native Camera FX Outputs</code> 是 View Layer 级的 Eevee 原生后期输出系统。它可以把指定的渲染通道抽出后，单独套用 Eevee 的 <code>Motion Blur</code> 和 / 或 <code>Depth of Field</code>，再以新的 Render Pass 输出。</p>
 <p>这适合为描边、AOV、深度、法线、光照分量等通道生成带相机运动模糊或景深的版本，用于合成器、后续滤镜或外部后期流程。</p>
-<h4 id="_11">面板入口<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h4>
+<h4 id="_12">面板入口<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h4>
 <p><code>View Layer Properties &gt; Passes &gt; Native Camera FX Outputs</code></p>
 <div align="center">
   <img src="images/native_camera_fx_outputs.png" alt="Native Camera FX Outputs 面板" style="border-radius: 10px;">
@@ -1307,7 +1374,7 @@
   <sub>为指定 Render Pass 单独应用运动模糊与景深</sub>
 </div>
 
-<h4 id="_12">可配置内容<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h4>
+<h4 id="_13">可配置内容<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h4>
 <p>每个输出条目支持：</p>
 <ul>
 <li><code>Name</code>：生成的 Render Pass 名称</li>
@@ -1336,7 +1403,7 @@
 <li><code>Shader AOV</code></li>
 <li><code>Outline</code></li>
 </ul>
-<h4 id="_13">基本使用方法<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h4>
+<h4 id="_14">基本使用方法<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h4>
 <ol>
 <li>切换到 <code>Eevee</code> 渲染引擎。</li>
 <li>打开 <code>View Layer Properties &gt; Passes &gt; Native Camera FX Outputs</code>。</li>
@@ -1345,7 +1412,7 @@
 <li>按需要启用 <code>Motion Blur</code>、<code>Depth of Field</code>，或同时启用两者。</li>
 <li>在合成器或后续流程中读取同名 Render Pass。</li>
 </ol>
-<h4 id="_14">重要说明<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h4>
+<h4 id="_15">重要说明<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Motion Blur</code> 仍需要场景 / View Layer 中启用 Eevee 运动模糊</li>
 <li><code>Depth of Field</code> 仍使用当前相机的景深设置</li>
@@ -1354,13 +1421,13 @@
 <li>描边通道可作为 <code>Outline</code> 来源输出，并可单独获得带景深或运动模糊的版本</li>
 </ul>
 <h2 id="4-eevee-outline">4. Eevee Outline<a class="headerlink" href="#4-eevee-outline" title="Permanent link">&para;</a></h2>
-<h4 id="_15">功能说明<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h4>
+<h4 id="_16">功能说明<a class="headerlink" href="#_16" title="Permanent link">&para;</a></h4>
 <p><code>Eevee Outline</code> 是场景级描边总开关，用于控制当前 NPR Port 内置的屏幕空间描边系统。</p>
-<h4 id="_16">面板入口<a class="headerlink" href="#_16" title="Permanent link">&para;</a></h4>
+<h4 id="_17">面板入口<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h4>
 <p><code>Render Properties &gt; Outline</code></p>
 <p>描边 Render Pass 入口：</p>
 <p><code>View Layer Properties &gt; Passes &gt; Data &gt; Outline</code></p>
-<h4 id="_17">行为说明<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h4>
+<h4 id="_18">行为说明<a class="headerlink" href="#_18" title="Permanent link">&para;</a></h4>
 <ul>
 <li>默认开启，保持 <code>Outline Control</code> 节点和 <code>Outline</code> Render Pass 的正常行为</li>
 <li>关闭后，<code>Outline Control</code> 节点不会影响 Combined 渲染结果</li>

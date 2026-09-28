@@ -145,7 +145,9 @@
       <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
     
     
-      <div class="md-header__option">
+      
+
+<div class="md-header__option">
   <div class="md-select">
     
     <button class="md-header__button md-icon" aria-label="Select language">
@@ -155,13 +157,13 @@
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href=".././" hreflang="zh" class="md-select__link">
+            <a href="../index.html" hreflang="zh" class="md-select__link">
               中文
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href="./" hreflang="en" class="md-select__link">
+            <a href="index.html" hreflang="en" class="md-select__link">
               English
             </a>
           </li>
@@ -517,13 +519,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#build-notes-fd9fabb4f531" class="md-nav__link">
+  <a href="#build-notes-02993970c8cd" class="md-nav__link">
     <span class="md-ellipsis">
-      Build notes · fd9fabb4f531
+      Build notes · 02993970c8cd
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Build notes · fd9fabb4f531">
+    <nav class="md-nav" aria-label="Build notes · 02993970c8cd">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -930,13 +932,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#build-notes-fd9fabb4f531" class="md-nav__link">
+  <a href="#build-notes-02993970c8cd" class="md-nav__link">
     <span class="md-ellipsis">
-      Build notes · fd9fabb4f531
+      Build notes · 02993970c8cd
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Build notes · fd9fabb4f531">
+    <nav class="md-nav" aria-label="Build notes · 02993970c8cd">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -990,20 +992,20 @@
 
 
 <div class="npr-hero">
-<div class="npr-eyebrow">Blender 5.2.0 LTS · NPR Port · fd9fabb4f531</div>
+<div class="npr-eyebrow">Blender 5.2.2 LTS · NPR Port · 02993970c8cd</div>
 <h1 id="stylized-rendering-extensions-on-eevee">Stylized rendering extensions on Eevee<a class="headerlink" href="#stylized-rendering-extensions-on-eevee" title="Permanent link">&para;</a></h1>
 <p class="lead">
 NPR capabilities are grouped into four paths you can start from immediately: Scene pipeline, extended nodes, NPR Tree, and UI controls.
 The package includes Cycles; this site documents <strong>Eevee</strong> extensions only.
 </p>
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" data-npr-latest-win href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip">Download stable</a>
+<a class="npr-btn npr-btn--primary" href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip">Download stable</a>
 <a class="npr-btn npr-btn--outline" href="#modules">Modules</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender">GitHub</a>
 </div>
 <div class="npr-meta">
-<span class="npr-chip">Tests <strong>110/110 · Win</strong></span>
-<span class="npr-chip">Date <strong>2026-08-11</strong></span>
+<span class="npr-chip">Tests <strong>129/129 · Win</strong></span>
+<span class="npr-chip">Date <strong>2026-09-28</strong></span>
 <span class="npr-chip">Platforms <strong>Win · Linux · macOS</strong></span>
 <span class="npr-chip">Engine <strong>Eevee</strong></span>
 </div>
@@ -1074,7 +1076,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 <ul>
 <li><strong>Filter domain</strong>: Object Info, Mask, Scene Color</li>
 <li><strong>General helpers</strong>: Render Info, Scene Time, Screen Derivative, Portal</li>
-<li><strong>Object materials</strong>: Outline Control, Screenspace Info, World / Probe</li>
+<li><strong>Object materials</strong>: Principled NPR V2, NPR Surface Diffusion / Rim, Outline Shell Output</li>
 <li><strong>GLSL / procedural</strong>: Function, Script Expression, SDF, OKLab</li>
 </ul>
 <div class="npr-tags">
@@ -1121,7 +1123,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 <ul>
 <li><strong>Eevee Performance</strong>: shadow / probe cost attribution</li>
 <li><strong>Material state</strong>: preview, culling, ZTest / Stencil / Write</li>
-<li><strong>Lights</strong>: Lightgroup ID, Sun Shadow Map Scale</li>
+<li><strong>Lights</strong>: Lightgroup ID, Shader Parameters, Sun Shadow Map Scale</li>
 <li><strong>Production helpers</strong>: splash version tag, IME, pose-bone Outliner visibility</li>
 </ul>
 <div class="npr-tags">
@@ -1141,6 +1143,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 <div class="npr-eyebrow">Node catalog</div>
 <h2 id="new-nodes-at-a-glance">New nodes at a glance<a class="headerlink" href="#new-nodes-at-a-glance" title="Permanent link">&para;</a></h2>
 <p>Relative to stock Blender, this Port adds nodes across shader trees, NPR Tree, and the Filter domain. Full parameters live on the linked pages.</p>
+<p>The overview screenshots predate the new nodes in this release. Refer to the lists and linked descriptions for 5.2.2 additions.</p>
 </div>
 <div class="npr-node-catalog">
 <h3 id="extended-shader-nodes_1">Extended shader nodes<a class="headerlink" href="#extended-shader-nodes_1" title="Permanent link">&para;</a></h3>
@@ -1150,6 +1153,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 <ul>
 <li>Render Info / Screen Derivative / Portal In·Out  </li>
 <li>Outline Control / Render Texture / Screenspace Info  </li>
+<li>Principled NPR V2 / NPR Surface Diffusion / NPR Rim / Outline Shell Output</li>
 <li>World Environment / Light Probe Color / World To Tangent  </li>
 <li>GLSL Function / Script Expression / Image to Closure  </li>
 <li>Basis Transform / Twirl / Water Ripples / Hex Grid / Parallax  </li>
@@ -1181,27 +1185,28 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 <div class="npr-section-head">
 <div class="npr-eyebrow">This build</div>
-<h2 id="build-notes-fd9fabb4f531">Build notes · fd9fabb4f531<a class="headerlink" href="#build-notes-fd9fabb4f531" title="Permanent link">&para;</a></h2>
-<p>This stable package focuses on refraction volume, GLSL matrix helpers, shadow detail, and input comfort.</p>
+<h2 id="build-notes-02993970c8cd">Build notes · 02993970c8cd<a class="headerlink" href="#build-notes-02993970c8cd" title="Permanent link">&para;</a></h2>
+<p>Blender 5.2.2 LTS: Principled NPR, surface diffusion, outline shells, light parameters, EXR and DLSS.</p>
 </div>
 <div class="npr-delta">
 <div>
 <h3 id="new">New<a class="headerlink" href="#new" title="Permanent link">&para;</a></h3>
 <ul>
-<li>EEVEE NPR refraction volume approximation, with sampling/capture isolation and background-leak fixes</li>
-<li><code>GLSL Function</code> draw-view matrix helpers (view / projection / model and inverses; see node docs)</li>
-<li>Viewport Shadow LOD visualization</li>
-<li>Improved IME support (5.2 API adaptation and text-editor cursor metrics)</li>
+<li><a href="extended-nodes.html#principled-npr-v2">Principled NPR V2, Surface Diffusion and standalone Rim</a>: per-light shadows, color mapping, highlights and rim lighting</li>
+<li><a href="extended-nodes.html#outline-shell-output">Outline Shell Output</a>: independent inverted-hull outlines</li>
+<li><a href="interface-guide.html#light-shader-parameters">Light shader parameters</a>: dynamic Light Info outputs, animation and drivers</li>
+<li><a href="interface-guide.html#exr-layer-color-spaces">Per-layer EXR color spaces</a>: OCIO targets and Non-Color data layers</li>
+<li><a href="scene-extensions.html#dlss">DLSS NR / Super Resolution</a>: separate viewport/render SR quality and custom input scale</li>
 </ul>
 </div>
 <div>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Refraction-volume Image Sample offset black holes, background misses, depth mapping</li>
-<li>Sun <code>Shadow Map Scale</code> correctly applied to tilemaps</li>
-<li>White fallback for unconnected GLSL samplers</li>
-<li>Restored NPR Tree AOV output</li>
-<li>Stabilized Render Texture resource lifetime</li>
+<li>Upstream Blender 5.2.1 / 5.2.2 fixes</li>
+<li>DLSS SR alignment, motion vectors, history reset and auxiliary-pass reconstruction</li>
+<li>NR defaults, small-render fallback, runtime deployment and failure recovery</li>
+<li>Outline Shell shadows retained for camera-hidden objects</li>
+<li>Lower Principled NPR compilation cost and corrected For Each Light shadow-resource bindings</li>
 </ul>
 </div>
 </div>
@@ -1217,7 +1222,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 <div class="npr-cta-band">
 <div class="npr-eyebrow">Release</div>
 <h2 id="windows-x64-stable-package">Windows x64 stable package<a class="headerlink" href="#windows-x64-stable-package" title="Permanent link">&para;</a></h2>
-<p>Windows is the fully validated baseline (110/110). Linux / macOS companion builds ship in the same release with SHA256.</p>
+<p>Windows is the fully validated baseline (129/129). Linux / macOS companion builds ship in the same release with SHA256.</p>
 <div class="npr-actions">
 <a class="npr-btn npr-btn--primary" href="release.html">Open download page</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases">All releases</a>

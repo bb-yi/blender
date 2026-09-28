@@ -145,7 +145,9 @@
       <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
     
     
-      <div class="md-header__option">
+      
+
+<div class="md-header__option">
   <div class="md-select">
     
     <button class="md-header__button md-icon" aria-label="选择当前语言">
@@ -155,13 +157,13 @@
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href="./" hreflang="zh" class="md-select__link">
+            <a href="index.html" hreflang="zh" class="md-select__link">
               中文
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href="en/" hreflang="en" class="md-select__link">
+            <a href="en/index.html" hreflang="en" class="md-select__link">
               English
             </a>
           </li>
@@ -517,13 +519,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#fd9fabb4f531" class="md-nav__link">
+  <a href="#02993970c8cd" class="md-nav__link">
     <span class="md-ellipsis">
-      本版变更 · fd9fabb4f531
+      本版变更 · 02993970c8cd
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="本版变更 · fd9fabb4f531">
+    <nav class="md-nav" aria-label="本版变更 · 02993970c8cd">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -930,13 +932,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#fd9fabb4f531" class="md-nav__link">
+  <a href="#02993970c8cd" class="md-nav__link">
     <span class="md-ellipsis">
-      本版变更 · fd9fabb4f531
+      本版变更 · 02993970c8cd
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="本版变更 · fd9fabb4f531">
+    <nav class="md-nav" aria-label="本版变更 · 02993970c8cd">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -990,20 +992,20 @@
 
 
 <div class="npr-hero">
-<div class="npr-eyebrow">Blender 5.2.0 LTS · NPR Port · fd9fabb4f531</div>
+<div class="npr-eyebrow">Blender 5.2.2 LTS · NPR Port · 02993970c8cd</div>
 <h1 id="eevee">Eevee 上的风格化渲染扩展<a class="headerlink" href="#eevee" title="Permanent link">&para;</a></h1>
 <p class="lead">
 把 NPR 能力收成四条可直接开工的路径：Scene 管线、扩展节点、NPR Tree、界面控制。
 安装包带 Cycles；本站文档只覆盖 <strong>Eevee</strong> 扩展。
 </p>
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" data-npr-latest-win href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip">下载正式版</a>
+<a class="npr-btn npr-btn--primary" href="https://github.com/bb-yi/blender/releases/download/v5.2.2-npr-port-win64-02993970c8cd-20260928-053554/blender-5.2.2-npr-port-win64-02993970c8cd-20260928-053554.zip">下载正式版</a>
 <a class="npr-btn npr-btn--outline" href="#modules">功能模块</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender">GitHub</a>
 </div>
 <div class="npr-meta">
-<span class="npr-chip">测试 <strong>110/110 · Win</strong></span>
-<span class="npr-chip">日期 <strong>2026-08-11</strong></span>
+<span class="npr-chip">测试 <strong>129/129 · Win</strong></span>
+<span class="npr-chip">日期 <strong>2026-09-28</strong></span>
 <span class="npr-chip">平台 <strong>Win · Linux · macOS</strong></span>
 <span class="npr-chip">引擎 <strong>Eevee</strong></span>
 </div>
@@ -1073,7 +1075,7 @@
 <p class="blurb">补齐屏幕空间、物体材质和自定义 GLSL 所需节点；Filter 域节点单独成类，见下方节点一览。</p>
 <ul>
 <li><strong>通用辅助</strong>：Render Info、Scene Time、Screen Derivative、Portal</li>
-<li><strong>物体材质</strong>：Outline Control、Screenspace Info、World / Probe</li>
+<li><strong>物体材质</strong>：Principled NPR V2、NPR Surface Diffusion / Rim、Outline Shell Output</li>
 <li><strong>GLSL / 程序化</strong>：Function、Script Expression、SDF、OKLab、Parallax</li>
 <li><strong>Filter 域</strong>：Object Info、Mask、Scene Color、Pass I/O</li>
 </ul>
@@ -1121,7 +1123,7 @@
 <ul>
 <li><strong>Eevee Performance</strong>：阴影 / 探针成本归因</li>
 <li><strong>材质状态</strong>：预览、剔除、ZTest / Stencil / Write</li>
-<li><strong>灯光</strong>：Lightgroup ID、太阳光 Shadow Map Scale</li>
+<li><strong>灯光</strong>：Lightgroup ID、Shader Parameters、太阳光 Shadow Map Scale</li>
 <li><strong>生产辅助</strong>：启动图版本、IME、骨骼 Outliner 显示</li>
 </ul>
 <div class="npr-tags">
@@ -1141,6 +1143,7 @@
 <div class="npr-eyebrow">Node catalog</div>
 <h2 id="_5">新增节点一览<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
 <p>相对官方 Blender，本 Port 在着色器、NPR Tree 与 Filter 域新增的节点分三类集中展示。详细参数见对应文档页。</p>
+<p>总览截图未包含本次新增节点；5.2.2 的节点以以下列表和对应说明为准。</p>
 </div>
 <div class="npr-node-catalog">
 <h3 id="_6">着色器扩展节点<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
@@ -1150,6 +1153,7 @@
 <ul>
 <li>Render Info / Screen Derivative / Portal In·Out  </li>
 <li>Outline Control / Render Texture / Screenspace Info  </li>
+<li>Principled NPR V2 / NPR Surface Diffusion / NPR Rim / Outline Shell Output</li>
 <li>World Environment / Light Probe Color / World To Tangent  </li>
 <li>GLSL Function / Script Expression / Image to Closure  </li>
 <li>Basis Transform / Twirl / Water Ripples / Hex Grid / Parallax  </li>
@@ -1181,27 +1185,28 @@
 </div>
 <div class="npr-section-head">
 <div class="npr-eyebrow">This build</div>
-<h2 id="fd9fabb4f531">本版变更 · fd9fabb4f531<a class="headerlink" href="#fd9fabb4f531" title="Permanent link">&para;</a></h2>
-<p>正式包重点：折射体积、GLSL 矩阵 helper、阴影细节、输入体验。</p>
+<h2 id="02993970c8cd">本版变更 · 02993970c8cd<a class="headerlink" href="#02993970c8cd" title="Permanent link">&para;</a></h2>
+<p>Blender 5.2.2 LTS 基线：原理化 NPR、表面扩散、外壳描边、灯光参数、EXR 与 DLSS。</p>
 </div>
 <div class="npr-delta">
 <div>
 <h3 id="_7">新增<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
 <ul>
-<li>EEVEE NPR 折射体积近似，并完成采样 / 捕获隔离与背景漏光修复</li>
-<li><code>GLSL Function</code> 提供 draw-view 矩阵 helper（view / projection / model 及 inverse；详见节点文档）</li>
-<li>视口 Shadow LOD 可视化</li>
-<li>改进 IME（适配 5.2 API，修正文本编辑器光标度量）</li>
+<li><a href="extended-nodes.html#principled-npr-v2">Principled NPR V2、表面扩散与独立 Rim</a>：逐灯阴影、明暗映射、高光与边缘光</li>
+<li><a href="extended-nodes.html#outline-shell-output">Outline Shell Output</a>：独立反转外壳描边</li>
+<li><a href="interface-guide.html#light-shader-parameters">灯光着色参数</a>：动态 Light Info 输出、动画与驱动</li>
+<li><a href="interface-guide.html#exr-layer-color-spaces">多层 EXR 色彩空间</a>：逐层 OCIO 目标与 Non-Color 数据层</li>
+<li><a href="scene-extensions.html#dlss">DLSS NR / Super Resolution</a>：独立视口/渲染 SR 品质与自定义输入比例</li>
 </ul>
 </div>
 <div>
 <h3 id="_8">修复<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
 <ul>
-<li>折射体积下 Image Sample 偏移黑洞、背景 miss、深度映射</li>
-<li>太阳光 <code>Shadow Map Scale</code> 正确作用于 tilemap</li>
-<li>未连接 GLSL sampler 回退为白色</li>
-<li>恢复 NPR Tree AOV 输出</li>
-<li>稳定 Render Texture 资源生命周期</li>
+<li>合入 Blender 5.2.1 / 5.2.2 官方修复</li>
+<li>修复 DLSS SR 对齐、运动矢量、历史重置与辅助通道重建</li>
+<li>修复 NR 默认值、小尺寸回退、运行库部署与失败恢复</li>
+<li>保留相机隐藏物体的 Outline Shell 阴影</li>
+<li>降低 Principled NPR 编译开销，修复 For Each Light 阴影资源绑定</li>
 </ul>
 </div>
 </div>
@@ -1217,7 +1222,7 @@
 <div class="npr-cta-band">
 <div class="npr-eyebrow">Release</div>
 <h2 id="windows-x64">Windows x64 正式包<a class="headerlink" href="#windows-x64" title="Permanent link">&para;</a></h2>
-<p>完整验证基线为 Windows（110/110）；同版本附带 Linux / macOS，含 SHA256。</p>
+<p>完整验证基线为 Windows（129/129）；同版本附带 Linux / macOS，含 SHA256。</p>
 <div class="npr-actions">
 <a class="npr-btn npr-btn--primary" href="release.html">打开下载页</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases">全部 Release</a>
