@@ -345,7 +345,7 @@ eShadowProjectionType ShadowDirectional::directional_distribution_type_get(const
   if (camera.is_perspective()) {
     /* Narrow FOV (< ~45°): cascade is more efficient than clipmap.
      * screen_diagonal_length ≈ 2*tan(diag_fov/2). Threshold 1.2 ≈ 45° hfov. */
-    const CameraData &cam_data = camera.data_get();
+    //const CameraData &cam_data = camera.data_get();
     //if (finite_or_default(cam_data.screen_diagonal_length, 1.0f) < 1.2f) {
     //  return SHADOW_PROJECTION_CASCADE;
     //}
