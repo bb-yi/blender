@@ -32,6 +32,8 @@ using TileMaps = eevee::shadow::TileMaps;
 struct Commands {
   [[storage(5, write)]] DispatchCommand &clear_dispatch_buf;
   [[storage(6, write)]] DrawCommandArray &tile_draw_buf;
+  [[push_constant]] const int shadow_page_lod;
+  [[push_constant]] const int shadow_page_res;
 };
 
 [[compute, local_size(1)]]
@@ -49,8 +51,8 @@ void defrag([[resource_table]] PageAllocator &allocator,
   stats.statistics_buf.view_needed_count = 0;
 
   /* Reset clear command indirect buffer. */
-  cmds.clear_dispatch_buf.num_groups_x = SHADOW_PAGE_RES / SHADOW_PAGE_CLEAR_GROUP_SIZE;
-  cmds.clear_dispatch_buf.num_groups_y = SHADOW_PAGE_RES / SHADOW_PAGE_CLEAR_GROUP_SIZE;
+  cmds.clear_dispatch_buf.num_groups_x = cmds.shadow_page_res / SHADOW_PAGE_CLEAR_GROUP_SIZE;
+  cmds.clear_dispatch_buf.num_groups_y = cmds.shadow_page_res / SHADOW_PAGE_CLEAR_GROUP_SIZE;
   cmds.clear_dispatch_buf.num_groups_z = 0;
 
   /* Reset TBDR command indirect buffer. */

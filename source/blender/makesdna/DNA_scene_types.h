@@ -2835,6 +2835,8 @@ struct SceneEEVEE {
   char _pad2[3] = {};
   float dlss_sr_viewport_percentage = 80.0f;
   float dlss_sr_render_percentage = 80.0f;
+  int shadow_page_resolution = 256;
+  char _pad_shadow_page_res[4] = {};
 };
 
 struct SceneGpencil {

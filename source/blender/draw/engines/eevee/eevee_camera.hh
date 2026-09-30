@@ -158,6 +158,12 @@ class Camera {
   {
     return data_.viewinv.z_axis();
   }
+  /**
+   * World-space lateral offset from camera shift.
+   * Ortho: derived from asymmetric winmat (shift = -winmat[3].xy / winmat[0/1].xy).
+   * Perspective: reserved (rotates view direction by angular offset).
+   */
+  float3 forward_shifted() const;
   const float3 &bound_center() const
   {
     return bound_sphere.center;

@@ -51,9 +51,8 @@ struct [[host_shared]] CameraData {
   enum eCameraType type;
   /** World space distance between view corners at unit distance from camera. */
   float screen_diagonal_length;
-  float _pad0;
-  float _pad1;
-  float _pad2;
+  /** World-space lateral offset from camera shift (ortho: from winmat asymmetry). */
+  packed_float3 forward_shifted;
 
   bool32_t initialized;
 

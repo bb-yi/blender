@@ -1081,6 +1081,12 @@ void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
     version_npr_image_sample_offset_socket_identifier(bmain);
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 47)) {
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.shadow_page_resolution = 256;
+    }
+  }
+
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 48) ||
       !DNA_struct_exists(fd->filesdna, "NodeShaderLightInfo"))
   {
