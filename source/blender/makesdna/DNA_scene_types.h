@@ -2646,6 +2646,20 @@ enum eSceneEEVEE_Flag : int {
 };
 ENUM_OPERATORS(eSceneEEVEE_Flag)
 
+/** #SceneEEVEE.dlss5_mode */
+enum SceneEEVEEDLSS5Mode : char {
+  SCE_EEVEE_DLSS5_OFF = 0,
+  SCE_EEVEE_DLSSNR = 1,
+};
+
+enum SceneEEVEEDLSSSRQuality : char {
+  SCE_EEVEE_DLSS_SR_OFF = 0,
+  SCE_EEVEE_DLSS_SR_QUALITY = 1,
+  SCE_EEVEE_DLSS_SR_BALANCED = 2,
+  SCE_EEVEE_DLSS_SR_PERFORMANCE = 3,
+  SCE_EEVEE_DLSS_SR_CUSTOM = 4,
+};
+
 enum FastGI_Method : char {
   FAST_GI_FULL = 0,
   FAST_GI_AO_ONLY = 1,
@@ -2800,10 +2814,28 @@ struct SceneEEVEE {
   int performance_profiler_average_window = 8;
   int performance_profiler_viewport_pause = 0;
   int stage_output_view = SCE_EEVEE_STAGE_VIEW_OFF;
+  float dlss5_intensity = 1.0f;
+  float dlss5_local_tone_strength = 1.0f;
+  float dlss5_local_structure_strength = 1.0f;
+  float dlss5_skin_structure_strength = -1.0f;
+  SceneEEVEEDLSS5Mode dlss5_mode = SCE_EEVEE_DLSS5_OFF;
+  char dlss5_use_auto_mask = false;
+  char dlss5_ui_correction = false;
+  char dlss5_render_scale = 1;
+  /* 0 Default, 1 Natural, 2 Cinematic — OptiScaler / Unity DLSSNR. */
+  char dlss5_style = 2;
+  char _pad_dlss5[3] = {};
+  SceneEEVEEDLSSSRQuality dlss_sr_viewport_quality = SCE_EEVEE_DLSS_SR_OFF;
+  SceneEEVEEDLSSSRQuality dlss_sr_render_quality = SCE_EEVEE_DLSS_SR_OFF;
+  char dlss5_mask_invert = false;
+  char dlss5_mask_aov_output = false;
+  char dlss5_mask_aov[64] = "";
+  char _pad_dlss_sr[4] = {};
   char use_outline = true;
   char _pad2[3] = {};
   int shadow_page_resolution = 256;
-  char _pad5[4] = {};
+  float dlss_sr_viewport_percentage = 80.0f;
+  float dlss_sr_render_percentage = 80.0f;
 };
 
 struct SceneGpencil {

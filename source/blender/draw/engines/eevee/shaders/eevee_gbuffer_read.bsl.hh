@@ -41,7 +41,8 @@ namespace gbuffer::detail {
 
 ClosureUndetermined unpack_closure(ClosurePacking cl_in)
 {
-  ClosureUndetermined cl;
+  ClosureUndetermined cl = {};
+  cl.npr = closure_npr_direct_default();
   cl.type = gbuffer::mode_to_closure_type(cl_in.mode);
   /* Common to all configs. */
   cl.color = gbuffer::closure_color_unpack(cl_in.data0);
@@ -189,6 +190,44 @@ struct Reader {
     return Header::from_data(texelFetch(gbuf_header_tx, int3(texel, 0), 0).r);
   }
 
+  float3 read_npr_radiance(int2 texel, uint layer) const
+  {
+    return rgb9e5_decode(texelFetch(gbuf_header_tx, int3(texel, layer), 0).r);
+  }
+
+  float3 read_npr_rim(Header header, int2 texel) const
+  {
+    return header.has_npr_payload() ? read_npr_radiance(texel, GBUF_NPR_RIM_LAYER) : float3(0.0f);
+  }
+
+  ClosureUndetermined read_npr_payload(
+      Header header, int2 texel, uint bin, ClosureUndetermined cl) const
+  {
+    if (header.has_npr_payload() && cl.type != CLOSURE_NONE_ID) {
+      cl.color = read_npr_radiance(texel, GBUF_NPR_COLOR_LAYER + bin);
+      cl.npr.enabled = header.npr_direct_enabled(bin);
+      cl.npr.additive = read_npr_radiance(texel, GBUF_NPR_ADDITIVE_LAYER + bin);
+      cl.npr.indirect_weight = read_npr_radiance(texel, GBUF_NPR_INDIRECT_WEIGHT_LAYER)[bin];
+      cl.npr.light_policy.code = texelFetch(
+          gbuf_header_tx, int3(texel, GBUF_NPR_LIGHT_POLICY_LAYER + bin), 0).r;
+      cl.npr.light_policy.strength = read_npr_radiance(texel, GBUF_NPR_SHADOW_STRENGTH_LAYER)[bin];
+      cl.npr.light_policy.direct_gain = read_npr_radiance(texel, GBUF_NPR_DIRECT_GAIN_LAYER)[bin];
+      if (cl.npr.enabled) {
+        cl.npr.multiplier = read_npr_radiance(texel, GBUF_NPR_MULTIPLIER_LAYER + bin);
+      }
+    }
+    if (header.has_npr_sss_additive() && cl.type == CLOSURE_BSSRDF_BURLEY_ID) {
+      cl.npr.additive = read_npr_radiance(texel, GBUF_NPR_ADDITIVE_LAYER);
+    }
+    if (header.has_surface_diffusion() && cl.type != CLOSURE_NONE_ID) {
+      cl.npr.diffusion = float4(
+          read_npr_radiance(texel, GBUF_DIFFUSION_RADIUS_LAYER + bin),
+          uintBitsToFloat(texelFetch(
+              gbuf_header_tx, int3(texel, GBUF_DIFFUSION_STRENGTH_LAYER + bin), 0).r));
+    }
+    return cl;
+  }
+
   /* Read the entirety of the GBuffer by layer. */
   Layers read_layers(int2 texel) const
   {
@@ -197,10 +236,12 @@ struct Reader {
     layers.header = Header::from_data(texelFetch(gbuf_header_tx, int3(texel, 0), 0).r);
     uint3 layer_types = layers.header.bin_types_per_layer();
     uchar closure_count = layers.header.closure_len();
+    uint3 bin_indices = layers.header.bin_index_per_layer();
 
     for (int i = 0; i < 3 /* GBUFFER_LAYER_MAX */; i++) [[unroll]] {
       layers.layer[i] = read_layer(
           layers.header.tangent_space_id(i), closure_count, GBufferMode(layer_types[i]), texel, i);
+      layers.layer[i] = read_npr_payload(layers.header, texel, bin_indices[i], layers.layer[i]);
     }
     return layers;
   }
@@ -214,7 +255,8 @@ struct Reader {
     uchar normal_id = header.tangent_space_id(layer_id);
     uchar closure_count = header.closure_len();
 
-    return read_layer(normal_id, closure_count, bin_mode, texel, layer_id);
+    return read_npr_payload(
+        header, texel, bin_index, read_layer(normal_id, closure_count, bin_mode, texel, layer_id));
   }
   ClosureUndetermined read_bin(int2 texel, uchar bin_index) const
   {
@@ -225,7 +267,8 @@ struct Reader {
     uchar normal_id = header.tangent_space_id(layer_id);
     uchar closure_count = header.closure_len();
 
-    return read_layer(normal_id, closure_count, bin_mode, texel, layer_id);
+    return read_npr_payload(
+        header, texel, bin_index, read_layer(normal_id, closure_count, bin_mode, texel, layer_id));
   }
 
   /* Load thickness data only if available. Return 0 otherwise. */

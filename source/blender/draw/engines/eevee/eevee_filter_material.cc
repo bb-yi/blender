@@ -284,7 +284,8 @@ static bool filter_graph_collect_dependencies(const bNode &node,
   }
   else if (!ELEM(node.type_legacy,
                 EEVEE_FILTER_GRAPH_NODE_SCENE_COLOR,
-                EEVEE_FILTER_GRAPH_NODE_AOV_INPUT))
+                EEVEE_FILTER_GRAPH_NODE_AOV_INPUT,
+                EEVEE_FILTER_GRAPH_NODE_AOV_OUTPUT))
   {
     return false;
   }
@@ -295,23 +296,66 @@ static bool filter_graph_collect_dependencies(const bNode &node,
   return true;
 }
 
+static bool filter_graph_has_aov_output(const bNodeTree &ntree,
+                                        const SceneEEVEEFilterExecutionStage stage)
+{
+  for (const bNode *node : ntree.all_nodes()) {
+    if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_AOV_OUTPUT && !node->is_muted() &&
+        node->custom1 == stage)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* AOV Output nodes are terminal sinks that never feed the stage output. Collect their upstream
+ * dependency chains separately so their materials are synced and evaluated. */
+static bool filter_graph_collect_aov_outputs(const bNodeTree &ntree,
+                                             Set<const bNode *> &visiting,
+                                             Set<const bNode *> &visited,
+                                             Vector<const bNode *> &r_order)
+{
+  for (const bNode *node : ntree.all_nodes()) {
+    if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_AOV_OUTPUT || node->is_muted()) {
+      continue;
+    }
+    for (const bNodeSocket *socket : node->input_sockets()) {
+      const bNodeLink *link = filter_graph_socket_used_link(*socket);
+      if (link == nullptr) {
+        continue;
+      }
+      if (!filter_graph_collect_dependencies(*link->fromnode, visiting, visited, r_order)) {
+        return false;
+      }
+    }
+    if (!visited.contains(node)) {
+      visited.add(node);
+      r_order.append(node);
+    }
+  }
+  return true;
+}
+
 static bool filter_graph_stage_dependency_order_get(const bNodeTree &filter_graph,
                                                     const SceneEEVEEFilterExecutionStage stage,
                                                     Vector<const bNode *> &r_order)
 {
-  const bNode *stage_output = filter_graph_stage_output_node_get(filter_graph, stage);
-  if (stage_output == nullptr) {
-    return true;
-  }
-  const bNodeSocket *stage_input = stage_output->input_by_identifier("Image"_ustr);
-  const bNodeLink *stage_link = (stage_input != nullptr) ? filter_graph_socket_used_link(*stage_input) :
-                                                          nullptr;
-  if (stage_link == nullptr) {
-    return true;
-  }
   Set<const bNode *> visiting;
   Set<const bNode *> visited;
-  return filter_graph_collect_dependencies(*stage_link->fromnode, visiting, visited, r_order);
+
+  if (const bNode *stage_output = filter_graph_stage_output_node_get(filter_graph, stage)) {
+    const bNodeSocket *stage_input = stage_output->input_by_identifier("Image"_ustr);
+    const bNodeLink *stage_link = (stage_input != nullptr) ?
+                                      filter_graph_socket_used_link(*stage_input) :
+                                      nullptr;
+    if (stage_link != nullptr &&
+        !filter_graph_collect_dependencies(*stage_link->fromnode, visiting, visited, r_order))
+    {
+      return false;
+    }
+  }
+  return filter_graph_collect_aov_outputs(filter_graph, visiting, visited, r_order);
 }
 
 static FilterObjectInfoData filter_object_info_default()
@@ -920,6 +964,14 @@ void FilterMaterialModule::init()
           uses_aov_ = true;
         }
       }
+      if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_AOV_OUTPUT && !node->is_muted()) {
+        const NodeEeveeFilterGraphAOVInput *storage =
+            static_cast<const NodeEeveeFilterGraphAOVInput *>(node->storage);
+        if (storage != nullptr && storage->name[0] != '\0') {
+          filter_material_add_aov_name(used_aov_names_, storage->name);
+          uses_aov_ = true;
+        }
+      }
       if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL || node->is_muted()) {
         continue;
       }
@@ -1188,6 +1240,11 @@ bool FilterMaterialModule::has_stage_entries(SceneEEVEEFilterExecutionStage stag
       {
         return true;
       }
+    }
+    /* AOV outputs produce compositor data instead of a stage image. */
+    if (filter_graph_has_aov_output(*filter_graph, stage))
+    {
+      return true;
     }
     return false;
   }
@@ -1620,23 +1677,28 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     bNodeTree &filter_graph = *inst_.scene->eevee.filter_graph;
     filter_graph.ensure_topology_cache();
 
-    const bNode *stage_output = filter_graph_stage_output_node_get(filter_graph, stage);
-    if (stage_output == nullptr) {
-      return input_tx;
-    }
-
-    const bNodeSocket *stage_input = stage_output->input_by_identifier("Image"_ustr);
-    const bNodeLink *stage_link = (stage_input != nullptr) ?
-                                      filter_graph_socket_used_link(*stage_input) :
-                                      nullptr;
-    if (stage_link == nullptr) {
-      return black_graph_output();
-    }
-
     Set<const bNode *> visiting;
     Set<const bNode *> visited;
     Vector<const bNode *> order;
-    if (!filter_graph_collect_dependencies(*stage_link->fromnode, visiting, visited, order)) {
+
+    const bNode *stage_output = filter_graph_stage_output_node_get(filter_graph, stage);
+    const bNodeSocket *stage_input = (stage_output != nullptr) ?
+                                         stage_output->input_by_identifier("Image"_ustr) :
+                                         nullptr;
+    const bNodeLink *stage_link = (stage_input != nullptr) ?
+                                      filter_graph_socket_used_link(*stage_input) :
+                                      nullptr;
+    if (stage_output != nullptr && stage_link == nullptr) {
+      return black_graph_output();
+    }
+    if (stage_link != nullptr &&
+        !filter_graph_collect_dependencies(*stage_link->fromnode, visiting, visited, order))
+    {
+      inst_.info_append_i18n(
+          "Error: Filter Graph contains a cycle, invalid material, unsupported node, or too many inputs");
+      return black_graph_output();
+    }
+    if (!filter_graph_collect_aov_outputs(filter_graph, visiting, visited, order)) {
       inst_.info_append_i18n(
           "Error: Filter Graph contains a cycle, invalid material, unsupported node, or too many inputs");
       return black_graph_output();
@@ -1688,6 +1750,80 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
                 FilterGraphImageHandle::null();
         for (const bNodeSocket *socket : node->output_sockets()) {
           result_by_socket.add_overwrite(socket, input_handle);
+        }
+      }
+      else if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_AOV_OUTPUT) {
+        if (node->custom1 != stage) {
+          continue;
+        }
+        const NodeEeveeFilterGraphAOVInput *storage =
+            static_cast<const NodeEeveeFilterGraphAOVInput *>(node->storage);
+        if (storage == nullptr || storage->name[0] == '\0') {
+          continue;
+        }
+        for (const bNodeSocket *socket : node->input_sockets()) {
+          const bool is_value_socket = STREQ(socket->identifier, "Value");
+          const int aov_index = filter_graph_aov_index_get(
+              inst_.render_buffers.data, storage->name, is_value_socket);
+          if (aov_index < 0) {
+            continue;
+          }
+          Texture &aov_target_tx = is_value_socket ? inst_.render_buffers.rp_value_tx :
+                                                    inst_.render_buffers.rp_color_tx;
+          const int layer = is_value_socket ?
+                                inst_.render_buffers.data.value_len + aov_index :
+                                inst_.render_buffers.data.color_len + aov_index;
+          const bNodeLink *input_link = filter_graph_socket_used_link(*socket);
+          if (input_link == nullptr) {
+            continue;
+          }
+          const FilterGraphImageHandle input_handle =
+              result_by_socket.lookup_default(input_link->fromsock,
+                                              FilterGraphImageHandle::null());
+          if (input_handle.type == FILTER_TEX_HANDLE_NULL) {
+            continue;
+          }
+
+          const FilterGraphImageHandle resampled_handle = resample_filter_graph_handle(input_handle,
+                                                                                      extent);
+          Texture *graph_input_tx = prepare_filter_graph_inputs({resampled_handle}, extent);
+          if (graph_input_tx == nullptr) {
+            continue;
+          }
+
+          gpu::Shader *resolve_shader = inst_.shaders.static_shader_get(FILTER_GRAPH_RESOLVE);
+          if (resolve_shader == nullptr) {
+            continue;
+          }
+
+          aov_target_tx.ensure_layer_views();
+          framebuffer_.ensure(
+              GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE_LAYER(aov_target_tx.layer_view(layer), 0));
+
+          PassSimple pass("FilterMaterial.AOVOutput");
+          pass.init();
+          pass.state_set(DRW_STATE_WRITE_COLOR);
+          pass.framebuffer_set(&framebuffer_);
+          pass.shader_set(resolve_shader);
+          const int resample_mode = filter_graph_resample_mode_for_source(
+              resampled_handle.source_kind);
+          const GPUSamplerState sampler = (resample_mode == FILTER_GRAPH_RESAMPLE_LINEAR) ?
+                                             linear_sampler :
+                                             nearest_sampler;
+          pass.bind_texture("scene_color_tx", &input_tx, sampler);
+          pass.bind_texture("rp_color_tx", &inst_.render_buffers.rp_color_tx, sampler);
+          pass.bind_texture("rp_value_tx", &inst_.render_buffers.rp_value_tx);
+          pass.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
+          pass.bind_texture("filter_graph_input_tx", graph_input_tx->gpu_texture(), sampler);
+          pass.bind_ubo(FILTER_OBJECT_INFO_BUF_SLOT, &filter_object_info_buf_);
+          pass.bind_ubo(FILTER_GRAPH_INPUT_BUF_SLOT, &filter_graph_input_buf_);
+          pass.bind_resources(inst_.uniform_data);
+          pass.push_constant("target_extent", extent);
+          pass.push_constant("resolve_mode", FILTER_GRAPH_RESOLVE_RAW);
+          pass.barrier(GPU_BARRIER_TEXTURE_FETCH);
+          pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+          inst_.manager->submit(pass, view);
+          GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
         }
       }
       else if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL) {
@@ -1759,6 +1895,11 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
                                                     FILTER_GRAPH_ALPHA_MODE_OPACITY));
         }
       }
+    }
+
+    if (stage_link == nullptr) {
+      /* AOV-output-only graph: no stage image to produce. */
+      return input_tx;
     }
 
     const FilterGraphImageHandle output_handle = result_by_socket.lookup_default(

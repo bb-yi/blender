@@ -78,6 +78,7 @@ void forward_lighting_eval(const ViewMatrices view,
    * by 1 for this evaluation and skip evaluating the transmission closure twice. */
   ObjectInfos object_infos = infos.get(resource_id);
   ctx.receiver_light_set = receiver_light_set_get(object_infos);
+  ctx.receiver_id = resource_id;
   ctx.terminator_normal_offset = object_infos.shadow_terminator_normal_offset;
   ctx.terminator_geometry_offset = object_infos.shadow_terminator_geometry_offset;
   /* NPR: World environment exclusion. Suppress world/light-probe (environment) indirect lighting
@@ -86,6 +87,7 @@ void forward_lighting_eval(const ViewMatrices view,
 
   lights.eval_reflection(ctx, vPz);
 
+  float3 npr_sss_backlight = float3(0.0f);
   if (srt.light_closure_eval_count_transmit > 0) [[static_branch]] {
     ClosureUndetermined cl_transmit = g_closure_get(0);
     if (closure_has_transmission(cl_transmit.type) || cl_transmit.type == CLOSURE_BSSRDF_BURLEY_ID)
@@ -101,6 +103,7 @@ void forward_lighting_eval(const ViewMatrices view,
         /* Apply transmission profile onto transmitted light and sum with reflected light. */
         float3 sss_profile = subsurface_transmission(
             util_tx, to_closure_subsurface(cl_transmit).sss_radius, thickness.value());
+        npr_sss_backlight = ctx_tr.stack.cl[0].light_shadowed * sss_profile;
         ctx.stack.cl[0].light_shadowed += ctx_tr.stack.cl[0].light_shadowed * sss_profile;
         ctx.stack.cl[0].light_unshadowed += ctx_tr.stack.cl[0].light_unshadowed * sss_profile;
 #endif
@@ -166,13 +169,16 @@ void forward_lighting_eval(const ViewMatrices view,
     if (srt.light_closure_eval_count_reflect > i) [[static_branch]] {
       ClosureUndetermined cl = g_closure_get_resolved(uchar(i), 1.0f);
       if (cl.weight > CLOSURE_WEIGHT_CUTOFF) {
-        float3 direct_light = ctx.stack.cl[i].light_shadowed;
+        float3 direct_light = cl.npr.enabled ? cl.npr.multiplier : ctx.stack.cl[i].light_shadowed;
+        if (cl.npr.enabled && cl.type == CLOSURE_BSSRDF_BURLEY_ID) {
+          direct_light += npr_sss_backlight;
+        }
         float3 indirect_light = world_environment_disabled ?
                                     float3(0.0f) :
                                     lightprobes.eval(samp, cl, g_data.P, V, thickness);
 
 #ifdef MAT_REFLECTION
-        if (cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID) {
+        if (cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID && !closure_is_npr_reflection(cl)) {
           const float blend = saturate(to_closure_reflection(cl).roughness * -10.0f + 1.0f) *
                               saturate(dot(average_N, cl.N) * 100.0f - 99.0f);
           indirect_light = mix(indirect_light, planar_probe_radiance, blend);
@@ -187,11 +193,13 @@ void forward_lighting_eval(const ViewMatrices view,
           cl.color *= cl.color;
         }
 
-        radiance_direct += direct_light * cl.color;
-        radiance_indirect += indirect_light * cl.color;
+        radiance_direct += direct_light * cl.color + cl.npr.additive;
+        radiance_indirect += indirect_light * cl.color * cl.npr.indirect_weight;
       }
     }
   }
+  radiance_direct += g_npr_rim;
+
   /* Light clamping. */
   float clamp_direct = uni.uniform_buf.clamp.surface_direct;
   float clamp_indirect = uni.uniform_buf.clamp.surface_indirect;

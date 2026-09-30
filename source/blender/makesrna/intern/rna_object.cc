@@ -585,6 +585,11 @@ static void rna_Object_dependency_update(Main *bmain, Scene * /*scene*/, Pointer
 void rna_Object_data_update(Main *bmain, Scene *scene, PointerRNA *ptr)
 {
   rna_Object_internal_update_data_dependency(bmain, scene, ptr);
+  Object *object = static_cast<Object *>(ptr->data);
+  if (object->type == OB_LAMP) {
+    BKE_ntree_update_tag_id_changed(bmain, &object->id);
+    BKE_main_ensure_invariants(*bmain);
+  }
 }
 
 static PointerRNA rna_Object_data_get(PointerRNA *ptr)

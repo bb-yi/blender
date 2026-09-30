@@ -100,6 +100,40 @@ enum eLightAreaShape : short {
   LA_AREA_ELLIPSE = 5,
 };
 
+/* Values are also part of the shader parameter GPU ABI. Zero denotes an invalid value. */
+enum eLightShaderParameterType : int {
+  LIGHT_SHADER_PARAMETER_FLOAT = 1,
+  LIGHT_SHADER_PARAMETER_INT = 2,
+  LIGHT_SHADER_PARAMETER_BOOL = 3,
+  LIGHT_SHADER_PARAMETER_VECTOR2 = 4,
+  LIGHT_SHADER_PARAMETER_VECTOR3 = 5,
+  LIGHT_SHADER_PARAMETER_VECTOR4 = 6,
+  LIGHT_SHADER_PARAMETER_COLOR = 7,
+};
+
+struct LightShaderParameter {
+  LightShaderParameter *next = nullptr, *prev = nullptr;
+  char name[64] = "";
+  /* Stable collection key for animation, independent of the shader-facing name. */
+  char identifier[32] = "";
+  eLightShaderParameterType type = LIGHT_SHADER_PARAMETER_FLOAT;
+  float value_float = 0.0f;
+  int value_int = 0;
+  int value_bool = 0;
+  /* Keep values for each type when switching types. */
+  float value_vector2[2] = {0.0f, 0.0f};
+  float value_vector3[3] = {0.0f, 0.0f, 0.0f};
+  float value_vector4[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float value_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  int _pad = 0;
+  char description[512] = "";
+  float range_min = 0.0f;
+  float range_max = 1.0f;
+  int use_hard_limits = 0;
+  /* PropertySubType. Presentation metadata, never part of the GPU payload. */
+  int subtype = 0;
+};
+
 struct Light {
 #ifdef __cplusplus
   DNA_DEFINE_CXX_METHODS(Light)
@@ -177,6 +211,10 @@ struct Light {
 
   int lightgroup_id = 0;
   int _pad3 = 0;
+
+  ListBaseT<LightShaderParameter> shader_parameters = {nullptr, nullptr};
+  int active_shader_parameter_index = 0;
+  int next_shader_parameter_identifier = 0;
 };
 
 }  // namespace blender

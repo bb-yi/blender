@@ -117,6 +117,9 @@ struct GPUMaterial {
   /* Source material, might be null for worlds and lights. */
   Material *source_material = nullptr;
   bool is_world = false;
+  /* The node graph is rooted at an Outline Shell Output node instead of the
+   * regular material output. */
+  bool is_outline_shell = false;
   /* 1D Texture array containing all color bands. */
   gpu::Texture *coba_tex = nullptr;
   /* Builder for coba_tex. */
@@ -129,6 +132,7 @@ struct GPUMaterial {
   GPUNodeGraph graph = {};
   bool uses_referenced_object_data = false;
   Vector<GPUReferencedObject> referenced_objects;
+  Vector<GPULightShaderParameterRequest> light_shader_parameters;
   Vector<Object *> filter_object_infos;
   Vector<Object *> filter_mask_objects;
   Vector<GPUMaterialGeneratedSource> generated_sources;
@@ -146,6 +150,9 @@ struct GPUMaterial {
   bool has_light_shader_output = false;
   bool has_glsl_light_shader_eval = false;
   bool has_shader_info_shadow_classification = false;
+  bool has_principled_npr_v2 = false;
+  bool has_surface_diffusion = false;
+  eGPUMaterialNPRFeature npr_features = GPU_MAT_NPR_FEATURE_NONE;
   bool uses_hiz_data = false;
 
   std::string name;
@@ -219,7 +226,8 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
     void *thunk,
-    GPUMaterialPassReplacementCallbackFn pass_replacement_cb)
+    GPUMaterialPassReplacementCallbackFn pass_replacement_cb,
+    bool outline_shell_root)
 {
   /* Search if this material is not already compiled. */
   for (LinkData &link : *gpumaterials) {
@@ -237,6 +245,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   GPUMaterial *mat = MEM_new<GPUMaterial>(__func__, engine);
   mat->source_material = ma;
   mat->is_world = (ma == nullptr) && compile_surface_graph && !compile_light_shader_graph;
+  mat->is_outline_shell = outline_shell_root;
   mat->uuid = shader_uuid;
   mat->name = name;
   result.material = mat;
@@ -429,6 +438,11 @@ bool GPU_material_is_world(const GPUMaterial *material)
   return material->is_world;
 }
 
+bool GPU_material_is_outline_shell(const GPUMaterial *material)
+{
+  return material->is_outline_shell;
+}
+
 GPUPass *GPU_material_get_pass(GPUMaterial *material)
 {
   /* If an optimized pass variant is available, and optimization is
@@ -556,6 +570,26 @@ bool GPU_material_has_shader_info_shadow_classification(const GPUMaterial *mat)
   return mat != nullptr && mat->has_shader_info_shadow_classification;
 }
 
+bool GPU_material_principled_npr_v2_has(const GPUMaterial *mat)
+{
+  return mat != nullptr && mat->has_principled_npr_v2;
+}
+
+bool GPU_material_surface_diffusion_has(const GPUMaterial *mat)
+{
+  return mat != nullptr && mat->has_surface_diffusion;
+}
+
+void GPU_material_surface_diffusion_set(GPUMaterial *mat)
+{
+  mat->has_surface_diffusion = true;
+}
+
+eGPUMaterialNPRFeature GPU_material_npr_features_get(const GPUMaterial *mat)
+{
+  return mat != nullptr ? mat->npr_features : GPU_MAT_NPR_FEATURE_NONE;
+}
+
 bool GPU_material_uses_hiz_data(const GPUMaterial *mat)
 {
   return mat != nullptr && mat->uses_hiz_data;
@@ -632,6 +666,48 @@ uint32_t GPU_material_referenced_object_ensure(GPUMaterial *material,
 bool GPU_material_uses_referenced_object_data(const GPUMaterial *material)
 {
   return material != nullptr && material->uses_referenced_object_data;
+}
+
+uint64_t GPU_light_shader_parameter_key(const char *name)
+{
+  /* Stable FNV-1a key. Draw Manager checks full names for collisions before upload. */
+  uint64_t key = 14695981039346656037ull;
+  for (const unsigned char *p = reinterpret_cast<const unsigned char *>(name); *p; p++) {
+    key = (key ^ *p) * 1099511628211ull;
+  }
+  return key;
+}
+
+uint64_t GPU_material_light_shader_parameter_ensure(GPUMaterial *material,
+                                                   const char *name,
+                                                   Object *object)
+{
+  GPULightShaderParameterRequest request;
+  STRNCPY(request.name, name);
+  request.key = GPU_light_shader_parameter_key(request.name);
+  if (!material) {
+    return request.key;
+  }
+  material->uses_referenced_object_data = true;
+  if (object) {
+    request.object_uid = GPU_material_referenced_object_ensure(
+        material, object, GPU_REFERENCED_OBJECT_DATA_LIGHT);
+    if (request.object_uid == 0) {
+      return request.key;
+    }
+  }
+  for (const auto &existing : material->light_shader_parameters) {
+    if (existing.object_uid == request.object_uid && STREQ(existing.name, request.name)) {
+      return request.key;
+    }
+  }
+  material->light_shader_parameters.append(request);
+  return request.key;
+}
+
+Span<GPULightShaderParameterRequest> GPU_material_light_shader_parameters(const GPUMaterial *material)
+{
+  return material ? material->light_shader_parameters.as_span() : Span<GPULightShaderParameterRequest>();
 }
 
 int GPU_material_referenced_object_count(const GPUMaterial *material)
@@ -1160,6 +1236,20 @@ void GPU_material_shader_info_shadow_classification_set(GPUMaterial *material)
 {
   if (material != nullptr) {
     material->has_shader_info_shadow_classification = true;
+  }
+}
+
+void GPU_material_principled_npr_v2_set(GPUMaterial *material)
+{
+  if (material != nullptr) {
+    material->has_principled_npr_v2 = true;
+  }
+}
+
+void GPU_material_npr_features_add(GPUMaterial *material, eGPUMaterialNPRFeature features)
+{
+  if (material != nullptr) {
+    material->npr_features |= features;
   }
 }
 

@@ -399,6 +399,24 @@ void node_node_foreach_id(bNode *node, LibraryForeachIDData *data)
 {
   BKE_LIB_FOREACHID_PROCESS_ID(data, node->id, IDWALK_CB_USER);
 
+  if (node->type_legacy == SH_NODE_LIGHT_INFO && node->storage != nullptr) {
+    auto *storage = static_cast<NodeShaderLightInfo *>(node->storage);
+    const Light *source_light = storage->source_light;
+    BKE_LIB_FOREACHID_PROCESS_ID(data, reinterpret_cast<ID *&>(storage->source_light), IDWALK_CB_NOP);
+    const auto flags = BKE_lib_query_foreachid_process_flags_get(data);
+    if (source_light != storage->source_light &&
+        (flags & IDWALK_NO_ORIG_POINTERS_ACCESS) == 0)
+    {
+      /* Parameter identifiers are only unique within one Light. A remapped pointer no longer
+       * proves that the stored bindings belong to the selected Light. File linking only resolves
+       * serialized addresses, so preserve the source identity in that case. */
+      storage->source_light = nullptr;
+      if (node->runtime && node->runtime->owner_tree) {
+        BKE_ntree_update_tag_node_property(node->runtime->owner_tree, node);
+      }
+    }
+  }
+
   if (node->type_legacy == SH_NODE_FILTER_OBJECT_MASK && node->storage != nullptr) {
     NodeFilterMask *storage = static_cast<NodeFilterMask *>(node->storage);
     for (NodeFilterMaskItem &item : MutableSpan(storage->items, storage->items_num)) {
@@ -5116,6 +5134,21 @@ void node_remove_node(
     /* Do user counting. */
     if (node.id) {
       id_us_min(node.id);
+    }
+
+    /* Socket items with ID user references declared in #node_node_foreach_id must be
+     * decremented here: the per-node storage destruction path (#node_free_storage via
+     * #destruct_item) must never touch user counts, because it also runs for evaluated
+     * copies whose ID pointers may already be released. */
+    if (node.type_legacy == SH_NODE_FILTER_OBJECT_MASK && node.storage != nullptr) {
+      NodeFilterMask *mask_storage = static_cast<NodeFilterMask *>(node.storage);
+      for (NodeFilterMaskItem &item : MutableSpan(mask_storage->items, mask_storage->items_num)) {
+        if (item.object != nullptr &&
+            BKE_id_is_in_global_main(reinterpret_cast<ID *>(item.object)))
+        {
+          id_us_min(reinterpret_cast<ID *>(item.object));
+        }
+      }
     }
 
     for (bNodeSocket &sock : node.inputs) {

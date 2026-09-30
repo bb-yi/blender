@@ -1392,8 +1392,14 @@ void draw_but_COLORBAND(Button *but, const uiWidgetColors *wcol, const rcti *rec
   uint pos_id, col_id;
 
   ButtonColorBand *but_coba = static_cast<ButtonColorBand *>(but);
+  if (but_coba->custom) {
+    but_coba->custom->refresh(but_coba->custom->display);
+  }
   ColorBand *coba = (but_coba->edit_coba == nullptr) ? reinterpret_cast<ColorBand *>(but->poin) :
                                                        but_coba->edit_coba;
+  if (but_coba->custom) {
+    coba = &but_coba->custom->display;
+  }
   const bool use_oklab = but_coba->use_oklab;
 
   if (coba == nullptr) {
@@ -1453,7 +1459,10 @@ void draw_but_COLORBAND(Button *but, const uiWidgetColors *wcol, const rcti *rec
   immBegin(GPU_PRIM_TRI_STRIP, (sizex + 1) * 2);
   for (int a = 0; a <= sizex; a++) {
     const float pos = float(a) / sizex;
-    if (use_oklab) {
+    if (but_coba->custom) {
+      but_coba->custom->evaluate(pos, colf);
+    }
+    else if (use_oklab) {
       BKE_colorband_evaluate_oklab(coba, pos, colf);
     }
     else {
@@ -1478,7 +1487,10 @@ void draw_but_COLORBAND(Button *but, const uiWidgetColors *wcol, const rcti *rec
   immBegin(GPU_PRIM_TRI_STRIP, (sizex + 1) * 2);
   for (int a = 0; a <= sizex; a++) {
     const float pos = float(a) / sizex;
-    if (use_oklab) {
+    if (but_coba->custom) {
+      but_coba->custom->evaluate(pos, colf);
+    }
+    else if (use_oklab) {
       BKE_colorband_evaluate_oklab(coba, pos, colf);
     }
     else {

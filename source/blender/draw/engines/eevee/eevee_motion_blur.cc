@@ -82,6 +82,13 @@ void MotionBlurModule::init()
   inst_.set_time(time_steps_[1]);
 }
 
+void MotionBlurModule::restore_time()
+{
+  if (enabled_) {
+    RE_engine_frame_set(inst_.render, initial_frame_, initial_subframe_);
+  }
+}
+
 void MotionBlurModule::step()
 {
   if (!enabled_) {
@@ -90,7 +97,7 @@ void MotionBlurModule::step()
 
   if (inst_.sampling.finished()) {
     /* Restore original frame number. This is because the render pipeline expects it. */
-    RE_engine_frame_set(inst_.render, initial_frame_, initial_subframe_);
+    restore_time();
   }
   else if (inst_.sampling.do_render_sync()) {
     /* Time to change motion step. */
@@ -102,6 +109,9 @@ void MotionBlurModule::step()
       inst_.velocity.step_sync(eVelocityStep::STEP_NEXT, time_steps_[step_id_ + 1]);
     }
     inst_.set_time(time_steps_[step_id_]);
+    /* Offline SR has no inter-step motion vectors. Reuse history within one shutter time,
+     * but never reproject samples from a different time with zero motion. */
+    inst_.dlss_sr.invalidate();
   }
 }
 

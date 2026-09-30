@@ -481,7 +481,8 @@ static void movieclip_convert_multilayer_add_pass(void * /*layer*/,
                                                   float *rect,
                                                   int num_channels,
                                                   const char *chan_id,
-                                                  const char * /*view_name*/)
+                                                  const char * /*view_name*/,
+                                                  const ColorSpace * /*colorspace*/)
 {
   /* NOTE: This function must free pass pixels data if it is not used, this
    * is how IMB_exr_multilayer_convert() is working. */

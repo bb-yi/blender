@@ -32,6 +32,7 @@
 #include "ED_view3d.hh"
 #include "GPU_context.hh"
 #include "GPU_pass.hh"
+#include "GPU_platform.hh"
 #include "IMB_imbuf_types.hh"
 
 #include "RE_engine.h"
@@ -327,6 +328,12 @@ namespace blender::eevee
     volume.init();
     lookdev.init(&lookdev_rect);
 
+    if (GPU_backend_get_type() == GPU_BACKEND_VULKAN &&
+        scene->eevee.dlss5_mode == SCE_EEVEE_DLSSNR && scene->eevee.dlss5_intensity != 0.0f)
+    {
+      dlss5.warmup();
+    }
+
     /* Request static shaders */
     ShaderGroups shader_request = DEFERRED_LIGHTING_SHADERS | SHADOW_SHADERS | FILM_SHADERS |
       HIZ_SHADERS | SPHERE_PROBE_SHADERS | VOLUME_PROBE_SHADERS |
@@ -370,10 +377,14 @@ namespace blender::eevee
     /* Needed bits to be able to display something to the screen. */
     needed_shaders = shader_request | DEFAULT_MATERIALS;
 
+    if (is_image_render && shaders.static_shaders_has_failed(shader_request))
+    {
+      info_append_i18n("Error: Failed to compile EEVEE engine shaders");
+    }
     skip_render_ = !is_loaded(needed_shaders) || !film.is_valid_render_extent();
   }
 
-  void Instance::init_light_bake(Depsgraph* depsgraph, draw::Manager* manager)
+  bool Instance::init_light_bake(Depsgraph* depsgraph, draw::Manager* manager)
   {
     telemetry.reset_epoch();
     this->depsgraph = depsgraph;
@@ -414,9 +425,16 @@ namespace blender::eevee
     volume.init();
     lookdev.init(&empty_rect);
 
-    needed_shaders = IRRADIANCE_BAKE_SHADERS | SHADOW_SHADERS | SURFEL_SHADERS;
+    needed_shaders = IRRADIANCE_BAKE_SHADERS | LIGHT_CULLING_SHADERS | SHADOW_SHADERS |
+                     SURFEL_SHADERS;
     shaders.static_shaders_load_async(needed_shaders);
-    shaders.static_shaders_wait_ready(needed_shaders);
+    loaded_shaders = shaders.static_shaders_wait_ready(needed_shaders);
+    if (shaders.static_shaders_has_failed(needed_shaders))
+    {
+      info_append_i18n("Error: Failed to compile EEVEE light bake shaders");
+      return false;
+    }
+    return is_loaded(needed_shaders);
   }
 
   void Instance::set_time(float time)
@@ -491,6 +509,27 @@ namespace blender::eevee
     update_eval_members();
     telemetry.maybe_begin_viewport_frame();
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncBegin);
+    dlss5_settings_changed_ = false;
+    if (scene != nullptr) {
+      const SceneEEVEE &dlss5 = scene->eevee;
+      bool changed = false;
+      changed |= assign_if_different(dlss5_mode_, dlss5.dlss5_mode);
+      changed |= assign_if_different(dlss5_intensity_, dlss5.dlss5_intensity);
+      changed |= assign_if_different(dlss5_local_tone_strength_,
+                                     dlss5.dlss5_local_tone_strength);
+      changed |= assign_if_different(dlss5_local_structure_strength_,
+                                     dlss5.dlss5_local_structure_strength);
+      changed |= assign_if_different(dlss5_skin_structure_strength_,
+                                     dlss5.dlss5_skin_structure_strength);
+      changed |= assign_if_different(dlss5_use_auto_mask_, dlss5.dlss5_use_auto_mask != 0);
+      changed |= assign_if_different(dlss5_ui_correction_, dlss5.dlss5_ui_correction != 0);
+      changed |= assign_if_different(dlss5_style_, dlss5.dlss5_style);
+      dlss5_settings_changed_ = changed;
+      if (changed && is_viewport()) {
+        this->dlss5.invalidate();
+        sampling.reset();
+      }
+    }
     /* Needs to be first for sun light parameters.
      * Also not skipped to be able to request world shader.
      * If engine shaders are not ready, will skip the pipeline sync. */
@@ -794,12 +833,22 @@ namespace blender::eevee
       }
     }
 
+    /* Camera/object changes can request a reset after RayTraceModule::sync(). Observe
+     * the final reset state before sampling.step() consumes it. This only advances the NPR
+     * generation counter; native and DLSS history invalidation remain independent. */
+    if (is_viewport() && sampling.is_reset()) {
+      raytracing.reset_npr_history();
+    }
+
     DebugScope debug_scope(debug_scope_render_sample, "EEVEE.render_sample");
 
     {
       /* Critical section. Potential gpu::Shader concurrent usage. */
       DRW_submission_start();
 
+      dlss5_reset_ = discard_viewport_history_ ||
+                     (is_viewport() && (dlss5_settings_changed_ || velocity.camera_changed_projection())) ||
+                     (is_image_render && sampling.sample_index() == 0);
       sampling.step();
       film.update_sample_table();
       uniform_data.push_update();
@@ -824,7 +873,7 @@ namespace blender::eevee
   void Instance::render_read_result(RenderLayer* render_layer, const char* view_name)
   {
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::ReadResult);
-    eViewLayerEEVEEPassType pass_bits = film.render_buffer_passes_get();
+    eViewLayerEEVEEPassType pass_bits = film.output_passes_get();
     const bool record_readbacks = telemetry.enabled() && telemetry.frame_active();
 
     const auto record_readback = [&](const TelemetryPassReadbackType type,
@@ -978,10 +1027,40 @@ namespace blender::eevee
 
     DebugScope debug_scope(debug_scope_render_frame, "EEVEE.render_frame");
 
+    bool native_retry = false;
+
     /* TODO: Break on RE_engine_test_break(engine) */
     while (!sampling.finished())
     {
       this->render_sample();
+
+      if (dlss_sr.active() && dlss_sr.failed() && !native_retry) {
+        native_retry = true;
+        GPU_finish();
+        dlss_sr.use_native_after_failure();
+        dlss5.invalidate();
+        sampling.restart_render();
+        film.discard_history();
+        const int2 full_extent = film.display_extent_get();
+        const int2 offset = film.film_offset_get();
+        const int2 extent = film.film_extent_get();
+        rcti rect{offset.x, offset.x + extent.x, offset.y, offset.y + extent.y};
+        /* init() already moved the scene into the shutter interval. Restore the
+         * request time saved by motion blur, not the current evaluated subframe. */
+        motion_blur.restore_time();
+        this->init(full_extent,
+                   &rect,
+                   &rect,
+                   render,
+                   depsgraph,
+                   camera_orig_object,
+                   this->render_layer,
+                   const_cast<View *>(drw_view),
+                   v3d,
+                   rv3d);
+        render_sync();
+        continue;
+      }
 
       if ((sampling.sample_index() == 1) || ((sampling.sample_index() % 25) == 0) ||
         sampling.finished())
@@ -1050,8 +1129,15 @@ namespace blender::eevee
       GPU_framebuffer_clear_color_depth(dfbl->default_fb, double4(0.0), 1.0f);
       if (!is_loaded(needed_shaders & ~WORLD_SHADERS))
       {
-        info_append_i18n("Compiling EEVEE engine shaders");
-        DRW_viewport_request_redraw();
+        if (shaders.static_shaders_has_failed(needed_shaders & ~WORLD_SHADERS))
+        {
+          info_append_i18n("Error: Failed to compile EEVEE engine shaders");
+        }
+        else
+        {
+          info_append_i18n("Compiling EEVEE engine shaders");
+          DRW_viewport_request_redraw();
+        }
       }
       /* Do not swap if the velocity module didn't go through a full sync cycle. */
       if (!is_loaded(needed_shaders))

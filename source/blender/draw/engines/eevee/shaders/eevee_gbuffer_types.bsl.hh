@@ -27,6 +27,7 @@
 #include "gpu_shader_math_vector_lib.glsl"
 #include "gpu_shader_math_vector_reduce_lib.glsl"
 #include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_shared_exponent_lib.glsl"
 
 enum UsedLayerFlag : uchar {
   /* Data 0 is always used. */
@@ -396,6 +397,41 @@ struct Header {
     set_flag_from_test(this->header_, value, 1u << 30u);
   }
 
+  bool has_npr_payload() const
+  {
+    return flag_test(this->header_, 1u << 19u);
+  }
+  bool has_surface_diffusion() const
+  {
+    return flag_test(this->header_, 1u << 27u);
+  }
+  void surface_diffusion_set(bool value)
+  {
+    set_flag_from_test(this->header_, value, 1u << 27u);
+  }
+  void npr_payload_set(bool value)
+  {
+    set_flag_from_test(this->header_, value, 1u << 19u);
+  }
+  bool npr_direct_enabled(uint bin) const
+  {
+    return flag_test(this->header_, 1u << (16u + bin));
+  }
+  void npr_direct_set(uint bin, bool value)
+  {
+    set_flag_from_test(this->header_, value, 1u << (16u + bin));
+  }
+  /* SSS can carry precolored light from a neighboring NPR surface into an ordinary SSS pixel
+   * on the same object. This flag does not replace its native direct illumination. */
+  bool has_npr_sss_additive() const
+  {
+    return flag_test(this->header_, 1u << 26u);
+  }
+  void npr_sss_additive_set(bool value)
+  {
+    set_flag_from_test(this->header_, value, 1u << 26u);
+  }
+
   /**
    * Set the dedicated normal bit for the specified layer.
    * Expects `layer_id` to be in [0..2].
@@ -609,12 +645,16 @@ struct Subsurface {
 struct Reflection {
   static void pack_additional(ClosurePacking &cl_packed, ClosureUndetermined cl)
   {
-    cl_packed.data1 = float4(cl.data.x, 0.0f, 0.0f, 0.0f);
+    cl_packed.data1 = float4(cl.data.x,
+                            cl.data.y,
+                            (closure_is_anisotropic(cl) || closure_is_npr_reflection(cl)) ?
+                                closure_tangent_angle_pack(cl) : 0.0f,
+                            0.0f);
   }
 
   static void unpack_additional(ClosureUndetermined &cl, float4 data1)
   {
-    cl.data.x = data1.x; /* Roughness. */
+    cl.data = float4(data1.xy, closure_tangent_angle_unpack(cl.N, data1.z));
   }
 };
 

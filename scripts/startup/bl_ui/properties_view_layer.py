@@ -237,6 +237,8 @@ class ViewLayerAOVPanelHelper(ViewLayerButtonsPanel):
         sub.operator("scene.view_layer_remove_aov", icon='REMOVE', text="")
 
         aov = view_layer.active_aov
+        if aov and context.engine == 'BLENDER_EEVEE':
+            layout.prop(aov, "use_sr_nearest")
         if aov and not aov.is_valid:
             layout.label(text="Conflicts with another render pass with the same name", icon='ERROR')
 

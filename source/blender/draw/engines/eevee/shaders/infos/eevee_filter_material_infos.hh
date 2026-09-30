@@ -9,6 +9,7 @@
 #  include "eevee_common_infos.hh"
 #  include "eevee_defines.hh"
 #  include "eevee_fullscreen_infos.hh"
+#  include "eevee_sampling_infos.hh"
 #  include "eevee_filter_material_shared.hh"
 #endif
 

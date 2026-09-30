@@ -501,6 +501,28 @@ static void draw_buttons(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 
 }  // namespace aov_input
 
+namespace aov_output {
+
+static void node_declare(NodeDeclarationBuilder &b)
+{
+  b.is_function_node();
+  b.add_input<decl::Image>("Color"_ustr);
+  b.add_input<decl::Image>("Value"_ustr);
+}
+
+static void node_init(bNodeTree * /*tree*/, bNode *node)
+{
+  node->storage = MEM_new<NodeEeveeFilterGraphAOVInput>(__func__);
+  node->custom1 = SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE;
+}
+
+static void draw_buttons(ui::Layout &layout, bContext *C, PointerRNA *ptr)
+{
+  draw_aov_name_search(layout, C, ptr);
+}
+
+}  // namespace aov_output
+
 namespace filter_material {
 
 NODE_STORAGE_FUNCS(NodeEeveeFilterGraphFilterMaterial);
@@ -764,6 +786,24 @@ void register_node_type_eevee_filter_graph_aov_input()
   ntype.declare = file_ns::aov_input::node_declare;
   ntype.initfunc = file_ns::aov_input::node_init;
   ntype.draw_buttons = file_ns::aov_input::draw_buttons;
+  bke::node_type_storage(
+      ntype, "NodeEeveeFilterGraphAOVInput", node_free_standard_storage, node_copy_standard_storage);
+  bke::node_register_type(ntype);
+}
+
+void register_node_type_eevee_filter_graph_aov_output()
+{
+  namespace file_ns = nodes::node_filter_graph_nodes_cc;
+  static bke::bNodeType ntype;
+  file_ns::graph_node_type_base(
+      ntype, "EeveeFilterGraphNodeAOVOutput", EEVEE_FILTER_GRAPH_NODE_AOV_OUTPUT);
+  ntype.ui_name = "AOV Output";
+  ntype.ui_description = "Write an image handle into a view-layer AOV";
+  ntype.enum_name_legacy = "AOV_OUTPUT";
+  ntype.nclass = NODE_CLASS_OUTPUT;
+  ntype.declare = file_ns::aov_output::node_declare;
+  ntype.initfunc = file_ns::aov_output::node_init;
+  ntype.draw_buttons = file_ns::aov_output::draw_buttons;
   bke::node_type_storage(
       ntype, "NodeEeveeFilterGraphAOVInput", node_free_standard_storage, node_copy_standard_storage);
   bke::node_register_type(ntype);

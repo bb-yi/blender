@@ -409,8 +409,12 @@ void RE_PreviewRender(struct Render *re, struct Main *bmain, struct Scene *scene
  */
 bool RE_ReadRenderResult(struct Scene *scene, struct Scene *scenode);
 
-struct RenderResult *RE_MultilayerConvert(
-    ExrHandle *exrhandle, const char *colorspace, bool predivide, int rectx, int recty);
+struct RenderResult *RE_MultilayerConvert(ExrHandle *exrhandle,
+                                          const char *colorspace,
+                                          bool predivide,
+                                          int rectx,
+                                          int recty,
+                                          bool use_part_colorspaces = false);
 
 /**
  * Display, event callbacks and GPU contexts

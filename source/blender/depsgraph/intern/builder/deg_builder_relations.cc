@@ -3746,6 +3746,12 @@ void DepsgraphRelationBuilder::build_copy_on_write_relations(IDNode *id_node)
     if (ELEM(comp_node->type, NodeType::LAYER_COLLECTIONS)) {
       rel_flag &= ~RELATION_FLAG_NO_FLUSH;
     }
+    /* Copying a node tree also replaces its evaluated ImageUser frame numbers with the
+     * original values. Recalculate them even for copy-only edits, such as renaming a group,
+     * which do not tag the node tree output or advance the time source. */
+    if (id_type == ID_NT && comp_node->type == NodeType::IMAGE_ANIMATION) {
+      rel_flag &= ~RELATION_FLAG_NO_FLUSH;
+    }
     /* Mask evaluation operation is part of parameters, and it needs to be re-evaluated when the
      * mask is tagged for copy-on-eval.
      *

@@ -78,6 +78,9 @@ class Film {
   bool32_t use_outline_in_combined_ = false;
   bool32_t has_outline_input_ = false;
   int outline_id_ = -1;
+  int nr_mask_id_ = -1;
+  ViewLayerAOV *nr_mask_aov_ = nullptr;
+  std::string nr_mask_signature_;
 
   /** Are we using the compute shader/pipeline. */
   bool use_compute_ = false;
@@ -200,6 +203,16 @@ class Film {
     return data_.scaling_factor;
   }
 
+  float2 render_ratio_get() const
+  {
+    return data_.sr_active ? data_.sr_render_ratio : float2(1.0f / data_.scaling_factor);
+  }
+
+  void discard_history()
+  {
+    data_.use_history = false;
+  }
+
   float2 pixel_jitter_get() const;
 
   float background_opacity_get() const
@@ -209,6 +222,11 @@ class Film {
 
   eViewLayerEEVEEPassType enabled_passes_get() const;
   eViewLayerEEVEEPassType render_buffer_passes_get() const;
+  /** Only passes with Film accumulation textures, excluding internal render dependencies. */
+  eViewLayerEEVEEPassType output_passes_get() const
+  {
+    return enabled_passes_;
+  }
   int cryptomatte_layer_len_get() const;
 
   /** WARNING: Film and RenderBuffers use different storage types for AO and Shadow. */

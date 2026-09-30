@@ -117,6 +117,9 @@ class MotionBlurModule {
 
   void init();
 
+  /** Restore the render request time before a retry, or after its last sample. */
+  void restore_time();
+
   /* Runs after rendering a sample. */
   void step();
 

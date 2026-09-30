@@ -468,4 +468,43 @@ void template_oklab_color_ramp(Layout *layout,
   template_color_ramp_ex(layout, ptr, propname, expand, true);
 }
 
+void template_custom_color_ramp(Layout *layout,
+                                PointerRNA *ptr,
+                                const StringRefNull propname,
+                                std::shared_ptr<CustomColorRampData> data)
+{
+  PropertyRNA *prop = RNA_struct_find_property(ptr, propname.c_str());
+  if (!prop || !data || !data->refresh || !data->evaluate || !data->edit || !data->update) {
+    return;
+  }
+  data->refresh(data->display);
+  Block *block = layout->row(false).block();
+  block_lock_set(block, ptr->owner_id && !ID_IS_EDITABLE(ptr->owner_id), ERROR_LIBDATA_MESSAGE);
+  Button *button = uiDefBut(
+      block,
+      ButtonType::ColorBand,
+      "",
+      0,
+      0,
+      10.0f * UI_UNIT_X,
+      UI_UNIT_Y,
+      &data->display,
+      0,
+      0,
+      TIP_("Drag a color anchor; Ctrl-click adds a new point; Delete removes the active point. "
+           "Handles show color-anchor positions, while the preview includes mapping controls"));
+  auto *ramp = static_cast<ButtonColorBand *>(button);
+  ramp->custom = data;
+  button->rnapoin = *ptr;
+  button->rnaprop = prop;
+  button_func_identity_compare_set(button, [](const Button *a, const Button *b) {
+    return static_cast<const ButtonColorBand *>(a)->custom &&
+           static_cast<const ButtonColorBand *>(b)->custom &&
+           a->rnapoin.owner_id == b->rnapoin.owner_id && a->rnapoin.data == b->rnapoin.data &&
+           a->rnaprop == b->rnaprop;
+  });
+  button_func_set(button, [data](bContext &C) { data->update(C); });
+  block_lock_clear(block);
+}
+
 }  // namespace blender::ui

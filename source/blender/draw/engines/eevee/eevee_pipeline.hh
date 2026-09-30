@@ -157,7 +157,9 @@ class ShadowPipeline {
  public:
   ShadowPipeline(Instance &inst) : inst_(inst) {};
 
-  PassMain::Sub *surface_material_add(blender::Material *material, GPUMaterial *gpumat);
+  PassMain::Sub *surface_material_add(blender::Material *material,
+                                      GPUMaterial *gpumat,
+                                      bool force_double_sided = false);
 
   void sync();
 
@@ -249,7 +251,7 @@ class Prepass {
             bool supports_raycast_visibility = true,
             FunctionRef<void(PassMain &pass)> pass_setup_cb = {});
 
-  PassMain::Sub *add(blender::Material *blender_mat,
+  PassMain::Sub *add(const SurfaceDrawState &state,
                      GPUMaterial *gpumat,
                      bool has_motion,
                      bool hide_from_raycast,
@@ -279,12 +281,11 @@ class ForwardPipeline {
   PassMain::Sub *opaque_subpasses_[2 /*Raycast*/][EEVEE_SURFACE_CULL_METHOD_COUNT] = {
       {nullptr}};
 
-  PassMain::Sub *get_opaque_subpass(blender::Material *blender_mat, GPUMaterial *gpumat)
+  PassMain::Sub *get_opaque_subpass(const SurfaceDrawState &state, GPUMaterial *gpumat)
   {
     const bool has_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
-    const int cull_method = material_surface_cull_subpass_index(blender_mat);
 
-    return opaque_subpasses_[has_raycast][cull_method];
+    return opaque_subpasses_[has_raycast][int(state.cull_method)];
   }
   PassSortable no_depth_ps_ = {"Shading.NoDepth"};
 
@@ -325,7 +326,7 @@ class ForwardPipeline {
   void sync();
   void end_sync();
 
-  PassMain::Sub *prepass_opaque_add(blender::Material *blender_mat,
+  PassMain::Sub *prepass_opaque_add(const SurfaceDrawState &state,
                                     GPUMaterial *gpumat,
                                     bool has_motion);
   PassMain::Sub *stencil_opaque_add(blender::Material *blender_mat,
@@ -333,10 +334,11 @@ class ForwardPipeline {
                                     bool has_motion,
                                     bool force_write_id);
   PassMain::Sub *material_opaque_add(const Object *ob,
-                                     blender::Material *blender_mat,
+                                     const SurfaceDrawState &state,
                                      GPUMaterial *gpumat);
   PassMain::Sub *material_no_depth_add(const Object *ob,
                                        blender::Material *blender_mat,
+                                       const SurfaceDrawState &state,
                                        GPUMaterial *gpumat);
 
   void transparent_add(const Object *ob,
@@ -378,14 +380,13 @@ struct DeferredLayerBase {
 
   DeferredLayerBase(Instance &inst) : prepass_(inst) {};
 
-  PassMain::Sub *get_gbuffer_subpass(blender::Material *blender_mat,
+  PassMain::Sub *get_gbuffer_subpass(const SurfaceDrawState &state,
                                      GPUMaterial *gpumat,
                                      const bool use_hybrid_resources)
   {
     const bool has_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
-    const int cull_method = material_surface_cull_subpass_index(blender_mat);
 
-    return gbuffer_subpasses_[use_hybrid_resources][has_raycast][cull_method];
+    return gbuffer_subpasses_[use_hybrid_resources][has_raycast][int(state.cull_method)];
   }
 
   PassMain npr_ps_ = {"NPR"};
@@ -401,6 +402,9 @@ struct DeferredLayerBase {
   int closure_count_ = 0;
   /* True if any material needs the original, un-offset surface depth for lighting. */
   bool use_depth_offset_lighting_data_ = false;
+  /* Only NPR V2 surface shaders write the optional HDR direct-light payload. */
+  bool has_principled_npr_v2_ = false;
+  bool has_surface_diffusion_ = false;
   /* True if this is a planar probe deferred layer. To be set before sync. */
   bool is_probe_ = false;
 
@@ -423,6 +427,12 @@ struct DeferredLayerBase {
   /* Return the amount of gbuffer layer needed. */
   int header_layer_count() const
   {
+    if (has_surface_diffusion_) {
+      return GBUF_DIFFUSION_HEADER_LAYER_COUNT;
+    }
+    if (has_principled_npr_v2_) {
+      return GBUF_NPR_HEADER_LAYER_COUNT;
+    }
     /* Default header. */
     int count = 1;
     /* SSS, light linking, shadow offset all require an additional layer to store the object ID.
@@ -457,6 +467,11 @@ struct DeferredLayerBase {
   eClosureBits closure_bits_get() const
   {
     return closure_bits_;
+  }
+
+  bool has_principled_npr_v2() const
+  {
+    return has_principled_npr_v2_;
   }
 
   void gbuffer_pass_sync(Instance &inst);
@@ -544,7 +559,7 @@ class DeferredLayer : DeferredLayerBase {
   void begin_sync();
   void end_sync(bool is_first_pass, bool is_last_pass, bool next_layer_has_transmission);
 
-  PassMain::Sub *prepass_add(blender::Material *blender_mat,
+  PassMain::Sub *prepass_add(const SurfaceDrawState &state,
                              GPUMaterial *gpumat,
                              bool has_motion,
                              bool hide_from_raycast,
@@ -553,7 +568,9 @@ class DeferredLayer : DeferredLayerBase {
                              GPUMaterial *gpumat,
                              bool has_motion,
                              bool force_write_id);
-  PassMain::Sub *material_add(blender::Material *blender_mat, GPUMaterial *gpumat);
+  PassMain::Sub *material_add(blender::Material *blender_mat,
+                              const SurfaceDrawState &state,
+                              GPUMaterial *gpumat);
   PassMain::Sub *npr_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 
   bool is_empty() const
@@ -607,12 +624,14 @@ class DeferredPipeline {
   void end_sync();
 
   PassMain::Sub *prepass_add(blender::Material *blender_mat,
+                             const SurfaceDrawState &state,
                              GPUMaterial *gpumat,
                              bool has_motion,
                              short refraction_layer,
                              bool hide_from_raycast,
                              bool force_write_id = false);
   PassMain::Sub *material_add(blender::Material *blender_mat,
+                              const SurfaceDrawState &state,
                               GPUMaterial *gpumat,
                               short refraction_layer);
   PassMain::Sub *stencil_add(blender::Material *blender_mat,
@@ -1081,7 +1100,8 @@ class PipelineModule {
                               blender::Material *blender_mat,
                               GPUMaterial *gpumat,
                               eMaterialPipeline pipeline_type,
-                              eMaterialProbe probe_capture);
+                              eMaterialProbe probe_capture,
+                              const SurfaceDrawState &state);
 };
 
 /** \} */

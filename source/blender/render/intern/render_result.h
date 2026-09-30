@@ -47,8 +47,12 @@ void render_result_passes_allocated_ensure(struct RenderResult *rr);
  * From `imbuf`, if a handle was returned and
  * it's not a single-layer multi-view we convert this to render result.
  */
-struct RenderResult *render_result_new_from_exr(
-    ExrHandle *exrhandle, const char *colorspace, bool predivide, int rectx, int recty);
+struct RenderResult *render_result_new_from_exr(ExrHandle *exrhandle,
+                                                const char *colorspace,
+                                                bool predivide,
+                                                int rectx,
+                                                int recty,
+                                                bool use_part_colorspaces = false);
 
 void render_result_view_new(struct RenderResult *rr, const char *viewname);
 void render_result_views_new(struct RenderResult *rr, const struct RenderData *rd);

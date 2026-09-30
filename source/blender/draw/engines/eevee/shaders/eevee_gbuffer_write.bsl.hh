@@ -51,7 +51,9 @@ using Header = gbuffer::Header;
 ClosurePacking pack_closure([[resource_table]] const PackParameters &srt, ClosureUndetermined cl)
 {
   ClosurePacking cl_packed;
-  cl_packed.mode = gbuffer::closure_type_to_mode(cl.type, gbuffer::color_is_grayscale(cl.color));
+  cl_packed.mode = gbuffer::closure_type_to_mode(
+      cl.type, gbuffer::color_is_grayscale(cl.color) && !closure_is_anisotropic(cl) &&
+                   !closure_is_npr_reflection(cl));
 
   if (cl.weight <= CLOSURE_WEIGHT_CUTOFF) {
     cl_packed.mode = GBUF_NONE;

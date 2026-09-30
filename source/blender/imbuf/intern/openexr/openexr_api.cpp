@@ -1026,6 +1026,24 @@ bool IMB_exr_begin_write(ExrHandle *handle,
     return false;
   }
 
+  if (handle->write_multipart) {
+    /* The first part supplies the file-wide color space. Keep data out of that
+     * position if a color part exists, preserving the relative order of other parts. */
+    auto first_color = std::find_if(handle->channels.begin(), handle->channels.end(),
+                                    [](const ExrChannel &channel) {
+                                      return channel.colorspace &&
+                                             !IMB_colormanagement_space_is_data(channel.colorspace);
+                                    });
+    if (first_color != handle->channels.end() && first_color != handle->channels.begin()) {
+      const std::string part_name = first_color->part_name;
+      auto part_end = std::find_if(first_color, handle->channels.end(),
+                                   [&](const ExrChannel &channel) {
+                                     return channel.part_name != part_name;
+                                   });
+      std::rotate(handle->channels.begin(), first_color, part_end);
+    }
+  }
+
   Header header(width, height);
 
   handle->width = width;
@@ -1365,7 +1383,8 @@ void IMB_exr_multilayer_convert(ExrHandle *handle,
                                                 float *rect,
                                                 int totchan,
                                                 const char *chan_id,
-                                                const char *view))
+                                                const char *view,
+                                                const ColorSpace *colorspace))
 {
   /* RenderResult needs at least one RenderView */
   if (handle->views.empty()) {
@@ -1393,7 +1412,8 @@ void IMB_exr_multilayer_convert(ExrHandle *handle,
                 pass.rect,
                 pass.totchan,
                 pass.chan_id,
-                pass.view.c_str());
+                pass.view.c_str(),
+                pass.chan[0] ? pass.chan[0]->colorspace : nullptr);
         pass.rect = nullptr;
       }
     }
@@ -1635,8 +1655,7 @@ static Vector<ExrChannel> exr_channels_in_multi_part_file(const MultiPartInputFi
   for (int p = 0; p < file.parts(); p++) {
     const ChannelList &c = file.header(p).channels();
 
-    /* Parse color-space. Per part color-spaces are not currently used, but
-     * might as well populate them for consistency with writing. */
+    /* Preserve per-part color spaces for multi-layer consumers. */
     const ColorSpace *colorspace = imb_exr_part_colorspace(file.header(p));
     if (colorspace == nullptr) {
       colorspace = global_colorspace;
@@ -2070,6 +2089,10 @@ static void imb_exr_set_known_colorspace(const Header &header, ImFileColorSpace 
       STRNCPY_UTF8(r_colorspace.metadata_colorspace,
                    IMB_colormanagement_colorspace_get_name(colorspace));
       return;
+    }
+    if (header_interop_id->value() != "unknown") {
+      CLOG_WARN(&LOG, "Unrecognized EXR colorInteropID '%s'; using fallback color space",
+                header_interop_id->value().c_str());
     }
   }
 

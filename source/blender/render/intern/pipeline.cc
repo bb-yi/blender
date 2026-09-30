@@ -260,10 +260,15 @@ bool RE_HasSingleLayer(Render *re)
   return (re->r.scemode & R_SINGLE_LAYER);
 }
 
-RenderResult *RE_MultilayerConvert(
-    ExrHandle *exrhandle, const char *colorspace, bool predivide, int rectx, int recty)
+RenderResult *RE_MultilayerConvert(ExrHandle *exrhandle,
+                                   const char *colorspace,
+                                   bool predivide,
+                                   int rectx,
+                                   int recty,
+                                   bool use_part_colorspaces)
 {
-  return render_result_new_from_exr(exrhandle, colorspace, predivide, rectx, recty);
+  return render_result_new_from_exr(
+      exrhandle, colorspace, predivide, rectx, recty, use_part_colorspaces);
 }
 
 RenderLayer *render_get_single_layer(Render *re, RenderResult *rr)

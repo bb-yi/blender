@@ -28,7 +28,9 @@ void SubsurfaceModule::end_sync()
   /* Process direct / indirect radiance separately for correct ligthpath intensity. */
   /* Note that we do not branch on clamp.surface_indirect since it is applied on the spherical
    * harmonics or rays before SSS evaluation. */
-  use_split_radiance_ = inst_.uniform_data.data.clamp.direct_scale != 1.0f ||
+  use_npr_radiance_ = inst_.pipelines.deferred.header_layer_count() >= GBUF_NPR_HEADER_LAYER_COUNT;
+  use_split_radiance_ = use_npr_radiance_ ||
+                        inst_.uniform_data.data.clamp.direct_scale != 1.0f ||
                         inst_.uniform_data.data.clamp.indirect_scale != 1.0f ||
                         inst_.scene->eevee.clamp_surface_direct != 0.0f;
 
@@ -38,6 +40,7 @@ void SubsurfaceModule::end_sync()
     pass.init();
     pass.state_set(DRW_STATE_NO_DRAW);
     pass.specialize_constant(sh, "use_split_radiance", use_split_radiance_);
+    pass.specialize_constant(sh, "use_npr_radiance", use_npr_radiance_);
     pass.shader_set(sh);
     pass.bind_resources(inst_.gbuffer);
     pass.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
@@ -45,6 +48,8 @@ void SubsurfaceModule::end_sync()
     pass.bind_image("indirect_light_img", &indirect_light_tx_);
     pass.bind_image("object_id_img", &object_id_tx_);
     pass.bind_image("radiance_img", &radiance_tx_);
+    pass.bind_image("diffusion_header_img", &inst_.gbuffer.header_tx);
+    pass.push_constant("diffusion_bin", &diffusion_bin_);
     pass.bind_ssbo("convolve_tile_buf", &convolve_tile_buf_);
     pass.bind_ssbo("convolve_dispatch_buf", &convolve_dispatch_buf_);
     pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
@@ -66,6 +71,7 @@ void SubsurfaceModule::end_sync()
     pass.init();
     pass.state_set(DRW_STATE_NO_DRAW);
     pass.specialize_constant(sh, "use_split_radiance", use_split_radiance_);
+    pass.specialize_constant(sh, "use_npr_radiance", use_npr_radiance_);
     pass.shader_set(sh);
     pass.bind_resources(inst_.uniform_data);
     pass.bind_ubo(SUBSURFACE_BUF_SLOT, data_);
@@ -75,6 +81,10 @@ void SubsurfaceModule::end_sync()
     pass.bind_texture("object_id_tx", &object_id_tx_, sampler);
     pass.bind_image("out_direct_light_img", &direct_light_tx_);
     pass.bind_image("out_indirect_light_img", &indirect_light_tx_);
+    /* Keep the descriptor valid even on drivers which retain resources behind a specialization
+     * constant. The disabled path never writes and does not allocate additional header layers. */
+    pass.bind_image("npr_header_img", &inst_.gbuffer.header_tx);
+    pass.push_constant("diffusion_bin", &diffusion_bin_);
     pass.bind_ssbo("tiles_coord_buf", &convolve_tile_buf_);
     pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_STORAGE);
     pass.dispatch(convolve_dispatch_buf_);
@@ -84,11 +94,13 @@ void SubsurfaceModule::end_sync()
 void SubsurfaceModule::render(gpu::Texture *direct_diffuse_light_tx,
                               gpu::Texture *indirect_diffuse_light_tx,
                               eClosureBits active_closures,
-                              View &view)
+                              View &view,
+                              int diffusion_bin)
 {
   if (!(active_closures & CLOSURE_SSS)) {
     return;
   }
+  diffusion_bin_ = diffusion_bin;
 
   /* TODO: This only needs to be update once per render sample. */
   precompute_samples_location();
@@ -106,7 +118,7 @@ void SubsurfaceModule::render(gpu::Texture *direct_diffuse_light_tx,
   eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
   object_id_tx_.acquire_2d(render_extent, gpu::TextureFormat::SUBSURFACE_OBJECT_ID_FORMAT, usage);
   radiance_tx_.acquire_2d_array(render_extent,
-                                use_split_radiance_ ? 2 : 1,
+                                use_npr_radiance_ ? 3 : (use_split_radiance_ ? 2 : 1),
                                 gpu::TextureFormat::SUBSURFACE_RADIANCE_FORMAT,
                                 usage);
 

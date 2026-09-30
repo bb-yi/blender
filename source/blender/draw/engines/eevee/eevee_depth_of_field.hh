@@ -198,6 +198,11 @@ class DepthOfField {
     return enabled_;
   }
 
+  bool jitter_enabled() const
+  {
+    return do_jitter_ && jitter_radius_ > 0.0f;
+  }
+
  private:
   void bokeh_lut_pass_sync();
   void setup_pass_sync();

@@ -25,6 +25,9 @@ void register_node_type_sh_bsdf_hair_principled();
 void register_node_type_sh_bsdf_hair();
 void register_node_type_sh_bsdf_metallic();
 void register_node_type_sh_bsdf_principled();
+void register_node_type_sh_principled_npr();
+void register_node_type_sh_npr_surface_diffusion();
+void register_node_type_sh_npr_rim();
 void register_node_type_sh_bsdf_ray_portal();
 void register_node_type_sh_bsdf_refraction();
 void register_node_type_sh_bsdf_toon();
@@ -94,6 +97,7 @@ void register_node_type_sh_shader_info();
 void register_node_type_sh_screenspace_info();
 void register_node_type_sh_scene_color();
 void register_node_type_sh_object_info();
+void register_node_type_sh_output_outline_shell();
 void register_node_type_sh_output_aov();
 void register_node_type_sh_output_eevee_material();
 void register_node_type_sh_output_light();
@@ -155,5 +159,6 @@ void register_node_type_eevee_filter_graph_scene_color();
 void register_node_type_eevee_filter_graph_aov_input();
 void register_node_type_eevee_filter_graph_filter_material();
 void register_node_type_eevee_filter_graph_stage_output();
+void register_node_type_eevee_filter_graph_aov_output();
 
 }  // namespace blender

@@ -35,6 +35,11 @@ set(SRC
   nodes/node_shader_bsdf_hair_principled.cc
   nodes/node_shader_bsdf_metallic.cc
   nodes/node_shader_bsdf_principled.cc
+  nodes/node_shader_principled_npr.cc
+  nodes/node_shader_npr_surface_diffusion.cc
+  nodes/node_shader_npr_rim.cc
+  nodes/node_shader_principled_npr_v2.cc
+  nodes/node_shader_principled_npr_v2.hh
   nodes/node_shader_bsdf_ray_portal.cc
   nodes/node_shader_bsdf_refraction.cc
   nodes/node_shader_bsdf_sheen.cc
@@ -102,6 +107,7 @@ set(SRC
   nodes/node_shader_screenspace_info.cc
   nodes/node_shader_scene_color.cc
   nodes/node_shader_object_info.cc
+  nodes/node_shader_output_outline_shell.cc
   nodes/node_shader_output_aov.cc
   nodes/node_shader_output_light.cc
   nodes/node_shader_output_linestyle.cc
@@ -220,6 +226,8 @@ endif()
 blender_add_lib(bf_nodes_shader "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 add_library(bf::nodes::shader ALIAS bf_nodes_shader)
 
+set_source_files_properties(nodes/node_shader_npr_surface_diffusion.cc nodes/node_shader_npr_rim.cc
+  PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 blender_set_target_unity_build(bf_nodes_shader 10)
 
 # RNA_prototypes.hh

@@ -609,7 +609,6 @@ float shadow_eval_seeded([[resource_table]] ShadowRenderData &srd,
   return saturate(1.0f - surface_hit / float(ray_count));
 }
 
-#if defined(SHADOW_CASTER_CLASSIFY)
 constexpr uint SHADOW_CASTER_UNKNOWN_ID = 0xFFFFFFFFu;
 
 struct ShadowCasterTraceResult {
@@ -689,7 +688,7 @@ template ShadowCasterTraceResult shadow_trace_caster_id<ShadowRayDirectional>(
 template ShadowCasterTraceResult shadow_trace_caster_id<ShadowRayPunctual>(
     ShadowRenderData &, ShadowRayPunctual, int, float);
 
-float3 shadow_caster_classification_seeded([[resource_table]] ShadowRenderData &srd,
+float3 shadow_caster_classification_seeded_ex([[resource_table]] ShadowRenderData &srd,
                                            LightData light,
                                            const bool is_directional,
                                            uint receiver_id,
@@ -701,7 +700,9 @@ float3 shadow_caster_classification_seeded([[resource_table]] ShadowRenderData &
                                            int ray_count,
                                            int ray_step_count,
                                            float3 random_shadow_3d,
-                                           float2 random_pcf_2d)
+                                           float2 random_pcf_2d,
+                                           const bool is_transmission,
+                                           Thickness thickness)
 {
   [[resource_table]] const Uniform &uni = srd.uniforms;
   [[resource_table]] const draw::View &views = srd.views;
@@ -725,9 +726,15 @@ float3 shadow_caster_classification_seeded([[resource_table]] ShadowRenderData &
   }
 
   float texel_radius = shadow_texel_radius_at_position(uni, views, light, is_directional, P);
-  P = offset_ray(P, Ng);
+  bool is_facing_light = dot(Ng, L) > 0.0f;
+  float3 N_bias = (is_transmission && !is_facing_light) ? reflect(Ng, L) : Ng;
+  if (is_transmission && !is_facing_light) {
+    P += abs(is_directional ? thickness.value() :
+                             min(thickness.value(), distance_to_shadow - 0.01f)) * L;
+  }
+  P = offset_ray(P, N_bias);
   P += (light.filter_radius * texel_radius) * shadow_pcf_offset(L, Ng, random_pcf_2d);
-  P += Ng * shadow_normal_offset(Ng, L, texel_radius);
+  P += N_bias * shadow_normal_offset(Ng, L, texel_radius);
   P += N * shadow_terminator_offset(N, L, terminator_normal_offset, terminator_geometry_offset);
 
   float3 lP = is_directional ? light_world_to_local_direction(light, P) :
@@ -773,6 +780,28 @@ float3 shadow_caster_classification_seeded([[resource_table]] ShadowRenderData &
                 saturate(cast_hit * inv_count));
 }
 
+/* Preserve the Shader Info reflection-only contract exactly. Native NPR transmission uses the
+ * explicit thickness variant above after the engine has amended the GBuffer thickness. */
+float3 shadow_caster_classification_seeded([[resource_table]] ShadowRenderData &srd,
+                                           LightData light,
+                                           const bool is_directional,
+                                           uint receiver_id,
+                                           float3 P,
+                                           float3 Ng,
+                                           float3 N,
+                                           float terminator_normal_offset,
+                                           float terminator_geometry_offset,
+                                           int ray_count,
+                                           int ray_step_count,
+                                           float3 random_shadow_3d,
+                                           float2 random_pcf_2d)
+{
+  return shadow_caster_classification_seeded_ex(srd, light, is_directional, receiver_id, P, Ng, N,
+                                                terminator_normal_offset, terminator_geometry_offset,
+                                                ray_count, ray_step_count, random_shadow_3d,
+                                                random_pcf_2d, false, Thickness::zero());
+}
+
 float3 shadow_caster_classification_seeded(LightData light,
                                            const bool is_directional,
                                            uint receiver_id,
@@ -801,8 +830,6 @@ float3 shadow_caster_classification_seeded(LightData light,
                                              random_shadow_3d,
                                              random_pcf_2d);
 }
-#endif
-
 float shadow_eval([[resource_table]] ShadowRenderData &srd,
                   LightData light,
                   const bool is_directional,

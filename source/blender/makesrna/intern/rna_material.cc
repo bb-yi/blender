@@ -1212,6 +1212,21 @@ void RNA_def_material(BlenderRNA *brna)
        "known as forward rendering."},
       {0, nullptr, 0, nullptr, nullptr},
   };
+  static const EnumPropertyItem prop_eevee_outline_shell_render_method_items[] = {
+      {MA_OUTLINE_SHELL_DEFERRED,
+       "DEFERRED",
+       0,
+       "Deferred",
+       "Draw the additional surface with the deferred pass, writing Cryptomatte and the "
+       "Emission render pass like the Dithered surface render method"},
+      {MA_OUTLINE_SHELL_FORWARD,
+       "FORWARD",
+       0,
+       "Forward",
+       "Draw the additional surface after deferred lighting, without Cryptomatte or the "
+       "Emission render pass"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
   static const EnumPropertyItem prop_eevee_surface_cull_method_items[] = {
       {MA_SURFACE_CULL_NONE, "NONE", 0, "None", "Render both front and back faces"},
       {MA_SURFACE_CULL_BACK, "BACK", 0, "Back", "Hide back-facing faces"},
@@ -1449,6 +1464,42 @@ void RNA_def_material(BlenderRNA *brna)
   RNA_def_property_boolean_sdna(prop, nullptr, "depth_write", 1);
   RNA_def_property_ui_text(
       prop, "Depth Write", "Write Eevee material surface depth output");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "outline_shell_render_method", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "outline_shell_render_method");
+  RNA_def_property_enum_items(prop, prop_eevee_outline_shell_render_method_items);
+  RNA_def_property_ui_text(prop,
+                           "Outline Shell Render Method",
+                           "Pipeline used to draw the additional surface output");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "outline_shell_cull_method", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "outline_shell_cull_method");
+  RNA_def_property_enum_items(prop, prop_eevee_surface_cull_method_items);
+  RNA_def_property_ui_text(
+      prop, "Outline Shell Face Culling", "Control which face orientation is hidden");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "outline_shell_ztest_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "outline_shell_ztest_mode");
+  RNA_def_property_enum_items(prop, prop_eevee_ztest_mode_items);
+  RNA_def_property_ui_text(
+      prop, "Outline Shell ZTest Mode", "Depth test mode used by the additional surface");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "use_outline_shell_depth_write", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "outline_shell_depth_write", 1);
+  RNA_def_property_ui_text(
+      prop, "Outline Shell Depth Write", "Write depth for the additional surface");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "use_outline_shell_shadow", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(
+      prop, nullptr, "outline_shell_flag", MA_OUTLINE_SHELL_CAST_SHADOW);
+  RNA_def_property_ui_text(prop,
+                           "Outline Shell Cast Shadow",
+                           "Draw the additional surface in shadow passes");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 
   prop = RNA_def_property(srna, "depth_offset_affect_lighting", PROP_BOOLEAN, PROP_NONE);

@@ -72,6 +72,8 @@ enum eImage_Flag : int {
   IMA_FLAG_UNUSED_16 = (1 << 16), /* cleared */
   /** Indicates that the image has autosave information */
   IMA_AUTOSAVE_TEMPPACK = (1 << 17),
+  /** Interpret multi-layer EXR passes using their individual color space metadata. */
+  IMA_USE_EXR_PART_COLORSPACES = (1 << 18),
 };
 ENUM_OPERATORS(eImage_Flag)
 

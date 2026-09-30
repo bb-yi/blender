@@ -712,19 +712,22 @@ bool BKE_image_save(
 
 /* OpenEXR saving, single and multilayer. */
 
-static const float *image_exr_from_scene_linear_to_output(const float *rect,
-                                                          const int width,
-                                                          const int height,
-                                                          const int channels,
-                                                          const ImageFormatData *imf,
-                                                          Vector<float *> &tmp_output_rects,
-                                                          StringRefNull &r_colorspace)
+static const float *image_exr_from_scene_linear_to_output(
+    const float *rect,
+    const int width,
+    const int height,
+    const int channels,
+    const ImageFormatData *imf,
+    Vector<float *> &tmp_output_rects,
+    StringRefNull &r_colorspace,
+    const char *override_colorspace = nullptr)
 {
   if (imf == nullptr) {
     return rect;
   }
 
-  const char *to_colorspace = imf->linear_colorspace_settings.name;
+  const char *to_colorspace = override_colorspace ? override_colorspace :
+                                                    imf->linear_colorspace_settings.name;
   if (to_colorspace[0] == '\0' || IMB_colormanagement_space_name_is_scene_linear(to_colorspace)) {
     return rect;
   }
@@ -736,8 +739,15 @@ static const float *image_exr_from_scene_linear_to_output(const float *rect,
 
   const char *from_colorspace = IMB_colormanagement_role_colorspace_name_get(
       COLOR_ROLE_SCENE_LINEAR);
-  IMB_colormanagement_transform_float(
-      output_rect, width, height, channels, from_colorspace, to_colorspace, false);
+  /* Explicit per-pass destinations use EXR's associated-alpha convention. Preserve
+   * the legacy conversion for callers without per-pass color settings. */
+  IMB_colormanagement_transform_float(output_rect,
+                                     width,
+                                     height,
+                                     channels,
+                                     from_colorspace,
+                                     to_colorspace,
+                                     override_colorspace != nullptr);
 
   r_colorspace = to_colorspace;
 
@@ -899,7 +909,8 @@ bool BKE_image_render_write_exr(ReportList *reports,
                                 const ImageFormatData *imf,
                                 const bool save_as_render,
                                 const char *view,
-                                int layer)
+                                int layer,
+                                const Map<const RenderPass *, std::string> *pass_colorspaces)
 {
   const int write_multipart = (imf ? imf->exr_flag & R_IMF_EXR_FLAG_MULTIPART : true);
   ExrHandle *exrhandle = IMB_exr_get_handle(write_multipart);
@@ -962,13 +973,18 @@ bool BKE_image_render_write_exr(ReportList *reports,
           (pass_RGBA) ? COLOR_ROLE_SCENE_LINEAR : COLOR_ROLE_DATA);
 
       if (save_as_render && pass_RGBA) {
-        output_rect = image_exr_from_scene_linear_to_output(output_rect,
-                                                            rr->rectx,
-                                                            rr->recty,
-                                                            render_pass.channels,
-                                                            imf,
-                                                            tmp_output_rects,
-                                                            colorspace);
+        const std::string *pass_colorspace = pass_colorspaces ?
+                                                 pass_colorspaces->lookup_ptr(&render_pass) :
+                                                 nullptr;
+        output_rect = image_exr_from_scene_linear_to_output(
+            output_rect,
+            rr->rectx,
+            rr->recty,
+            render_pass.channels,
+            imf,
+            tmp_output_rects,
+            colorspace,
+            pass_colorspace ? pass_colorspace->c_str() : nullptr);
       }
 
       /* For multi-layer EXRs, we write the pass as is with all of its channels. */
@@ -1130,7 +1146,8 @@ bool BKE_image_render_write(ReportList *reports,
                             const bool stamp,
                             const char *filepath_basis,
                             const ImageFormatData *format,
-                            bool save_as_render)
+                            bool save_as_render,
+                            const Map<const RenderPass *, std::string> *pass_colorspaces)
 {
   bool ok = true;
 
@@ -1154,7 +1171,7 @@ bool BKE_image_render_write(ReportList *reports,
 
   if (image_format.views_format == R_IMF_VIEWS_MULTIVIEW && is_exr_rr) {
     ok = BKE_image_render_write_exr(
-        reports, rr, filepath_basis, &image_format, save_as_render, nullptr, -1);
+        reports, rr, filepath_basis, &image_format, save_as_render, nullptr, -1, pass_colorspaces);
     image_render_print_save_message(reports, filepath_basis, ok, errno);
   }
 
@@ -1174,7 +1191,7 @@ bool BKE_image_render_write(ReportList *reports,
 
       if (is_exr_rr) {
         ok = BKE_image_render_write_exr(
-            reports, rr, filepath, &image_format, save_as_render, rv->name, -1);
+            reports, rr, filepath, &image_format, save_as_render, rv->name, -1, pass_colorspaces);
         image_render_print_save_message(reports, filepath, ok, errno);
 
         /* optional preview images for exr */

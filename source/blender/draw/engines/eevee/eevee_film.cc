@@ -53,6 +53,7 @@ void Film::init_aovs(const Set<std::string> &passes_used_by_viewport_compositor)
   aovs_info.display_id = -1;
   aovs_info.display_is_value = false;
   aovs_info.value_len = aovs_info.color_len = 0;
+  aovs_info.sr_nearest = uint4(0);
 
   if (inst_.is_viewport()) {
     /* Viewport case. */
@@ -122,6 +123,9 @@ void Film::init_aovs(const Set<std::string> &passes_used_by_viewport_compositor)
     /* Value hashes live after all color hashes, so the split must use the final color count. */
     const int combined_index = is_value ? aovs_info.color_len + index : index;
     aovs_info.hash[combined_index / 4][combined_index % 4] = BLI_hash_string(aov->name);
+    if (aov->flag & AOV_SR_NEAREST) {
+      aovs_info.sr_nearest[combined_index / 32] |= 1u << (combined_index % 32);
+    }
   }
 
   if (!aovs.is_empty()) {
@@ -184,7 +188,6 @@ float *Film::read_native_postfx_output(ViewLayerNativePostFXOutput *output)
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
 
   float *result = static_cast<float *>(GPU_texture_read(pass_tx, GPU_DATA_FLOAT, 0));
-
   int channels = 4;
   const char *chan_id = "RGBA";
   eNodeSocketDatatype socket_type = SOCK_RGBA;
@@ -349,6 +352,19 @@ static eViewLayerEEVEEPassType get_viewport_compositor_enabled_passes(
   return viewport_compositor_enabled_passes;
 }
 
+/* Light passes are stored pre-divided by their matching Color pass, so Color must be enabled
+ * whenever Light is (#161352). */
+static eViewLayerEEVEEPassType with_light_pass_color_dependencies(eViewLayerEEVEEPassType passes)
+{
+  if (passes & EEVEE_RENDER_PASS_DIFFUSE_LIGHT) {
+    passes |= EEVEE_RENDER_PASS_DIFFUSE_COLOR;
+  }
+  if (passes & EEVEE_RENDER_PASS_SPECULAR_LIGHT) {
+    passes |= EEVEE_RENDER_PASS_SPECULAR_COLOR;
+  }
+  return passes;
+}
+
 void Film::init(const int2 &extent, const rcti *output_rect)
 {
   using namespace math;
@@ -379,6 +395,24 @@ void Film::init(const int2 &extent, const rcti *output_rect)
 
   enabled_categories_ = PassCategory(0);
   init_aovs(passes_used_by_viewport_compositor);
+  nr_mask_aov_ = nullptr;
+  std::string mask_signature = scene.eevee.dlss5_mask_aov;
+  mask_signature += scene.eevee.dlss5_mask_invert ? "!" : ":";
+  for (ViewLayerAOV &aov : inst_.view_layer->aovs) {
+    mask_signature += std::string(aov.name) + std::to_string(aov.type) + std::to_string(aov.flag);
+    if (STREQ(aov.name, scene.eevee.dlss5_mask_aov) && aov.type == AOV_TYPE_VALUE &&
+        !(aov.flag & AOV_CONFLICT))
+    {
+      nr_mask_aov_ = &aov;
+    }
+  }
+  if (assign_if_different(nr_mask_signature_, mask_signature)) {
+    data_.use_history = false;
+    inst_.dlss5.invalidate();
+    if (inst_.is_viewport()) {
+      sampling.reset();
+    }
+  }
   if (assign_if_different(native_postfx_outputs_hash_,
                           inst_.native_postfx_outputs.outputs_hash_get()))
   {
@@ -433,14 +467,7 @@ void Film::init(const int2 &extent, const rcti *output_rect)
       needed_passes |= EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT;
     }
 
-    /* Force enable color passes if light passes are enabled.
-     * This is needed since we need to pre-divide by them. */
-    if (enabled_passes_ & EEVEE_RENDER_PASS_DIFFUSE_LIGHT) {
-      enabled_passes_ |= EEVEE_RENDER_PASS_DIFFUSE_COLOR;
-    }
-    if (enabled_passes_ & EEVEE_RENDER_PASS_SPECULAR_LIGHT) {
-      enabled_passes_ |= EEVEE_RENDER_PASS_SPECULAR_COLOR;
-    }
+    needed_passes = with_light_pass_color_dependencies(needed_passes);
 
     /* Filter obsolete passes. */
     needed_passes &= ~(EEVEE_RENDER_PASS_UNUSED_8 | EEVEE_RENDER_PASS_UNUSED_14);
@@ -483,7 +510,34 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     data_.extent = int2(BLI_rcti_size_x(output_rect), BLI_rcti_size_y(output_rect));
     data_.offset = int2(output_rect->xmin, output_rect->ymin);
     data_.extent_inv = 1.0f / float2(data_.extent);
+    const bool was_sr = data_.sr_active;
+    const float2 old_ratio = data_.sr_render_ratio;
+    inst_.dlss_sr.init(data_.extent);
+    data_.sr_active = inst_.dlss_sr.active();
+    data_.sr_render_ratio = data_.sr_active ?
+                                float2(inst_.dlss_sr.input_extent()) / float2(data_.extent) :
+                                float2(0.0f);
+    if (was_sr != bool(data_.sr_active) || old_ratio != data_.sr_render_ratio) {
+      data_.use_history = false;
+      inst_.dlss5.invalidate();
+      if (inst_.is_viewport()) {
+        sampling.reset();
+      }
+    }
+    if (data_.sr_active) {
+      if (inst_.is_viewport() && data_.scaling_factor > 1) {
+        /* SR replaces pixel-size rendering, including its minimum sample count. */
+        sampling.init(&scene, 1);
+      }
+      data_.scaling_factor = 1;
+      /* This scales texture gradients, not mip levels. The lower render resolution already
+       * increases derivatives; shrink them to retain the native-resolution texture detail. */
+      data_.texture_lod_bias = math::reduce_min(data_.sr_render_ratio) / 1.5f;
+    }
     data_.render_extent = divide_ceil(data_.extent, int2(data_.scaling_factor));
+    if (data_.sr_active) {
+      data_.render_extent = inst_.dlss_sr.input_extent();
+    }
     data_.overscan = overscan_pixels_get(inst_.camera.overscan(), data_.render_extent);
     data_.render_extent += data_.overscan * 2;
 
@@ -642,7 +696,8 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     }
   }
   {
-    int2 weight_extent = (inst_.camera.is_panoramic() || (data_.scaling_factor > 1)) ?
+    int2 weight_extent = (data_.sr_active || inst_.camera.is_panoramic() ||
+                          (data_.scaling_factor > 1)) ?
                              data_.extent :
                              int2(1);
 
@@ -694,6 +749,17 @@ void Film::init(const int2 &extent, const rcti *output_rect)
 
 void Film::sync()
 {
+  nr_mask_id_ = -1;
+  if (nr_mask_aov_) {
+    const uint hash = BLI_hash_string(nr_mask_aov_->name);
+    for (int i = 0; i < aovs_info.value_len; i++) {
+      const int slot = aovs_info.color_len + i;
+      if (aovs_info.hash[slot / 4][slot % 4] == hash) {
+        nr_mask_id_ = data_.aov_value_id + i;
+        break;
+      }
+    }
+  }
   /* We use a fragment shader for viewport because we need to output the depth.
    *
    * Compute shader is also used to work around Metal/Intel iGPU issues concerning
@@ -785,6 +851,8 @@ void Film::init_pass(PassSimple &pass, gpu::Shader *sh)
   pass.push_constant("outline_id", &outline_id_, 1);
   pass.push_constant("use_outline_in_combined", &use_outline_in_combined_, 1);
   pass.push_constant("has_outline_input", &has_outline_input_, 1);
+  pass.push_constant("nr_mask_id", &nr_mask_id_, 1);
+  pass.push_constant("sr_offline", inst_.is_image_render);
   /* NOTE(@fclem): 16 is the max number of sampled texture in many implementations.
    * If we need more, we need to pack more of the similar passes in the same textures as arrays or
    * use image binding instead. */
@@ -832,6 +900,9 @@ void Film::end_sync()
 
 float2 Film::pixel_jitter_get() const
 {
+  if (data_.sr_active) {
+    return inst_.sampling.rng_2d_get(SAMPLING_FILTER_U) - 0.5f;
+  }
   const bool has_time_dependent_shading = inst_.materials.has_time_dependent_materials() ||
                                           inst_.world.uses_scene_time() ||
                                           inst_.filter_materials.uses_scene_time() ||
@@ -889,7 +960,7 @@ float2 Film::pixel_jitter_get() const
 
 eViewLayerEEVEEPassType Film::enabled_passes_get() const
 {
-  if (inst_.is_viewport() && use_reprojection_) {
+  if (data_.sr_active || (inst_.is_viewport() && use_reprojection_)) {
     /* Enable motion vector rendering but not the accumulation buffer. */
     return enabled_passes_ | EEVEE_RENDER_PASS_VECTOR;
   }
@@ -925,7 +996,12 @@ void Film::update_sample_table()
   }
 
   data_.samples_len = 0;
-  if (data_.scaling_factor > 1) {
+  if (data_.sr_active) {
+    /* Fractional SR ratios need per-output-pixel bilinear weights on the GPU. */
+    data_.samples_len = 4;
+    data_.samples_weight_total = 1.0f;
+  }
+  else if (data_.scaling_factor > 1) {
     /* For this case there might be no valid samples for some pixels.
      * Still visit all four neighbors to have the best weight available.
      * Note that weight is computed on the GPU as it is different for each sample. */
@@ -1049,6 +1125,25 @@ void Film::accumulate(View &view,
   }
 
   combined_final_tx_ = combined_final_tx;
+  if (data_.sr_active) {
+    combined_final_tx_ = inst_.dlss_sr.process(combined_final_tx, outline_combined_tx, view);
+    if (!combined_final_tx_) {
+      /* Do not accumulate or publish interpolated output as an SR frame. Offline caller
+       *
+       * restarts this frame natively; viewport redraw reinitializes at native size. */
+      inst_.dlss5.invalidate();
+      if (inst_.is_viewport()) {
+        inst_.sampling.reset();
+        DRW_viewport_request_redraw();
+      }
+      return;
+    }
+    if (inst_.is_viewport()) {
+      DefaultFramebufferList *dfbl = inst_.draw_ctx->viewport_framebuffer_list_get();
+      GPU_framebuffer_bind(dfbl->default_fb);
+      GPU_framebuffer_viewport_set(dfbl->default_fb, UNPACK2(data_.offset), UNPACK2(data_.extent));
+    }
+  }
   history_display_tx_ = combined_tx_.current();
   gpu::Texture *outline_input_tx = (outline_combined_tx != nullptr) ? outline_combined_tx :
                                                                     outline_raw_tx;
@@ -1057,8 +1152,71 @@ void Film::accumulate(View &view,
   has_outline_input_ = outline_input_tx != nullptr;
   use_outline_in_combined_ = outline_combined_tx != nullptr;
   display_only_ = false;
+  gpu::Texture *dlss_display_tx = nullptr;
   inst_.manager->submit(accumulate_ps_, view);
-  inst_.manager->submit(copy_ps_, view);
+  /* Viewport NR uses the Film/combined texture size (the pixels on screen), never
+   * Scene render resolution. Offline F12 runs NR once on the last accumulated
+   * sample — not 64 times at print resolution. */
+  const bool dlss_live_viewport = inst_.is_viewport() && !inst_.is_image_render;
+  const bool dlss_final_render = inst_.is_image_render && inst_.sampling.finished();
+  if (dlss_live_viewport || dlss_final_render) {
+    gpu::Texture *color_tx = combined_output_tx_.gpu_texture();
+    gpu::Texture *depth_tx = inst_.render_buffers.depth_tx;
+    gpu::Texture *velocity_tx = inst_.render_buffers.vector_tx;
+    if (color_tx != nullptr && depth_tx != nullptr && velocity_tx != nullptr) {
+      const int2 color_extent(GPU_texture_width(color_tx), GPU_texture_height(color_tx));
+      const int2 guide_extent(GPU_texture_width(depth_tx), GPU_texture_height(depth_tx));
+      dlss_display_tx = inst_.dlss5.process(
+          {
+              color_tx,
+              color_tx,
+              depth_tx,
+              velocity_tx,
+              color_extent,
+              color_extent,
+              guide_extent,
+              data_.overscan,
+              data_.scaling_factor,
+              inst_.film.pixel_jitter_get(),
+              dlss_live_viewport ? inst_.dlss5_reset() : true,
+              dlss_live_viewport,
+              true,
+              true,
+              true,
+              false,
+              exp2f(inst_.scene->view_settings.exposure),
+              nr_mask_aov_ ? get_aov_texture(nr_mask_aov_) : nullptr,
+              !inst_.scene->eevee.dlss5_mask_aov[0] ||
+                  (nr_mask_aov_ && get_aov_texture(nr_mask_aov_)),
+              data_.sr_active ? data_.sr_render_ratio : float2(0.0f),
+          },
+          view);
+    }
+  }
+  const bool dlss_active = dlss_display_tx != nullptr &&
+                           inst_.dlss5.display_texture() == dlss_display_tx;
+  if (inst_.is_image_render && dlss_active) {
+    GPU_texture_copy(combined_output_tx_.gpu_texture(), dlss_display_tx);
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_TEXTURE_UPDATE);
+  }
+  if (inst_.is_viewport()) {
+    /* Conversion passes bind their own framebuffer. Present through the same Film
+     * shader for active sampling and cached display, including borders and passes.
+     * Keep native Combined intact so disabling NR never exposes a stale result. */
+    DefaultFramebufferList *dfbl = inst_.draw_ctx->viewport_framebuffer_list_get();
+    GPU_framebuffer_bind(dfbl->default_fb);
+    GPU_framebuffer_viewport_set(dfbl->default_fb, UNPACK2(data_.offset), UNPACK2(data_.extent));
+    if (dlss_active) {
+      history_display_tx_ = dlss_display_tx;
+      display_only_ = true;
+      inst_.manager->submit(use_compute_ ? copy_ps_ : accumulate_ps_, view);
+    }
+    else {
+      /* The normal fragment accumulation already presented the native image.
+       * Only the compute path needs the original copy pass. */
+      inst_.manager->submit(copy_ps_, view);
+    }
+  }
 
   combined_tx_.swap();
   weight_tx_.swap();
@@ -1081,7 +1239,8 @@ void Film::display()
   GPU_framebuffer_viewport_set(dfbl->default_fb, UNPACK2(data_.offset), UNPACK2(data_.extent));
 
   combined_final_tx_ = inst_.render_buffers.combined_tx;
-  history_display_tx_ = combined_output_tx_;
+  gpu::Texture *dlss_display_tx = inst_.dlss5.display_texture();
+  history_display_tx_ = dlss_display_tx ? dlss_display_tx : combined_output_tx_.gpu_texture();
   /* The outline result is transient and may have been released when viewport sampling
    * converged or the material graph stopped producing outline output. Refresh the optional
    * binding here as well, otherwise the display-only pass can keep a dangling texture pointer. */
@@ -1106,11 +1265,22 @@ void Film::cryptomatte_sort()
 
 float *Film::read_pass(eViewLayerEEVEEPassType pass_type, int layer_offset)
 {
+  /* DLSS writes its reconstructed result back into combined_output_tx_. Keep the
+   * normal pass lookup here so render readback and viewport display share one
+   * authoritative Combined texture. */
   gpu::Texture *pass_tx = this->get_pass_texture(pass_type, layer_offset);
+  if (pass_tx == nullptr) {
+    return nullptr;
+  }
 
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
 
   float *result = static_cast<float *>(GPU_texture_read(pass_tx, GPU_DATA_FLOAT, 0));
+
+  if (inst_.is_image_render && pass_type == EEVEE_RENDER_PASS_COMBINED) {
+    inst_.dlss5.render_readback_complete();
+    inst_.dlss_sr.readback_complete();
+  }
 
   if (pass_is_float3(pass_type)) {
     /* Convert result in place as we cannot do this conversion on GPU. */
@@ -1125,6 +1295,11 @@ float *Film::read_pass(eViewLayerEEVEEPassType pass_type, int layer_offset)
 
 gpu::Texture *Film::get_pass_texture(eViewLayerEEVEEPassType pass_type, int layer_offset)
 {
+  if (inst_.is_viewport() && pass_type == EEVEE_RENDER_PASS_COMBINED && layer_offset == 0) {
+    if (gpu::Texture *output = inst_.dlss5.display_texture()) {
+      return output;
+    }
+  }
   ePassStorageType storage_type = pass_storage_type(pass_type);
   const bool is_value = storage_type == PASS_STORAGE_VALUE;
   const bool is_cryptomatte = storage_type == PASS_STORAGE_CRYPTOMATTE;

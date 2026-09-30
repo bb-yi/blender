@@ -26,7 +26,9 @@ namespace eevee::subsurface {
  * \{ */
 
 struct Setup {
+  [[push_constant]] int diffusion_bin;
   [[specialization_constant(false)]] const bool use_split_radiance;
+  [[specialization_constant(false)]] const bool use_npr_radiance;
 
   [[shared]] uint &has_visible_sss;
 
@@ -36,6 +38,7 @@ struct Setup {
   [[image(1, read, RAYTRACE_RADIANCE_FORMAT)]] const image2D indirect_light_img;
   [[image(2, write, SUBSURFACE_OBJECT_ID_FORMAT)]] uimage2D object_id_img;
   [[image(3, write, SUBSURFACE_RADIANCE_FORMAT)]] image2DArray radiance_img;
+  [[image(4, write, UINT_32)]] uimage2DArray diffusion_header_img;
 
   [[storage(0, write)]] uint (&convolve_tile_buf)[];
   [[storage(1, read_write)]] DispatchCommand &convolve_dispatch_buf;
@@ -61,13 +64,32 @@ void setup_main([[resource_table]] Setup &srt,
   const gbuffer::Layers gbuf = reader.read_layers(texel);
 
   ClosureUndetermined cl = gbuf.layer[0];
+  bool surface_diffusion = srt.diffusion_bin >= 0;
+  if (surface_diffusion) {
+    cl = reader.read_bin(gbuf.header, texel, uchar(srt.diffusion_bin));
+  }
 
-  if (cl.type == CLOSURE_BSSRDF_BURLEY_ID) {
+  bool enabled = surface_diffusion ?
+      (cl.npr.diffusion.w > 0.0f && reduce_max(cl.npr.diffusion.xyz) > 0.0f) :
+      cl.type == CLOSURE_BSSRDF_BURLEY_ID;
+  if (enabled) {
     float3 direct = rgb9e5_decode(imageLoadFast(srt.direct_light_img, texel).r);
     float3 indirect = imageLoadFast(srt.indirect_light_img, texel).rgb;
 
     ClosureSubsurface closure = to_closure_subsurface(cl);
     float max_radius = reduce_max(closure.sss_radius);
+    if (surface_diffusion) {
+      max_radius = reduce_max(cl.npr.diffusion.xyz);
+      direct = direct * cl.color + cl.npr.additive;
+      indirect *= cl.color * cl.npr.indirect_weight;
+      /* Also initialize sub-pixel radii, for which convolution is intentionally skipped. */
+      imageStoreFast(srt.diffusion_header_img,
+          int3(texel, GBUF_DIFFUSION_DIRECT_LAYER + srt.diffusion_bin),
+          uint4(rgb9e5_encode(direct)));
+      imageStoreFast(srt.diffusion_header_img,
+          int3(texel, GBUF_DIFFUSION_INDIRECT_LAYER + srt.diffusion_bin),
+          uint4(rgb9e5_encode(indirect)));
+    }
 
     uint object_id = reader.read_object_id(texel);
 
@@ -77,6 +99,9 @@ void setup_main([[resource_table]] Setup &srt,
     }
     else {
       imageStoreFast(srt.radiance_img, int3(texel, 0), float4(direct + indirect, 0.0f));
+    }
+    if (srt.use_npr_radiance && !surface_diffusion) {
+      imageStoreFast(srt.radiance_img, int3(texel, 2), float4(cl.npr.additive, 0.0f));
     }
     imageStoreFast(srt.object_id_img, texel, uint4(object_id));
 
@@ -92,7 +117,19 @@ void setup_main([[resource_table]] Setup &srt,
     }
   }
   else {
-    /* No need to write radiance_img since the radiance won't be used at all. */
+    if (srt.use_split_radiance) {
+      /* The indirect radiance is not part of the convolve stage shared memory cache. A cache hit
+       * and a similar indirect radiance texture fetch can differ slightly and lead to
+       * uninitialized reads that are not masked by the object ID. To avoid this, we clear the
+       * indirect radiance to 0. */
+      imageStoreFast(srt.radiance_img, int3(texel, 1), float4(0));
+    }
+    /* No need to write radiance_img (except for the case above) since the radiance won't be used
+     * at all. */
+    /* The NPR additive layer is fetched outside the cache too. */
+    if (srt.use_npr_radiance && !surface_diffusion) {
+      imageStoreFast(srt.radiance_img, int3(texel, 2), float4(0));
+    }
     imageStore(srt.object_id_img, texel, uint4(0));
   }
 
@@ -131,7 +168,9 @@ struct SubSurfaceSample {
 };
 
 struct Convolve {
+  [[push_constant]] int diffusion_bin;
   [[specialization_constant(false)]] const bool use_split_radiance;
+  [[specialization_constant(false)]] const bool use_npr_radiance;
 
   [[sampler(2)]] sampler2DArray radiance_tx;
   [[sampler(3)]] sampler2DDepth depth_tx;
@@ -139,6 +178,7 @@ struct Convolve {
 
   [[image(0, write, DEFERRED_RADIANCE_FORMAT)]] uimage2D out_direct_light_img;
   [[image(1, write, RAYTRACE_RADIANCE_FORMAT)]] image2D out_indirect_light_img;
+  [[image(2, write, UINT_32)]] uimage2DArray npr_header_img;
 
   [[uniform(SUBSURFACE_BUF_SLOT)]] const SubsurfaceData &subsurface_buf;
 
@@ -205,13 +245,24 @@ void convolve_main([[resource_table]] Convolve &srt,
   float3 vP = view.point_screen_to_view(float3(center_uv, depth));
 
   const gbuffer::Layers gbuf = reader.read_layers(texel);
-  if (gbuf.layer[0].type != CLOSURE_BSSRDF_BURLEY_ID) {
+  bool surface_diffusion = srt.diffusion_bin >= 0;
+  ClosureUndetermined cl = surface_diffusion ?
+      reader.read_bin(gbuf.header, texel, uchar(srt.diffusion_bin)) : gbuf.layer[0];
+  bool enabled = surface_diffusion ?
+      (cl.npr.diffusion.w > 0.0f && reduce_max(cl.npr.diffusion.xyz) > 0.0f) :
+      cl.type == CLOSURE_BSSRDF_BURLEY_ID;
+  if (!enabled) {
     return;
   }
 
   const uint object_id = reader.read_object_id(texel);
 
-  const ClosureSubsurface closure = to_closure_subsurface(gbuf.layer[0]);
+  ClosureSubsurface closure = to_closure_subsurface(cl);
+  if (surface_diffusion) {
+    closure.sss_radius = cl.npr.diffusion.xyz;
+    /* Already shaded radiance: never divide by or reapply the physical albedo. */
+    closure.color = float3(1.0f);
+  }
   float max_radius = reduce_max(closure.sss_radius);
 
   float homogenous_coord = view.winmat[2][3] * vP.z + view.winmat[3][3];
@@ -241,6 +292,7 @@ void convolve_main([[resource_table]] Convolve &srt,
   float3 accum_weight = float3(0.0f);
   float3 accum_radiance = float3(0.0f);
   float3 accum_radiance_indirect = float3(0.0f);
+  float3 accum_radiance_additive = float3(0.0f);
 
   for (int i = 0; i < srt.subsurface_buf.sample_len; i++) {
     float2 sample_uv = center_uv + sample_space * srt.subsurface_buf.samples[i].xy;
@@ -263,17 +315,52 @@ void convolve_main([[resource_table]] Convolve &srt,
       accum_radiance_indirect += textureLod(srt.radiance_tx, float3(sample_uv, 1.0f), 0.0f).rgb *
                                  weight;
     }
+    if (srt.use_npr_radiance && !surface_diffusion) {
+      accum_radiance_additive += textureLod(srt.radiance_tx, float3(sample_uv, 2.0f), 0.0f).rgb *
+                                 weight;
+    }
   }
   /* Normalize the sum (slide 34). */
   float3 accum_weight_inv = safe_rcp(accum_weight);
   accum_radiance *= accum_weight_inv;
   accum_radiance_indirect *= accum_weight_inv;
+  accum_radiance_additive *= accum_weight_inv;
+
+  if (surface_diffusion) {
+    float3 original = textureLod(srt.radiance_tx, float3(center_uv, 0.0f), 0.0f).rgb;
+    float3 original_indirect = textureLod(srt.radiance_tx, float3(center_uv, 1.0f), 0.0f).rgb;
+    /* A zero channel radius or an entirely rejected neighborhood is an exact bypass. */
+    for (int channel = 0; channel < 3; channel++) {
+      float strength = (cl.npr.diffusion[channel] > 0.0f && accum_weight[channel] > 0.0f) ?
+                           cl.npr.diffusion.w : 0.0f;
+      accum_radiance[channel] = mix(original[channel], accum_radiance[channel], strength);
+      accum_radiance_indirect[channel] = mix(
+          original_indirect[channel], accum_radiance_indirect[channel], strength);
+    }
+    imageStoreFast(srt.npr_header_img,
+        int3(texel, GBUF_DIFFUSION_DIRECT_LAYER + srt.diffusion_bin),
+        uint4(rgb9e5_encode(accum_radiance)));
+    imageStoreFast(srt.npr_header_img,
+        int3(texel, GBUF_DIFFUSION_INDIRECT_LAYER + srt.diffusion_bin),
+        uint4(rgb9e5_encode(accum_radiance_indirect)));
+    return;
+  }
 
   /* Put result in direct diffuse. */
   imageStoreFast(srt.out_direct_light_img, texel, uint4(rgb9e5_encode(accum_radiance)));
   /* Note that if we don't use split radiance, this clears the indirect pass since its content has
    * been merged and convolved with direct light.*/
   imageStoreFast(srt.out_indirect_light_img, texel, float4(accum_radiance_indirect, 0.0f));
+  if (srt.use_npr_radiance) {
+    /* Read only this pixel's GBuffer; neighborhood input was copied by setup to radiance_tx.
+     * The separate additive flag also supports ordinary SSS receiving colored light from NPR. */
+    gbuffer::Header header = gbuf.header;
+    header.npr_sss_additive_set(true);
+    imageStoreFast(srt.npr_header_img, int3(texel, 0), uint4(header.raw()));
+    imageStoreFast(srt.npr_header_img,
+                   int3(texel, GBUF_NPR_ADDITIVE_LAYER),
+                   uint4(rgb9e5_encode(accum_radiance_additive)));
+  }
 }
 
 /** \} */

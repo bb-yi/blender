@@ -263,7 +263,9 @@ void view3d_operatortypes()
 #endif
 
   ed::transform::transform_operatortypes();
+
 }
+
 
 void view3d_keymap(wmKeyConfig *keyconf)
 {

@@ -42,7 +42,10 @@ static void append_npr_and_probe_materials(Vector<GPUMaterial *> &materials,
   for (const Material *material : npr_materials) {
     for (GPUMaterial *gpumat : {material->npr.gpumat,
                                material->planar_probe_npr.gpumat,
-                               material->lightprobe_sphere_npr.gpumat})
+                               material->lightprobe_sphere_npr.gpumat,
+                               material->outline_shell_prepass.gpumat,
+                               material->outline_shell_shading.gpumat,
+                               material->outline_shell_shadow.gpumat})
     {
       if (gpumat != nullptr) {
         materials.append(gpumat);
@@ -242,9 +245,19 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
     has_transparent_shadows |= material->has_transparent_shadows;
     has_time_dependent_shadows |= has_time_node &&
                                   (material->has_transparent_shadows || has_displacement);
+    has_time_dependent_shadows |= material->outline_shell_shadow.gpumat != nullptr &&
+                                  GPU_material_is_time_dependent(
+                                      material->outline_shell_shadow.gpumat);
 
     if (has_displacement) {
       inflate_bounds = math::max(inflate_bounds, bl_material->inflate_bounds);
+    }
+    if (material->outline_shell_shading.gpumat != nullptr ||
+        material->outline_shell_shadow.gpumat != nullptr)
+    {
+      inflate_bounds = math::max(
+          inflate_bounds,
+          math::max(material->outline_shell_bounds_inflation, bl_material->inflate_bounds));
     }
 
     inst_.cryptomatte.sync_material(bl_material);
@@ -299,6 +312,8 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
       ob_handle.object, material_array.gpu_materials);
   Span<gpu::Batch *> mat_geom_npr = DRW_cache_object_surface_material_get(
       ob_handle.object, material_array.gpu_materials_npr);
+  Span<gpu::Batch *> mat_geom_shell = DRW_cache_object_surface_material_get(
+      ob_handle.object, material_array.gpu_materials_outline_shell);
   if (mat_geom.is_empty()) {
     return;
   }
@@ -342,6 +357,15 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
                                 pass.gpumat == material.lightprobe_sphere_npr.gpumat;
       geometry_call(pass.sub_pass, use_npr_geom ? geom_npr : geom, ob_handle.res_handle);
     });
+
+    gpu::Batch *geom_shell = (i < mat_geom_shell.size()) ? mat_geom_shell[i] :
+                                                                     nullptr;
+    geometry_call(
+        material.outline_shell_prepass.sub_pass, geom_shell, ob_handle.res_handle);
+    geometry_call(
+        material.outline_shell_shading.sub_pass, geom_shell, ob_handle.res_handle);
+    geometry_call(
+        material.outline_shell_shadow.sub_pass, geom_shell, ob_handle.res_handle);
 
     sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass,
                                                            int instance) {

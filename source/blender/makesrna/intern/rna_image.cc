@@ -1389,6 +1389,14 @@ static void rna_def_image(BlenderRNA *brna)
   RNA_def_property_struct_type(prop, "ColorManagedInputColorspaceSettings");
   RNA_def_property_ui_text(prop, "Color Space Settings", "Input color space settings");
 
+  prop = RNA_def_property(srna, "use_exr_part_color_spaces", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "flag", IMA_USE_EXR_PART_COLORSPACES);
+  RNA_def_property_ui_text(prop,
+                           "Use File Layer Color Spaces",
+                           "Interpret multi-layer EXR using each part's color space metadata; "
+                           "fall back to the file or image color space for untagged parts");
+  RNA_def_property_update(prop, NC_IMAGE | ND_DISPLAY, "rna_Image_colormanage_update");
+
   prop = RNA_def_property(srna, "alpha_mode", PROP_ENUM, PROP_NONE);
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_enum_items(prop, alpha_mode_items);

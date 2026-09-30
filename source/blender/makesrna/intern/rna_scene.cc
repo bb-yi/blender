@@ -1810,6 +1810,10 @@ enum class SceneEEVEEPerformanceString {
   ViewportSummary,
   ViewportReport,
   RenderReport,
+  Dlss5ViewportStatus,
+  Dlss5RenderStatus,
+  DlssSrViewportStatus,
+  DlssSrRenderStatus,
 };
 
 static std::string rna_SceneEEVEE_performance_string(
@@ -1821,12 +1825,32 @@ static std::string rna_SceneEEVEE_performance_string(
   }
 
   switch (which) {
+    case SceneEEVEEPerformanceString::DlssSrViewportStatus:
+    case SceneEEVEEPerformanceString::DlssSrRenderStatus: {
+      const bool viewport = which == SceneEEVEEPerformanceString::DlssSrViewportStatus;
+      if ((viewport ? scene->eevee.dlss_sr_viewport_quality :
+                      scene->eevee.dlss_sr_render_quality) == SCE_EEVEE_DLSS_SR_OFF)
+      {
+        return "Disabled";
+      }
+      const std::string status = scene->runtime->eevee_performance.dlss_sr_status_get(viewport);
+      return status.empty() ? "Waiting for EEVEE output" : status;
+    }
     case SceneEEVEEPerformanceString::ViewportSummary:
       return scene->runtime->eevee_performance.viewport_summary_get();
     case SceneEEVEEPerformanceString::ViewportReport:
       return scene->runtime->eevee_performance.viewport_report_get();
     case SceneEEVEEPerformanceString::RenderReport:
       return scene->runtime->eevee_performance.render_report_get();
+    case SceneEEVEEPerformanceString::Dlss5ViewportStatus:
+    case SceneEEVEEPerformanceString::Dlss5RenderStatus:
+      if (scene->eevee.dlss5_mode != SCE_EEVEE_DLSSNR) { return "Disabled"; }
+      if (scene->eevee.dlss5_intensity == 0.0f) { return "Bypassed (Intensity 0)"; }
+      {
+        const std::string status = scene->runtime->eevee_performance.dlss5_status_get(
+            which == SceneEEVEEPerformanceString::Dlss5ViewportStatus);
+        return status.empty() ? "Waiting for EEVEE output" : status;
+      }
   }
 
   return {};
@@ -1838,7 +1862,7 @@ struct RnaEeveePerformanceStringPin {
   bool valid = false;
 };
 
-static thread_local std::array<RnaEeveePerformanceStringPin, 3> rna_eevee_performance_pins;
+static thread_local std::array<RnaEeveePerformanceStringPin, 7> rna_eevee_performance_pins;
 
 static std::string rna_SceneEEVEE_performance_string_pinned(
     const PointerRNA *ptr, const SceneEEVEEPerformanceString which)
@@ -1913,6 +1937,56 @@ static int rna_SceneEEVEE_performance_profiler_render_report_length(PointerRNA *
 {
   return rna_SceneEEVEE_performance_string_length(
       ptr, SceneEEVEEPerformanceString::RenderReport);
+}
+
+static void rna_SceneEEVEE_dlss5_viewport_status_get(PointerRNA *ptr, char *value)
+{
+  const std::string text = rna_SceneEEVEE_performance_string_pinned(
+      ptr, SceneEEVEEPerformanceString::Dlss5ViewportStatus);
+  if (value != nullptr) { memcpy(value, text.c_str(), text.size() + 1); }
+}
+
+static int rna_SceneEEVEE_dlss5_viewport_status_length(PointerRNA *ptr)
+{
+  return rna_SceneEEVEE_performance_string_length(ptr, SceneEEVEEPerformanceString::Dlss5ViewportStatus);
+}
+
+static void rna_SceneEEVEE_dlss5_render_status_get(PointerRNA *ptr, char *value)
+{
+  const std::string text = rna_SceneEEVEE_performance_string_pinned(
+      ptr, SceneEEVEEPerformanceString::Dlss5RenderStatus);
+  if (value != nullptr) { memcpy(value, text.c_str(), text.size() + 1); }
+}
+
+static int rna_SceneEEVEE_dlss5_render_status_length(PointerRNA *ptr)
+{
+  return rna_SceneEEVEE_performance_string_length(ptr, SceneEEVEEPerformanceString::Dlss5RenderStatus);
+}
+
+static void rna_SceneEEVEE_dlss_sr_viewport_status_get(PointerRNA *ptr, char *value)
+{
+  const std::string text = rna_SceneEEVEE_performance_string_pinned(
+      ptr, SceneEEVEEPerformanceString::DlssSrViewportStatus);
+  memcpy(value, text.c_str(), text.size() + 1);
+}
+
+static int rna_SceneEEVEE_dlss_sr_viewport_status_length(PointerRNA *ptr)
+{
+  return rna_SceneEEVEE_performance_string_length(
+      ptr, SceneEEVEEPerformanceString::DlssSrViewportStatus);
+}
+
+static void rna_SceneEEVEE_dlss_sr_render_status_get(PointerRNA *ptr, char *value)
+{
+  const std::string text = rna_SceneEEVEE_performance_string_pinned(
+      ptr, SceneEEVEEPerformanceString::DlssSrRenderStatus);
+  memcpy(value, text.c_str(), text.size() + 1);
+}
+
+static int rna_SceneEEVEE_dlss_sr_render_status_length(PointerRNA *ptr)
+{
+  return rna_SceneEEVEE_performance_string_length(ptr,
+                                                  SceneEEVEEPerformanceString::DlssSrRenderStatus);
 }
 
 static int rna_SceneEEVEE_performance_profiler_average_window_get(PointerRNA *ptr)
@@ -2104,6 +2178,45 @@ void rna_Scene_render_update(Main * /*bmain*/, Scene * /*scene*/, PointerRNA *pt
   Scene *scene = id_cast<Scene *>(ptr->owner_id);
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+}
+
+static void rna_SceneEEVEE_dlss5_update(Main *bmain, Scene *scene, PointerRNA *ptr)
+{
+  rna_Scene_render_update(bmain, scene, ptr);
+  WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
+}
+
+static void rna_SceneEEVEE_dlss_pass_update(Main *bmain, Scene *scene, PointerRNA *ptr)
+{
+  Scene *owner = id_cast<Scene *>(ptr->owner_id);
+  BKE_ntree_update_tag_id_changed(bmain, &owner->id);
+  BKE_main_ensure_invariants(*bmain);
+  rna_SceneEEVEE_dlss5_update(bmain, scene, ptr);
+}
+
+static void rna_SceneEEVEE_mask_aov_search(
+    const bContext *C,
+    PointerRNA *ptr,
+    PropertyRNA * /*prop*/,
+    const char * /*edit_text*/,
+    FunctionRef<void(StringPropertySearchVisitParams)> visit_fn)
+{
+  if (C == nullptr) {
+    return;
+  }
+  const ViewLayer *view_layer = CTX_data_view_layer(C);
+  if (view_layer == nullptr || CTX_data_scene(C) == nullptr ||
+      &CTX_data_scene(C)->id != ptr->owner_id)
+  {
+    return;
+  }
+  for (const ViewLayerAOV &aov : view_layer->aovs) {
+    if (aov.type == AOV_TYPE_VALUE && !(aov.flag & AOV_CONFLICT)) {
+      StringPropertySearchVisitParams item{};
+      item.text = aov.name;
+      visit_fn(item);
+    }
+  }
 }
 
 static void rna_Scene_world_update(Main *bmain, Scene *scene, PointerRNA *ptr)
@@ -3322,6 +3435,23 @@ static void rna_Stereo3dFormat_update(Main *bmain, Scene * /*scene*/, PointerRNA
       BKE_image_signal(bmain, ima, nullptr, IMA_SIGNAL_FREE);
     }
     BKE_image_release_ibuf(ima, ibuf, lock);
+  }
+  else if (id && GS(id->name) == ID_SCE) {
+    Scene *scene = id_cast<Scene *>(id);
+    Editing *ed = seq::editing_get(scene);
+
+    if (ed == nullptr) {
+      return;
+    }
+
+    seq::foreach_strip(&ed->seqbase, [&](Strip *strip) {
+      /* Compare pointers until we find the strip that just changed. */
+      if (strip->stereo3d_format != ptr->data) {
+        return true;
+      }
+      seq::relations_invalidate_cache_raw(scene, strip);
+      return false;
+    });
   }
 }
 
@@ -5532,6 +5662,15 @@ static void rna_def_view_layer_aov(BlenderRNA *brna)
   prop = RNA_def_property(srna, "is_valid", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_negative_sdna(prop, nullptr, "flag", AOV_CONFLICT);
   RNA_def_property_ui_text(prop, "Valid", "Is the name of the AOV conflicting");
+
+  prop = RNA_def_property(srna, "use_sr_nearest", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "flag", AOV_SR_NEAREST);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop,
+                           "SR Nearest Sample",
+                           "Preserve discrete AOV values during super resolution instead of "
+                           "interpolating or averaging them; does not increase AOV storage precision");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
 
   prop = RNA_def_property(srna, "type", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "type");
@@ -9288,6 +9427,48 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
       {0, nullptr, 0, nullptr, nullptr},
   };
 
+  static const EnumPropertyItem dlss5_mode_items[] = {
+      {SCE_EEVEE_DLSS5_OFF,
+       "OFF",
+       0,
+       "Off",
+       "Use the regular EEVEE viewport output"},
+      {SCE_EEVEE_DLSSNR,
+       "DLSSNR",
+       0,
+       "DLSSNR",
+       "Run NVIDIA DLSS Ray Reconstruction on the EEVEE Rendered viewport"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem dlss5_style_items[] = {
+      {0, "DEFAULT", 0, "Default", "OptiScaler / Unity Default style"},
+      {1, "NATURAL", 0, "Natural", "OptiScaler Natural style"},
+      {2,
+       "CINEMATIC",
+       0,
+       "Cinematic",
+       "OptiScaler / Unity Cinematic. Image Converter measured ~50% more change than Natural"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem dlss5_render_scale_items[] = {
+      {1,
+       "FULL",
+       0,
+       "100%",
+       "Offline Film stays at the final resolution. Viewport ignores this and uses Preview Pixel Size"},
+      {2,
+       "HALF",
+       0,
+       "50% (F12 Film)",
+       "Offline Film renders at half resolution then upscales before DLSSNR. Not DLSS Super Resolution. Viewport ignores this"},
+      {4,
+       "QUARTER",
+       0,
+       "25% (F12 Film)",
+       "Offline Film renders at quarter resolution then upscales before DLSSNR. Not DLSS Super Resolution. Viewport ignores this"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
   srna = RNA_def_struct(brna, "SceneEEVEE", nullptr);
   RNA_def_struct_path_func(srna, "rna_SceneEEVEE_path");
   RNA_def_struct_ui_text(srna, "Scene Display", "Scene display settings for 3D viewport");
@@ -9477,6 +9658,197 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
   RNA_def_property_flag(prop, PROP_ANIMATABLE);
+
+  /* DLSS5 / DLSSNR viewport reconstruction. */
+  static const EnumPropertyItem sr_quality_items[] = {
+      {SCE_EEVEE_DLSS_SR_OFF, "OFF", 0, "Off", "Render at native resolution"},
+      {SCE_EEVEE_DLSS_SR_QUALITY, "QUALITY", 0, "Quality", "DLSS Super Resolution: quality"},
+      {SCE_EEVEE_DLSS_SR_BALANCED, "BALANCED", 0, "Balanced", "DLSS Super Resolution: balanced"},
+      {SCE_EEVEE_DLSS_SR_PERFORMANCE,
+       "PERFORMANCE",
+       0,
+       "Performance",
+       "DLSS Super Resolution: performance"},
+      {SCE_EEVEE_DLSS_SR_CUSTOM,
+       "CUSTOM",
+       0,
+       "Custom",
+       "DLSS Super Resolution: custom input resolution using the Quality preset"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  for (const char *name : {"dlss_sr_viewport_quality", "dlss_sr_render_quality"}) {
+    prop = RNA_def_property(srna, name, PROP_ENUM, PROP_NONE);
+    RNA_def_property_enum_sdna(prop, nullptr, name);
+    RNA_def_property_enum_items(prop, sr_quality_items);
+    RNA_def_property_enum_default(prop, SCE_EEVEE_DLSS_SR_OFF);
+    RNA_def_property_ui_text(prop,
+                             STREQ(name, "dlss_sr_viewport_quality") ? "Viewport SR" : "Render SR",
+                             "Super resolution with resampled auxiliary passes; "
+                             "explicit precise mask output uses native rendering");
+    RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss_pass_update");
+  }
+  for (const char *name : {"dlss_sr_viewport_percentage", "dlss_sr_render_percentage"}) {
+    prop = RNA_def_property(srna, name, PROP_FLOAT, PROP_PERCENTAGE);
+    RNA_def_property_float_sdna(prop, nullptr, name);
+    RNA_def_property_range(prop, 50.0f, 100.0f);
+    RNA_def_property_float_default(prop, 80.0f);
+    RNA_def_property_ui_range(prop, 50.0f, 100.0f, 100, 1);
+    RNA_def_property_ui_text(prop,
+                             "Input Resolution",
+                             "Input width and height as a percentage of output, rounded to pixels "
+                             "and limited to the runtime-supported range. 100% does not upscale");
+    RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss_pass_update");
+  }
+  prop = RNA_def_property(srna, "dlss_sr_viewport_status", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop,
+                                "rna_SceneEEVEE_dlss_sr_viewport_status_get",
+                                "rna_SceneEEVEE_dlss_sr_viewport_status_length",
+                                nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Viewport SR Status", "Latest Super Resolution status");
+  prop = RNA_def_property(srna, "dlss_sr_render_status", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop,
+                                "rna_SceneEEVEE_dlss_sr_render_status_get",
+                                "rna_SceneEEVEE_dlss_sr_render_status_length",
+                                nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Render SR Status", "Latest Super Resolution status");
+  prop = RNA_def_property(srna, "dlss5_mask_aov", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_sdna(prop, nullptr, "dlss5_mask_aov");
+  RNA_def_property_ui_text(
+      prop,
+      "Mask AOV",
+      "Value AOV: black preserves the pre-NR image, white uses NR. Empty means full image");
+  RNA_def_property_string_search_func(
+      prop, "rna_SceneEEVEE_mask_aov_search", PROP_STRING_SEARCH_SUGGESTION);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss_pass_update");
+  prop = RNA_def_property(srna, "dlss5_mask_invert", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "dlss5_mask_invert", 1);
+  RNA_def_property_ui_text(
+      prop, "Invert Mask", "Invert finite mask values after clamping to zero through one");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+  prop = RNA_def_property(srna, "dlss5_mask_aov_output", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "dlss5_mask_aov_output", 1);
+  RNA_def_property_ui_text(
+      prop,
+      "Output Precise Mask AOV",
+      "Use native rendering for an exact mask pass instead of a resampled SR pass");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss_pass_update");
+  prop = RNA_def_property(srna, "dlss5_viewport_status", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop, "rna_SceneEEVEE_dlss5_viewport_status_get",
+                                "rna_SceneEEVEE_dlss5_viewport_status_length", nullptr);
+  RNA_def_property_clear_flag(prop, PROP_IDPROPERTY | PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Viewport Status", "Latest DLSSNR execution status for this scene");
+
+  prop = RNA_def_property(srna, "dlss5_render_status", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop, "rna_SceneEEVEE_dlss5_render_status_get",
+                                "rna_SceneEEVEE_dlss5_render_status_length", nullptr);
+  RNA_def_property_clear_flag(prop, PROP_IDPROPERTY | PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Render Status", "Latest DLSSNR execution status for this scene");
+
+  prop = RNA_def_property(srna, "dlss5_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "dlss5_mode");
+  RNA_def_property_enum_items(prop, dlss5_mode_items);
+  RNA_def_property_enum_default(prop, SCE_EEVEE_DLSS5_OFF);
+  RNA_def_property_ui_text(
+      prop,
+      "DLSS5",
+      "Enable NVIDIA Neural Rendering for the EEVEE viewport and final render");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_render_scale", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "dlss5_render_scale");
+  RNA_def_property_enum_items(prop, dlss5_render_scale_items);
+  RNA_def_property_enum_default(prop, 1);
+  RNA_def_property_ui_text(
+      prop,
+      "Legacy Film Scale",
+      "Deprecated compatibility setting; final renders now retain native resolution, "
+      "including when Neural Rendering is unavailable");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_intensity", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, nullptr, "dlss5_intensity");
+  RNA_def_property_float_default(prop, 1.0f);
+  RNA_def_property_range(prop, 0.0f, 2.0f);
+  RNA_def_property_ui_range(prop, 0.0f, 2.0f, 0.01f, 3);
+  RNA_def_property_ui_text(
+      prop,
+      "Intensity",
+      "Neural Rendering strength. RenoDX / OptiScaler / Image Converter use 0-2; "
+      "2.0 is the measured ceiling");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_style", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "dlss5_style");
+  RNA_def_property_enum_items(prop, dlss5_style_items);
+  RNA_def_property_enum_default(prop, 2);
+  RNA_def_property_ui_text(
+      prop, "Style", "DLSSNR style. Cinematic matches Unity DLSSNR and the Image Converter demo");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_local_tone_strength", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_float_sdna(prop, nullptr, "dlss5_local_tone_strength");
+  RNA_def_property_float_default(prop, 1.0f);
+  RNA_def_property_range(prop, 0.0f, 2.0f);
+  RNA_def_property_ui_range(prop, 0.0f, 2.0f, 0.01f, 3);
+  RNA_def_property_ui_text(
+      prop, "Local Tone", "Preserve local tone structure during reconstruction");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_local_structure_strength", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_float_sdna(prop, nullptr, "dlss5_local_structure_strength");
+  RNA_def_property_float_default(prop, 1.0f);
+  RNA_def_property_range(prop, 0.0f, 2.0f);
+  RNA_def_property_ui_range(prop, 0.0f, 2.0f, 0.01f, 3);
+  RNA_def_property_ui_text(
+      prop, "Local Structure", "Preserve local geometric and shading structure");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_skin_structure_strength", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, nullptr, "dlss5_skin_structure_strength");
+  RNA_def_property_float_default(prop, -1.0f);
+  RNA_def_property_range(prop, -1.0f, 1.0f);
+  RNA_def_property_ui_range(prop, -1.0f, 1.0f, 0.01f, 3);
+  RNA_def_property_ui_text(
+      prop, "Skin Structure", "Adjust preservation of fine skin-like surface structure");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_use_auto_mask", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "dlss5_use_auto_mask", 1);
+  RNA_def_property_boolean_default(prop, false);
+  RNA_def_property_ui_text(prop, "Auto Mask", "Enable the DLSSNR automatic reconstruction mask");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_ui_correction", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "dlss5_ui_correction", 1);
+  RNA_def_property_boolean_default(prop, false);
+  RNA_def_property_ui_text(
+      prop, "UI Correction", "Preserve screen-space UI elements during reconstruction");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
 
   prop = RNA_def_property(srna, "use_outline", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "use_outline", 1);

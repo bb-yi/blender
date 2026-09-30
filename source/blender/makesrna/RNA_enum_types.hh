@@ -4,6 +4,11 @@
 
 #pragma once
 
+namespace blender {
+struct EnumPropertyItem;
+extern const EnumPropertyItem rna_enum_light_shader_parameter_type_items[];
+}
+
 /** \file
  * \ingroup RNA
  */

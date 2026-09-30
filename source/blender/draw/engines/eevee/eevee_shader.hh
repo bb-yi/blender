@@ -54,6 +54,11 @@ enum eShaderType {
   FILM_PASS_CONVERT_VALUE,
   FILM_PASS_CONVERT_COLOR,
   FILM_PASS_CONVERT_CRYPTOMATTE,
+  DLSS5_COLOR_CONVERT,
+  DLSS_SR_PREPARE,
+  DLSS5_HDR_RECONSTRUCT,
+  DLSS5_DEPTH_CONVERT,
+  DLSS5_VELOCITY_CONVERT,
   FILTER_GRAPH_INPUT_COPY,
   FILTER_GRAPH_RESOLVE,
 
@@ -251,6 +256,7 @@ enum eMaterialProbe {
 class ShaderModule {
  private:
   std::array<StaticShader, MAX_SHADER_TYPE> shaders_;
+  ShaderGroups failed_shader_groups_ = ShaderGroups::NONE;
 
   Mutex mutex_;
 
@@ -312,6 +318,8 @@ class ShaderModule {
     return static_shaders_load(request_bits, true);
   }
 
+  bool static_shaders_has_failed(ShaderGroups request_bits);
+
   bool request_specializations(bool block_until_ready,
                                int render_buffers_shadow_id,
                                int shadow_ray_count,
@@ -327,7 +335,8 @@ class ShaderModule {
                                    eMaterialProbe probe_capture,
                                    bool deferred_compilation,
                                    blender::Material *default_mat,
-                                   bool use_outline = true);
+                                   bool use_outline = true,
+                                   bool outline_shell = false);
   GPUMaterial *world_shader_get(blender::World *blender_world,
                                 bNodeTree *nodetree,
                                 eMaterialPipeline pipeline_type,

@@ -529,6 +529,7 @@ struct ButtonHSVCube : public Button {
 struct ButtonColorBand : public Button {
   ColorBand *edit_coba = nullptr;
   bool use_oklab = false;
+  std::shared_ptr<CustomColorRampData> custom;
 };
 
 /** Derived struct for #ButtonType::CurveProfile. */
@@ -1714,7 +1715,7 @@ bool popup_context_menu_for_button(bContext *C, Button *but, const wmEvent *even
 /**
  * menu to show when right clicking on the panel header
  */
-void popup_context_menu_for_panel(bContext *C, ARegion *region, Panel *panel);
+int popup_context_menu_for_panel(bContext *C, ARegion *region, Panel *panel);
 
 /* `eyedroppers/interface_eyedropper.cc` */
 

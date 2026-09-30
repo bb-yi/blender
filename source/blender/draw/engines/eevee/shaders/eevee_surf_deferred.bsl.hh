@@ -186,7 +186,10 @@ DeferredFragOut surf_deferred_impl([[resource_table]] PipelineConstants &pipe,
       gbuf_data.closure[i] = g_closure_get_resolved(i, alpha_rcp);
     }
   }
-  const bool use_object_id = pipe.use_sss || use_light_linking || use_terminator_offset;
+  bool use_object_id = pipe.use_sss || use_light_linking || use_terminator_offset;
+#ifdef MAT_PRINCIPLED_NPR_V2
+  use_object_id = true;
+#endif
 
   float3 gbuffer_dither = sampling.rng_3D_get(SAMPLING_GBUFFER_U);
   gbuffer::Packed gbuf = gbuffer::pack(gbuf_params,
@@ -197,6 +200,48 @@ DeferredFragOut surf_deferred_impl([[resource_table]] PipelineConstants &pipe,
                                        use_object_id,
                                        use_surface_depth,
                                        surface_depth);
+
+#ifdef MAT_PRINCIPLED_NPR_V2
+  /* Keep HDR compensation for every selected candidate, including ordinary BSDFs sharing a
+   * reservoir with NPR. The compact UNORM closure color cannot hold this compensation. */
+  gbuffer::Header npr_header = gbuffer::Header::from_data(gbuf.header);
+  npr_header.npr_payload_set(true);
+#ifdef MAT_NPR_SURFACE_DIFFUSION
+  npr_header.surface_diffusion_set(true);
+#endif
+  float3 npr_indirect_weights = float3(1.0f);
+  float3 npr_shadow_strengths = float3(1.0f);
+  float3 npr_direct_gains = float3(1.0f);
+  for (uint i = 0u; i < 3u; i++) [[unroll]] {
+    if (pipe.closure_bin_count > i) [[static_branch]] {
+      ClosureUndetermined cl = gbuf_data.closure[i];
+#ifdef MAT_NPR_SURFACE_DIFFUSION
+      srt.write_header_data(out_texel, GBUF_DIFFUSION_RADIUS_LAYER + i,
+                            rgb9e5_encode(cl.npr.diffusion.xyz));
+      srt.write_header_data(out_texel, GBUF_DIFFUSION_STRENGTH_LAYER + i,
+                            floatBitsToUint(cl.npr.diffusion.w));
+#endif
+      npr_indirect_weights[i] = cl.npr.indirect_weight;
+      npr_shadow_strengths[i] = cl.npr.light_policy.strength;
+      npr_direct_gains[i] = cl.npr.light_policy.direct_gain;
+      srt.write_header_data(out_texel, GBUF_NPR_LIGHT_POLICY_LAYER + i, cl.npr.light_policy.code);
+      npr_header.npr_direct_set(i, cl.npr.enabled && cl.weight > CLOSURE_WEIGHT_CUTOFF);
+      srt.write_header_data(out_texel, GBUF_NPR_COLOR_LAYER + i, rgb9e5_encode(cl.color));
+      srt.write_header_data(
+          out_texel, GBUF_NPR_MULTIPLIER_LAYER + i, rgb9e5_encode(cl.npr.multiplier));
+      srt.write_header_data(
+          out_texel, GBUF_NPR_ADDITIVE_LAYER + i, rgb9e5_encode(cl.npr.additive));
+    }
+  }
+  srt.write_header_data(out_texel, GBUF_NPR_RIM_LAYER, rgb9e5_encode(g_npr_rim * alpha_rcp));
+  srt.write_header_data(
+      out_texel, GBUF_NPR_INDIRECT_WEIGHT_LAYER, rgb9e5_encode(npr_indirect_weights));
+  srt.write_header_data(
+      out_texel, GBUF_NPR_SHADOW_STRENGTH_LAYER, rgb9e5_encode(npr_shadow_strengths));
+  srt.write_header_data(
+      out_texel, GBUF_NPR_DIRECT_GAIN_LAYER, rgb9e5_encode(npr_direct_gains));
+  gbuf.header = npr_header.raw();
+#endif
 
   /* Output header and first closure using frame-buffer attachment. */
   frag_out.gbuf_header = gbuf.header;

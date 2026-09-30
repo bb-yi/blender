@@ -932,6 +932,9 @@ void uiTemplateImage(ui::Layout *layout,
 
     ui::Layout &col = layout->column(false);
     col.use_property_split_set(true);
+    if (ima->type == IMA_TYPE_MULTILAYER) {
+      col.prop(&imaptr, "use_exr_part_color_spaces", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    }
     template_colorspace_settings(&col, &imaptr, "colorspace_settings");
 
     if (compact == 0) {
@@ -967,7 +970,8 @@ void uiTemplateImageSettings(ui::Layout *layout,
                              bContext *C,
                              PointerRNA *imfptr,
                              bool color_management,
-                             const char *panel_idname)
+                             const char *panel_idname,
+                             const bool allow_exr_interleave)
 {
   ImageFormatData *imf = static_cast<ImageFormatData *>(imfptr->data);
   ID *id = imfptr->owner_id;
@@ -1026,7 +1030,15 @@ void uiTemplateImageSettings(ui::Layout *layout,
     }
   }
   if (imf->imtype == R_IMF_IMTYPE_MULTILAYER) {
-    col.prop(imfptr, "use_exr_interleave", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    ui::Layout &row = col.row(false);
+    row.active_set(allow_exr_interleave);
+    if (allow_exr_interleave) {
+      row.prop(imfptr, "use_exr_interleave", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    }
+    else {
+      row.label(IFACE_("Interleave"), ICON_CHECKBOX_DEHLT);
+      col.label(IFACE_("Layer color spaces require Multipart EXR"), ICON_INFO);
+    }
   }
 
   if (is_render_out && ELEM(imf->imtype, R_IMF_IMTYPE_OPENEXR, R_IMF_IMTYPE_MULTILAYER)) {

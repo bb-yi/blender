@@ -7,6 +7,7 @@
  */
 
 #include <climits>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <type_traits>
@@ -35,6 +36,7 @@
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_tree_update.hh"
+#include "BKE_colorband.hh"
 
 #include "DEG_depsgraph_build.hh"
 
@@ -42,10 +44,11 @@
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
 
+#include "../../nodes/shader/include/NOD_filter_graph.hh"
 #include "NOD_common.hh"
+#include "NOD_principled_npr.hh"
 #include "NOD_socket.hh"
 #include "NOD_socket_items.hh"
-#include "../../nodes/shader/include/NOD_filter_graph.hh"
 
 #include "rna_internal.hh"
 #include "rna_internal_types.hh"
@@ -950,6 +953,8 @@ static void rna_EeveeFilterGraphNode_material_update(Main *bmain,
   bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
   bNode &node = *ptr->data_as<bNode>();
   nodes::filter_graph_filter_pass_material_changed(*bmain, ntree, node);
+  /* A new filter material may introduce image animation and other ID dependencies. */
+  DEG_relations_tag_update(bmain);
 }
 
 static int rna_EeveeFilterGraphNode_execution_resolution_get(PointerRNA *ptr)
@@ -5412,6 +5417,333 @@ static void rna_ShaderNodeShaderInfo_lightgroup_id_set(PointerRNA *ptr, int valu
   data->lightgroup_id = max_ii(value, 0);
 }
 
+static constexpr int PRINCIPLED_NPR_MAX_STOPS = 8;
+
+static float principled_npr_default_stop_position(const int index, const int stop_count)
+{
+  return (stop_count <= 1) ? 0.0f : float(index) / float(stop_count - 1);
+}
+
+static bool principled_npr_stop_positions_match_default(const bNode &node, const int stop_count)
+{
+  for (int i = 0; i < PRINCIPLED_NPR_MAX_STOPS; i++) {
+    char position_id[32];
+    SNPRINTF(position_id, "stop_position_%d", i);
+    const bNodeSocket *socket = bke::node_find_socket(node, SOCK_IN, UString(position_id));
+    if (socket == nullptr || socket->link != nullptr) {
+      return false;
+    }
+  }
+
+  for (int i = 0; i < stop_count; i++) {
+    char position_id[32];
+    SNPRINTF(position_id, "stop_position_%d", i);
+    const bNodeSocket *socket = bke::node_find_socket(node, SOCK_IN, UString(position_id));
+    if (socket == nullptr) {
+      return false;
+    }
+    const float value = socket->default_value_typed<bNodeSocketValueFloat>()->value;
+    if (std::abs(value - principled_npr_default_stop_position(i, stop_count)) > 1e-5f) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void principled_npr_update_stop_default_positions(bNode &node, const int new_stop_count)
+{
+  int default_stop_count = 0;
+  for (int candidate = 2; candidate <= PRINCIPLED_NPR_MAX_STOPS; candidate++) {
+    if (principled_npr_stop_positions_match_default(node, candidate)) {
+      default_stop_count = candidate;
+      break;
+    }
+  }
+  if (default_stop_count == 0 || default_stop_count == new_stop_count) {
+    return;
+  }
+
+  for (int i = 0; i < new_stop_count; i++) {
+    char position_id[32];
+    SNPRINTF(position_id, "stop_position_%d", i);
+    if (bNodeSocket *socket = bke::node_find_socket(node, SOCK_IN, UString(position_id))) {
+      if (socket->link == nullptr) {
+        socket->default_value_typed<bNodeSocketValueFloat>()->value =
+            principled_npr_default_stop_position(i, new_stop_count);
+      }
+    }
+  }
+}
+
+static void rna_ShaderNodePrincipledNPR_driven_stop_count_set(PointerRNA *ptr, int value)
+{
+  bNode *node = ptr->data_as<bNode>();
+  NodeShaderPrincipledNPR *data = static_cast<NodeShaderPrincipledNPR *>(node->storage);
+  if (data == nullptr) {
+    return;
+  }
+
+  const int old_stop_count = clamp_i(data->driven_stop_count, 2, PRINCIPLED_NPR_MAX_STOPS);
+  const int new_stop_count = clamp_i(value, 2, PRINCIPLED_NPR_MAX_STOPS);
+  if (data->model_version < 2 && old_stop_count != new_stop_count &&
+      data->diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP)
+  {
+    principled_npr_update_stop_default_positions(*node, new_stop_count);
+  }
+  data->driven_stop_count = new_stop_count;
+}
+
+static void rna_ShaderNodePrincipledNPR_diffuse_mapping_set(PointerRNA *ptr, int value)
+{
+  bNode *node = ptr->data_as<bNode>();
+  NodeShaderPrincipledNPR *data = static_cast<NodeShaderPrincipledNPR *>(node->storage);
+  if (data == nullptr) {
+    return;
+  }
+
+  if (data->model_version < 2 && value == SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP) {
+    principled_npr_update_stop_default_positions(
+        *node, clamp_i(data->driven_stop_count, 2, PRINCIPLED_NPR_MAX_STOPS));
+  }
+  data->diffuse_mapping = value;
+}
+
+static int rna_ShaderNodePrincipledNPR_model_version_get(PointerRNA *ptr)
+{
+  const bNode *node = ptr->data_as<bNode>();
+  const auto *data = static_cast<const NodeShaderPrincipledNPR *>(node->storage);
+  return data ? max_ii(data->model_version, 1) : 1;
+}
+
+static const EnumPropertyItem *rna_ShaderNodePrincipledNPR_mapping_stage_itemf(
+    bContext * /*C*/, PointerRNA *ptr, PropertyRNA * /*prop*/, bool *r_free)
+{
+  static const EnumPropertyItem items[] = {
+      {SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT, "PER_LIGHT", 0, "Per Light",
+       "Map each light independently before combining its color"},
+      {SHD_PRINCIPLED_NPR_MAPPING_COMBINED, "COMBINED", 0, "Combined (Legacy)",
+       "Map the energy-weighted average coordinate, then multiply by total light color"},
+      {SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING, "TOTAL_LIGHTING", 0, "Total Lighting",
+       "Sum unquantized diffuse lighting before one color map; sum GGX before highlight shaping"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem legacy_items[] = {
+      items[0], items[1], {0, nullptr, 0, nullptr, nullptr}};
+  static const EnumPropertyItem energy_items[] = {
+      items[0],
+      {SHD_PRINCIPLED_NPR_MAPPING_COMBINED, "COMBINED", 0, "Shared Energy",
+       "Use shared available energy to drive each light's bands, then add the mapped colors"},
+      items[2], {0, nullptr, 0, nullptr, nullptr},
+  };
+  *r_free = false;
+  if (ptr->data && rna_ShaderNodePrincipledNPR_model_version_get(ptr) < 2) {
+    return legacy_items;
+  }
+  const auto *data = ptr->data ?
+      static_cast<const NodeShaderPrincipledNPR *>(ptr->data_as<bNode>()->storage) : nullptr;
+  static const EnumPropertyItem unified_items[] = {
+      {SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING, "TOTAL_LIGHTING", 0, "Energy Sum",
+       "Sum diffuse light energy before one color mapping; fill lights can expand lit regions"},
+      {SHD_PRINCIPLED_NPR_MAPPING_MAX_LIGHTING, "MAX_LIGHTING", 0, "Maximum Contribution",
+       "Map the strongest diffuse intensity once, with smoothly blended light colors; "
+       "highlights still sum GGX responses"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  if (data && data->energy_response_version >= 2) {
+    return unified_items;
+  }
+  return data && data->energy_response_version >= 1 ? energy_items : items;
+}
+
+static const EnumPropertyItem *rna_ShaderNodePrincipledNPR_shadow_mode_itemf(
+    bContext * /*C*/, PointerRNA *ptr, PropertyRNA * /*prop*/, bool *r_free)
+{
+  static const EnumPropertyItem items[] = {
+      {SHD_PRINCIPLED_NPR_SHADOW_ALL, "ALL", 0, "All", "Receive all shadows"},
+      {SHD_PRINCIPLED_NPR_SHADOW_NONE, "NONE", 0, "None", "Ignore all received shadows"},
+      {SHD_PRINCIPLED_NPR_SHADOW_CAST_ONLY,
+       "CAST_ONLY",
+       0,
+       "Cast Only",
+       "Receive shadows from other objects"},
+      {SHD_PRINCIPLED_NPR_SHADOW_SELF_ONLY,
+       "SELF_ONLY",
+       0,
+       "Self Only",
+       "Receive only this object's own shadows"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem legacy_items[] = {
+      items[0], items[1], items[2], {0, nullptr, 0, nullptr, nullptr}};
+  *r_free = false;
+  return ptr->data && rna_ShaderNodePrincipledNPR_model_version_get(ptr) < 2 ? legacy_items :
+                                                                               items;
+}
+
+static bool rna_PrincipledNPRRampPoint_skip(CollectionPropertyIterator * /*iter*/, void *data)
+{
+  const auto *point = static_cast<const NodePrincipledNPRRampPoint *>(data);
+  return !point->initialized || !point->enabled;
+}
+
+static void rna_ShaderNodePrincipledNPR_ramp_points_begin(CollectionPropertyIterator *iter,
+                                                          PointerRNA *ptr)
+{
+  const bNode *node = ptr->data_as<bNode>();
+  auto *data = static_cast<NodeShaderPrincipledNPR *>(node->storage);
+  rna_iterator_array_begin(iter,
+                           ptr,
+                           data ? data->ramp_points : nullptr,
+                           sizeof(NodePrincipledNPRRampPoint),
+                           data ? SHD_PRINCIPLED_NPR_MAX_RAMP_POINTS : 0,
+                           false,
+                           rna_PrincipledNPRRampPoint_skip);
+}
+
+static int rna_ShaderNodePrincipledNPR_ramp_points_length(PointerRNA *ptr)
+{
+  const auto *data = static_cast<NodeShaderPrincipledNPR *>(ptr->data_as<bNode>()->storage);
+  return data ? data->ramp_point_count : 0;
+}
+
+static bool rna_ShaderNodePrincipledNPR_ramp_points_lookup_int(PointerRNA *ptr,
+                                                               int index,
+                                                               PointerRNA *r_ptr)
+{
+  auto *data = static_cast<NodeShaderPrincipledNPR *>(ptr->data_as<bNode>()->storage);
+  if (data == nullptr || index < 0) {
+    return false;
+  }
+  for (NodePrincipledNPRRampPoint &point : data->ramp_points) {
+    if (point.initialized && point.enabled && index-- == 0) {
+      rna_pointer_create_with_ancestors(
+          *ptr, RNA_ShaderNodePrincipledNPRRampPoint, &point, *r_ptr);
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool rna_ShaderNodePrincipledNPR_ramp_points_lookup_string(PointerRNA *ptr,
+                                                                  const char *key,
+                                                                  PointerRNA *r_ptr)
+{
+  auto *data = static_cast<NodeShaderPrincipledNPR *>(ptr->data_as<bNode>()->storage);
+  if (data == nullptr) {
+    return false;
+  }
+  for (NodePrincipledNPRRampPoint &point : data->ramp_points) {
+    char name[32];
+    SNPRINTF(name, "%d", point.identifier);
+    /* Suspended points remain addressable by animation paths, unlike deleted points. */
+    if (point.initialized && STREQ(name, key)) {
+      rna_pointer_create_with_ancestors(
+          *ptr, RNA_ShaderNodePrincipledNPRRampPoint, &point, *r_ptr);
+      return true;
+    }
+  }
+  return false;
+}
+
+static void rna_ShaderNodePrincipledNPR_ramp_point_count_set(PointerRNA *ptr, const int value)
+{
+  auto *data = static_cast<NodeShaderPrincipledNPR *>(ptr->data_as<bNode>()->storage);
+  if (data && data->model_version >= 2) {
+    nodes::principled_npr::set_point_count(*data, value);
+  }
+}
+
+static int rna_ShaderNodePrincipledNPR_ramp_active_index_get(PointerRNA *ptr)
+{
+  const auto *data = static_cast<NodeShaderPrincipledNPR *>(ptr->data_as<bNode>()->storage);
+  int index = 0;
+  if (data) {
+    for (const NodePrincipledNPRRampPoint &point : data->ramp_points) {
+      if (point.initialized && point.enabled) {
+        if (point.identifier == data->active_point_identifier) {
+          return index;
+        }
+        index++;
+      }
+    }
+  }
+  return 0;
+}
+
+static void rna_ShaderNodePrincipledNPR_ramp_active_index_set(PointerRNA *ptr, const int value)
+{
+  PointerRNA point_ptr;
+  if (rna_ShaderNodePrincipledNPR_ramp_points_lookup_int(ptr, value, &point_ptr)) {
+    auto *data = static_cast<NodeShaderPrincipledNPR *>(ptr->data_as<bNode>()->storage);
+    data->active_point_identifier = point_ptr.data_as<NodePrincipledNPRRampPoint>()->identifier;
+  }
+}
+
+static bNode *rna_PrincipledNPRRampPoint_node(const PointerRNA *ptr)
+{
+  if (!ptr->owner_id || GS(ptr->owner_id->name) != ID_NT) {
+    return nullptr;
+  }
+  bNodeTree *tree = reinterpret_cast<bNodeTree *>(ptr->owner_id);
+  for (bNode &node : tree->nodes) {
+    if (node.type_legacy == SH_NODE_PRINCIPLED_NPR && node.storage) {
+      const auto &data = *static_cast<const NodeShaderPrincipledNPR *>(node.storage);
+      for (const NodePrincipledNPRRampPoint &point : data.ramp_points) {
+        if (&point == ptr->data) {
+          return &node;
+        }
+      }
+    }
+  }
+  return nullptr;
+}
+
+static std::optional<std::string> rna_PrincipledNPRRampPoint_path(const PointerRNA *ptr)
+{
+  if (bNode *node = rna_PrincipledNPRRampPoint_node(ptr)) {
+    const PointerRNA node_ptr = RNA_pointer_create_discrete(ptr->owner_id, RNA_Node, node);
+    return fmt::format("{}.ramp_points[\"{}\"]",
+                       rna_Node_path(&node_ptr).value(),
+                       ptr->data_as<NodePrincipledNPRRampPoint>()->identifier);
+  }
+  return std::nullopt;
+}
+
+static void rna_PrincipledNPRRampPoint_name_get(PointerRNA *ptr, char *value)
+{
+  const std::string name = std::to_string(ptr->data_as<NodePrincipledNPRRampPoint>()->identifier);
+  memcpy(value, name.c_str(), name.size() + 1);
+}
+
+static int rna_PrincipledNPRRampPoint_name_length(PointerRNA *ptr)
+{
+  return std::to_string(ptr->data_as<NodePrincipledNPRRampPoint>()->identifier).size();
+}
+
+static void rna_PrincipledNPRRampPoint_update(Main *bmain, Scene *scene, PointerRNA *ptr)
+{
+  if (bNode *node = rna_PrincipledNPRRampPoint_node(ptr)) {
+    PointerRNA node_ptr = RNA_pointer_create_discrete(ptr->owner_id, RNA_Node, node);
+    rna_Node_update(bmain, scene, &node_ptr);
+  }
+}
+
+static void rna_ShaderNodePrincipledNPR_evaluate_ramp(bNode *node,
+                                                      float coordinate,
+                                                      float coordinate_scale,
+                                                      float coordinate_offset,
+                                                      float global_softness,
+                                                      float color[4])
+{
+  const auto *data = static_cast<const NodeShaderPrincipledNPR *>(node->storage);
+  if (data == nullptr || data->model_version < 2) {
+    std::fill_n(color, 4, 0.0f);
+    return;
+  }
+  nodes::principled_npr::evaluate_ramp(
+      *data, coordinate, coordinate_scale, coordinate_offset, global_softness, color);
+}
+
 static NodeShaderParallax *rna_ShaderNodeParallax_storage_ensure(PointerRNA *ptr)
 {
   bNode *node = ptr->data_as<bNode>();
@@ -7607,7 +7939,18 @@ static void def_sh_tex_coord(BlenderRNA * /*brna*/, StructRNA *srna)
 static void def_sh_light_info(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   PropertyRNA *prop;
+  static const EnumPropertyItem modes[] = {
+      {0, "BASIC", 0, "Basic Information", "Read built-in light information"},
+      {1, "PARAMETER", 0, "Shader Parameter", "Read one dedicated light shader parameter"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, modes);
+  RNA_def_property_ui_text(prop, "Mode", "Light information to read");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 
+  /* Define bNode fields before switching the SDNA source to node storage. */
   prop = RNA_def_property(srna, "light_object", PROP_POINTER, PROP_NONE);
   RNA_def_property_pointer_sdna(prop, nullptr, "id");
   RNA_def_property_struct_type(prop, "Object");
@@ -7616,6 +7959,16 @@ static void def_sh_light_info(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_ui_text(prop, "Light", "Light object to read color, power, transform, and size from");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update_relations");
+
+  RNA_def_struct_sdna_from(srna, "NodeShaderLightInfo", "storage");
+  prop = RNA_def_property(srna, "parameter_name", PROP_STRING, PROP_NONE);
+  RNA_def_property_ui_text(prop, "Parameter", "Exact shader parameter name (not a custom property)");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  prop = RNA_def_property(srna, "parameter_type", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, rna_enum_light_shader_parameter_type_items);
+  RNA_def_property_ui_text(prop, "Type", "Expected shader parameter type");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
 }
 
 static void def_sh_filter_object_info(BlenderRNA * /*brna*/, StructRNA *srna)
@@ -8498,6 +8851,51 @@ static void def_eevee_filter_graph_aov_input(BlenderRNA * /*brna*/, StructRNA *s
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
 }
 
+static void def_eevee_filter_graph_aov_output(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem filter_execution_stage_items[] = {
+      {SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG,
+       "BEFORE_VOLUME_FOG",
+       0,
+       "Before Volume Fog",
+       "Run after deferred/background rendering and before Eevee volume fog is resolved"},
+      {SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX,
+       "BEFORE_POSTFX",
+       0,
+       "Before PostFX",
+       "Run after forward rendering and before Eevee post-processing"},
+      {SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD,
+       "BEFORE_DEPTH_OF_FIELD",
+       0,
+       "Before Depth of Field",
+       "Run after motion blur and before depth of field"},
+      {SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE,
+       "BEFORE_COMPOSITE",
+       0,
+       "Before Composite",
+       "Run after Eevee depth of field and before final film compositing"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "execution_stage", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, filter_execution_stage_items);
+  RNA_def_property_ui_text(
+      prop, "Execution Stage", "Where this AOV output runs in Eevee. The image it reads is the "
+                               "stage input at that point in the render pipeline");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  RNA_def_struct_sdna_from(srna, "NodeEeveeFilterGraphAOVInput", "storage");
+
+  prop = RNA_def_property(srna, "aov_name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_sdna(prop, nullptr, "name");
+  RNA_def_property_ui_text(prop, "Name", "Name of the AOV that this graph output writes to");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+}
+
 static void def_eevee_filter_graph_filter_material(BlenderRNA *brna, StructRNA *srna)
 {
   static const EnumPropertyItem filter_graph_execution_resolution_items[] = {
@@ -9143,7 +9541,16 @@ static void rna_def_cmp_file_output_item(BlenderRNA *brna)
 
   rna_def_node_item_array_socket_item_common(srna, "FileOutputItemsAccessor", true, true);
 
-  PropertyRNA *prop = RNA_def_property(srna, "override_node_format", PROP_BOOLEAN, PROP_NONE);
+  PropertyRNA *prop = RNA_def_property(srna, "override_color_space", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "override_color_space", 1);
+  RNA_def_property_ui_text(prop,
+                           "Override Color Space",
+                           "Use this layer's color space instead of the node color space when "
+                           "saving multi-layer EXR in Override mode");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_Node_ItemArray_item_update<FileOutputItemsAccessor>");
+
+  prop = RNA_def_property(srna, "override_node_format", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "override_node_format", 1);
   RNA_def_property_ui_text(prop,
                            "Override Node Format",
@@ -9659,6 +10066,503 @@ static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+}
+
+static void rna_def_principled_npr_ramp_point(BlenderRNA *brna)
+{
+  StructRNA *srna = RNA_def_struct(brna, "ShaderNodePrincipledNPRRampPoint", nullptr);
+  RNA_def_struct_sdna(srna, "NodePrincipledNPRRampPoint");
+  RNA_def_struct_path_func(srna, "rna_PrincipledNPRRampPoint_path");
+  RNA_def_struct_ui_text(srna, "NPR Ramp Point", "Stable-identity NPR color mapping anchor");
+
+  PropertyRNA *prop = RNA_def_property(srna, "name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop,
+                                "rna_PrincipledNPRRampPoint_name_get",
+                                "rna_PrincipledNPRRampPoint_name_length",
+                                nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_struct_name_property(srna, prop);
+  RNA_def_property_ui_text(
+      prop, "Identifier", "Persistent point identity, independent of position");
+
+  prop = RNA_def_property(srna, "identifier", PROP_INT, PROP_NONE);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(
+      prop, "Identifier", "Persistent point identity; never reused after deletion");
+
+  prop = RNA_def_property(srna, "enabled", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "enabled", 1);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Enabled", "Whether this point participates in mapping");
+
+  prop = RNA_def_property(srna, "color", PROP_FLOAT, PROP_COLOR);
+  RNA_def_property_array(prop, 4);
+  RNA_def_property_ui_text(prop, "Color", "Scene-linear color; alpha controls mapping influence");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_PrincipledNPRRampPoint_update");
+
+  prop = RNA_def_property(srna, "position", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_range(prop, 0.0f, 1.0f);
+  RNA_def_property_ui_text(
+      prop, "Position", "Color anchor; 0.5 is the Lambert terminator in Full Range");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_PrincipledNPRRampPoint_update");
+
+  prop = RNA_def_property(srna, "offset", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_range(prop, -0.5f, 0.5f);
+  RNA_def_property_ui_text(
+      prop, "Boundary Offset", "Offset the transition from the previous sorted color");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_PrincipledNPRRampPoint_update");
+
+  prop = RNA_def_property(srna, "softness", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_range(prop, 0.0f, 10.0f);
+  RNA_def_property_ui_text(
+      prop, "Softness Multiplier", "Multiply global softness for the incoming transition");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_PrincipledNPRRampPoint_update");
+}
+
+static void def_sh_npr_rim(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem modes[] = {
+      {0, "FRESNEL", 0, "Fresnel", "Normal and view-angle rim"},
+      {1, "DEPTH", 0, "Depth", "Screen-space depth discontinuity rim"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  PropertyRNA *prop = RNA_def_property(srna, "rim_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, modes);
+  RNA_def_property_ui_text(prop, "Mode", "Rim calculation method");
+  RNA_def_property_translation_context(prop, "NPR");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+}
+
+static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem diffuse_mapping_items[] = {
+      {SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE,
+       "SIMPLE",
+       0,
+       "Simple",
+       "Map the lighting coordinate between Shadow Color and Lit Color"},
+      {SHD_PRINCIPLED_NPR_DIFFUSE_RAMP,
+       "RAMP",
+       0,
+       "Color Ramp",
+       "Map the lighting coordinate through an embedded color ramp"},
+      {SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP,
+       "DRIVEN_RAMP",
+       0,
+       "Driven Ramp",
+       "Map through stable Color and Position sockets that can be driven by the node graph"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem specular_mapping_items[] = {
+      {SHD_PRINCIPLED_NPR_SPECULAR_SIMPLE,
+       "SIMPLE",
+       0,
+       "Simple",
+       "Use Highlight Size and Softness to shape the artistic highlight"},
+      {SHD_PRINCIPLED_NPR_SPECULAR_RAMP,
+       "RAMP",
+       0,
+       "Color Ramp",
+       "Map the anisotropic highlight coordinate through an embedded color ramp"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem coordinate_range_items[] = {
+      {SHD_PRINCIPLED_NPR_RANGE_FRONT,
+       "FRONT",
+       0,
+       "Front",
+       "Use the unclamped N dot L coordinate directly"},
+      {SHD_PRINCIPLED_NPR_RANGE_FULL,
+       "FULL",
+       0,
+       "Full Range",
+       "Remap N dot L from -1..1 to 0..1 before subsequent operations"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem color_application_items[] = {
+      {SHD_PRINCIPLED_NPR_COLOR_MULTIPLY,
+       "MULTIPLY",
+       0,
+       "Multiply",
+       "Multiply Base Color by the mapped color, blended by mapped alpha"},
+      {SHD_PRINCIPLED_NPR_COLOR_REPLACE,
+       "REPLACE",
+       0,
+       "Replace",
+       "Replace Base Color with the mapped color, blended by mapped alpha"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem mapping_stage_items[] = {
+      {SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT,
+       "PER_LIGHT",
+       0,
+       "Per Light",
+       "Map every light coordinate independently before combining colors"},
+      {SHD_PRINCIPLED_NPR_MAPPING_COMBINED,
+       "COMBINED",
+       0,
+       "Combined",
+       "Legacy coordinate or shared-energy aggregation, depending on the saved model"},
+      {SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING,
+       "TOTAL_LIGHTING", 0, "Total Lighting",
+      "Sum diffuse lighting before one color map and GGX before highlight shaping (V2)"},
+      {SHD_PRINCIPLED_NPR_MAPPING_MAX_LIGHTING,
+       "MAX_LIGHTING", 0, "Maximum Contribution",
+       "Map maximum diffuse intensity once; smoothly blend light colors and sum GGX highlights"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem shadow_mode_items[] = {
+      {SHD_PRINCIPLED_NPR_SHADOW_NONE,
+       "NONE",
+       0,
+       "None",
+       "Ignore self shadows and shadows cast by other objects"},
+      {SHD_PRINCIPLED_NPR_SHADOW_CAST_ONLY,
+       "CAST_ONLY",
+       0,
+       "Cast Only",
+       "Receive shadows cast by other objects while ignoring self shadows"},
+      {SHD_PRINCIPLED_NPR_SHADOW_ALL,
+       "ALL",
+       0,
+       "All",
+       "Receive both self shadows and shadows cast by other objects"},
+      {SHD_PRINCIPLED_NPR_SHADOW_SELF_ONLY,
+       "SELF_ONLY",
+       0,
+       "Self Only",
+       "Receive only shadows cast by this object's own geometry (V2)"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem shadow_quality_items[] = {
+      {SHD_SHADER_INFO_SHADOW_TEMPORAL,
+       "BUILT_IN",
+       0,
+       "Built-in",
+       "Use Eevee's built-in shadow sampling"},
+      {SHD_SHADER_INFO_SHADOW_SOFT_FILTERED,
+       "SOFT_FILTERED",
+       0,
+       "Soft Filtered",
+       "Use Shader Info's spatially filtered shadow classification"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem mapping_interpolation_items[] = {
+      {SHD_PRINCIPLED_NPR_INTERP_LINEAR,
+       "LINEAR",
+       0,
+       "Linear",
+       "Linear transition inside the softness interval"},
+      {SHD_PRINCIPLED_NPR_INTERP_EASE,
+       "EASE",
+       0,
+       "Smooth",
+       "Smooth transition inside the softness interval"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem light_combine_items[] = {
+      {SHD_PRINCIPLED_NPR_LIGHT_ADD,
+       "ADD",
+       0,
+       "Add",
+       "Add light coordinates or mapped HDR colors without clamping the final color"},
+      {SHD_PRINCIPLED_NPR_LIGHT_STRONGEST,
+       "STRONGEST",
+       0,
+       "Strongest",
+       "Use the single light with the strongest scalar contribution"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem driven_interpolation_items[] = {
+      {SHD_PRINCIPLED_NPR_INTERP_CONSTANT,
+       "CONSTANT",
+       0,
+       "Constant",
+       "Keep each stop color until the next stop"},
+      {SHD_PRINCIPLED_NPR_INTERP_LINEAR,
+       "LINEAR",
+       0,
+       "Linear",
+       "Interpolate linearly between adjacent stops"},
+      {SHD_PRINCIPLED_NPR_INTERP_EASE,
+       "EASE",
+       0,
+       "Ease",
+       "Use a smooth eased transition between adjacent stops"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop;
+  RNA_def_struct_sdna_from(srna, "NodeShaderPrincipledNPR", "storage");
+
+  prop = RNA_def_property(srna, "model_version", PROP_INT, PROP_NONE);
+  RNA_def_property_int_funcs(
+      prop, "rna_ShaderNodePrincipledNPR_model_version_get", nullptr, nullptr);
+  RNA_def_property_range(prop, 1, 2);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(
+      prop,
+      "Model Version",
+      "1 is legacy V1; 2 is native NPR V2; upgrade by creating an explicit copy");
+
+  prop = RNA_def_property(srna, "energy_response_version", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, nullptr, "energy_response_version");
+  RNA_def_property_range(prop, 0, 2);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop,
+                           "Energy Response Version",
+                           "0 preserves legacy bias; 1 preserves per-light energy response; "
+                           "2 uses unified sum/max lighting. Upgrade by creating an explicit copy");
+
+  static const EnumPropertyItem rim_mode_items[] = {
+      {SHD_PRINCIPLED_NPR_RIM_FRESNEL, "FRESNEL", 0, "Fresnel",
+       "View-normal rim using the existing thickness controls"},
+      {SHD_PRINCIPLED_NPR_RIM_DEPTH, "DEPTH", 0, "Depth",
+       "Depth-difference rim sampled from the HiZ buffer; opaque and binary cutout surfaces only, "
+       "not Blended, fractional Alpha or probe capture"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "rim_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, rim_mode_items);
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_RIM_FRESNEL);
+  RNA_def_property_ui_text(prop, "Rim Mode", "Rim construction method (V2)");
+  RNA_def_property_translation_context(prop, "NPR");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  static const EnumPropertyItem highlight_light_shape_items[] = {
+      {SHD_PRINCIPLED_NPR_HIGHLIGHT_DIRECTION, "DIRECTION", 0, "Direction (Fast)",
+       "Evaluate complete GGX once per light direction; roughness controls the lobe, without "
+       "integrating emitter radius or shape"},
+      {SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED, "INTEGRATED", 0, "Emitter Shape (Advanced)",
+       "Progressively integrate GGX over the finite emitter. More expensive and needs render "
+       "samples to converge; hard remapping is applied to each sample"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "highlight_receive_shadows", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, nullptr, "highlight_ignore_shadow", 1);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_ui_text(prop, "Receive Shadows", "Apply shadow visibility to direct highlights without changing diffuse shadows");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "highlight_light_shape", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, highlight_light_shape_items);
+  RNA_def_property_ui_text(prop, "Light Shape", "Finite emitter treatment for direct highlights only");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "shadow_quality", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, shadow_quality_items);
+  RNA_def_property_enum_default(prop, SHD_SHADER_INFO_SHADOW_TEMPORAL);
+  RNA_def_property_ui_text(
+      prop, "Shadow Quality", "Sampling quality, independent of the received shadow type");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "shadow_samples", PROP_INT, PROP_NONE);
+  RNA_def_property_range(prop, 1, 32);
+  RNA_def_property_ui_text(prop, "Shadow Samples", "Spatial samples for Soft Filtered shadows");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "use_all_lights", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "use_all_lights", 1);
+  RNA_def_property_ui_text(
+      prop, "All Lights", "Include all light groups; disable to use the selected Lightgroup ID");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "mapping_interpolation", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, mapping_interpolation_items);
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_INTERP_EASE);
+  RNA_def_property_ui_text(
+      prop, "Transition Curve", "Shared by all three V2 color mapping editors");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  /* The active view is filtered and keyed by persistent ID, not a DNA array collection. */
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+  prop = RNA_def_property(srna, "ramp_points", PROP_COLLECTION, PROP_NONE);
+  RNA_def_property_struct_type(prop, "ShaderNodePrincipledNPRRampPoint");
+  RNA_def_property_collection_funcs(prop,
+                                    "rna_ShaderNodePrincipledNPR_ramp_points_begin",
+                                    "rna_iterator_array_next",
+                                    "rna_iterator_array_end",
+                                    "rna_iterator_array_get",
+                                    "rna_ShaderNodePrincipledNPR_ramp_points_length",
+                                    "rna_ShaderNodePrincipledNPR_ramp_points_lookup_int",
+                                    "rna_ShaderNodePrincipledNPR_ramp_points_lookup_string",
+                                    nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(
+      prop, "Ramp Points", "Active points; persistent ID keys also address suspended points");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_struct_sdna_from(srna, "NodeShaderPrincipledNPR", "storage");
+
+  prop = RNA_def_property(srna, "ramp_point_count", PROP_INT, PROP_NONE);
+  RNA_def_property_range(prop, 2, SHD_PRINCIPLED_NPR_MAX_RAMP_POINTS);
+  RNA_def_property_int_funcs(
+      prop, nullptr, "rna_ShaderNodePrincipledNPR_ramp_point_count_set", nullptr);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(
+      prop, "Point Count", "Suspend or restore points without deleting their animation or colors");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "ramp_active_index", PROP_INT, PROP_NONE);
+  RNA_def_property_int_funcs(prop,
+                             "rna_ShaderNodePrincipledNPR_ramp_active_index_get",
+                             "rna_ShaderNodePrincipledNPR_ramp_active_index_set",
+                             nullptr);
+  RNA_def_property_range(prop, 0, SHD_PRINCIPLED_NPR_MAX_RAMP_POINTS - 1);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(
+      prop, "Active Point", "Select a point without changing its persistent identity");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, nullptr);
+
+  prop = RNA_def_property(srna, "diffuse_mapping", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, diffuse_mapping_items);
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE);
+  RNA_def_property_enum_funcs(
+      prop, nullptr, "rna_ShaderNodePrincipledNPR_diffuse_mapping_set", nullptr);
+  RNA_def_property_ui_text(prop, "Diffuse Mapping", "Source used to map lighting into color");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+
+  prop = RNA_def_property(srna, "specular_mapping", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, specular_mapping_items);
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_SPECULAR_SIMPLE);
+  RNA_def_property_ui_text(prop, "Specular Mapping", "Source used to map highlight shape");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+
+  prop = RNA_def_property(srna, "coordinate_range", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, coordinate_range_items);
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_RANGE_FRONT);
+  RNA_def_property_ui_text(prop, "Coordinate Range", "Initial N dot L coordinate mapping");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "color_application", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, color_application_items);
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_COLOR_MULTIPLY);
+  RNA_def_property_ui_text(prop, "Color Application", "How mapped colors affect Base Color");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "mapping_stage", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, mapping_stage_items);
+  RNA_def_property_enum_funcs(
+      prop, nullptr, nullptr, "rna_ShaderNodePrincipledNPR_mapping_stage_itemf");
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT);
+  RNA_def_property_ui_text(prop, "Mapping Stage", "Whether color mapping runs per light or once");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "shadow_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, shadow_mode_items);
+  RNA_def_property_enum_funcs(
+      prop, nullptr, nullptr, "rna_ShaderNodePrincipledNPR_shadow_mode_itemf");
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_SHADOW_ALL);
+  RNA_def_property_ui_text(prop, "Shadow Mode", "Which classified Eevee shadows are received");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "light_combine", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, light_combine_items);
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_LIGHT_ADD);
+  RNA_def_property_ui_text(prop, "Light Combine", "How multiple direct lights are combined");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "lightgroup_id", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_range(prop, 0, SHD_PRINCIPLED_NPR_LIGHTGROUP_MAX);
+  RNA_def_property_ui_text(
+      prop,
+      "Lightgroup",
+      "Only lights with the same Lightgroup ID affect this material; "
+      "0 matches only lights in group 0 (the default)");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "driven_stop_count", PROP_INT, PROP_NONE);
+  RNA_def_property_range(prop, 2, 8);
+  RNA_def_property_int_funcs(
+      prop, nullptr, "rna_ShaderNodePrincipledNPR_driven_stop_count_set", nullptr);
+  RNA_def_property_ui_text(prop, "Stop Count", "Number of visible Driven Ramp stops");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+
+  prop = RNA_def_property(srna, "driven_interpolation", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, driven_interpolation_items);
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_INTERP_LINEAR);
+  RNA_def_property_ui_text(prop, "Interpolation", "Interpolation between Driven Ramp stops");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "diffuse_ramp", PROP_POINTER, PROP_NEVER_NULL);
+  RNA_def_property_pointer_sdna(prop, nullptr, "diffuse_ramp");
+  RNA_def_property_struct_type(prop, "ColorRamp");
+  RNA_def_property_ui_text(prop, "Diffuse Ramp", "Lighting-coordinate color mapping ramp");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "specular_ramp", PROP_POINTER, PROP_NEVER_NULL);
+  RNA_def_property_pointer_sdna(prop, nullptr, "specular_ramp");
+  RNA_def_property_struct_type(prop, "ColorRamp");
+  RNA_def_property_ui_text(prop, "Specular Ramp", "Highlight-coordinate color mapping ramp");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+
+  FunctionRNA *func = RNA_def_function(
+      srna, "evaluate_ramp", "rna_ShaderNodePrincipledNPR_evaluate_ramp");
+  RNA_def_function_ui_description(
+      func,
+      "Evaluate the V2 gradient editor analytically, using the same CPU function as its preview");
+  PropertyRNA *parm = RNA_def_float(func,
+                                    "coordinate",
+                                    0.5f,
+                                    -FLT_MAX,
+                                    FLT_MAX,
+                                    "Coordinate",
+                                    "Unclamped lighting coordinate",
+                                    -1.0f,
+                                    1.0f);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+  RNA_def_float(func,
+                "coordinate_scale",
+                1.0f,
+                -FLT_MAX,
+                FLT_MAX,
+                "Scale",
+                "Mapping coordinate scale",
+                -10.0f,
+                10.0f);
+  RNA_def_float(func,
+                "coordinate_offset",
+                0.0f,
+                -FLT_MAX,
+                FLT_MAX,
+                "Offset",
+                "Mapping coordinate offset",
+                -1.0f,
+                1.0f);
+  RNA_def_float(func,
+                "global_softness",
+                0.1f,
+                0.0f,
+                FLT_MAX,
+                "Softness",
+                "Global transition softness",
+                0.0f,
+                1.0f);
+  parm = RNA_def_float_color(func,
+                             "color",
+                             4,
+                             nullptr,
+                             -FLT_MAX,
+                             FLT_MAX,
+                             "Color",
+                             "Scene-linear mapped RGBA",
+                             -FLT_MAX,
+                             FLT_MAX);
+  RNA_def_parameter_flags(parm, PROP_THICK_WRAP, ParameterFlag(0));
+  RNA_def_function_output(func, parm);
 }
 
 static void def_sh_scene_color(BlenderRNA * /*brna*/, StructRNA *srna)
@@ -12787,6 +13691,11 @@ static void rna_def_nodetree(BlenderRNA *brna)
       {NTREE_TEXTURE, "TEXTURE", ICON_TEXTURE, "Texture", "Texture nodes"},
       {NTREE_COMPOSIT, "COMPOSITING", ICON_RENDERLAYERS, "Compositing", "Compositing nodes"},
       {NTREE_GEOMETRY, "GEOMETRY", ICON_GEOMETRY_NODES, "Geometry", "Geometry nodes"},
+      {NTREE_EEVEE_FILTER_GRAPH,
+       "FILTER_GRAPH",
+       ICON_NODE_COMPOSITING,
+       "Filter Graph",
+       "Eevee filter graph nodes"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -13244,6 +14153,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("NodeInternal", "NodeStoreBundleItem");
 
   define("NodeInternal", "EeveeFilterGraphNodeAOVInput", def_eevee_filter_graph_aov_input);
+  define("NodeInternal", "EeveeFilterGraphNodeAOVOutput", def_eevee_filter_graph_aov_output);
   define("NodeInternal", "EeveeFilterGraphNodeFilterMaterial", def_eevee_filter_graph_filter_material);
   define("NodeInternal", "EeveeFilterGraphNodeSceneColor");
   define("NodeInternal", "EeveeFilterGraphNodeStageOutput", def_eevee_filter_graph_stage_output);
@@ -13262,6 +14172,9 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeBsdfHairPrincipled", def_hair_principled);
   define("ShaderNode", "ShaderNodeBsdfMetallic", def_metallic);
   define("ShaderNode", "ShaderNodeBsdfPrincipled", def_principled);
+  define("ShaderNode", "ShaderNodePrincipledNPR", def_sh_principled_npr);
+  define("ShaderNode", "ShaderNodeNPRSurfaceDiffusion", nullptr);
+  define("ShaderNode", "ShaderNodeNPRRim", def_sh_npr_rim);
   define("ShaderNode", "ShaderNodeBsdfRayPortal");
   define("ShaderNode", "ShaderNodeBsdfRefraction", def_refraction);
   define("ShaderNode", "ShaderNodeBsdfSheen", def_sheen);
@@ -13305,6 +14218,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeNPR_Output", def_group_output);
   define("ShaderNode", "ShaderNodeNPR_Refraction");
   define("ShaderNode", "ShaderNodeOutlineControl");
+  define("ShaderNode", "ShaderNodeOutputOutlineShell");
   define("ShaderNode", "ShaderNodeEeveeLightShaderInfo");
   define("ShaderNode", "ShaderNodeEeveeLightShaderOutput", def_sh_eevee_light_shader_output);
   define("ShaderNode", "ShaderNodePortalIn", def_sh_portal_in);
@@ -13844,6 +14758,7 @@ static void rna_def_nodes(BlenderRNA *brna)
 
 void RNA_def_nodetree(BlenderRNA *brna)
 {
+  rna_def_principled_npr_ramp_point(brna);
   rna_def_node_panel_state(brna);
   rna_def_node(brna);
   rna_def_node_link(brna);

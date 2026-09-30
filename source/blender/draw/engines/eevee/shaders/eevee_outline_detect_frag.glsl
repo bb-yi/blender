@@ -122,7 +122,11 @@ void main()
 
   const float4 outline_color = outline_source_color_fetch(texel);
   const uint4 outline_info = outline_source_info_fetch(texel);
-  const float line_width = outline_width_unpack(outline_info.r);
+  const float sr_width_scale = uniform_buf.film.sr_active ?
+                                   sqrt(uniform_buf.film.sr_render_ratio.x *
+                                        uniform_buf.film.sr_render_ratio.y) :
+                                   1.0f;
+  const float line_width = outline_width_unpack(outline_info.r) * sr_width_scale;
   const float depth_threshold_input = outline_depth_threshold_unpack(outline_info.g);
   const float depth_threshold_range_input = outline_depth_threshold_range_unpack(outline_info.r);
   const float depth_edge_width = outline_depth_edge_width_unpack(outline_info.r);
@@ -212,7 +216,7 @@ void main()
 
     if (center_id_edge && center_is_not_behind_sample) {
       const uint4 sample_outline_info = outline_source_info_fetch(sample_texel);
-      const float sample_line_width = outline_width_unpack(sample_outline_info.r);
+      const float sample_line_width = outline_width_unpack(sample_outline_info.r) * sr_width_scale;
       const uint sample_outline_id = outline_id_unpack(sample_outline_info.a);
       if (sample_outline_id != center_outline_id) {
         has_id_edge = true;

@@ -10,6 +10,7 @@
 
 #include <bit>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -20,6 +21,7 @@
 #include "BLI_string_utf8_symbols.h"
 #include "BLI_sys_types.h" /* size_t */
 
+#include "DNA_colorband_types.h"
 #include "DNA_listBase.h"
 #include "DNA_userdef_types.h"
 
@@ -2554,6 +2556,22 @@ void template_preview(Layout *layout,
                       MTex *slot,
                       const char *preview_id);
 void template_color_ramp(Layout *layout, PointerRNA *ptr, StringRefNull propname, bool expand);
+
+/** Optional adapter for a ramp whose anchors and interpolation are not a DNA ColorBand.
+ * The
+ * display band is transient; CBData.cur contains a persistent anchor identifier. */
+enum class CustomColorRampAction { Select, Move, Add, Remove };
+struct CustomColorRampData {
+  ColorBand display;
+  std::function<void(ColorBand &)> refresh;
+  std::function<void(float, float[4])> evaluate;
+  std::function<bool(CustomColorRampAction, int, float)> edit;
+  std::function<void(bContext &)> update;
+};
+void template_custom_color_ramp(Layout *layout,
+                                PointerRNA *ptr,
+                                StringRefNull propname,
+                                std::shared_ptr<CustomColorRampData> data);
 void template_oklab_color_ramp(
     Layout *layout, PointerRNA *ptr, StringRefNull propname, bool expand);
 /**
@@ -2622,7 +2640,8 @@ void uiTemplateImageSettings(ui::Layout *layout,
                              bContext *C,
                              PointerRNA *imfptr,
                              bool color_management,
-                             const char *panel_idname = nullptr);
+                             const char *panel_idname = nullptr,
+                             bool allow_exr_interleave = true);
 void uiTemplateImageStereo3d(ui::Layout *layout, PointerRNA *stereo3d_format_ptr);
 void uiTemplateImageViews(ui::Layout *layout, PointerRNA *imaptr);
 void uiTemplateImageFormatViews(ui::Layout *layout, PointerRNA *imfptr, PointerRNA *ptr);

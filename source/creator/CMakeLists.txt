@@ -497,19 +497,30 @@ if(WITH_PYTHON)
   endif()
   unset(FREESTYLE_EXCLUDE_CONDITIONAL)
 
+  # The glTF add-on's draco & meshopt bridge libraries, loaded at run-time by `io_scene_gltf2`.
+  # Portable Linux builds place them in `lib` beside their bundled dependencies (found via each
+  # target's `$ORIGIN` RPATH); otherwise beside the add-on where `library.py` looks for them.
+  if(UNIX AND NOT APPLE AND WITH_INSTALL_PORTABLE)
+    set(GLTF_BRIDGE_INSTALL_DIR "${TARGETDIR_LIB}")
+  else()
+    set(GLTF_BRIDGE_INSTALL_DIR "${TARGETDIR_VER_LIBS}/scripts/addons_core/io_scene_gltf2")
+  endif()
+
   if(WITH_DRACO)
     install(
       PROGRAMS $<TARGET_FILE:bf_intern_draco_bridge>
-      DESTINATION ${TARGETDIR_VER_LIBS}/scripts/addons_core/io_scene_gltf2
+      DESTINATION ${GLTF_BRIDGE_INSTALL_DIR}
     )
   endif()
 
   if(WITH_MESHOPTIMIZER)
     install(
       PROGRAMS $<TARGET_FILE:bf_intern_meshopt_bridge>
-      DESTINATION ${TARGETDIR_VER_LIBS}/scripts/addons_core/io_scene_gltf2
+      DESTINATION ${GLTF_BRIDGE_INSTALL_DIR}
     )
   endif()
+
+  unset(GLTF_BRIDGE_INSTALL_DIR)
 
 endif()
 
@@ -2169,6 +2180,28 @@ endif()
 
 # -----------------------------------------------------------------------------
 # Post-install script
+
+if(WIN32)
+  set(DLSS5_RUNTIME_DIR "$ENV{DLSS5_RUNTIME_DIR}" CACHE PATH
+    "Directory containing the optional DLSSNR runtime binaries")
+  if(DLSS5_RUNTIME_DIR)
+    foreach(_dlss5_file nvngx_dlssnr.dll nvngx.dll)
+      if(NOT EXISTS "${DLSS5_RUNTIME_DIR}/${_dlss5_file}")
+        message(FATAL_ERROR "Missing DLSS5 runtime file: ${DLSS5_RUNTIME_DIR}/${_dlss5_file}")
+      endif()
+      install(FILES "${DLSS5_RUNTIME_DIR}/${_dlss5_file}" DESTINATION "dlss5")
+    endforeach()
+    unset(_dlss5_file)
+  endif()
+  set(DLSS_SR_RUNTIME_DIR "$ENV{DLSS_SR_RUNTIME_DIR}" CACHE PATH
+    "Directory containing the optional official DLSS Super Resolution runtime")
+  if(DLSS_SR_RUNTIME_DIR)
+    if(NOT EXISTS "${DLSS_SR_RUNTIME_DIR}/nvngx_dlss.dll")
+      message(FATAL_ERROR "Missing DLSS SR runtime: ${DLSS_SR_RUNTIME_DIR}/nvngx_dlss.dll")
+    endif()
+    install(FILES "${DLSS_SR_RUNTIME_DIR}/nvngx_dlss.dll" DESTINATION "dlss5")
+  endif()
+endif()
 
 if(POSTINSTALL_SCRIPT)
   install(SCRIPT ${POSTINSTALL_SCRIPT})

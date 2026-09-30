@@ -730,6 +730,82 @@ class RENDER_PT_eevee_sampling_viewport(RenderButtonsPanel, Panel):
         # Add SSS sample count here.
 
 
+class RENDER_PT_eevee_dlss5(RenderButtonsPanel, Panel):
+    bl_label = "DLSS5"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.engine in cls.COMPAT_ENGINES)
+
+    def draw(self, context):
+        import gpu
+
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        props = context.scene.eevee
+        runtime_backend = gpu.platform.backend_type_get()
+        pref_backend = context.preferences.system.gpu_backend
+        is_vulkan = runtime_backend == 'VULKAN'
+
+        row = layout.row()
+        row.label(
+            text="GPU Backend: %s" % runtime_backend,
+            icon='INFO' if is_vulkan else 'ERROR',
+        )
+
+        if not is_vulkan:
+            warn = layout.column(align=True)
+            warn.label(text="DLSSNR 未运行，需要 Vulkan 并重启", icon='ERROR')
+            if pref_backend != 'VULKAN':
+                warn.label(text="偏好设置 → 系统 → GPU Backend 设为 Vulkan 后重启")
+            else:
+                warn.label(text="偏好已是 Vulkan，请完全退出后重启当前进程")
+
+        sr = layout.column(align=True)
+        sr.enabled = is_vulkan
+        sr.prop(props, "dlss_sr_viewport_quality")
+        if props.dlss_sr_viewport_quality == 'CUSTOM':
+            sr.prop(props, "dlss_sr_viewport_percentage", slider=True)
+        sr.prop(props, "dlss_sr_render_quality")
+        if props.dlss_sr_render_quality == 'CUSTOM':
+            sr.prop(props, "dlss_sr_render_percentage", slider=True)
+        layout.label(text="Viewport SR: " + props.dlss_sr_viewport_status)
+        layout.label(text="Render SR: " + props.dlss_sr_render_status)
+        layout.separator()
+        layout.prop(props, "dlss5_mode")
+        layout.label(text="Viewport NR: " + props.dlss5_viewport_status)
+        layout.label(text="Render NR: " + props.dlss5_render_status)
+
+        enabled = (props.dlss5_mode == 'DLSSNR') and is_vulkan
+        col = layout.column(align=True)
+        col.active = enabled
+        col.enabled = is_vulkan
+        col.prop(props, "dlss5_intensity")
+        col.prop(props, "dlss5_style")
+        col.prop(props, "dlss5_local_tone_strength")
+        col.prop(props, "dlss5_local_structure_strength")
+        col.prop(props, "dlss5_skin_structure_strength")
+        col.prop(props, "dlss5_use_auto_mask")
+        col.prop(props, "dlss5_ui_correction")
+        col = layout.column(align=True)
+        col.active = is_vulkan
+        col.prop(props, "dlss5_mask_aov")
+        if props.dlss5_mask_aov:
+            col.prop(props, "dlss5_mask_invert")
+            col.prop(props, "dlss5_mask_aov_output")
+            aov = context.view_layer.aovs.get(props.dlss5_mask_aov)
+            if aov is None or aov.type != 'VALUE' or not aov.is_valid:
+                col.label(text="遮罩 AOV 缺失或无效：NR 将旁路", icon='ERROR')
+            elif not props.dlss5_mask_aov_output:
+                col.label(text="SR 时遮罩重采样输出；启用精确输出将使用原生渲染")
+        if enabled:
+            layout.label(text="NR 在 SR／Film 之后增强；遮罩不关闭 SR")
+
+
 class RENDER_PT_eevee_sampling_render(RenderButtonsPanel, Panel):
     bl_label = "Render"
     bl_parent_id = "RENDER_PT_eevee_sampling"
@@ -1228,6 +1304,7 @@ classes = (
     RENDER_PT_context,
     RENDER_PT_eevee_sampling,
     RENDER_PT_eevee_sampling_viewport,
+    RENDER_PT_eevee_dlss5,
     RENDER_PT_eevee_sampling_render,
     RENDER_PT_eevee_sampling_shadows,
     RENDER_PT_eevee_sampling_advanced,

@@ -45,11 +45,149 @@ static VkImageAspectFlags to_vk_image_aspect_single_bit(const VkImageAspectFlags
 
 VKTexture::~VKTexture()
 {
+  if (external_memory_ != VK_NULL_HANDLE) {
+    VKDevice &device = VKBackend::get().device;
+    if (VKContext::get() != nullptr) {
+      VKContext::get()->finish();
+    }
+    else {
+      vkDeviceWaitIdle(device.vk_handle());
+    }
+    image_views_.clear();
+    device.resources.remove_image(vk_image_);
+    vkDestroyImage(device.vk_handle(), vk_image_, nullptr);
+    vkFreeMemory(device.vk_handle(), external_memory_, nullptr);
+    vk_image_ = VK_NULL_HANDLE;
+    external_memory_ = VK_NULL_HANDLE;
+    return;
+  }
   if (vk_image_ != VK_NULL_HANDLE && allocation_ != VK_NULL_HANDLE) {
     VKDiscardPool::discard_pool_get().discard_image(vk_image_, allocation_);
     vk_image_ = VK_NULL_HANDLE;
     allocation_ = VK_NULL_HANDLE;
   }
+}
+
+bool VKTexture::init_internal_external_2D(const GPUExternalTextureHandle &external)
+{
+#ifdef _WIN32
+  if (external.type != GPUExternalTextureType::D3D12_RESOURCE || external.handle == 0) {
+    return false;
+  }
+
+  VKDevice &device = VKBackend::get().device;
+  if (!device.extensions_get().external_memory) {
+    return false;
+  }
+
+  device_format_ = format_;
+  if (device_format_ == TextureFormat::SFLOAT_16_16_16) {
+    device_format_ = TextureFormat::SFLOAT_16_16_16_16;
+  }
+  if (device_format_ == TextureFormat::SFLOAT_32_32_32) {
+    device_format_ = TextureFormat::SFLOAT_32_32_32_32;
+  }
+
+  VkExternalMemoryImageCreateInfo external_memory_info = {
+      VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO};
+  external_memory_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT;
+
+  VkImageCreateInfo image_info = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+  image_info.pNext = &external_memory_info;
+  image_info.imageType = VK_IMAGE_TYPE_2D;
+  image_info.extent = {uint32_t(w_), uint32_t(h_), 1};
+  image_info.mipLevels = 1;
+  image_info.arrayLayers = 1;
+  image_info.format = to_vk_format(device_format_);
+  image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  image_info.usage = to_vk_image_usage(gpu_image_usage_flags_, format_flag_, false);
+  image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+
+  VkPhysicalDeviceExternalImageFormatInfo external_format = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO};
+  external_format.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT;
+  VkPhysicalDeviceImageFormatInfo2 format_info = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2};
+  format_info.pNext = &external_format;
+  format_info.format = image_info.format;
+  format_info.type = image_info.imageType;
+  format_info.tiling = image_info.tiling;
+  format_info.usage = image_info.usage;
+  format_info.flags = image_info.flags;
+  VkExternalImageFormatProperties external_properties = {
+      VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES};
+  VkImageFormatProperties2 format_properties = {VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2};
+  format_properties.pNext = &external_properties;
+  if (vkGetPhysicalDeviceImageFormatProperties2(
+          device.physical_device_get(), &format_info, &format_properties) != VK_SUCCESS ||
+      !(external_properties.externalMemoryProperties.externalMemoryFeatures &
+        VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT))
+  {
+    return false;
+  }
+
+  VkResult result = vkCreateImage(device.vk_handle(), &image_info, nullptr, &vk_image_);
+  if (result != VK_SUCCESS) {
+    return false;
+  }
+
+  VkMemoryRequirements memory_requirements = {};
+  vkGetImageMemoryRequirements(device.vk_handle(), vk_image_, &memory_requirements);
+  const VkPhysicalDeviceMemoryProperties &memory_properties =
+      device.physical_device_memory_properties_get();
+  uint32_t memory_type_index = UINT32_MAX;
+  for (uint32_t index = 0; index < memory_properties.memoryTypeCount; ++index) {
+    if ((memory_requirements.memoryTypeBits & (1u << index)) != 0 &&
+        (memory_properties.memoryTypes[index].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0)
+    {
+      memory_type_index = index;
+      break;
+    }
+  }
+  if (memory_type_index == UINT32_MAX) {
+    vkDestroyImage(device.vk_handle(), vk_image_, nullptr);
+    vk_image_ = VK_NULL_HANDLE;
+    return false;
+  }
+
+  VkImportMemoryWin32HandleInfoKHR import_info = {
+      VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR};
+  import_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT;
+  import_info.handle = reinterpret_cast<HANDLE>(external.handle);
+  VkMemoryDedicatedAllocateInfo dedicated_info = {
+      VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO};
+  dedicated_info.image = vk_image_;
+  import_info.pNext = &dedicated_info;
+
+  VkMemoryAllocateInfo allocate_info = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+  allocate_info.pNext = &import_info;
+  allocate_info.allocationSize = memory_requirements.size;
+  allocate_info.memoryTypeIndex = memory_type_index;
+  result = vkAllocateMemory(
+      device.vk_handle(), &allocate_info, nullptr, &external_memory_);
+  if (result != VK_SUCCESS) {
+    vkDestroyImage(device.vk_handle(), vk_image_, nullptr);
+    vk_image_ = VK_NULL_HANDLE;
+    return false;
+  }
+  result = vkBindImageMemory(device.vk_handle(), vk_image_, external_memory_, 0);
+  if (result != VK_SUCCESS) {
+    vkFreeMemory(device.vk_handle(), external_memory_, nullptr);
+    vkDestroyImage(device.vk_handle(), vk_image_, nullptr);
+    external_memory_ = VK_NULL_HANDLE;
+    vk_image_ = VK_NULL_HANDLE;
+    return false;
+  }
+
+  device.resources.add_image(vk_image_, false, name_.c_str());
+  this->mip_range_set(0, 0);
+  has_data_ = true;
+  return true;
+#else
+  UNUSED_VARS(external);
+  return false;
+#endif
 }
 
 void VKTexture::generate_mipmap()

@@ -63,6 +63,9 @@ void DepsgraphRelationBuilder::build_scene_parameters(Scene *scene)
   ComponentKey scene_eval_key(&scene->id, NodeType::SCENE);
   add_relation(parameters_eval_key, scene_eval_key, "Parameters -> Scene Eval");
 
+  /* Include filter materials and their image animation in viewport and render graphs. */
+  build_nodetree(scene->eevee.filter_graph);
+
   for (TimeMarker &marker : scene->markers) {
     build_idproperties(marker.prop);
   }

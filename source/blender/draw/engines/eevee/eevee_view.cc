@@ -17,6 +17,8 @@
 
 #include "DRW_render.hh"
 
+#include "BLI_math_base.hh"
+
 #include "GPU_debug.hh"
 
 #include "eevee_instance.hh"
@@ -335,6 +337,8 @@ namespace blender::eevee
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry,
         TelemetryStageId::MainFilmAccumulate);
+      /* Invoke DLSS5 after the current Film sample is accumulated, while keeping
+       * the reconstructed display result out of Film's temporal history. */
       inst_.film.accumulate(jitter_view_, combined_final_tx, outline_raw_tx, outline_combined_tx);
     }
     inst_.outline.release_result();
@@ -416,8 +420,7 @@ namespace blender::eevee
     float4x4 viewmat = main_view_.viewmat();
     float4x4 winmat = main_view_.winmat();
 
-    if (film.scaling_factor_get() > 1)
-    {
+    if (film.scaling_factor_get() > 1 || inst_.dlss_sr.active()) {
       /* This whole section ensures that the render target pixel grid will match the film pixel grid.
        * Otherwise the weight computation inside the film accumulation will be wrong. */
 
@@ -449,10 +452,10 @@ namespace blender::eevee
       const float2 pixel_size = render_size / float2(film.film_extent_get());
 
       /* Render extent in final film pixel unit. */
-      const int2 render_extent = film.render_extent_get() * film.scaling_factor_get();
-      const int overscan_pixels = film.render_overscan_get() * film.scaling_factor_get();
+      const float2 render_extent = float2(film.render_extent_get()) / film.render_ratio_get();
+      const float2 overscan_pixels = float2(film.render_overscan_get()) / film.render_ratio_get();
 
-      const float2 render_bottom_left = bottom_left - pixel_size * float(overscan_pixels);
+      const float2 render_bottom_left = bottom_left - pixel_size * overscan_pixels;
       const float2 render_top_right = render_bottom_left + pixel_size * float2(render_extent);
 
       if (main_view_.is_persp())

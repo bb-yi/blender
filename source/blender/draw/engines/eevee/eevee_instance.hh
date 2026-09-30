@@ -32,8 +32,10 @@
 #include "eevee_cryptomatte.hh"
 #include "eevee_debug_shared.hh"
 #include "eevee_depth_of_field.hh"
-#include "eevee_filter_material.hh"
+#include "eevee_dlss5.hh"
+#include "eevee_dlss_sr.hh"
 #include "eevee_film.hh"
+#include "eevee_filter_material.hh"
 #include "eevee_gbuffer.hh"
 #include "eevee_hizbuffer.hh"
 #include "eevee_light.hh"
@@ -54,8 +56,8 @@
 #include "eevee_shader.hh"
 #include "eevee_shadow.hh"
 #include "eevee_subsurface.hh"
-#include "eevee_telemetry.hh"
 #include "eevee_sync.hh"
+#include "eevee_telemetry.hh"
 #include "eevee_view.hh"
 #include "eevee_volume.hh"
 #include "eevee_world.hh"
@@ -112,6 +114,16 @@ namespace blender::eevee
     bool last_viewport_scene_time_valid_ = false;
     float last_viewport_scene_time_ = 0.0f;
     bool discard_viewport_history_ = false;
+    bool dlss5_reset_ = false;
+    bool dlss5_settings_changed_ = false;
+    SceneEEVEEDLSS5Mode dlss5_mode_ = SCE_EEVEE_DLSS5_OFF;
+    float dlss5_intensity_ = 1.0f;
+    float dlss5_local_tone_strength_ = 1.0f;
+    float dlss5_local_structure_strength_ = 1.0f;
+    float dlss5_skin_structure_strength_ = -1.0f;
+    bool dlss5_use_auto_mask_ = false;
+    bool dlss5_ui_correction_ = false;
+    char dlss5_style_ = 2;
     int2 render_extent_override_ = int2(-1);
 
     /** Info string displayed at the top of the render / viewport, or the console when baking. */
@@ -138,6 +150,8 @@ namespace blender::eevee
     RenderTextureModule render_textures;
     FilterMaterialModule filter_materials;
     OutlineModule outline;
+    Dlss5Module dlss5;
+    DlssSrModule dlss_sr;
     NativePostFXOutputModule native_postfx_outputs;
     Camera camera;
     Film film;
@@ -229,6 +243,8 @@ namespace blender::eevee
       render_textures(*this),
       filter_materials(*this),
       outline(*this),
+      dlss5(*this),
+      dlss_sr(*this),
       native_postfx_outputs(*this),
       camera(*this, uniform_data.data.camera),
       film(*this, uniform_data.data.film),
@@ -284,6 +300,16 @@ namespace blender::eevee
       return discard_viewport_history_;
     }
 
+    bool dlss5_reset() const
+    {
+      return dlss5_reset_;
+    }
+
+    bool dlss5_settings_changed() const
+    {
+      return dlss5_settings_changed_;
+    }
+
     /**
      * Return true when probe pipeline is used during this sample.
      */
@@ -330,7 +356,7 @@ namespace blender::eevee
 
     /* Light bake. */
 
-    void init_light_bake(Depsgraph* depsgraph, draw::Manager* manager);
+    bool init_light_bake(Depsgraph* depsgraph, draw::Manager* manager);
     void light_bake_irradiance(
       Object& probe,
       FunctionRef<void()> context_enable,

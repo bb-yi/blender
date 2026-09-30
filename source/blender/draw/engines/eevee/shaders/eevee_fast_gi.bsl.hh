@@ -989,6 +989,10 @@ void resolve([[work_group_id]] const uint3 group_id,
 
       float mix_fac = saturate(roughness * uni.raytrace_buf.roughness_mask_scale -
                                uni.raytrace_buf.roughness_mask_bias);
+      if (closure_is_npr_reflection(cl)) {
+        /* A neighboring diffuse pixel can still schedule this tile for Fast GI. */
+        mix_fac = 0.0f;
+      }
       bool use_raytrace = mix_fac < 1.0f;
       bool use_fast_gi = mix_fac > 0.0f;
 

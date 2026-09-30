@@ -5,6 +5,7 @@
 #pragma once
 
 #include "eevee_uniform_shared.hh"
+#include "gpu_shader_codegen_lib.glsl"
 
 /**
  * BxDF evaluation functions.
@@ -32,6 +33,9 @@ struct ClosureLight {
   /* Output both shadowed and unshadowed for shadow denoising. */
   packed_float3 light_shadowed;
   packed_float3 light_unshadowed;
+  /* Preserve the material normal when translucent LTC evaluation temporarily changes N. */
+  packed_float3 shadow_N;
+  ClosureNPRLightPolicy npr_policy;
 };
 
 /* Represent an approximation of a bunch of rays from a BSDF. */

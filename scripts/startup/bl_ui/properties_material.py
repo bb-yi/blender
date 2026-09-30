@@ -272,7 +272,7 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
         col.prop(mat, "ztest_mode", text="ZTest")
 
         header, panel = layout.panel("material_surface_stencil_settings", default_closed=True)
-        header.label(text="Stencil")
+        header.label(text="Stencil", text_ctxt="NPR")
         if panel:
             panel.use_property_split = True
             panel.use_property_decorate = False
@@ -321,9 +321,10 @@ def draw_material_stencil_settings(layout, mat):
     draw_stencil_mask_bits(sub, mat, "Read Mask", "stencil_read_mask_bits")
     draw_stencil_mask_bits(sub, mat, "Write Mask", "stencil_write_mask_bits")
     sub.prop(mat, "stencil_test", text="Test")
-    sub.prop(mat, "stencil_pass_op", text="Pass")
-    sub.prop(mat, "stencil_fail_op", text="Fail")
-    sub.prop(mat, "stencil_zfail_op", text="ZFail")
+    # Avoid generic "Pass" (official zh maps it to 通道 / render pass).
+    sub.prop(mat, "stencil_pass_op", text="On Pass")
+    sub.prop(mat, "stencil_fail_op", text="On Fail")
+    sub.prop(mat, "stencil_zfail_op", text="On ZFail")
 
 
 def draw_material_volume_settings(layout, mat, is_eevee=True):
@@ -382,6 +383,9 @@ def material_shader_compile_time_text(compile_time):
 
 
 def draw_material_shader_compilation_status(layout, mat):
+    # Keep label and value as separate UI strings so gettext can translate each
+    # piece. Runtime concatenation (e.g. "Status: " + name) produces dynamic
+    # msgids that never match the catalog.
     status_names = {
         'NOT_COMPILED': "Not Compiled",
         'QUEUED': "Queued",
@@ -390,10 +394,18 @@ def draw_material_shader_compilation_status(layout, mat):
     }
     status = getattr(mat, "shader_compile_status", 'NOT_COMPILED')
     compile_time = getattr(mat, "shader_compile_time", 0.0)
+    status_text = status_names.get(status, status)
 
     col = layout.column(align=True)
-    col.label(text="Status: " + status_names.get(status, status))
-    col.label(text="Compile Time: " + material_shader_compile_time_text(compile_time))
+
+    row = col.row(align=True)
+    row.label(text="Status")
+    row.label(text=status_text)
+
+    row = col.row(align=True)
+    row.label(text="Compile Time")
+    # Numeric timing string; do not run through translations.
+    row.label(text=material_shader_compile_time_text(compile_time), translate=False)
 
 
 def draw_material_settings(self, context):
@@ -447,6 +459,43 @@ class EEVEE_MATERIAL_PT_settings_surface(MaterialButtonsPanel, Panel):
         mat = context.material
 
         draw_material_surface_settings(layout, mat)
+
+
+class EEVEE_MATERIAL_PT_settings_outline_shell(MaterialButtonsPanel, Panel):
+    bl_label = "Outline Shell"
+    bl_context = "material"
+    bl_parent_id = "EEVEE_MATERIAL_PT_settings"
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        mat = context.material
+
+        has_node = mat.node_tree and any(
+            node.type == 'OUTPUT_OUTLINE_SHELL' and not node.mute
+            for node in mat.node_tree.nodes)
+        if not has_node:
+            layout.label(
+                text="Add an Outline Shell Output node to enable",
+                icon='INFO')
+        layout.active = has_node
+
+        col = layout.column()
+        col.prop(mat, "outline_shell_render_method", text="Render Method")
+
+        col = layout.column(heading="Culling")
+        col.prop(mat, "outline_shell_cull_method", text="Faces")
+
+        col = layout.column()
+        col.prop(mat, "outline_shell_ztest_mode", text="ZTest")
+        col.prop(mat, "use_outline_shell_depth_write", text="Depth Write")
+        col.prop(mat, "use_outline_shell_shadow", text="Cast Shadow")
+
+        col = layout.column()
+        col.prop(mat, "max_vertex_displacement", text="Max Distance")
 
 
 class EEVEE_MATERIAL_PT_settings_volume(MaterialButtonsPanel, Panel):
@@ -586,6 +635,7 @@ classes = (
     EEVEE_MATERIAL_PT_thickness,
     EEVEE_MATERIAL_PT_settings,
     EEVEE_MATERIAL_PT_settings_surface,
+    EEVEE_MATERIAL_PT_settings_outline_shell,
     EEVEE_MATERIAL_PT_settings_volume,
     EEVEE_MATERIAL_PT_settings_shader_compilation,
     MATERIAL_PT_lineart,

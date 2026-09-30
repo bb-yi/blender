@@ -7,6 +7,9 @@
  */
 
 #include <cstdlib>
+#include <algorithm>
+#include <climits>
+#include <cmath>
 #include <optional>
 
 #include "MEM_guardedalloc.h"
@@ -23,8 +26,12 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_utildefines.h"
+#include "BLI_string.h"
+#include "BLI_string_utf8.h"
+#include "BLI_string_utils.hh"
 
 #include "BKE_icons.hh"
+#include "BKE_animsys.h"
 #include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
@@ -71,6 +78,8 @@ static void light_copy_data(Main *bmain,
   Light *la_dst = id_cast<Light *>(id_dst);
   const Light *la_src = id_cast<const Light *>(id_src);
 
+  BLI_duplicatelist(&la_dst->shader_parameters, &la_src->shader_parameters);
+
   const bool is_localized = (flag & LIB_ID_CREATE_LOCAL) != 0;
   /* We always need allocation of our private ID data.
    * User reference-counting is also handled by calling code,
@@ -107,6 +116,7 @@ static void light_free_data(ID *id)
   Light *la = id_cast<Light *>(id);
 
   GPU_material_free(&la->gpumaterial);
+  BLI_freelistN(&la->shader_parameters);
 
   /* is no lib link block, but light extension */
   if (la->nodetree) {
@@ -136,6 +146,9 @@ static void light_foreach_working_space_color(ID *id, const IDTypeForeachColorFu
   Light *la = id_cast<Light *>(id);
 
   fn.single(&la->r);
+  for (LightShaderParameter &parameter : la->shader_parameters) {
+    fn.single(parameter.value_color);
+  }
 }
 
 static void light_blend_write(BlendWriter *writer, ID *id, const void *id_address)
@@ -158,6 +171,7 @@ static void light_blend_write(BlendWriter *writer, ID *id, const void *id_addres
   /* write LibData */
   writer->write_id_struct(id_address, la);
   BKE_id_blend_write(writer, &la->id);
+  writer->write_struct_list(&la->shader_parameters);
 
   /* Node-tree is integral part of lights, no libdata. */
   if (la->nodetree) {
@@ -175,6 +189,7 @@ static void light_blend_read_data(BlendDataReader *reader, ID *id)
   Light *la = id_cast<Light *>(id);
 
   BLO_read_struct(reader, PreviewImage, &la->preview);
+  BLO_read_struct_list(reader, LightShaderParameter, &la->shader_parameters);
   BKE_previewimg_blend_read(reader, la->preview);
   BLI_listbase_clear(&la->gpumaterial);
 }
@@ -209,6 +224,97 @@ IDTypeInfo IDType_ID_LA = {
 
     .lib_override_apply_post = nullptr,
 };
+
+LightShaderParameter *BKE_light_shader_parameter_add(Light &light, const char *name, int type)
+{
+  if (light.next_shader_parameter_identifier == INT_MAX ||
+      type < LIGHT_SHADER_PARAMETER_FLOAT || type > LIGHT_SHADER_PARAMETER_COLOR)
+  {
+    return nullptr;
+  }
+  auto *parameter = MEM_new<LightShaderParameter>(__func__);
+  parameter->type = eLightShaderParameterType(type);
+  BLI_strncpy_utf8(parameter->name, name[0] ? name : "Parameter", sizeof(parameter->name));
+  SNPRINTF(parameter->identifier, "parameter_%d", ++light.next_shader_parameter_identifier);
+  BLI_addtail(&light.shader_parameters, parameter);
+  BLI_uniquename(&light.shader_parameters, parameter, "Parameter", '.',
+                 offsetof(LightShaderParameter, name), sizeof(parameter->name));
+  light.active_shader_parameter_index = BLI_listbase_count(&light.shader_parameters) - 1;
+  return parameter;
+}
+
+void BKE_light_shader_parameter_remove(Light &light, LightShaderParameter &parameter)
+{
+  const std::string path = "shader_parameters[\"" + std::string(parameter.identifier) + "\"]";
+  /* Actions (including NLA actions) may be shared with another Light. Do not edit their curves.
+   * Identifiers are never reused, so an obsolete curve cannot animate a newly added parameter. */
+  BKE_animdata_driver_path_remove(&light.id, path.c_str());
+  BLI_remlink(&light.shader_parameters, &parameter);
+  MEM_delete(&parameter);
+  light.active_shader_parameter_index = std::clamp(
+      light.active_shader_parameter_index, 0, max_ii(0, BLI_listbase_count(&light.shader_parameters) - 1));
+}
+
+bool BKE_light_shader_parameter_value(const LightShaderParameter &parameter, float4 &value)
+{
+  value = float4(0.0f);
+  switch (parameter.type) {
+    case LIGHT_SHADER_PARAMETER_FLOAT:
+      value.x = parameter.value_float;
+      break;
+    case LIGHT_SHADER_PARAMETER_INT:
+      if (parameter.value_int < -16777216 || parameter.value_int > 16777216) {
+        return false;
+      }
+      value.x = float(parameter.value_int);
+      break;
+    case LIGHT_SHADER_PARAMETER_BOOL:
+      value.x = parameter.value_bool != 0 ? 1.0f : 0.0f;
+      break;
+    case LIGHT_SHADER_PARAMETER_VECTOR2:
+      value.x = parameter.value_vector2[0];
+      value.y = parameter.value_vector2[1];
+      break;
+    case LIGHT_SHADER_PARAMETER_VECTOR3:
+      value = float4(float3(parameter.value_vector3), 0.0f);
+      break;
+    case LIGHT_SHADER_PARAMETER_VECTOR4:
+      value = float4(parameter.value_vector4);
+      break;
+    case LIGHT_SHADER_PARAMETER_COLOR:
+      value = float4(parameter.value_color);
+      break;
+    default:
+      return false;
+  }
+  if (!(std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z) &&
+        std::isfinite(value.w))) {
+    return false;
+  }
+  if (parameter.use_hard_limits && parameter.type != LIGHT_SHADER_PARAMETER_BOOL) {
+    float lo = parameter.range_min;
+    float hi = parameter.range_max;
+    if (!std::isfinite(lo) || !std::isfinite(hi)) {
+      return false;
+    }
+    hi = std::max(lo, hi);
+    if (parameter.type == LIGHT_SHADER_PARAMETER_INT) {
+      lo = std::ceil(std::clamp(lo, -16777216.0f, 16777216.0f));
+      hi = std::max(lo, std::floor(std::clamp(hi, -16777216.0f, 16777216.0f)));
+    }
+    if (parameter.type == LIGHT_SHADER_PARAMETER_COLOR) {
+      lo = std::max(lo, 0.0f);
+      hi = std::max(lo, hi);
+    }
+    const int components = parameter.type <= LIGHT_SHADER_PARAMETER_BOOL ? 1 :
+                           parameter.type == LIGHT_SHADER_PARAMETER_VECTOR2 ? 2 :
+                           parameter.type == LIGHT_SHADER_PARAMETER_VECTOR3 ? 3 : 4;
+    for (int i = 0; i < components; i++) {
+      value[i] = std::clamp(value[i], lo, hi);
+    }
+  }
+  return true;
+}
 
 Light *BKE_light_add(Main *bmain, const char *name)
 {

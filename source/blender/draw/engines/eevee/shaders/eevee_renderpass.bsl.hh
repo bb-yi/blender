@@ -47,6 +47,23 @@ void output_aov(
   [[resource_table]] eevee::RenderPassOutput &rp = resource_table_get(eevee::RenderPassOutput);
   [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
 
+#ifdef MAT_FILTER
+  /* Filter passes render at a potentially reduced pass extent, but the render-pass buffers
+   * span the full stage extent. Rescale the fragment texel so scaled filter materials write
+   * their AOVs across the whole render-pass layer instead of the bottom-left corner. */
+  {
+    int2 pass_extent = int2(imageSize(filter_graph_output_img).xy);
+    if (pass_extent.x > 0 && pass_extent.y > 0) {
+      int2 rp_extent = int2(imageSize(rp.rp_color_img).xy);
+      if (rp_extent.x > 0 && rp_extent.y > 0) {
+        texel = clamp(int2(float2(texel) * (float2(rp_extent) / float2(pass_extent))),
+                      int2(0),
+                      rp_extent - int2(1));
+      }
+    }
+  }
+#endif
+
   uint total_len = uni.uniform_buf.render_pass.aovs.color_len +
                    uni.uniform_buf.render_pass.aovs.value_len;
 

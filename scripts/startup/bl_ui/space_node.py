@@ -24,6 +24,7 @@ from bl_ui.space_toolsystem_common import (
 )
 from bl_ui.properties_material import (
     EEVEE_MATERIAL_PT_settings,
+    EEVEE_MATERIAL_PT_settings_outline_shell,
     EEVEE_MATERIAL_PT_settings_shader_compilation,
     EEVEE_MATERIAL_PT_settings_surface,
     EEVEE_MATERIAL_PT_settings_volume,
@@ -380,6 +381,7 @@ class NODE_MT_filter_graph_node_output(node_add_menu.AddNodeMenu):
     def draw(self, _context):
         layout = self.layout
         self.node_operator(layout, "EeveeFilterGraphNodeStageOutput")
+        self.node_operator(layout, "EeveeFilterGraphNodeAOVOutput", label="AOV Output")
 
 
 class NODE_MT_filter_graph_node_add_all(Menu):
@@ -1326,6 +1328,7 @@ classes = (
 
     node_panel(EEVEE_MATERIAL_PT_settings),
     node_panel(EEVEE_MATERIAL_PT_settings_surface),
+    node_panel(EEVEE_MATERIAL_PT_settings_outline_shell),
     node_panel(EEVEE_MATERIAL_PT_settings_volume),
     node_panel(EEVEE_MATERIAL_PT_settings_shader_compilation),
     node_panel(MATERIAL_PT_viewport),

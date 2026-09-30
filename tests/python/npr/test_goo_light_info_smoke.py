@@ -9,8 +9,9 @@ material.use_nodes = True
 node = material.node_tree.nodes.new("ShaderNodeLightInfo")
 
 assert node.bl_label == "Light Info"
-assert [socket.name for socket in node.inputs] == []
-assert [socket.name for socket in node.outputs] == [
+assert node.mode == "BASIC"
+assert [socket.name for socket in node.inputs if socket.enabled] == []
+assert [socket.name for socket in node.outputs if socket.enabled] == [
     "Color",
     "Power",
     "Type",
@@ -33,8 +34,10 @@ assert node.light_object == light_object
 
 
 def assert_all_outputs_enabled(shader_node):
-    disabled = [socket.name for socket in shader_node.outputs if not socket.enabled]
-    assert not disabled, f"Light Info outputs must stay enabled; disabled={disabled}"
+    # Parameter sockets remain stored but unavailable in Basic mode, preserving their links.
+    disabled = [socket.name for socket in shader_node.outputs[:9] if not socket.enabled]
+    assert not disabled, f"Basic Light Info outputs must stay enabled; disabled={disabled}"
+    assert not any(socket.enabled for socket in shader_node.outputs[9:])
 
 
 assert_all_outputs_enabled(node)
@@ -58,4 +61,11 @@ node.light_object = sun_object
 assert_all_outputs_enabled(node)
 
 node.light_object = None
+assert_all_outputs_enabled(node)
+
+node.mode = "PARAMETER"
+assert [socket.name for socket in node.inputs if socket.enabled] == ["Default"]
+assert [socket.name for socket in node.outputs if socket.enabled][-2:] == ["Value", "Is Valid"]
+assert all(socket.enabled for socket in node.outputs[:9])
+node.mode = "BASIC"
 assert_all_outputs_enabled(node)

@@ -586,6 +586,10 @@ BLI_STATIC_ASSERT_ALIGN(ObjectAttribute, 20)
 #define DRW_REFERENCED_OBJECT_DATA_ABI_VERSION 1u
 #define DRW_REFERENCED_OBJECT_DATA_RECORD_STRIDE 10u
 
+/* Independent dynamic table in the shared ObjectAttribute SSBO, not a per-light fixed array. */
+#define DRW_LIGHT_SHADER_PARAMETER_HEADER 1u
+#define DRW_LIGHT_SHADER_PARAMETER_MAGIC 0x4C535031u /* "LSP1" */
+
 struct [[host_shared]] LayerAttribute {
   float4 data;
   uint hash_code;
