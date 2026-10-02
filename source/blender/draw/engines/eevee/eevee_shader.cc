@@ -1632,13 +1632,25 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
 
   bool use_transparency = false;
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT)) {
+  const blender::Material *blender_mat = GPU_material_get_material(gpumat);
+  const bool shell_blended = outline_shell &&
+                             blender_mat->outline_shell_transparency_method ==
+                                 MA_OUTLINE_SHELL_BLENDED;
+  if (outline_shell) {
+    info.define("MAT_OUTLINE_SHELL");
+    if (shell_blended) {
+      info.define("MAT_OUTLINE_SHELL_BLENDED");
+    }
+  }
+  if (outline_shell ? GPU_material_outline_shell_has_alpha(gpumat) :
+                      GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT))
+  {
     if (pipeline_type != MAT_PIPE_SHADOW || transparent_shadows) {
       info.define("MAT_TRANSPARENT");
       use_transparency = true;
     }
     /* Transparent material do not have any velocity specific pipeline. */
-    if (pipeline_type == MAT_PIPE_PREPASS_FORWARD_VELOCITY) {
+    if (pipeline_type == MAT_PIPE_PREPASS_FORWARD_VELOCITY && !outline_shell) {
       pipeline_type = MAT_PIPE_PREPASS_FORWARD;
     }
   }
@@ -1673,7 +1685,6 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
-  const blender::Material *blender_mat = GPU_material_get_material(gpumat);
   const bool depth_offset_affect_lighting = material_depth_offset_affects_lighting(blender_mat);
   const bool has_depth_offset = GPU_material_has_depth_offset_output(gpumat) &&
                                 material_pipeline_supports_depth_offset(pipeline_type,
@@ -2813,7 +2824,8 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
 
   bool has_vertex_displacement = GPU_material_has_displacement_output(mat) &&
                                  displacement_type != eMaterialDisplacement::MAT_DISPLACEMENT_BUMP;
-  bool has_transparency = GPU_material_flag_get(mat, GPU_MATFLAG_TRANSPARENT);
+  bool has_transparency = outline_shell ? GPU_material_outline_shell_has_alpha(mat) :
+                                         GPU_material_flag_get(mat, GPU_MATFLAG_TRANSPARENT);
   bool has_shadow_transparency = has_transparency && transparent_shadows;
   bool has_raytraced_transmission = blender_mat && (blender_mat->blend_flag & MA_BL_SS_REFRACTION);
   bool has_raycast = GPU_material_flag_get(mat, GPU_MATFLAG_RAYCAST);
@@ -2893,16 +2905,24 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
                                      (pipeline_type != MAT_PIPE_DEFERRED_NPR) ||
                                      needs_npr_vertex_displacement || needs_npr_depth_offset;
 
+  /* Shell modes are independent of the body's transparency settings. Shell graphs do not
+   * use an NPR tree key, so reserve their extra-key space for the transparency mode. */
+  const uint64_t graph_key = outline_shell ?
+                                 uint64_t(blender_mat->outline_shell_transparency_method) :
+                                 npr_tree_key;
+  const char blend_flags = outline_shell ?
+                               (blender_mat->blend_flag | MA_BL_TRANSPARENT_SHADOW) :
+                               blender_mat->blend_flag;
   uint64_t shader_uuid = shader_uuid_from_material_type(
       pipeline_type,
       geometry_type,
       displacement_type,
       thickness_type,
       probe_capture,
-      blender_mat->blend_flag,
+      blend_flags,
       outline_shell ? false : use_outline,
       outline_shell ? false : material_depth_offset_affects_lighting(blender_mat),
-      npr_tree_key,
+      graph_key,
       outline_shell);
 
   bool is_default_material = default_mat == nullptr;

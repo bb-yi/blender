@@ -78,7 +78,11 @@ void surf_shadow([[resource_table]] PipelineConstants &pipe,
     float random_threshold = pcg4d(float4(g_data.P, noise_offset)).x;
 
     float transparency = average(g_transmittance);
-    if (transparency > random_threshold) {
+    if (transparency > random_threshold
+#ifdef MAT_OUTLINE_SHELL
+        || transparency >= 1.0f
+#endif
+    ) {
       gpu_discard_fragment();
       return;
     }

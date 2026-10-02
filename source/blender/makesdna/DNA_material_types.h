@@ -185,6 +185,13 @@ enum eMaterial_OutlineShellRenderMethod : char {
   MA_OUTLINE_SHELL_FORWARD = 1,
 };
 
+/** #Material::outline_shell_transparency_method */
+enum eMaterial_OutlineShellTransparencyMethod : char {
+  MA_OUTLINE_SHELL_DITHERED = 0,
+  MA_OUTLINE_SHELL_CLIP = 1,
+  MA_OUTLINE_SHELL_BLENDED = 2,
+};
+
 /** #Material::outline_shell_flag */
 enum eMaterial_OutlineShellFlag : char {
   MA_OUTLINE_SHELL_CAST_SHADOW = 1 << 0,
@@ -541,8 +548,10 @@ struct Material {
   char outline_shell_ztest_mode = MA_ZTEST_LESS_EQUAL;
   char outline_shell_depth_write = true;
   char outline_shell_flag = 0;
-
-  char _pad4[7] = {};
+  eMaterial_OutlineShellTransparencyMethod outline_shell_transparency_method =
+      MA_OUTLINE_SHELL_DITHERED;
+  char _pad4[2] = {};
+  float outline_shell_alpha_threshold = 0.5f;
 };
 
 #ifdef __cplusplus

@@ -483,7 +483,14 @@ class EEVEE_MATERIAL_PT_settings_outline_shell(MaterialButtonsPanel, Panel):
                 icon='INFO')
         layout.active = has_node
 
+        blended = mat.outline_shell_transparency_method == 'BLENDED'
         col = layout.column()
+        col.prop(mat, "outline_shell_transparency_method", text="Transparency")
+        if mat.outline_shell_transparency_method == 'CLIP':
+            col.prop(mat, "outline_shell_alpha_threshold", text="Alpha Threshold")
+
+        col = layout.column()
+        col.enabled = not blended
         col.prop(mat, "outline_shell_render_method", text="Render Method")
 
         col = layout.column(heading="Culling")
@@ -491,8 +498,12 @@ class EEVEE_MATERIAL_PT_settings_outline_shell(MaterialButtonsPanel, Panel):
 
         col = layout.column()
         col.prop(mat, "outline_shell_ztest_mode", text="ZTest")
-        col.prop(mat, "use_outline_shell_depth_write", text="Depth Write")
+        row = col.row()
+        row.enabled = not blended
+        row.prop(mat, "use_outline_shell_depth_write", text="Depth Write")
         col.prop(mat, "use_outline_shell_shadow", text="Cast Shadow")
+        if blended:
+            layout.label(text="Blended uses Forward without depth or velocity", icon='INFO')
 
         col = layout.column()
         col.prop(mat, "max_vertex_displacement", text="Max Distance")

@@ -52,4 +52,12 @@ float alpha_threshold(float hash_scale, float hash_offset, float3 P)
   return threshold;
 }
 
+/* Match the shell prepass threshold, while keeping exact endpoints independent of noise. */
+bool should_discard(float transparency, float hash_scale, float hash_offset, float3 P)
+{
+  /* Derivatives must be evaluated before any potentially divergent Alpha condition. */
+  const float threshold = alpha_threshold(hash_scale, hash_offset, P);
+  return transparency >= 1.0f || (transparency > 0.0f && transparency > threshold);
+}
+
 }  // namespace eevee::hashed_transparency

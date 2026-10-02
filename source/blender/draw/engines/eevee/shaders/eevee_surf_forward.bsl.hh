@@ -23,6 +23,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_geom_iface_info)
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_outline_lib.glsl"
 #include "eevee_surf_common.bsl.hh"
+#include "eevee_transparency.bsl.hh"
 #include "eevee_volume_lib.bsl.hh"
 
 /* Global thickness because it is needed for closure_to_rgba. */
@@ -159,6 +160,28 @@ SurfaceForwardFragOut surf_forward_impl(
 
   outline_output_reset();
   nodetree_surface(closure_rand);
+
+#ifdef MAT_OUTLINE_SHELL
+  const float shell_transparency = average(g_transmittance);
+#  ifdef MAT_OUTLINE_SHELL_BLENDED
+  if (shell_transparency >= 1.0f) {
+    gpu_discard_fragment();
+    return frag_out;
+  }
+#  else
+  if (hashed_transparency::should_discard(shell_transparency,
+                                         uni.pipeline_buf.alpha_hash_scale,
+                                         sampling.rng_1D_get(SAMPLING_TRANSPARENCY),
+                                         g_data.P))
+  {
+    gpu_discard_fragment();
+    return frag_out;
+  }
+  /* Coverage already applied Alpha. A surviving sample is opaque, including volume resolve. */
+  g_emission *= safe_rcp(1.0f - shell_transparency);
+  g_transmittance = float3(0.0f);
+#  endif
+#endif
 
   /* NPR: Forward/blended materials must still feed the Normal render pass. The deferred path writes
    * it from the GBuffer during the combine stage, but forward surfaces are never gbuffered, so the

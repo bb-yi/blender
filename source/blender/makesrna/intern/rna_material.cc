@@ -1227,6 +1227,16 @@ void RNA_def_material(BlenderRNA *brna)
        "Emission render pass"},
       {0, nullptr, 0, nullptr, nullptr},
   };
+  static const EnumPropertyItem prop_outline_shell_transparency_items[] = {
+      {MA_OUTLINE_SHELL_DITHERED, "DITHERED", 0, "Dithered", "Stochastic alpha coverage"},
+      {MA_OUTLINE_SHELL_CLIP, "CLIP", 0, "Clip", "Discard alpha below the threshold"},
+      {MA_OUTLINE_SHELL_BLENDED,
+       "BLENDED",
+       0,
+       "Blended",
+       "Sorted alpha blending, without shell depth or velocity output"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
   static const EnumPropertyItem prop_eevee_surface_cull_method_items[] = {
       {MA_SURFACE_CULL_NONE, "NONE", 0, "None", "Render both front and back faces"},
       {MA_SURFACE_CULL_BACK, "BACK", 0, "Back", "Hide back-facing faces"},
@@ -1464,6 +1474,16 @@ void RNA_def_material(BlenderRNA *brna)
   RNA_def_property_boolean_sdna(prop, nullptr, "depth_write", 1);
   RNA_def_property_ui_text(
       prop, "Depth Write", "Write Eevee material surface depth output");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "outline_shell_transparency_method", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, prop_outline_shell_transparency_items);
+  RNA_def_property_ui_text(prop, "Outline Shell Transparency", "How the shell Alpha is rendered");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "outline_shell_alpha_threshold", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_range(prop, 0.0f, 1.0f);
+  RNA_def_property_ui_text(prop, "Outline Shell Alpha Threshold", "Minimum nonzero alpha to keep");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 
   prop = RNA_def_property(srna, "outline_shell_render_method", PROP_ENUM, PROP_NONE);
