@@ -17,6 +17,7 @@
 #include "vk_device.hh"
 #include "vk_state_manager.hh"
 #include "vk_storage_buffer.hh"
+#include "vk_nuru_raytrace_acceleration.hh"
 #include "vk_texture.hh"
 #include "vk_vertex_buffer.hh"
 
@@ -95,6 +96,10 @@ void VKDevice::deinit()
   }
 
   deinit_submission_pool();
+
+  /* Nuru: hardware ray tracing owns device-lifetime objects (pipelines, command pool, OIDN
+   * interop buffers) that must be released before the memory allocator and device go away. */
+  vulkan::raytrace_device_free();
 
   dummy_buffer.free();
   samplers_.free();
@@ -219,6 +224,24 @@ void VKDevice::init_functions()
     /* VK_KHR_external_memory_fd */
     functions.vkGetMemoryFd = LOAD_FUNCTION(vkGetMemoryFdKHR);
 #endif
+  }
+
+  /* Nuru: VK_KHR_acceleration_structure */
+  if (extensions_.hardware_raytracing) {
+    functions.vkGetAccelerationStructureBuildSizes = LOAD_FUNCTION(
+        vkGetAccelerationStructureBuildSizesKHR);
+    functions.vkCreateAccelerationStructure = LOAD_FUNCTION(vkCreateAccelerationStructureKHR);
+    functions.vkDestroyAccelerationStructure = LOAD_FUNCTION(vkDestroyAccelerationStructureKHR);
+    functions.vkCmdBuildAccelerationStructures = LOAD_FUNCTION(
+        vkCmdBuildAccelerationStructuresKHR);
+    functions.vkGetAccelerationStructureDeviceAddress = LOAD_FUNCTION(
+        vkGetAccelerationStructureDeviceAddressKHR);
+  }
+
+  /* Nuru: VK_NV_device_diagnostic_checkpoints (wedge diagnostic, env-gated). */
+  if (extensions_.diagnostic_checkpoints) {
+    functions.vkCmdSetCheckpoint = LOAD_FUNCTION(vkCmdSetCheckpointNV);
+    functions.vkGetQueueCheckpointData = LOAD_FUNCTION(vkGetQueueCheckpointDataNV);
   }
 
 #undef LOAD_FUNCTION

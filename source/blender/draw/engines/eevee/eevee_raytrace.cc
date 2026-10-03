@@ -70,11 +70,33 @@ void RayTraceModule::init()
   data_.thickness = ray_tracing_options_.screen_trace_thickness;
 
   tracing_method_ = RaytraceEEVEE_Method(sce_eevee.ray_tracing_method);
+  hardware_feature_mask_ = sce_eevee.hardware_raytracing_features;
+  data_.hardware_trace_phase = HWRT_TRACE_PHASE_FULL;
+  data_.hardware_feature_mask = 0;
+  data_.use_hardware_tracing_method = false;
+  if (tracing_method_ == RAYTRACE_EEVEE_METHOD_HARDWARE &&
+      !GPU_viewport_hardware_raytracing_support())
+  {
+    tracing_method_ = RAYTRACE_EEVEE_METHOD_SCREEN;
+  }
   fast_gi_ray_count_ = sce_eevee.fast_gi_ray_count;
   fast_gi_step_count_ = sce_eevee.fast_gi_step_count;
   fast_gi_ao_only_ = (sce_eevee.fast_gi_method == FAST_GI_AO_ONLY);
 
   use_raytracing_ = (sce_eevee.flag & SCE_EEVEE_SSR_ENABLED) != 0;
+  hardware_shadow_ready_ = false;
+  if (!use_hardware_tracing()) {
+    free_hardware_rt_scene_cache();
+  }
+  if (!use_hardware_shadows()) {
+    hardware_shadow_visibility_tx_.free();
+  }
+  if (!hardware_shadow_visibility_tx_.is_valid()) {
+    const float visibility[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    hardware_shadow_visibility_tx_.ensure_2d_array(
+        gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1,
+        GPU_TEXTURE_USAGE_SHADER_READ, visibility);
+  }
 
   float4 data(0.0f);
   radiance_dummy_black_tx_.ensure_2d(
@@ -406,7 +428,8 @@ void RayTraceModule::sync()
     const bool use_temporal_denoise = (ray_tracing_options_.denoise_stages &
                                        RAYTRACE_EEVEE_DENOISE_TEMPORAL) &&
                                       use_spatial_denoise;
-    const bool use_bilateral_denoise = (ray_tracing_options_.denoise_stages &
+    const bool use_bilateral_denoise = !use_hardware_tracing_method() &&
+                                       (ray_tracing_options_.denoise_stages &
                                         RAYTRACE_EEVEE_DENOISE_BILATERAL) &&
                                        use_temporal_denoise;
 
@@ -430,6 +453,15 @@ void RayTraceModule::sync()
     }
     if (use_spatial_denoise) {
       inst_.manager->warm_shader_specialization(denoise_spatial_ps_);
+      if (use_hardware_tracing() && data_.trace_pixel_scale == 1 &&
+          (hardware_feature_mask_ & (RAYTRACE_EEVEE_HARDWARE_REFLECTIONS |
+                                     RAYTRACE_EEVEE_HARDWARE_REFRACTIONS)) != 0)
+      {
+        /* Nuru's full-resolution late specular phase only resolves, without spatial blur. */
+        data_.skip_denoise = true;
+        inst_.manager->warm_shader_specialization(denoise_spatial_ps_);
+        data_.skip_denoise = false;
+      }
     }
     if (use_temporal_denoise) {
       inst_.manager->warm_shader_specialization(denoise_temporal_ps_);
@@ -481,8 +513,42 @@ RayTraceResult RayTraceModule::render(RayTraceBuffer &rt_buffer,
                                       eClosureBits active_closures,
                                       View &render_view)
 {
+  rt_buffer.scene_final_specular.reset();
+  return render_phase(rt_buffer,
+                      nullptr,
+                      screen_radiance_back_tx,
+                      active_closures,
+                      render_view,
+                      HWRT_TRACE_PHASE_FULL);
+}
+
+RayTraceResult RayTraceModule::render_phase(RayTraceBuffer &rt_buffer,
+                                            gpu::Texture *screen_radiance_front_tx,
+                                            gpu::Texture *screen_radiance_back_tx,
+                                            eClosureBits active_closures,
+                                            View &render_view,
+                                            eHardwareTracePhase phase)
+{
   using namespace blender::math;
   BLI_assert(use_raytracing_);
+  if (rt_buffer.history_phase != phase) {
+    for (RayTraceBuffer::DenoiseBuffer &buffer : rt_buffer.closures) {
+      buffer.valid_history = false;
+    }
+    rt_buffer.history_phase = phase;
+  }
+  const uint32_t specular_mask = RAYTRACE_EEVEE_HARDWARE_REFLECTIONS |
+                                 RAYTRACE_EEVEE_HARDWARE_REFRACTIONS;
+  current_hardware_feature_mask_ = hardware_feature_mask_;
+  if (phase == HWRT_TRACE_PHASE_PRECOMBINE) {
+    current_hardware_feature_mask_ &= ~specular_mask;
+  }
+  else if (phase == HWRT_TRACE_PHASE_SCENE_FINAL_SPECULAR) {
+    current_hardware_feature_mask_ &= specular_mask;
+  }
+  data_.use_hardware_tracing_method = use_hardware_tracing_method();
+  data_.hardware_trace_phase = use_hardware_tracing_method() ? phase : HWRT_TRACE_PHASE_FULL;
+  data_.hardware_feature_mask = use_hardware_tracing_method() ? hardware_feature_mask_ : 0;
 
   if (rt_buffer.npr_history_reset_generation != npr_history_reset_generation_) {
     for (RayTraceBuffer::DenoiseBuffer &buffer : rt_buffer.closures) {
@@ -493,7 +559,8 @@ RayTraceResult RayTraceModule::render(RayTraceBuffer &rt_buffer,
     rt_buffer.npr_history_reset_generation = npr_history_reset_generation_;
   }
 
-  screen_radiance_front_tx_ = rt_buffer.radiance_feedback_tx.is_valid() ?
+  screen_radiance_front_tx_ = screen_radiance_front_tx ? screen_radiance_front_tx :
+                              rt_buffer.radiance_feedback_tx.is_valid() ?
                                   rt_buffer.radiance_feedback_tx :
                                   radiance_dummy_black_tx_;
   screen_radiance_back_tx_ = screen_radiance_back_tx ? screen_radiance_back_tx :
@@ -501,7 +568,15 @@ RayTraceResult RayTraceModule::render(RayTraceBuffer &rt_buffer,
 
   RaytraceEEVEE options = ray_tracing_options_;
 
-  bool use_fast_gi_scan = options.trace_max_roughness < 1.0f;
+  if (use_hardware_tracing_method()) {
+    /* Nuru's traced families cover the full roughness range. Do not let the screen-space
+     * Fast GI cutoff remove hardware rays or resurrect disabled indirect families. Keep
+     * the saved scene options untouched so disabling HWRT restores native Eevee behavior. */
+    options.trace_max_roughness = 1.0f;
+  }
+
+  bool use_fast_gi_scan = phase != HWRT_TRACE_PHASE_SCENE_FINAL_SPECULAR &&
+                         options.trace_max_roughness < 1.0f;
 
   const int resolution_scale = max_ii(1, power_of_2_max_i(options.resolution_scale));
   const int fast_gi_resolution_scale = max_ii(
@@ -558,7 +633,7 @@ RayTraceResult RayTraceModule::render(RayTraceBuffer &rt_buffer,
   /* Data for the radiance setup. */
   data_.trace_pixel_scale = resolution_scale;
   data_.trace_pixel_offset = int2(random_in_tile(inst_.sampling.sample_index(), resolution_scale));
-  data_.history_persmat = rt_buffer.history_persmat;
+  data_.history_persmat = screen_radiance_front_tx ? render_view.persmat() : rt_buffer.history_persmat;
   data_.full_resolution = extent;
   data_.full_resolution_inv = 1.0f / float2(extent);
 
@@ -584,8 +659,29 @@ RayTraceResult RayTraceModule::render(RayTraceBuffer &rt_buffer,
 
   data_.trace_refraction = screen_radiance_back_tx != nullptr;
 
+  /* Keep NPR's per-closure radiance/weights/diffusion contract. Every object still participates
+   * in transport; only the denoising representation differs for layers requiring NPR data. */
+  use_shared_oidn_ = use_hardware_tracing() && has_active_closure &&
+                     (options.flag & RAYTRACE_EEVEE_USE_DENOISE) != 0 &&
+                     (hardware_feature_mask_ & (RAYTRACE_EEVEE_HARDWARE_GI |
+                                                RAYTRACE_EEVEE_HARDWARE_REFLECTIONS |
+                                                RAYTRACE_EEVEE_HARDWARE_REFRACTIONS)) != 0 &&
+                     inst_.pipelines.deferred.header_layer_count() < GBUF_NPR_HEADER_LAYER_COUNT;
+  if (use_shared_oidn_) {
+    shared_indirect_radiance_tx_.acquire_2d(tracing_res, gpu::TextureFormat::RAYTRACE_RADIANCE_FORMAT);
+    shared_indirect_albedo_tx_.acquire_2d(tracing_res, gpu::TextureFormat::SFLOAT_16_16_16_16);
+    shared_indirect_normal_tx_.acquire_2d(tracing_res, gpu::TextureFormat::SFLOAT_16_16_16_16);
+    shared_indirect_radiance_tx_.clear(float4(0.0f));
+    shared_indirect_albedo_tx_.clear(float4(0.0f));
+    shared_indirect_normal_tx_.clear(float4(0.0f, 0.0f, 1.0f, 0.0f));
+  }
+
   for (int i = 0; i < 3; i++) {
     result.closures[i] = trace(i, (closure_count > i), options, rt_buffer, render_view);
+  }
+  if (use_shared_oidn_) {
+    result.shared_indirect = resolve_hardware_shared_indirect(rt_buffer, render_view);
+    result.use_shared_indirect = true;
   }
 
   if (has_active_closure) {
@@ -672,11 +768,27 @@ RayTraceResultTexture RayTraceModule::trace(int closure_index,
   renderbuf_depth_view_ = inst_.render_buffers.depth_tx;
 
   const bool use_denoise = (options.flag & RAYTRACE_EEVEE_USE_DENOISE);
-  const bool use_spatial_denoise = (options.denoise_stages & RAYTRACE_EEVEE_DENOISE_SPATIAL) &&
+  const bool scene_final_specular_phase =
+      data_.hardware_trace_phase == HWRT_TRACE_PHASE_SCENE_FINAL_SPECULAR;
+  const bool hardware_kernel_will_run = use_hardware_tracing() &&
+      current_hardware_feature_mask_ != 0 &&
+      !inst_.sync.hardware_raytrace_scene_entries().is_empty() &&
+      closure_index < inst_.pipelines.deferred.closure_layer_count() / 2;
+  const bool use_oidn = !use_shared_oidn_ && use_denoise && hardware_kernel_will_run;
+  /* Preserve the pinned phase policy, including NPR's per-closure OIDN representation:
+   * no full-resolution spatial blur or temporal history after scene-final specular, and
+   * no native bilateral filter in hardware mode. Kernel-less compatibility paths retain
+   * spatial filtering so unsupported closures do not expose unfiltered GGX samples. */
+  const bool allow_spatial_denoise = !scene_final_specular_phase || resolution_scale > 1 ||
+                                     !hardware_kernel_will_run;
+  const bool use_spatial_denoise = allow_spatial_denoise &&
+                                   (options.denoise_stages & RAYTRACE_EEVEE_DENOISE_SPATIAL) &&
                                    use_denoise;
-  const bool use_temporal_denoise = (options.denoise_stages & RAYTRACE_EEVEE_DENOISE_TEMPORAL) &&
+  const bool use_temporal_denoise = !scene_final_specular_phase &&
+                                    (options.denoise_stages & RAYTRACE_EEVEE_DENOISE_TEMPORAL) &&
                                     use_spatial_denoise;
-  const bool use_bilateral_denoise = (options.denoise_stages & RAYTRACE_EEVEE_DENOISE_BILATERAL) &&
+  const bool use_bilateral_denoise = !use_hardware_tracing_method() &&
+                                     (options.denoise_stages & RAYTRACE_EEVEE_DENOISE_BILATERAL) &&
                                      use_temporal_denoise;
   use_npr_history_ = inst_.pipelines.deferred.header_layer_count() >= GBUF_NPR_HEADER_LAYER_COUNT;
   if (!use_temporal_denoise || !use_npr_history_) {
@@ -716,6 +828,17 @@ RayTraceResultTexture RayTraceModule::trace(int closure_index,
     ray_time_tx_.acquire_2d(tracing_res, gpu::TextureFormat::RAYTRACE_RAYTIME_FORMAT);
     ray_radiance_tx_.acquire_2d(tracing_res, gpu::TextureFormat::RAYTRACE_RADIANCE_FORMAT);
 
+    if (use_oidn) {
+      ray_oidn_albedo_tx_.acquire_2d(tracing_res, gpu::TextureFormat::SFLOAT_16_16_16_16);
+      ray_oidn_normal_tx_.acquire_2d(tracing_res, gpu::TextureFormat::SFLOAT_16_16_16_16);
+      ray_oidn_albedo_tx_.clear(float4(0.0f));
+      ray_oidn_normal_tx_.clear(float4(0.0f));
+      /* The native denoiser only reads dispatched tiles. OIDN reads the entire ray grid, so
+       * background/unused tiles must not contain previous texture-pool contents. */
+      ray_radiance_tx_.clear(float4(0.0f));
+    }
+    bool hardware_traced = false;
+
     inst_.manager->submit(generate_ps_, render_view);
     if (tracing_method_ == RAYTRACE_EEVEE_METHOD_SCREEN) {
       if (inst_.planar_probes.enabled()) {
@@ -724,8 +847,41 @@ RayTraceResultTexture RayTraceModule::trace(int closure_index,
       inst_.manager->submit(trace_screen_ps_, render_view);
     }
     else {
+      /* Seed native probe misses for enabled and unsupported families. Disabled hardware
+       * families have no generated ray; their objects still participate in other rays. */
       inst_.manager->submit(trace_fallback_ps_, render_view);
+      if (use_hardware_tracing()) {
+        for (const int phase : {int(HWRT_TRACE_PHASE_PRECOMBINE),
+                                int(HWRT_TRACE_PHASE_SCENE_FINAL_SPECULAR)}) {
+          const uint32_t phase_features = phase == HWRT_TRACE_PHASE_PRECOMBINE ?
+              RAYTRACE_EEVEE_HARDWARE_GI :
+              (RAYTRACE_EEVEE_HARDWARE_REFLECTIONS | RAYTRACE_EEVEE_HARDWARE_REFRACTIONS);
+          if ((current_hardware_feature_mask_ & phase_features) == 0) {
+            continue;
+          }
+          if (submit_hardware_tracing(render_view, phase) &&
+              submit_hardware_hit_lighting(render_view, phase))
+          {
+            GPU_texture_copy(ray_time_tx_, hardware_hit_.time);
+            GPU_texture_copy(ray_radiance_tx_, hardware_hit_.radiance);
+            hardware_traced = true;
+            if (use_oidn) {
+              submit_hardware_denoise_guides();
+            }
+          }
+          release_hardware_hit_buffers();
+        }
+      }
     }
+    if (use_oidn && hardware_traced) {
+      submit_hardware_denoise();
+    }
+    if (use_shared_oidn_) {
+      accumulate_hardware_shared_indirect();
+    }
+    ray_oidn_albedo_tx_.release();
+    ray_oidn_normal_tx_.release();
+    ray_radiance_oidn_tx_.release();
   }
 
   RayTraceResultTexture result;
@@ -852,6 +1008,7 @@ RayTraceResultTexture RayTraceModule::trace(int closure_index,
 
 RayTraceResult RayTraceModule::alloc_only(RayTraceBuffer &rt_buffer)
 {
+  rt_buffer.scene_final_specular.reset();
   const int2 extent = inst_.render_extent_get();
   eGPUTextureUsage usage_rw = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
 
@@ -869,6 +1026,7 @@ RayTraceResult RayTraceModule::alloc_only(RayTraceBuffer &rt_buffer)
 
 RayTraceResult RayTraceModule::alloc_dummy(RayTraceBuffer &rt_buffer)
 {
+  rt_buffer.scene_final_specular.reset();
   eGPUTextureUsage usage_rw = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
 
   RayTraceResult result;

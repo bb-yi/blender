@@ -82,6 +82,7 @@
 #include "eevee_ray_denoise.bsl.hh"                  /* IWYU pragma: export */
 #include "eevee_ray_generate.bsl.hh"                 /* IWYU pragma: export */
 #include "eevee_ray_tile.bsl.hh"                     /* IWYU pragma: export */
+#include "eevee_ray_hit_eval.bsl.hh"                 /* IWYU pragma: export */
 #include "eevee_ray_trace.bsl.hh"                    /* IWYU pragma: export */
 #include "eevee_ray_trace_screen_lib.bsl.hh"         /* IWYU pragma: export */
 #include "eevee_ray_types_lib.bsl.hh"                /* IWYU pragma: export */

@@ -44,11 +44,19 @@ struct NPRShadowSurfaceData {
   [[resource_table]] srt_t<HiZ> hiz;
 };
 
+struct HardwareShadowData {
+  [[specialization_constant(false)]] bool use_hardware_rt_shadows;
+  /* Only declared for deferred direct-light evaluation. NPR radiance is not bound there. */
+  [[sampler(DIRECT_RADIANCE_NPR_TX_SLOT_1)]] sampler2DArray hardware_shadow_visibility_tx;
+};
+
 struct LightEvalData {
   [[compilation_constant]] bool use_light_shader_texture_eval;
   [[compilation_constant]] bool use_light_shader_surfel_eval;
   [[compilation_constant]] bool use_npr_light_policy;
+  [[compilation_constant]] bool use_hardware_shadow_data;
 
+  [[resource_table, condition(use_hardware_shadow_data)]] srt_t<HardwareShadowData> hardware_shadow;
   [[resource_table]] srt_t<ShadowRenderData> shadow_data;
   [[resource_table]] srt_t<UtilityTexture> utility_tx;
   [[resource_table, condition(use_npr_light_policy)]] srt_t<NPRShadowSurfaceData> npr_surface;
@@ -375,7 +383,7 @@ void eval_single_closure(sampler2DArray util_tx,
                          ClosureLight &cl,
                          float3 V,
                          float attenuation,
-                         float shadow,
+                         float3 shadow,
                          const bool light_shader_no_distance_falloff,
                          const bool is_directional)
 {
@@ -390,7 +398,7 @@ void eval_single_closure(sampler2DArray util_tx,
                              util_tx, light, lv, vertices, cl, V, is_directional) :
                          light_ltc(util_tx, light, cl.N, V, lv, cl.ltc_mat, vertices);
   float3 out_radiance = light.color * ltc_result;
-  float visibility = shadow * attenuation;
+  float3 visibility = shadow * attenuation;
   cl.light_shadowed += visibility * out_radiance;
   cl.light_unshadowed += attenuation * out_radiance;
 }
@@ -416,11 +424,11 @@ template<bool is_transmission> struct EvalCtx {
                     LightVertices vertices,
                     ClosureLight &cl,
                     float attenuation,
-                    float native_shadow,
+                    float3 native_shadow,
                     bool light_shader_no_distance_falloff,
                     bool is_directional)
   {
-    float visibility = native_shadow;
+    float3 visibility = native_shadow;
     if (srt.use_npr_light_policy) [[static_branch]] {
       if (closure_npr_policy_enabled(cl.npr_policy)) {
         /* This is native direct illumination, including the SSS back-light term. Custom NPR
@@ -444,8 +452,8 @@ template<bool is_transmission> struct EvalCtx {
         shadow_ctx.transmission_path = is_transmission;
         shadow_ctx.is_translucent_with_thickness =
             is_transmission && cl.type == LIGHT_TRANSLUCENT_WITH_THICKNESS;
-        visibility = npr_shadow_visibility(srt, light, is_directional, lv.L,
-                                            shadow_ctx, cl.npr_policy);
+        visibility = float3(npr_shadow_visibility(srt, light, is_directional, lv.L,
+                                                   shadow_ctx, cl.npr_policy));
       }
     }
     [[resource_table]] const UtilityTexture &util = srt.utility_tx;
@@ -549,7 +557,7 @@ template<bool is_transmission> struct EvalCtx {
       return;
     }
 
-    float shadow = 1.0f;
+    float3 shadow = float3(1.0f);
     bool needs_native_shadow = true;
     if (srt.use_npr_light_policy) [[static_branch]] {
       needs_native_shadow = false;
@@ -569,7 +577,17 @@ template<bool is_transmission> struct EvalCtx {
       }
     }
     if (light.tilemap_index != LIGHT_NO_SHADOW && needs_native_shadow) {
-      shadow = shadow_eval(srd,
+      bool use_hardware_shadow = false;
+      if (srt.use_hardware_shadow_data) [[static_branch]] {
+        [[resource_table]] const HardwareShadowData &hwrt = srt.hardware_shadow;
+        use_hardware_shadow = hwrt.use_hardware_rt_shadows && light.hwrt_shadow_layer >= 0;
+        if (use_hardware_shadow) {
+          shadow = texelFetch(hwrt.hardware_shadow_visibility_tx,
+                               int3(int2(texel), light.hwrt_shadow_layer), 0).rgb;
+        }
+      }
+      if (!use_hardware_shadow) {
+        shadow = float3(shadow_eval(srd,
                            light,
                            is_directional,
                            is_transmission,
@@ -582,7 +600,8 @@ template<bool is_transmission> struct EvalCtx {
                            terminator_normal_offset,
                            terminator_geometry_offset,
                            ray_count,
-                           ray_step_count);
+                           ray_step_count));
+      }
     }
 
     if (is_translucent_with_thickness) {

@@ -710,6 +710,50 @@ static void version_solid_color_width_height_defaults(Main &bmain)
 
 void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
 {
+  if (DNA_struct_member_exists(fd->filesdna, "RaytraceEEVEE", "int", "denoise_backend")) {
+    /* Nuru stores percentages in this field; native Eevee stores a downscale divisor.
+     * Identify the foreign layout, not the file version shared by unrelated Blender forks.
+     * The native grid cannot represent 75%; choose 50% without raising the saved ray budget. */
+    for (Scene &scene : bmain->scenes) {
+      int &scale = scene.eevee.ray_tracing_options.resolution_scale;
+      switch (scale) {
+        case 100:
+          scale = 1;
+          break;
+        case 75:
+        case 50:
+          scale = 2;
+          break;
+        case 25:
+          scale = 4;
+          break;
+      }
+    }
+  }
+
+  if (!DNA_struct_member_exists(fd->filesdna, "RaytraceEEVEE", "int", "gi_spatial_samples")) {
+    /* Preserve the earlier port's fixed ray budget. New scenes use Nuru's 16-sample default. */
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.ray_tracing_options.gi_spatial_samples = RAYTRACE_EEVEE_GI_SPATIAL_8;
+    }
+  }
+
+  /* Presence checking also covers files from the parallel NPR feature branches. Keep the old
+   * ray-tracing method, enable flag and indirect intensity exactly as saved. */
+  if (!DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "int", "hardware_raytracing_features")) {
+    const SceneEEVEE defaults;
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.hardware_raytracing_features = defaults.hardware_raytracing_features;
+      scene.eevee.ray_tracing_reflection_bounces = defaults.ray_tracing_reflection_bounces;
+      scene.eevee.ray_tracing_refraction_bounces = defaults.ray_tracing_refraction_bounces;
+      scene.eevee.hardware_raytracing_shadow_samples = defaults.hardware_raytracing_shadow_samples;
+      scene.eevee.hardware_raytracing_shadow_color_intensity =
+          defaults.hardware_raytracing_shadow_color_intensity;
+      scene.eevee.hardware_raytracing_shadow_transparency =
+          defaults.hardware_raytracing_shadow_transparency;
+    }
+  }
+
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 1)) {
     for (Scene &scene : bmain->scenes) {
       scene.r.mode |= R_SAVE_OUTPUT;

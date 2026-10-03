@@ -228,6 +228,8 @@ namespace blender::eevee
       inst_.pipelines.background.render(render_view_, combined_fb_);
     }
 
+    const bool scene_final_hardware_specular =
+        inst_.pipelines.deferred.use_scene_final_hardware_specular();
     /* TODO(Miguel Pozo): Deferred and forward prepass should happen before the GBuffer pass. */
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferred);
@@ -239,14 +241,15 @@ namespace blender::eevee
                                       extent_,
                                       rt_buffer_opaque_,
                                       rt_buffer_refract_,
-                                      volume_compute_done);
+                                      volume_compute_done,
+                                      scene_final_hardware_specular);
     }
 
     /* NPR: the outline detect pass reads the deferred GBuffer (surface normals for raytrace
      * transmission, see d55d73358c0b). Keep the GBuffer alive until after the outline pass when
      * outline is enabled; otherwise release it right away to free the pool textures early. */
-    const bool defer_gbuffer_release_for_outline = inst_.outline.enabled();
-    if (!defer_gbuffer_release_for_outline) {
+    const bool defer_gbuffer_release = inst_.outline.enabled() || scene_final_hardware_specular;
+    if (!defer_gbuffer_release) {
       inst_.gbuffer.release();
     }
 
@@ -288,12 +291,26 @@ namespace blender::eevee
         render_view_, rbufs.depth_tx, prepass_fb_, transparent_fb_, combined_fb_, extent_);
     }
 
+    if (scene_final_hardware_specular) {
+      /* Pinned Nuru resolves specular from the completed scene, after volume and forward.
+       * Keep a read-only snapshot: the resolve adds its result to the real combined target. */
+      TextureFromPool scene_radiance("Hardware Whole Frame Specular Scene");
+      scene_radiance.acquire_2d(extent_, RenderBuffers::color_format);
+      GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+      GPU_texture_copy(scene_radiance, rbufs.combined_tx);
+      inst_.raytracing.render_scene_final_specular(*rt_buffer_opaque_.scene_final_specular,
+                                                  scene_radiance,
+                                                  inst_.pipelines.deferred.closure_bits_get(),
+                                                  render_view_);
+      scene_radiance.release();
+    }
+
     if (inst_.outline.enabled()) {
       inst_.outline.render(render_view_, extent_);
     }
 
     /* NPR: release the GBuffer that was kept alive for the outline detect pass (see above). */
-    if (defer_gbuffer_release_for_outline) {
+    if (defer_gbuffer_release) {
       inst_.gbuffer.release();
     }
 

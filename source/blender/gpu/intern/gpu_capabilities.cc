@@ -12,6 +12,7 @@
 #include "DNA_userdef_types.h" /* For `U.glreslimit`. */
 
 #include "GPU_capabilities.hh"
+#include "GPU_context.hh"
 
 #include "gpu_context_private.hh"
 
@@ -167,6 +168,16 @@ bool GPU_hdr_support()
 bool GPU_stencil_export_support()
 {
   return GCaps.stencil_export_support;
+}
+
+bool GPU_hardware_raytracing_support()
+{
+  return GCaps.hardware_raytracing_support;
+}
+
+bool GPU_viewport_hardware_raytracing_support()
+{
+  return GPU_hardware_raytracing_support() && GPU_backend_get_type() == GPU_BACKEND_VULKAN;
 }
 
 int GPU_max_shader_storage_buffer_bindings()

@@ -572,6 +572,39 @@ void VKBackend::detect_workarounds(VKDevice &device)
   extensions.external_memory = false;
 #endif
 
+  /* Nuru: hardware ray tracing requires acceleration structures, ray queries in compute, deferred
+   * host operations, and buffer device address. The current Eevee Vulkan HWRT path is validated on
+   * NVIDIA RTX only; other vendors stay on the software path until they receive their own
+   * validation evidence. */
+#ifdef _WIN32
+  extensions.hardware_raytracing =
+      GPU_type_matches(GPU_DEVICE_NVIDIA, GPU_OS_ANY, GPU_DRIVER_ANY) &&
+      device.supports_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+      device.supports_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+      device.supports_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) &&
+      device.physical_device_vulkan_12_features_get().bufferDeviceAddress == VK_TRUE &&
+      device.physical_device_vulkan_12_features_get().scalarBlockLayout == VK_TRUE &&
+      device.physical_device_features_get().shaderInt64 == VK_TRUE &&
+      device.physical_device_features_get().shaderStorageImageReadWithoutFormat == VK_TRUE &&
+      device.physical_device_features_get().shaderStorageImageWriteWithoutFormat == VK_TRUE;
+  if (extensions.hardware_raytracing) {
+    VkPhysicalDeviceRayQueryFeaturesKHR ray_query = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    VkPhysicalDeviceFeatures2 rt_features = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    rt_features.pNext = &acceleration;
+    acceleration.pNext = &ray_query;
+    vkGetPhysicalDeviceFeatures2(device.physical_device_get(), &rt_features);
+    extensions.hardware_raytracing = acceleration.accelerationStructure && ray_query.rayQuery;
+  }
+
+  /* Nuru: wedge diagnostic, inert unless BLENDER_VULKAN_CHECKPOINTS=1 is set. */
+  extensions.diagnostic_checkpoints =
+      vk_diagnostic_checkpoints_requested() &&
+      device.supports_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+#endif
+
   /* AMD GPUs don't support texture formats that use are aligned to 24 or 48 bits. */
   if (GPU_type_matches(GPU_DEVICE_ATI, GPU_OS_ANY, GPU_DRIVER_ANY) ||
       GPU_type_matches(GPU_DEVICE_APPLE, GPU_OS_MAC, GPU_DRIVER_ANY))
@@ -886,6 +919,10 @@ void VKBackend::capabilities_init(VKDevice &device)
   GCaps.extension_get = vk_extension_get;
 
   detect_workarounds(device);
+
+  /* Nuru: expose hardware ray tracing to Eevee after workaround detection has settled the
+   * final extension state. */
+  GCaps.hardware_raytracing_support = device.extensions_get().hardware_raytracing;
 }
 
 }  // namespace gpu

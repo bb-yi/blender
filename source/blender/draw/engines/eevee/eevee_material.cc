@@ -477,7 +477,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                                           default_surface->nodetree;
 
   /* We can't defer compilation in viewport image render, since we can't re-sync.(See #130235) */
-  bool use_deferred_compilation = !inst_.is_viewport_image_render;
+  bool use_deferred_compilation = !inst_.is_viewport_image_render &&
+                                  pipeline_type != MAT_PIPE_HIT_EVAL;
 
   const bool is_volume = ELEM(pipeline_type, MAT_PIPE_VOLUME_OCCUPANCY, MAT_PIPE_VOLUME_MATERIAL);
   blender::Material *default_mat = is_volume ? default_volume : default_surface;
@@ -523,7 +524,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     case GPU_MAT_QUEUED:
       queued_shaders_count++;
       shader_queued = true;
-      if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell) {
+      if (ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_HIT_EVAL) || outline_shell) {
         inst_.telemetry.material_sync_add(shader_queued,
                                           optimize_queued,
                                           false,
@@ -545,7 +546,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     case GPU_MAT_FAILED:
     default:
       material_failed = true;
-      if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell) {
+      if (ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_HIT_EVAL) || outline_shell) {
         inst_.telemetry.material_sync_add(shader_queued,
                                           optimize_queued,
                                           false,
@@ -600,7 +601,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
   const bool is_late_registered_forward = is_forward &&
                                           (is_transparent ||
                                            pipeline_type == MAT_PIPE_PREPASS_OVERLAP);
-  if (!register_pass || is_volume || is_late_registered_forward) {
+  if (!register_pass || is_volume || is_late_registered_forward ||
+      pipeline_type == MAT_PIPE_HIT_EVAL) {
     /* Sub pass is generated later. */
     matpass.sub_pass = nullptr;
   }
@@ -712,8 +714,17 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
   const bool use_outline = inst_.scene->eevee.use_outline != 0;
   const bool uses_outline_control = material_uses_outline_control(blender_mat);
   const bool uses_custom_ztest = material_ztest_mode_get(*blender_mat) != MA_ZTEST_LESS_EQUAL;
+  /* Nuru's HWRT receiver passes require a GBuffer, also for materials saved as BLENDED.
+   * Override the ordinary mesh route at runtime, not the saved material setting. NPR draw
+   * policies without an equivalent deferred ordering retain their native compatibility path. */
+  const bool use_hardware_deferred = inst_.raytracing.use_hardware_tracing_method() &&
+                                     geometry_type == MAT_GEOM_MESH && color_write && depth_write &&
+                                     !uses_custom_ztest && !uses_outline_control &&
+                                     !material_stencil_state_get(blender_mat).enabled &&
+                                     !material_depth_offset_affects_lighting(*blender_mat) &&
+                                     npr_tree_get_from_mat(blender_mat) == nullptr;
   const bool use_forward_pipeline =
-      blender_mat->surface_render_method == MA_SURFACE_METHOD_FORWARD ||
+      (blender_mat->surface_render_method == MA_SURFACE_METHOD_FORWARD && !use_hardware_deferred) ||
       (!uses_outline_control && (!depth_write || uses_custom_ztest));
   const bool is_filter_material = blender_mat->eevee_domain == MA_EEVEE_DOMAIN_FILTER;
   eMaterialPipeline surface_pipe, prepass_pipe;
@@ -895,6 +906,12 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
     }
     if (is_shadow_caster && !disable_depth_offset_shadow) {
       mat.shadow = material_pass_get(ob, blender_mat, MAT_PIPE_SHADOW, geometry_type);
+    }
+
+    if (geometry_type == MAT_GEOM_MESH && inst_.raytracing.use_hardware_tracing() &&
+        mat.shading.gpumat && GPU_material_has_surface_output(mat.shading.gpumat))
+    {
+      mat.hit_eval = material_pass_get(ob, blender_mat, MAT_PIPE_HIT_EVAL, geometry_type);
     }
 
     mat.is_alpha_blend_transparent = color_write && use_forward_pipeline &&

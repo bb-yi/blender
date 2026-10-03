@@ -21,6 +21,8 @@
 
 #include "draw_common.hh"
 
+#include <cstdlib>
+
 namespace blender::eevee {
 
 template<typename PassType>
@@ -1767,6 +1769,10 @@ void DeferredLayer::end_sync(bool is_first_pass,
               sub.specialize_constant(sh, "use_split_indirect", use_split_indirect);
               sub.specialize_constant(sh, "use_lightprobe_eval", use_lightprobe_eval);
               sub.specialize_constant(sh, "use_transmission", use_transmission);
+              sub.specialize_constant(sh, "use_hardware_rt_shadows",
+                                        inst_.raytracing.hardware_shadow_ready());
+              sub.specialize_constant(sh, "use_hardware_rt_direct",
+                                        inst_.raytracing.hardware_direct_replace());
               sub.specialize_constant(sh, "shadow_ray_count", &shadow_scene.ray_count);
               sub.specialize_constant(sh, "shadow_ray_step_count", &shadow_scene.step_count);
             };
@@ -1786,6 +1792,10 @@ void DeferredLayer::end_sync(bool is_first_pass,
           sub.bind_image("indirect_radiance_3_img", &indirect_result_.closures[2]);
           sub.bind_resources(inst_.uniform_data);
           sub.bind_resources(inst_.gbuffer);
+          sub.bind_texture("hardware_shadow_visibility_tx",
+                             inst_.raytracing.hardware_shadow_visibility_tx());
+          sub.bind_texture("hardware_direct_closures_tx",
+                             inst_.raytracing.hardware_direct_closures_tx());
           sub.bind_resources(inst_.lights);
           inst_.lights.bind_light_shader_resources(sub);
           sub.bind_resources(inst_.shadows);
@@ -1828,6 +1838,7 @@ void DeferredLayer::end_sync(bool is_first_pass,
                                (rbuf_data.specular_light_id != -1) ||
                                    (rbuf_data.specular_color_id != -1));
       pass.specialize_constant(sh, "use_split_radiance", use_split_radiance_);
+      pass.specialize_constant(sh, "use_shared_indirect", &indirect_result_.use_shared_indirect);
       pass.specialize_constant(
           sh, "use_radiance_feedback", use_feedback_output_ && use_clamp_direct_);
       pass.specialize_constant(sh, "render_pass_normal_enabled", rbuf_data.normal_id != -1);
@@ -1843,6 +1854,7 @@ void DeferredLayer::end_sync(bool is_first_pass,
       pass.bind_texture("indirect_radiance_1_tx", &indirect_result_.closures[0]);
       pass.bind_texture("indirect_radiance_2_tx", &indirect_result_.closures[1]);
       pass.bind_texture("indirect_radiance_3_tx", &indirect_result_.closures[2]);
+      pass.bind_texture("shared_indirect_tx", &shared_indirect_tx_);
       pass.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
       pass.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
       pass.bind_image("radiance_feedback_img", &radiance_feedback_tx_);
@@ -1998,7 +2010,8 @@ gpu::Texture *DeferredLayer::render(View &main_view,
                                     int2 extent,
                                     RayTraceBuffer &rt_buffer,
                                     gpu::Texture *radiance_behind_tx,
-                                    bool &volume_compute_done)
+                                    bool &volume_compute_done,
+                                    bool scene_final_hardware_specular)
 {
   if (this->is_empty()) {
     return radiance_behind_tx;
@@ -2090,13 +2103,35 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   }
   inst_.lights.eval_light_shaders(render_view, extent);
 
+  inst_.raytracing.render_hardware_shadows(render_view, rb.depth_tx, extent);
+  inst_.raytracing.render_hardware_direct_light(render_view, rb.depth_tx, extent);
+
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
     direct_radiance_txs_[i].acquire_2d((closure_count_ > i) ? extent : int2(1),
                                        gpu::TextureFormat::DEFERRED_RADIANCE_FORMAT,
                                        usage_rw);
   }
 
-  if (use_raytracing_) {
+  const uint32_t hw_features = inst_.raytracing.active_hardware_feature_mask();
+  const bool defer_hardware_specular = use_raytracing_ && inst_.raytracing.use_hardware_tracing() &&
+      (((closure_bits_ & CLOSURE_REFLECTION) &&
+        (hw_features & RAYTRACE_EEVEE_HARDWARE_REFLECTIONS)) ||
+       ((closure_bits_ & CLOSURE_REFRACTION) &&
+        (hw_features & RAYTRACE_EEVEE_HARDWARE_REFRACTIONS)));
+
+  if (defer_hardware_specular) {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredRaytrace);
+    if (!rt_buffer.scene_final_specular) {
+      rt_buffer.scene_final_specular = std::make_unique<RayTraceBuffer>();
+    }
+    indirect_result_ = inst_.raytracing.render_phase(rt_buffer,
+                                                   nullptr,
+                                                   radiance_behind_tx,
+                                                   closure_bits_,
+                                                   render_view,
+                                                   HWRT_TRACE_PHASE_PRECOMBINE);
+  }
+  else if (use_raytracing_) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredRaytrace);
     indirect_result_ = inst_.raytracing.render(
         rt_buffer, radiance_behind_tx, closure_bits_, render_view);
@@ -2107,6 +2142,9 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   else {
     indirect_result_ = inst_.raytracing.alloc_dummy(rt_buffer);
   }
+  shared_indirect_tx_ = indirect_result_.use_shared_indirect ?
+                            static_cast<gpu::Texture *>(indirect_result_.shared_indirect) :
+                            static_cast<gpu::Texture *>(indirect_result_.closures[0]);
 
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredEvalLight);
@@ -2128,6 +2166,41 @@ gpu::Texture *DeferredLayer::render(View &main_view,
 
   radiance_feedback_tx_ = rt_buffer.feedback_ensure(!use_feedback_output_, extent);
   radiance_back_tx_ = radiance_behind_tx ? radiance_behind_tx : radiance_feedback_tx_;
+
+  if (defer_hardware_specular && !scene_final_hardware_specular) {
+    /* NPR can have several ordered refraction layers and a material postpass. Resolve each
+     * layer's direct + diffuse scene color before tracing its specular phase, while its GBuffer
+     * is still alive. Keep the real combined target unchanged until all closures are ready. */
+    TextureFromPool scene_radiance("Hardware Specular Scene Radiance");
+    scene_radiance.acquire_2d(extent, GPU_texture_format(rb.combined_tx), usage_rw);
+    GPU_texture_copy(scene_radiance, rb.combined_tx);
+    if (use_feedback_output_ && use_clamp_direct_) {
+      GPU_texture_copy(radiance_feedback_tx_, rb.combined_tx);
+    }
+    Framebuffer scene_fb("Hardware Specular Scene");
+    scene_fb.ensure(GPU_ATTACHMENT_TEXTURE(rb.depth_tx), GPU_ATTACHMENT_TEXTURE(scene_radiance));
+    GPU_framebuffer_bind(scene_fb);
+    inst_.manager->submit(combine_ps_, render_view);
+    GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+
+    RayTraceResult specular = inst_.raytracing.render_phase(
+        *rt_buffer.scene_final_specular,
+        scene_radiance,
+        (closure_bits_ & CLOSURE_REFRACTION) ? static_cast<gpu::Texture *>(scene_radiance) : nullptr,
+        closure_bits_,
+        render_view,
+        HWRT_TRACE_PHASE_SCENE_FINAL_SPECULAR);
+    inst_.raytracing.merge_specular_result(rt_buffer, indirect_result_, specular, render_view);
+    specular.release();
+    scene_radiance.release();
+
+    if (has_surface_diffusion_) {
+      for (int bin = 0; bin < to_gbuffer_bin_count(closure_bits_); bin++) {
+        inst_.subsurface.render(direct_radiance_txs_[bin], indirect_result_.closures[bin],
+                                closure_bits_, render_view, bin);
+      }
+    }
+  }
 
   if (use_feedback_output_ && use_clamp_direct_) {
     /* We need to do a copy before the combine pass (otherwise we have a dependency issue) to save
@@ -2345,6 +2418,9 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
     case MAT_PIPE_BAKE_COLOR:
       BLI_assert_msg(0, "Bake shaders are evaluated by the Eevee bake callback.");
       return nullptr;
+    case MAT_PIPE_HIT_EVAL:
+      BLI_assert_msg(0, "Hardware hit shaders are submitted by sparse material replay.");
+      return nullptr;
 
     case MAT_PIPE_VOLUME_OCCUPANCY:
     case MAT_PIPE_VOLUME_MATERIAL:
@@ -2413,6 +2489,24 @@ PassMain::Sub *DeferredPipeline::npr_add(blender::Material *blender_mat,
   return opaque_layer_.npr_add(blender_mat, gpumat);
 }
 
+bool DeferredPipeline::use_scene_final_hardware_specular() const
+{
+  /* Unlike Nuru's single deferred surface layer, NPR can consume previous-layer radiance,
+   * rewrite it in a material postpass or write custom depth in forward. Those consumers keep
+   * their existing per-layer resolve; no object is excluded from hardware transport. */
+  const uint32_t features = inst_.raytracing.active_hardware_feature_mask();
+  return inst_.raytracing.use_hardware_tracing() && opaque_layer_.use_raytracing_ &&
+         !opaque_layer_.is_empty() && refraction_layers_.empty() &&
+         opaque_layer_.npr_ps_.is_empty() && !opaque_layer_.has_surface_diffusion_ &&
+         !opaque_layer_.has_stencil_ && !opaque_layer_.has_outline_ &&
+         !inst_.pipelines.forward.has_surface_draws() &&
+         (((opaque_layer_.closure_bits_ & CLOSURE_REFLECTION) &&
+           (features & RAYTRACE_EEVEE_HARDWARE_REFLECTIONS)) ||
+          ((opaque_layer_.closure_bits_ & CLOSURE_REFRACTION) &&
+           (features & RAYTRACE_EEVEE_HARDWARE_REFRACTIONS))) &&
+         std::getenv("BLENDER_EEVEE_HWRT_LAYER_SPECULAR") == nullptr;
+}
+
 void DeferredPipeline::render(View &main_view,
                               View &render_view,
                               Framebuffer &prepass_fb,
@@ -2421,7 +2515,8 @@ void DeferredPipeline::render(View &main_view,
                               int2 extent,
                               RayTraceBuffer &rt_buffer_opaque_layer,
                               RayTraceBuffer &rt_buffer_refract_layer,
-                              bool &volume_compute_done)
+                              bool &volume_compute_done,
+                              bool scene_final_hardware_specular)
 {
   gpu::Texture *feedback_tx = nullptr;
 
@@ -2436,7 +2531,8 @@ void DeferredPipeline::render(View &main_view,
                                        extent,
                                        rt_buffer_opaque_layer,
                                        feedback_tx,
-                                       volume_compute_done);
+                                       volume_compute_done,
+                                       scene_final_hardware_specular);
   }
   GPU_debug_group_end();
 

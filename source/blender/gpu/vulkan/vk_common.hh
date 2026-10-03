@@ -36,6 +36,8 @@ namespace blender::gpu {
 
 using TimelineValue = uint64_t;
 
+bool vk_diagnostic_checkpoints_requested();
+
 /**
  * Based on the usage of an Image View a different image view type should be created.
  *

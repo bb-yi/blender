@@ -51,6 +51,8 @@ enum eMaterialPipeline {
   MAT_PIPE_CAPTURE,
   MAT_PIPE_FILTER,
   MAT_PIPE_BAKE_COLOR,
+  /* Sparse material replay at hardware ray hits. Last value in the four-bit pipeline key. */
+  MAT_PIPE_HIT_EVAL,
 };
 
 /**

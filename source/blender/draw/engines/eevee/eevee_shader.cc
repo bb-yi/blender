@@ -18,6 +18,8 @@
 #include "DNA_light_types.h"
 
 #include "gpu_shader_create_info.hh"
+#include "gpu_codegen.hh"
+#include "BLI_string.h"
 
 #include "NOD_shader.h"
 
@@ -555,6 +557,16 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
     request(RAYTRACING_SHADERS, AS_SPAN(shader_list));
   }
   {
+    const eShaderType shader_list[] = {
+        RAY_HIT_EVAL_COUNT, RAY_HIT_EVAL_PREFIX, RAY_HIT_EVAL_COMPACT, RAY_HIT_DENOISE_GUIDES,
+        RAY_SHARED_INDIRECT_ACCUM, RAY_SHARED_INDIRECT_RECONSTRUCT, RAY_MERGE_SPECULAR,
+        RAY_SCENE_FINAL_SPECULAR,
+        RAY_TRACE_HARDWARE_LIGHTING, RAY_HW_DIRECT_TILE_COMPACT, RAY_HW_DIRECT_VISIBILITY,
+        RAY_HW_DIRECT_ACCUM, RAY_HW_DIRECT_DENOISE, RAY_HW_NIS_TRAIN,
+        RAY_HW_NIS_TRAIN_FEEDBACK, RAY_HW_NIS_ADAM};
+    request(HARDWARE_RAYTRACING_SHADERS, AS_SPAN(shader_list));
+  }
+  {
     const eShaderType shader_list[] = {SPHERE_PROBE_CONVOLVE,
                                        SPHERE_PROBE_IRRADIANCE,
                                        SPHERE_PROBE_REMAP,
@@ -870,6 +882,38 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_ray_tile_classify";
     case RAY_TILE_COMPACT:
       return "eevee_ray_tile_compact";
+    case RAY_HIT_EVAL_COUNT:
+      return "eevee_ray_hit_eval_count";
+    case RAY_HIT_EVAL_PREFIX:
+      return "eevee_ray_hit_eval_prefix";
+    case RAY_HIT_EVAL_COMPACT:
+      return "eevee_ray_hit_eval_compact";
+    case RAY_HIT_DENOISE_GUIDES:
+      return "eevee_ray_hit_denoise_guides";
+    case RAY_SHARED_INDIRECT_ACCUM:
+      return "eevee_ray_shared_indirect_accum";
+    case RAY_SHARED_INDIRECT_RECONSTRUCT:
+      return "eevee_ray_shared_indirect_reconstruct";
+    case RAY_MERGE_SPECULAR:
+      return "eevee_ray_merge_specular";
+    case RAY_SCENE_FINAL_SPECULAR:
+      return "eevee_ray_scene_final_specular";
+    case RAY_TRACE_HARDWARE_LIGHTING:
+      return "eevee_ray_trace_hardware_lighting";
+    case RAY_HW_DIRECT_TILE_COMPACT:
+      return "eevee_ray_hardware_direct_light_tile_compact";
+    case RAY_HW_DIRECT_VISIBILITY:
+      return "eevee_ray_hardware_direct_light_visibility";
+    case RAY_HW_DIRECT_ACCUM:
+      return "eevee_ray_hardware_direct_light_accum";
+    case RAY_HW_DIRECT_DENOISE:
+      return "eevee_ray_hardware_direct_light_denoise";
+    case RAY_HW_NIS_TRAIN:
+      return "eevee_nuru_nis_train";
+    case RAY_HW_NIS_TRAIN_FEEDBACK:
+      return "eevee_nuru_nis_train_feedback";
+    case RAY_HW_NIS_ADAM:
+      return "eevee_nuru_nis_adam";
     case RENDERPASS_CLEAR:
       return "eevee_renderpass_clear";
     case RENDER_TEXTURE_EXTRACT_RGBA16F:
@@ -1007,6 +1051,8 @@ class SlotAllocator {
   bool sampler_overflow_ = false;
 
   uint32_t available_vertex_id_ = ~uint32_t(0u);
+  uint32_t available_storage_slots_ = 0xFFFFu;
+  bool storage_overflow_ = false;
   bool vertex_id_overflow_ = false;
 
   Set<std::string> visited_infos;
@@ -1023,13 +1069,24 @@ class SlotAllocator {
       available_vertex_id_ &= ~(uint32_t(1) << vert_in.index);
     }
     for (const ShaderCreateInfo::Resource &res : info.pass_resources_) {
+      if (res.bind_type == ShaderCreateInfo::Resource::STORAGE_BUFFER) {
+        available_storage_slots_ &= ~(uint32_t(1) << res.slot);
+      }
       if (res.bind_type == ShaderCreateInfo::Resource::SAMPLER) {
         available_samplers_ &= ~(uint64_t(1) << res.slot);
       }
     }
     for (const ShaderCreateInfo::Resource &res : info.geometry_resources_) {
+      if (res.bind_type == ShaderCreateInfo::Resource::STORAGE_BUFFER) {
+        available_storage_slots_ &= ~(uint32_t(1) << res.slot);
+      }
       if (res.bind_type == ShaderCreateInfo::Resource::SAMPLER) {
         available_samplers_ &= ~(uint64_t(1) << res.slot);
+      }
+    }
+    for (const ShaderCreateInfo::Resource &res : info.batch_resources_) {
+      if (res.bind_type == ShaderCreateInfo::Resource::STORAGE_BUFFER) {
+        available_storage_slots_ &= ~(uint32_t(1) << res.slot);
       }
     }
     if (!is_gpumat_info) {
@@ -1051,8 +1108,25 @@ class SlotAllocator {
   }
 
  public:
+  int get_next_storage()
+  {
+    /* Pass submission binds this independently of material resources. */
+    available_storage_slots_ &= ~(uint32_t(1) << DRW_RESOURCE_ID_SLOT);
+    if (available_storage_slots_ == 0) {
+      storage_overflow_ = true;
+      return -1;
+    }
+    return bitscan_forward_clear_uint(&available_storage_slots_);
+  }
+
+  bool storage_overflow() const
+  {
+    return storage_overflow_;
+  }
+
   void reserve_slots(const gpu::shader::ShaderCreateInfo &info)
   {
+    visited_infos.clear();
     reserve_slots_recursive(info);
   }
 
@@ -1226,6 +1300,8 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
       return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_FORWARD;
     case MAT_PIPE_BAKE_COLOR:
       return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_BAKE;
+    case MAT_PIPE_HIT_EVAL:
+      return 8; /* Utility, depth, and five sparse-hit payload textures. */
     case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
     case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
     case MAT_PIPE_PREPASS_OVERLAP:
@@ -1402,6 +1478,11 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           pipeline_info_name = "eevee_surf_bake_color";
           info.name_ += "_bake_color";
           break;
+        case MAT_PIPE_HIT_EVAL:
+          pipeline_info_name = "eevee_surf_hit_eval";
+          info.name_ += "_hit_eval";
+          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
+          break;
         case MAT_PIPE_DEFERRED:
           info.define("MAT_DEFERRED");
           if (use_shader_to_rgba) {
@@ -1488,7 +1569,11 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
       info.vertex_function("eevee_geom_curves");
       break;
     case MAT_GEOM_MESH:
-      if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
+      if (pipeline_type == MAT_PIPE_HIT_EVAL) {
+        geometry_info_name = "eevee_geom_hit_mesh";
+        info.name_ += "_hit_mesh";
+      }
+      else if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
         geometry_info_name = "eevee_geom_bake_mesh";
         info.name_ += "_bake_mesh";
       }
@@ -1564,6 +1649,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
+  auto &codegen_info = *reinterpret_cast<GPUCodegenCreateInfo *>(codegen.create_info);
+  const bool is_hit_eval_mesh = pipeline_type == MAT_PIPE_HIT_EVAL &&
+                                geometry_type == MAT_GEOM_MESH;
+  Map<std::string, int> hit_eval_attr_slots;
+  Map<std::string, std::string> hit_eval_attr_symbols;
   bool use_shader_to_rgba = material_graph_serialized_contains(codegen.surface,
                                                                "node_shader_to_rgba(");
   if (GPU_material_surface_diffusion_has(gpumat)) {
@@ -2168,7 +2258,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.compilation_constant(gpu::shader::Type::bool_t, "shadow_random", true);
   }
 
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_BARYCENTRIC)) {
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_BARYCENTRIC) && !is_hit_eval_mesh) {
     switch (geometry_type) {
       case MAT_GEOM_MESH:
         /* Support using gpu builtin barycentrics. */
@@ -2203,6 +2293,34 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
         vertex_inputs.clear();
         /* Volume materials require these for loading the grid attributes from smoke sims. */
         info.additional_info("draw_volume_infos");
+      }
+      else if (is_hit_eval_mesh) {
+        /* Reserve after all node dependencies have added their resources. */
+        slots.reserve_slots(info);
+        for (const auto &input : vertex_inputs) {
+          if (input.name == "orco") {
+            /* Match Nuru's generated-coordinate fallback. */
+            continue;
+          }
+          const int slot = slots.get_next_storage();
+          if (slot == -1) {
+            break;
+          }
+          const std::string symbol = input.name == "a" ? "eevee_default_uv_attr" : input.name;
+          char name[32];
+          SNPRINTF(name, "%s[]", symbol.c_str());
+          info.storage_buf(slot, Qualifier::read, "uint",
+                           codegen_info.name_buffer.append_sampler_name(name), Frequency::GEOMETRY);
+          SNPRINTF(name, "gpu_attr_%d", slot);
+          info.push_constant(gpu::shader::Type::int2_t,
+                             codegen_info.name_buffer.append_sampler_name(name));
+          SNPRINTF(name, "gpu_attr_%d_meta", slot);
+          info.push_constant(gpu::shader::Type::int_t,
+                             codegen_info.name_buffer.append_sampler_name(name));
+          hit_eval_attr_slots.add_new(std::string(input.name), slot);
+          hit_eval_attr_symbols.add_new(std::string(input.name), symbol);
+        }
+        vertex_inputs.clear();
       }
       break;
     case MAT_GEOM_POINTCLOUD:
@@ -2255,7 +2373,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const bool support_volume_attributes = ELEM(geometry_type, MAT_GEOM_MESH, MAT_GEOM_VOLUME);
   const bool do_vertex_attrib_load = !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME) &&
                                      (pipeline_type != MAT_PIPE_VOLUME_MATERIAL ||
-                                      !support_volume_attributes);
+                                      !support_volume_attributes) && !is_hit_eval_mesh;
 
   if (!do_vertex_attrib_load && !info.vertex_out_interfaces_.is_empty()) {
     /* Codegen outputs only one interface. */
@@ -2301,7 +2419,28 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   std::stringstream attr_load;
   attr_load << "{\n";
-  attr_load << (!codegen.attr_load.empty() ? codegen.attr_load : "");
+  if (is_hit_eval_mesh) {
+    domain_type_frag = domain_type_vert = "HitMeshVertex";
+    for (const GPUMaterialAttribute &attr : GPU_material_attributes(gpumat)) {
+      const int *slot = hit_eval_attr_slots.lookup_ptr(std::string(attr.input_name));
+      if (attr.type == CD_ORCO && slot == nullptr) {
+        attr_load << "  var_attrs.v" << attr.id << " = domain.mesh.orco_default;\n";
+        continue;
+      }
+      if (slot == nullptr) {
+        continue;
+      }
+      const char *loader = attr.type == CD_TANGENT ? "hit_attr_load_tangent" :
+                           attr.is_hair_length || attr.is_hair_intercept ? "hit_attr_load_float" :
+                                                                         "hit_attr_load_float4";
+      attr_load << "  var_attrs.v" << attr.id << " = " << loader << "(domain, "
+                << hit_eval_attr_symbols.lookup(std::string(attr.input_name)) << ", gpu_attr_"
+                << *slot << ", gpu_attr_" << *slot << "_meta, " << attr.id << ");\n";
+    }
+  }
+  else {
+    attr_load << (!codegen.attr_load.empty() ? codegen.attr_load : "");
+  }
   attr_load << "}\n\n";
 
   const bool use_vertex_displacement = !codegen.displacement.empty() &&
@@ -2310,13 +2449,17 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   std::stringstream vert_gen, frag_gen;
 
-  if (do_vertex_attrib_load) {
+  if (do_vertex_attrib_load || is_hit_eval_mesh) {
     vert_gen << global_vars.str() << "void attrib_load(" << domain_type_vert << " domain)"
              << attr_load.str();
-    frag_gen << "void attrib_load(" << domain_type_frag << " domain) {}\n"; /* Placeholder. */
   }
   else {
     vert_gen << "void attrib_load(" << domain_type_vert << " domain) {}\n"; /* Placeholder. */
+  }
+  if (do_vertex_attrib_load) {
+    frag_gen << "void attrib_load(" << domain_type_frag << " domain) {}\n"; /* Placeholder. */
+  }
+  else {
     frag_gen << global_vars.str() << "void attrib_load(" << domain_type_frag << " domain)"
              << attr_load.str();
   }
@@ -2373,12 +2516,23 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     Vector<StringRefNull> dependencies = use_vertex_displacement ?
                                              material_dependencies_finalize(generated_dependencies) :
                                              Vector<StringRefNull>{};
+    if (is_hit_eval_mesh) {
+      dependencies.append("eevee_hit_attr_lib.glsl");
+    }
 
     info.generated_sources.append({"eevee_nodetree_vert_lib.glsl", dependencies, vert_gen.str()});
   }
 
   if (pipeline_type != MAT_PIPE_VOLUME_OCCUPANCY) {
     Set<StringRefNull> dependencies_set;
+    if (is_hit_eval_mesh) {
+      dependencies_set.add("eevee_hit_attr_lib.glsl");
+      if (GPU_material_principled_npr_v2_has(gpumat)) {
+        /* NPR's shared helper library declares shadow evaluators even when replay only consumes
+         * its transport closures. Supply their definitions without enabling main-view shading. */
+        dependencies_set.add("eevee_shadow_tracing.bsl.hh");
+      }
+    }
     Set<StringRefNull> emitted_generated_sources;
     std::stringstream generated_source_block;
     if (use_ao_node) {
@@ -2595,6 +2749,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
               << std::endl;
     /* Avoid assert in ShaderCreateInfo::finalize. */
     info.batch_resources_.clear();
+  }
+
+  if (slots.storage_overflow()) {
+    std::cerr << "Error: EEVEE: Hardware hit material " << material_name
+              << " uses too many attribute storage buffers." << std::endl;
+    /* Fail shader compilation explicitly, rather than replay uninitialized attributes. */
+    info.fragment_source_generated += "\n#error HWRT material attribute storage limit exceeded\n";
   }
 
   material_create_info_pipelines_amend(geometry_type, pipeline_type, info);
@@ -3218,6 +3379,14 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
       break;
     }
 
+    case MAT_PIPE_HIT_EVAL: {
+      r_info.pipeline_state()
+          .primitive(GPU_PRIM_TRIS)
+          .state(GPU_WRITE_NONE, GPU_BLEND_NONE, GPU_CULL_NONE, GPU_DEPTH_NONE,
+                 GPU_STENCIL_NONE, GPU_STENCIL_OP_NONE, GPU_VERTEX_LAST)
+          .viewports(1);
+      break;
+    }
     case MAT_PIPE_BAKE_COLOR: {
       r_info.pipeline_state()
           .primitive(prim_type)

@@ -17,6 +17,7 @@
 #include "DNA_view3d_types.h"
 
 #include "IMB_colormanagement.hh"
+#include "GPU_capabilities.hh"
 
 #include "MOV_enums.hh"
 
@@ -745,6 +746,13 @@ static const EnumPropertyItem eevee_resolution_scale_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
+static const EnumPropertyItem eevee_gi_spatial_sample_items[] = {
+    {RAYTRACE_EEVEE_GI_SPATIAL_8, "8", 0, "8", "8 diffuse GI rays per gather point"},
+    {RAYTRACE_EEVEE_GI_SPATIAL_16, "16", 0, "16", "16 diffuse GI rays per gather point"},
+    {RAYTRACE_EEVEE_GI_SPATIAL_32, "32", 0, "32", "32 diffuse GI rays per gather point"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
 }  // namespace blender
 
 #ifdef RNA_RUNTIME
@@ -1338,6 +1346,30 @@ static std::optional<std::string> rna_SceneEEVEE_path(const PointerRNA * /*ptr*/
 static std::optional<std::string> rna_RaytraceEEVEE_path(const PointerRNA * /*ptr*/)
 {
   return "eevee.ray_tracing_options";
+}
+
+static int rna_RaytraceEEVEE_gi_spatial_samples_sanitize(const int value)
+{
+  switch (value) {
+    case RAYTRACE_EEVEE_GI_SPATIAL_8:
+    case RAYTRACE_EEVEE_GI_SPATIAL_16:
+    case RAYTRACE_EEVEE_GI_SPATIAL_32:
+      return value;
+    default:
+      return RAYTRACE_EEVEE_GI_SPATIAL_8;
+  }
+}
+
+static int rna_RaytraceEEVEE_gi_spatial_samples_get(PointerRNA *ptr)
+{
+  const RaytraceEEVEE *options = static_cast<const RaytraceEEVEE *>(ptr->data);
+  return rna_RaytraceEEVEE_gi_spatial_samples_sanitize(options->gi_spatial_samples);
+}
+
+static void rna_RaytraceEEVEE_gi_spatial_samples_set(PointerRNA *ptr, int value)
+{
+  RaytraceEEVEE *options = static_cast<RaytraceEEVEE *>(ptr->data);
+  options->gi_spatial_samples = rna_RaytraceEEVEE_gi_spatial_samples_sanitize(value);
 }
 
 static std::optional<std::string> rna_SceneGpencil_path(const PointerRNA * /*ptr*/)
@@ -2178,6 +2210,11 @@ void rna_Scene_render_update(Main * /*bmain*/, Scene * /*scene*/, PointerRNA *pt
   Scene *scene = id_cast<Scene *>(ptr->owner_id);
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+}
+
+static bool rna_SceneEEVEE_is_hardware_raytracing_supported_get(PointerRNA * /*ptr*/)
+{
+  return GPU_viewport_hardware_raytracing_support();
 }
 
 static void rna_SceneEEVEE_dlss5_update(Main *bmain, Scene *scene, PointerRNA *ptr)
@@ -8988,6 +9025,19 @@ static void rna_def_raytrace_eevee(BlenderRNA *brna)
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
 
+  prop = RNA_def_property(srna, "gi_spatial_samples", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, eevee_gi_spatial_sample_items);
+  RNA_def_property_enum_funcs(prop,
+                              "rna_RaytraceEEVEE_gi_spatial_samples_get",
+                              "rna_RaytraceEEVEE_gi_spatial_samples_set",
+                              nullptr);
+  RNA_def_property_ui_text(
+      prop,
+      "GI Spatial",
+      "Diffuse Hardware RT GI rays per low-resolution gather point before OIDN reconstruction");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
   prop = RNA_def_property(srna, "use_backface_hit", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "flag", RAYTRACE_EEVEE_USE_BACKFACE);
   RNA_def_property_ui_text(prop, "Hit Backfaces", "Consider rays hitting backfaces as valid");
@@ -9402,6 +9452,11 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
        0,
        "Screen-Trace",
        "Raytrace against the depth buffer. Fallback to light probes for invalid rays."},
+      {RAYTRACE_EEVEE_METHOD_HARDWARE,
+       "HARDWARE",
+       0,
+       "Hardware Ray Tracing (Experimental)",
+       "Trace scene geometry using NVIDIA RTX and Vulkan; unsupported devices use screen tracing"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -9854,6 +9909,62 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
   RNA_def_property_enum_items(prop, ray_tracing_method_items);
   RNA_def_property_ui_text(
       prop, "Tracing Method", "Select the tracing method used to find scene-ray intersections");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "is_hardware_raytracing_supported", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_boolean_funcs(
+      prop, "rna_SceneEEVEE_is_hardware_raytracing_supported_get", nullptr);
+  RNA_def_property_ui_text(
+      prop, "Hardware Ray Tracing Supported", "The active GPU backend supports hardware ray queries");
+
+  prop = RNA_def_property(srna, "use_hardware_raytracing_shadows", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(
+      prop, nullptr, "hardware_raytracing_features", RAYTRACE_EEVEE_HARDWARE_SHADOWS);
+  RNA_def_property_ui_text(prop, "Hardware Shadows", "Trace shadow rays against scene geometry");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "use_hardware_raytracing_reflections", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(
+      prop, nullptr, "hardware_raytracing_features", RAYTRACE_EEVEE_HARDWARE_REFLECTIONS);
+  RNA_def_property_ui_text(prop, "Hardware Reflections", "Trace reflections against scene geometry");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "use_hardware_raytracing_refractions", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(
+      prop, nullptr, "hardware_raytracing_features", RAYTRACE_EEVEE_HARDWARE_REFRACTIONS);
+  RNA_def_property_ui_text(prop, "Hardware Refractions", "Trace transmission through scene geometry");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "use_hardware_raytracing_gi", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(
+      prop, nullptr, "hardware_raytracing_features", RAYTRACE_EEVEE_HARDWARE_GI);
+  RNA_def_property_ui_text(prop, "Hardware GI", "Trace diffuse indirect lighting against scene geometry");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "ray_tracing_reflection_bounces", PROP_INT, PROP_NONE);
+  RNA_def_property_range(prop, 1, 16);
+  RNA_def_property_ui_text(prop, "Reflection Bounces", "Maximum hardware reflection traversal depth");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "ray_tracing_refraction_bounces", PROP_INT, PROP_NONE);
+  RNA_def_property_range(prop, 1, 16);
+  RNA_def_property_ui_text(prop, "Refraction Bounces", "Maximum hardware refraction traversal depth");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "hardware_raytracing_shadow_samples", PROP_INT, PROP_NONE);
+  RNA_def_property_range(prop, 1, 16);
+  RNA_def_property_ui_text(prop, "Shadow Rays", "Rays per pixel and light for hardware shadows");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "hardware_raytracing_shadow_color_intensity", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_range(prop, 0.0f, 1.0f);
+  RNA_def_property_ui_text(prop, "Shadow Color", "Saturation of transmission shadows");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "hardware_raytracing_shadow_transparency", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_range(prop, 0.0f, 1.0f);
+  RNA_def_property_ui_text(prop, "Shadow Transparency", "Blend opaque and transmission shadows");
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
 
   prop = RNA_def_property(srna, "use_shadow_jitter_viewport", PROP_BOOLEAN, PROP_NONE);

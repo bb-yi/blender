@@ -282,6 +282,25 @@ class LightModule {
     return lights_len_;
   }
 
+  const LightData &sync_light(int index) const
+  {
+    return light_buf_[index];
+  }
+
+  const LightCullingData &culling_data() const
+  {
+    return culling_data_buf_;
+  }
+
+  template<typename PassType> void bind_hardware_hit_lighting(PassType &pass)
+  {
+    /* Secondary hits can lie outside the view. Never use the camera-compacted light list. */
+    pass.bind_ssbo("hardware_light_buf", &light_buf_);
+    pass.bind_ubo(WORLD_SUNLIGHT_BUF_SLOT, world_sunlight_ubo());
+    pass.push_constant("hardware_local_lights_len", local_lights_len_);
+    pass.push_constant("hardware_lights_len", lights_len_);
+  }
+
   Span<const TelemetryShadowLightCost> shadow_light_costs() const
   {
     return Span<const TelemetryShadowLightCost>(shadow_light_costs_.data(),

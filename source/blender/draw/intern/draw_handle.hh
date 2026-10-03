@@ -256,6 +256,19 @@ class ObjectRef {
     return dupli_parent_ != nullptr;
   }
 
+  /** Evaluated mesh object whose lifetime extends past the sync callback.
+   * Dupli iteration uses a temporary Object; never retain that for sparse HWRT hit replay. */
+  Object *stable_hit_eval_object() const
+  {
+    Object *source = (dupli_object_ && dupli_object_->ob) ? dupli_object_->ob : object;
+    if (source == nullptr || source->type != OB_MESH || source->data == nullptr ||
+        GS(static_cast<ID *>(source->data)->name) != ID_ME)
+    {
+      return nullptr;
+    }
+    return (object->type == source->type && object->data == source->data) ? source : nullptr;
+  }
+
   bool is_active(const Object *active_object) const
   {
     return (dupli_parent_ ? dupli_parent_ : object) == active_object;

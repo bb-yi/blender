@@ -449,6 +449,7 @@ struct Material {
   bool telemetry_uses_glsl_function;
   MaterialPass shadow;
   MaterialPass shading;
+  MaterialPass hit_eval;
   MaterialPass npr;
   MaterialPass prepass;
   MaterialPass stencil;

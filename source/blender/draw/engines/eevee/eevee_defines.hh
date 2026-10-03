@@ -27,6 +27,7 @@
 
 /* Avoid too much overhead caused by resizing the light buffers too many time. */
 #define LIGHT_CHUNK 256
+#define HWRT_LIGHT_CLUSTER_COUNT 32
 
 #define CULLING_SELECT_GROUP_SIZE 256
 #define CULLING_SORT_GROUP_SIZE 256
@@ -259,6 +260,7 @@
 #define NPR_RADIANCE_TEX_SLOT 20
 #define LIGHT_SHADER_TEX_SLOT 20
 #define DIRECT_RADIANCE_NPR_TX_SLOT_1 21
+#define HWRT_DIRECT_CLOSURES_TEX_SLOT 22
 #define INDIRECT_RADIANCE_NPR_TX_SLOT_1 24
 #define BACK_HIZ_TX_SLOT 27
 #define BACK_RADIANCE_TX_SLOT 28

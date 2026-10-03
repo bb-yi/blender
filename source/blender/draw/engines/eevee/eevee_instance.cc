@@ -344,6 +344,9 @@ namespace blender::eevee
     SET_FLAG_FROM_TEST(shader_request, motion_blur.postfx_enabled(), MOTION_BLUR_SHADERS);
     SET_FLAG_FROM_TEST(shader_request, raytracing.use_fast_gi(), FAST_GI_SHADERS);
     SET_FLAG_FROM_TEST(shader_request, raytracing.use_raytracing(), RAYTRACING_SHADERS);
+    SET_FLAG_FROM_TEST(shader_request,
+                       raytracing.use_hardware_tracing(),
+                       HARDWARE_RAYTRACING_SHADERS);
     SET_FLAG_FROM_TEST(shader_request, scene->eevee.filter_graph != nullptr, FILTER_GRAPH_SHADERS);
 
     loaded_shaders = ShaderGroups::NONE;
@@ -545,6 +548,7 @@ namespace blender::eevee
 
     {
       ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginSceneModules);
+      sync.begin_sync();
       materials.begin_sync();
       velocity.begin_sync(); /* NOTE: Also syncs camera. */
       lights.begin_sync();

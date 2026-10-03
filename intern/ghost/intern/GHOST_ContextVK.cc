@@ -535,6 +535,35 @@ struct GHOST_InstanceVK {
     device.extensions.enable(required_device_extensions);
     device.extensions.enable(optional_device_extensions, true);
 
+    /* Extension names alone do not guarantee the feature bits required by the RT kernels. */
+    VkPhysicalDeviceRayQueryFeaturesKHR ray_query_features = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration_structure_features = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    bool use_hardware_raytracing = false;
+#ifdef _WIN32
+    if (device.properties.properties.vendorID == 0x10de &&
+        device.extensions.is_enabled(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+        device.extensions.is_enabled(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+        device.extensions.is_enabled(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) &&
+        device.features_12.bufferDeviceAddress && device.features_12.scalarBlockLayout &&
+        device.features.features.shaderInt64 &&
+        device.features.features.shaderStorageImageReadWithoutFormat &&
+        device.features.features.shaderStorageImageWriteWithoutFormat)
+    {
+      VkPhysicalDeviceFeatures2 rt_features = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+      rt_features.pNext = &acceleration_structure_features;
+      acceleration_structure_features.pNext = &ray_query_features;
+      vkGetPhysicalDeviceFeatures2(device.vk_physical_device, &rt_features);
+      use_hardware_raytracing = acceleration_structure_features.accelerationStructure &&
+                                ray_query_features.rayQuery;
+    }
+#endif
+    if (!use_hardware_raytracing) {
+      device.extensions.disable(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+      device.extensions.disable(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    }
+
     /* Disabling pipeline libraries and dynamic vertex input on AMD drivers due to random crashes
      * that are also happening when enabling the extension, but not using it at all. This needs
      * more investigation as it could be related to development workflows.
@@ -600,6 +629,11 @@ struct GHOST_InstanceVK {
     device_features.drawIndirectFirstInstance = VK_TRUE;
     device_features.samplerAnisotropy = device.features.features.samplerAnisotropy;
     device_features.wideLines = device.features.features.wideLines;
+    if (use_hardware_raytracing) {
+      device_features.shaderInt64 = VK_TRUE;
+      device_features.shaderStorageImageReadWithoutFormat = VK_TRUE;
+      device_features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+    }
 
     VkDeviceCreateInfo device_create_info = {};
     device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -624,6 +658,9 @@ struct GHOST_InstanceVK {
     vulkan_12_features.shaderOutputViewportIndex = device.features_12.shaderOutputViewportIndex;
     vulkan_12_features.bufferDeviceAddress = device.features_12.bufferDeviceAddress;
     vulkan_12_features.timelineSemaphore = VK_TRUE;
+    if (use_hardware_raytracing) {
+      vulkan_12_features.scalarBlockLayout = VK_TRUE;
+    }
     feature_struct_ptr.push_back(&vulkan_12_features);
 
 #ifndef __APPLE__
@@ -749,6 +786,17 @@ struct GHOST_InstanceVK {
     }
 
     /* Link all registered feature structs. */
+    if (use_hardware_raytracing) {
+      /* Enable only the queried features that the ray-query implementation uses. */
+      acceleration_structure_features = {
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+      acceleration_structure_features.accelerationStructure = VK_TRUE;
+      ray_query_features = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+      ray_query_features.rayQuery = VK_TRUE;
+      feature_struct_ptr.push_back(&acceleration_structure_features);
+      feature_struct_ptr.push_back(&ray_query_features);
+    }
+
     for (int i = 1; i < feature_struct_ptr.size(); i++) {
       ((VkBaseInStructure *)(feature_struct_ptr[i - 1]))->pNext =
           (VkBaseInStructure *)(feature_struct_ptr[i]);
@@ -1815,6 +1863,12 @@ GHOST_TSuccess GHOST_ContextVK::initializeDrawingContext()
     optional_device_extensions.append(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
     optional_device_extensions.append(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME);
     optional_device_extensions.append(VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME);
+#ifdef _WIN32
+    optional_device_extensions.append(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    optional_device_extensions.append(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    optional_device_extensions.append(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    optional_device_extensions.append(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+#endif
     /* Disabled as the extension is available, but without any features set. */
 #ifndef __APPLE__
     optional_device_extensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);

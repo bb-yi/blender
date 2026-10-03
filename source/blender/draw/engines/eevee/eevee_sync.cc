@@ -358,6 +358,8 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
       geometry_call(pass.sub_pass, use_npr_geom ? geom_npr : geom, ob_handle.res_handle);
     });
 
+    capture_hardware_raytrace_scene_entry(ob_handle, material, geom, i, false);
+
     gpu::Batch *geom_shell = (i < mat_geom_shell.size()) ? mat_geom_shell[i] :
                                                                      nullptr;
     geometry_call(
@@ -435,6 +437,8 @@ bool SyncModule::sync_sculpt(const ObjectRef &ob_ref)
         continue;
       }
     }
+
+    capture_hardware_raytrace_scene_entry(ob_handle, material, geom, batch.material_slot, true);
 
     sync_common_passes(material, [&](const MaterialPass &pass) {
       const bool use_npr_geom = pass.gpumat == material.npr.gpumat ||

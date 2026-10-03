@@ -82,6 +82,7 @@ set(SRC
   intern/gpu_material.cc
   intern/gpu_matrix.cc
   intern/gpu_node_graph.cc
+  intern/gpu_nuru_hardware_raytrace.cc
   intern/gpu_pass.cc
   intern/gpu_platform.cc
   intern/gpu_query.cc
@@ -130,6 +131,7 @@ set(SRC
   GPU_batch_presets.hh
   GPU_batch_utils.hh
   GPU_capabilities.hh
+  GPU_nuru_hardware_raytrace.hh
   GPU_common.hh
   GPU_common_types.hh
   GPU_compilation_subprocess.hh
@@ -258,6 +260,7 @@ set(VULKAN_SRC
   vulkan/vk_descriptor_set_layouts.cc
   vulkan/vk_device.cc
   vulkan/vk_device_submission.cc
+  vulkan/vk_nuru_raytrace_acceleration.cc
   vulkan/vk_fence.cc
   vulkan/vk_framebuffer.cc
   vulkan/vk_image_view.cc
@@ -308,6 +311,8 @@ set(VULKAN_SRC
   vulkan/vk_descriptor_set.hh
   vulkan/vk_descriptor_set_layouts.hh
   vulkan/vk_device.hh
+  vulkan/vk_nuru_raytrace_acceleration.hh
+  vulkan/vk_nuru_raytrace_kernels.hh
   vulkan/vk_fence.hh
   vulkan/vk_framebuffer.hh
   vulkan/vk_ghost_api.hh
@@ -441,6 +446,7 @@ set(LIB
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::nodes
   PRIVATE bf::dependencies::opencolorio
+  PRIVATE bf::dependencies::optional::openimagedenoise
 )
 
 # Select Backend source based on availability
@@ -866,6 +872,16 @@ endif()
 
 if(WITH_VULKAN_BACKEND)
   list(APPEND GLSL_SRC ${VULKAN_BACKEND_GLSL_SRC})
+
+  # Raw ray-query kernels are compiled with shaderc, not the BSL preprocessor.
+  set(HWRT_KERNEL_C "")
+  foreach(HWRT_KERNEL
+    trace_override directional_shadow directional_hit_shadow
+    environment_visibility hit_environment_visibility local_shadow local_hit_shadow
+    oidn_pack oidn_unpack
+  )
+    data_to_c_simple(vulkan/kernels/vk_nuru_${HWRT_KERNEL}.glsl HWRT_KERNEL_C)
+  endforeach()
 endif()
 
 set(GLSL_INC
@@ -887,6 +903,9 @@ endforeach()
 
 set(SHADER_C "")
 list(APPEND SHADER_C ${GLSL_C})
+if(WITH_VULKAN_BACKEND)
+  list(APPEND SHADER_C ${HWRT_KERNEL_C})
+endif()
 if(WITH_METAL_BACKEND)
   list(APPEND SHADER_C ${MSL_C})
 endif()

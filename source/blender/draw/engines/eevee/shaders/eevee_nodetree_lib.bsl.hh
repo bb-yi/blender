@@ -105,6 +105,16 @@ ViewMatrices view_matrices_get()
   return views.get(view_id_get());
 }
 
+float3 nodetree_world_incident_vector(float3 P)
+{
+#ifdef MAT_HIT_EVAL
+  /* Secondary hits are viewed from the previous ray segment, not from the main camera. */
+  return safe_normalize(hit_flat.view_origin - P);
+#else
+  return view_matrices_get().world_incident_vector(P);
+#endif
+}
+
 /* === NPR legacy draw-resource compatibility shims ===
  * The NPR custom material nodes (bevel, curvature, screen-space info, parallax, world environment,
  * ...) and `eevee_outline_lib.glsl` were written against the legacy `draw_view_lib.glsl` /
@@ -152,7 +162,7 @@ float drw_depth_screen_to_view(float ss_depth)
 }
 float3 drw_world_incident_vector(float3 P)
 {
-  return view_matrices_get().world_incident_vector(P);
+  return nodetree_world_incident_vector(P);
 }
 #  define DRW_VIEW_LIB_FUNCTIONS_DEFINED
 #endif /* !DRW_VIEW_LIB_FUNCTIONS_DEFINED */
@@ -224,7 +234,7 @@ float3 lightprobe_world_sample(float3 L, float lod)
       eevee::LightprobeRenderData);
   [[resource_table]] eevee::LightprobeSphereRenderData &lp_spheres = lightprobes.spheres;
   const ViewMatrices view = view_matrices_get();
-  float3 V = view.world_incident_vector(g_data.P);
+  float3 V = nodetree_world_incident_vector(g_data.P);
   eevee::LightProbeSample samp = lightprobes.load(gl_FragCoord.xy, g_data.P, g_data.Ng, V);
   return lp_spheres.spherical_sample_normalized_with_parallax(samp, g_data.P, L, lod);
 #  else
@@ -1198,7 +1208,7 @@ float3 coordinate_reflect(float3 P, float3 N)
   return N;
 #else
   const ViewMatrices view = view_matrices_get();
-  return -reflect(view.world_incident_vector(P), N);
+  return -reflect(nodetree_world_incident_vector(P), N);
 #endif
 }
 
@@ -1208,7 +1218,7 @@ float3 coordinate_incoming(float3 P)
   return -P;
 #else
   const ViewMatrices view = view_matrices_get();
-  return view.world_incident_vector(P);
+  return nodetree_world_incident_vector(P);
 #endif
 }
 

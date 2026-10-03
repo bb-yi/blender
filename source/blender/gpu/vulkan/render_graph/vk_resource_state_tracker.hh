@@ -213,6 +213,9 @@ class VKResourceStateTracker {
    */
   void update_image_layout(VkImage vk_image, VkImageLayout vk_image_layout);
 
+  /** Last tracked layout, for an external RT transition paired with update_image_layout(). */
+  VkImageLayout image_layout_get(VkImage vk_image);
+
   /**
    * Remove an registered image.
    *

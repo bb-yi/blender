@@ -434,6 +434,28 @@ class RENDER_PT_eevee_raytracing(RenderButtonsPanel, Panel):
         col = layout.column()
         col.prop(props, "ray_tracing_method", text="Method")
 
+        if props.ray_tracing_method == 'HARDWARE':
+            if not props.is_hardware_raytracing_supported:
+                col.label(text="Requires Windows NVIDIA RTX / Vulkan", icon='INFO')
+            col.prop(props, "use_hardware_raytracing_shadows")
+            sub = col.column(align=True)
+            sub.active = props.use_hardware_raytracing_shadows
+            sub.prop(props, "hardware_raytracing_shadow_samples")
+            sub.prop(props, "hardware_raytracing_shadow_color_intensity")
+            sub.prop(props, "hardware_raytracing_shadow_transparency")
+            col.prop(props, "use_hardware_raytracing_reflections")
+            sub = col.column()
+            sub.active = props.use_hardware_raytracing_reflections
+            sub.prop(props, "ray_tracing_reflection_bounces")
+            col.prop(props, "use_hardware_raytracing_refractions")
+            sub = col.column()
+            sub.active = props.use_hardware_raytracing_refractions
+            sub.prop(props, "ray_tracing_refraction_bounces")
+            col.prop(props, "use_hardware_raytracing_gi")
+            sub = col.column()
+            sub.active = props.use_hardware_raytracing_gi
+            sub.prop(props.ray_tracing_options, "gi_spatial_samples")
+
         options = context.scene.eevee.ray_tracing_options
 
         col.prop(options, "resolution_scale")
@@ -549,6 +571,9 @@ class RENDER_PT_eevee_denoise(RenderButtonsPanel, Panel):
         props = context.scene.eevee.ray_tracing_options
 
         col = layout.column(align=True)
+
+        if scene.eevee.ray_tracing_method == 'HARDWARE':
+            col.label(text="Hardware rays: OpenImageDenoise (GPU)")
 
         row = col.row()
         row.active = props.use_denoise

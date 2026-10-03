@@ -324,6 +324,19 @@ class PassBase {
   void draw_indirect(gpu::Batch *batch,
                      StorageBuffer<DrawCommand, true> &indirect_buffer,
                      ResourceID res_id = {0});
+  /** Replay traced hits as procedural triangles, reading the source mesh as SSBOs. */
+  void draw_expand_indirect(gpu::Batch *batch,
+                            GPUPrimType primitive_type,
+                            uint primitive_len,
+                            gpu::StorageBuf **indirect_buffer,
+                            uint32_t indirect_offset,
+                            ResourceID res_id = {0});
+  void draw_expand_indirect(gpu::Batch *batch,
+                            GPUPrimType primitive_type,
+                            uint primitive_len,
+                            StorageBuffer<DrawCommand, true> &indirect_buffer,
+                            uint32_t indirect_offset,
+                            ResourceID res_id = {0});
   void draw_procedural_indirect(GPUPrimType primitive,
                                 StorageBuffer<DrawCommand, true> &indirect_buffer,
                                 ResourceID res_id = {0});
@@ -1016,7 +1029,33 @@ inline void PassBase<T>::draw_indirect(gpu::Batch *batch,
                                        ResourceID res_id)
 {
   BLI_assert(shader_);
-  create_command(Type::DrawIndirect).draw_indirect = {batch, &indirect_buffer, res_id};
+  create_command(Type::DrawIndirect).draw_indirect = {
+      batch, &indirect_buffer, 0, GPU_PRIM_NONE, 0, res_id};
+}
+
+template<class T>
+inline void PassBase<T>::draw_expand_indirect(gpu::Batch *batch,
+                                              GPUPrimType primitive_type,
+                                              uint primitive_len,
+                                              gpu::StorageBuf **indirect_buffer,
+                                              uint32_t indirect_offset,
+                                              ResourceID res_id)
+{
+  BLI_assert(shader_);
+  create_command(Type::DrawIndirect).draw_indirect = {
+      batch, indirect_buffer, indirect_offset, primitive_type, primitive_len, res_id};
+}
+
+template<class T>
+inline void PassBase<T>::draw_expand_indirect(gpu::Batch *batch,
+                                              GPUPrimType primitive_type,
+                                              uint primitive_len,
+                                              StorageBuffer<DrawCommand, true> &indirect_buffer,
+                                              uint32_t indirect_offset,
+                                              ResourceID res_id)
+{
+  this->draw_expand_indirect(
+      batch, primitive_type, primitive_len, &indirect_buffer, indirect_offset, res_id);
 }
 
 template<class T>

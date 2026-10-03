@@ -10,6 +10,7 @@
  */
 
 #include "BLI_math_base.h"
+#include "BLI_string.h"
 #include "BLI_utildefines.h"
 
 #include "GPU_batch.hh"
@@ -208,7 +209,7 @@ static uint16_t bind_attribute_as_ssbo(const ShaderInterface *interface,
    * our OpenSubdiv implementation to output the same layout as the regular mesh extraction. */
   // BLI_assert_msg(format->attr_len == 1, "Multi attribute buffers are not supported for now");
 
-  char uniform_name[] = "gpu_attr_0";
+  char uniform_name[32];
   uint stride = format->stride;
   uint offset = 0;
   uint16_t bound_attr = 0u;
@@ -226,7 +227,14 @@ static uint16_t bind_attribute_as_ssbo(const ShaderInterface *interface,
     for (uint n_idx = 0; n_idx < a->name_len; n_idx++) {
       const char *name = GPU_vertformat_attr_name_get(format, a, n_idx);
       const ShaderInput *input = interface->ssbo_get(name);
+      if (input == nullptr && STREQ(name, "a")) {
+        input = interface->ssbo_get("eevee_default_uv_attr");
+      }
       if (input == nullptr || input->location == -1) {
+        continue;
+      }
+      if (bound_attr & (1 << input->location)) {
+        /* Keep the first resolved alias, including the active render UV layer. */
         continue;
       }
       GPU_vertbuf_bind_as_ssbo(vbo, input->location);
@@ -234,17 +242,26 @@ static uint16_t bind_attribute_as_ssbo(const ShaderInterface *interface,
 
       /* WORKAROUND: This is to support complex format. But ideally this should not be supported.
        */
-      uniform_name[9] = '0' + input->location;
+      SNPRINTF(uniform_name, "gpu_attr_%d", input->location);
 
       /* Only support 4byte aligned attributes. */
       BLI_assert((stride % 4) == 0);
       BLI_assert((offset % 4) == 0);
       int descriptor[2] = {int(stride) / 4, int(offset) / 4};
       GPU_shader_uniform_2iv(shader, uniform_name, descriptor);
+      /* HWRT material replay reads packed mesh attributes, not converted vertex inputs. */
+      char meta_name[32];
+      SNPRINTF(meta_name, "gpu_attr_%d_meta", input->location);
+      const int meta_location = GPU_shader_get_uniform(shader, meta_name);
+      if (meta_location != -1) {
+        const int meta = int(a->type.comp_len()) | (int(a->type.comp_type()) << 8) |
+                         (int(a->type.fetch_mode()) << 16);
+        GPU_shader_uniform_int_ex(shader, meta_location, 1, 1, &meta);
+      }
       /* WORKAROUND: Fix for polyline workaround. Ideally should be fused with `gpu_attr_0`.
        * But for now, changes are a bit too invasive. Will need to be revisited later on. */
-      char uniform_name_len[] = "gpu_attr_0_len";
-      uniform_name_len[9] = '0' + input->location;
+      char uniform_name_len[32];
+      SNPRINTF(uniform_name_len, "gpu_attr_%d_len", input->location);
       const int loc = GPU_shader_get_uniform(shader, uniform_name_len);
       if (loc != -1) {
         int data = a->type.comp_len();
@@ -291,6 +308,26 @@ void GPU_batch_bind_as_resources(Batch *batch,
     }
   }
 
+  /* Sparse replay declares packed-format metadata. Missing attributes use zero, matching generic
+   * mesh attributes, without relaxing the binding contract for other expanded draw shaders. */
+  for (int slot = 0; slot < 16 && ssbo_attributes; slot++) {
+    if ((ssbo_attributes & (1 << slot)) == 0) {
+      continue;
+    }
+    char name[32];
+    SNPRINTF(name, "gpu_attr_%d_meta", slot);
+    const int meta_location = GPU_shader_get_uniform(shader, name);
+    if (meta_location == -1) {
+      continue;
+    }
+    const int zero = 0;
+    GPU_shader_uniform_int_ex(shader, meta_location, 1, 1, &zero);
+    SNPRINTF(name, "gpu_attr_%d", slot);
+    const int descriptor[2] = {0, 0};
+    GPU_shader_uniform_2iv(shader, name, descriptor);
+    GPU_vertbuf_bind_as_ssbo(batch->verts[0], slot);
+    ssbo_attributes &= ~(1 << slot);
+  }
   BLI_assert_msg(ssbo_attributes == 0, "Not all attribute storage buffer fulfilled");
   UNUSED_VARS_NDEBUG(ssbo_attributes);
 }

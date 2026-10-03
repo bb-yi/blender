@@ -9,6 +9,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 
 #include "BLI_task.h"
 #include "BLI_threads.h"
@@ -106,6 +107,18 @@ struct VKExtensions {
    */
   bool host_image_copy = false;
 
+  /**
+   * Nuru: does the device support hardware ray tracing
+   * (VK_KHR_acceleration_structure + VK_KHR_ray_query + buffer device address).
+   */
+  bool hardware_raytracing = false;
+
+  /**
+   * Nuru: VK_NV_device_diagnostic_checkpoints, only set when the wedge diagnostic is requested
+   * via `BLENDER_VULKAN_CHECKPOINTS=1` (see `vk_diagnostic_checkpoints_requested`).
+   */
+  bool diagnostic_checkpoints = false;
+
   /** Log enabled features and extensions. */
   void log() const;
 };
@@ -184,6 +197,15 @@ class VKDevice : public NonCopyable {
    * Must be externally synced by orphaned_data.mutex_get()
    */
   TimelineValue timeline_value_ = 0;
+  /**
+   * Nuru: timeline of the last render-graph submission that reached `vkQueueSubmit` on the
+   * submission runner thread. Lets external direct queue submissions (hardware ray tracing)
+   * wait until all previously enqueued graph work is actually on the queue, preserving
+   * CPU-record order on the GPU queue.
+   */
+  std::atomic<TimelineValue> queue_submitted_timeline_ = 0;
+  std::mutex queue_submitted_mutex_;
+  std::condition_variable queue_submitted_condition_;
 
   VKSamplers samplers_;
   VKDescriptorSetLayouts descriptor_set_layouts_;
@@ -281,6 +303,18 @@ class VKDevice : public NonCopyable {
     PFN_vkGetMemoryWin32HandleKHR vkGetMemoryWin32Handle = nullptr;
 #endif
 
+    /* Nuru extension: VK_KHR_acceleration_structure */
+    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizes = nullptr;
+    PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructure = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructure = nullptr;
+    PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructures = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddress =
+        nullptr;
+
+    /* Nuru extension: VK_NV_device_diagnostic_checkpoints (wedge diagnostic, env-gated). */
+    PFN_vkCmdSetCheckpointNV vkCmdSetCheckpoint = nullptr;
+    PFN_vkGetQueueCheckpointDataNV vkGetQueueCheckpointData = nullptr;
+
   } functions;
 
   VKMemoryPools vma_pools;
@@ -350,6 +384,18 @@ class VKDevice : public NonCopyable {
   uint32_t queue_family_get() const
   {
     return vk_queue_family_;
+  }
+
+  /* Nuru: direct queue access for the hardware ray-tracing submission path. Lock
+   * `queue_mutex_get()` for the duration of any `vkQueueSubmit` made outside the render graph. */
+  VkQueue queue_get() const
+  {
+    return vk_queue_;
+  }
+
+  std::mutex &queue_mutex_get()
+  {
+    return *queue_mutex_;
   }
 
   inline VmaAllocator mem_allocator_get() const
@@ -431,7 +477,64 @@ class VKDevice : public NonCopyable {
                                     uint64_t wait_semaphore_value,
                                     uint64_t signal_semaphore_value);
   void wait_for_timeline(TimelineValue timeline);
+  /**
+   * Nuru: block until the submission runner thread has handed every render-graph submission with
+   * a timeline up to and including `timeline` to `vkQueueSubmit`. Unlike
+   * `RenderGraphFlushFlags::WAIT_FOR_SUBMISSION` this also covers submissions enqueued by earlier
+   * flushes (including flushes of empty graphs which enqueue nothing themselves).
+   */
+  void wait_for_submission_timeline(TimelineValue timeline);
+  /**
+   * Nuru: chain an external direct queue submission (hardware ray tracing) into the device
+   * timeline. Returns the timeline value the external submission must SIGNAL and writes the
+   * value it must WAIT on into `r_wait_value`. Subsequent render-graph submissions claim later
+   * timeline values and wait on this one, so the GPU serializes the external command buffer
+   * against graph work in both directions without any CPU-side waits. Without this chaining,
+   * same-queue submissions may overlap execution: both Xid 109 checkpoint captures show the
+   * GPU wedging on the first graph node (a dispatch, then a plain buffer copy) immediately
+   * after an external `Trace.HardwareLighting` batch completes.
+   */
+  TimelineValue external_timeline_chain_acquire(TimelineValue *r_wait_value);
+  /**
+   * Nuru: record that the external submission owning `value` reached `vkQueueSubmit`. External
+   * submissions claim timeline values through the call above, and an empty-graph flush can
+   * return such a value from `render_graph_submit`; without this publication
+   * `wait_for_submission_timeline` on that value would wait forever (the runner only publishes
+   * values it submitted itself).
+   */
+  void external_timeline_chain_submitted(TimelineValue value);
+  /** Semaphore handle for external submissions chained via the call above. */
+  VkSemaphore timeline_semaphore_get() const
+  {
+    return vk_timeline_semaphore_;
+  }
+  /**
+   * Nuru: latest claimed timeline value (graphs and chained externals). Waiting on it via
+   * `wait_for_timeline` drains every Vulkan submission claimed so far, e.g. to hand the GPU
+   * to a CUDA interop burst without leaving Vulkan channels to starve.
+   */
+  TimelineValue claimed_timeline_get()
+  {
+    std::scoped_lock lock(orphaned_data.mutex_get());
+    return timeline_value_;
+  }
+  /**
+   * Nuru: latest timeline value that actually reached `vkQueueSubmit` (graphs and chained
+   * externals). Safe to wait on while holding the queue mutex: completion needs no further
+   * submissions.
+   */
+  TimelineValue queue_submitted_timeline_value() const
+  {
+    return queue_submitted_timeline_.load(std::memory_order_acquire);
+  }
   void wait_queue_idle();
+  /**
+   * Nuru: wedge diagnostic. When `VK_NV_device_diagnostic_checkpoints` is active (see
+   * `vk_diagnostic_checkpoints_requested`), retrieve and print the last started/completed
+   * checkpoint markers from the queue. Call on `VK_ERROR_DEVICE_LOST` or wedged fence waits.
+   * Prints at most once per process; no-op when the diagnostic is inactive.
+   */
+  void diagnostic_checkpoints_dump();
 
   /**
    * Retrieve the last finished submission timeline.

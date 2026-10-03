@@ -351,6 +351,11 @@ class ForwardPipeline {
 
   bool use_colored_transparency() const;
   bool has_outline_occluders() const;
+  bool has_surface_draws() const
+  {
+    return has_opaque_ || has_transparent_ || has_no_depth_ || has_stencil_ ||
+           has_outline_occluders_;
+  }
   void render_outline_occlusion(View &view, Framebuffer &outline_occlusion_fb);
 
   void render(View &view,
@@ -530,6 +535,7 @@ class DeferredLayer : DeferredLayerBase {
   Texture tile_mask_tx_ = {"tile_mask_tx_"};
 
   RayTraceResult indirect_result_;
+  gpu::Texture *shared_indirect_tx_ = nullptr;
 
   bool use_split_radiance_ = true;
   /* Output radiance from the combine shader instead of copy. Allow passing unclamped result. */
@@ -598,7 +604,8 @@ class DeferredLayer : DeferredLayerBase {
                        int2 extent,
                        RayTraceBuffer &rt_buffer,
                        gpu::Texture *radiance_behind_tx,
-                       bool &volume_compute_done);
+                       bool &volume_compute_done,
+                       bool scene_final_hardware_specular = false);
 };
 
 class DeferredPipeline {
@@ -649,7 +656,11 @@ class DeferredPipeline {
               int2 extent,
               RayTraceBuffer &rt_buffer_opaque_layer,
               RayTraceBuffer &rt_buffer_refract_layer,
-              bool &volume_compute_done);
+              bool &volume_compute_done,
+              bool scene_final_hardware_specular = false);
+
+  /** Whether the main view can retain this GBuffer for Nuru's whole-frame specular phase. */
+  bool use_scene_final_hardware_specular() const;
 
   /* Return the maximum amount of gbuffer layer needed. */
   int header_layer_count() const

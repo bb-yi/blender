@@ -421,7 +421,38 @@ struct DrawMulti {
 struct DrawIndirect {
   gpu::Batch *batch;
   gpu::StorageBuf **indirect_buf;
+  uint32_t indirect_offset;
+  uint32_t expand_prim_type : 4; /* #GPUPrimType */
+  uint32_t expand_prim_len : 4;
+  uint32_t _pad : 24;
   ResourceID res_id;
+
+  DrawIndirect() = default;
+
+  DrawIndirect(gpu::Batch *batch,
+               gpu::StorageBuf **indirect_buf,
+               uint32_t indirect_offset,
+               GPUPrimType expanded_prim_type,
+               uint expanded_prim_len,
+               ResourceID res_id)
+      : batch(batch),
+        indirect_buf(indirect_buf),
+        indirect_offset(indirect_offset),
+        expand_prim_type(expanded_prim_type),
+        expand_prim_len(expanded_prim_len),
+        _pad(0),
+        res_id(res_id)
+  {
+    BLI_assert(batch != nullptr);
+    BLI_assert(indirect_buf != nullptr);
+    BLI_assert(expanded_prim_type <= 15);
+    BLI_assert(expanded_prim_len <= 15);
+  }
+
+  bool is_primitive_expansion() const
+  {
+    return expand_prim_type != GPU_PRIM_NONE;
+  }
 
   void execute(RecordingState &state) const;
   std::string serialize() const;
@@ -550,7 +581,7 @@ union Undetermined {
 
 /** Try to keep the command size as low as possible for performance. */
 
-BLI_STATIC_ASSERT(sizeof(Undetermined) <= 24, "One of the command type is too large.")
+BLI_STATIC_ASSERT(sizeof(Undetermined) <= 32, "One of the command type is too large.")
 
 /** \} */
 

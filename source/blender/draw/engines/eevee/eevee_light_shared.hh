@@ -214,8 +214,9 @@ struct [[host_shared]] LightData {
   uint2 shadow_set_membership;
 
   float shadow_map_scale;
-  float _pad7;
-  float _pad8;
+  /** Stable source-light layer, independent of view-dependent light culling/sorting. */
+  int hwrt_shadow_layer;
+  int hwrt_cluster_id;
   float _pad9;
   float _pad10;
   float _pad11;

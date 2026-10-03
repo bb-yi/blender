@@ -257,7 +257,15 @@ void DrawIndirect::execute(RecordingState &state) const
 {
   state.front_facing_set(res_id.has_inverted_handedness());
 
-  GPU_batch_draw_indirect(batch, *indirect_buf, 0);
+  if (is_primitive_expansion()) {
+    GPU_batch_bind_as_resources(batch, state.shader, state.specialization_constants_get());
+    gpu::Batch *gpu_batch = procedural_batch_get(GPUPrimType(expand_prim_type));
+    GPU_batch_set_shader(gpu_batch, state.shader, state.specialization_constants_get());
+    GPU_batch_draw_indirect(gpu_batch, *indirect_buf, indirect_offset);
+    return;
+  }
+  GPU_batch_set_shader(batch, state.shader, state.specialization_constants_get());
+  GPU_batch_draw_indirect(batch, *indirect_buf, indirect_offset);
 }
 
 void Dispatch::execute(RecordingState &state) const
@@ -666,7 +674,8 @@ std::string DrawMulti::serialize(const std::string &line_prefix) const
 
 std::string DrawIndirect::serialize() const
 {
-  return std::string(".draw_indirect()");
+  return is_primitive_expansion() ? std::string(".draw_expand_indirect()") :
+                                    std::string(".draw_indirect()");
 }
 
 std::string Dispatch::serialize() const

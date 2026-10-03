@@ -1089,6 +1089,10 @@ void LightModule::end_sync()
     int dst_idx = is_sun_light(light.type) ? sun_lights_idx++ : local_lights_idx++;
     /* Put all light data into global data SSBO. */
     light_buf_[dst_idx] = light;
+    /* World extraction remains on its existing shadow path until the world RT pass runs. */
+    light_buf_[dst_idx].hwrt_shadow_layer =
+        (light.color.x >= 0.0f && light.tilemap_index != LIGHT_NO_SHADOW) ? dst_idx : -1;
+    light_buf_[dst_idx].hwrt_cluster_id = 0;
     const int uniform_encoded_index = (light.uniform_light_shader_index >= 0) ?
                                           -light.uniform_light_shader_index - 2 :
                                           -1;
@@ -1135,6 +1139,23 @@ void LightModule::end_sync()
   }
 
   /* This scene data buffer is then immutable after this point. */
+  /* Nuru's spatial buckets must travel with each light through the GPU culling sort. */
+  if (local_lights_len_ > 0) {
+    float3 bounds_min(FLT_MAX), bounds_max(-FLT_MAX);
+    for (int i = sun_lights_len_; i < lights_len_; i++) {
+      bounds_min = math::min(bounds_min, light_buf_[i].position());
+      bounds_max = math::max(bounds_max, light_buf_[i].position());
+    }
+    const float3 extent = math::max(bounds_max - bounds_min, float3(1.0e-3f));
+    for (int i = sun_lights_len_; i < lights_len_; i++) {
+      const float3 ndc = (light_buf_[i].position() - bounds_min) / extent;
+      const uint qx = math::min(uint(ndc.x * 4.0f), 3u);
+      const uint qy = math::min(uint(ndc.y * 4.0f), 3u);
+      const uint qz = math::min(uint(ndc.z * 4.0f), 3u);
+      light_buf_[i].hwrt_cluster_id = int((qx | (qy << 2u) | (qz << 4u)) %
+                                         HWRT_LIGHT_CLUSTER_COUNT);
+    }
+  }
   light_buf_.push_update();
   light_shader_src_index_buf_.push_update();
   front_light_shader_src_index_buf_.push_update();

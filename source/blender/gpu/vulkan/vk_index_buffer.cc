@@ -84,8 +84,10 @@ void VKIndexBuffer::bind_as_ssbo(uint binding)
 
 void VKIndexBuffer::read(uint32_t *data) const
 {
+  /* Subranges own no device allocation. Return the source storage; the caller applies
+   * index_start_get(), as it does for the other backends. */
   VKContext &context = *VKContext::get();
-  VKStagingBuffer staging_buffer(buffer_, VKStagingBuffer::Direction::DeviceToHost);
+  VKStagingBuffer staging_buffer(buffer_get(), VKStagingBuffer::Direction::DeviceToHost);
   VKBuffer &buffer = staging_buffer.host_buffer_get();
   if (buffer.is_mapped()) {
     staging_buffer.copy_from_device(context);

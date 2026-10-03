@@ -12,6 +12,15 @@
 #include "vk_common.hh"
 
 namespace blender::gpu {
+
+bool vk_diagnostic_checkpoints_requested()
+{
+  static const bool requested = []() {
+    const char *env = getenv("BLENDER_VULKAN_CHECKPOINTS");
+    return env != nullptr && env[0] == '1';
+  }();
+  return requested;
+}
 VkImageAspectFlags to_vk_image_aspect_flag_bits(const TextureFormat format)
 {
   switch (format) {

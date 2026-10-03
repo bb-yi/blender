@@ -152,6 +152,21 @@ void spatial_main([[resource_table]] DenoiseSpatial &srt,
   constexpr uint tile_size = RAYTRACE_GROUP_SIZE;
   int2 texel_fullres = int2(local_id.xy + tile_coord * tile_size);
 
+  if (any(greaterThanEqual(texel_fullres, uni.raytrace_buf.full_resolution))) {
+    return;
+  }
+  ClosureUndetermined phase_closure = reader.read_bin(texel_fullres, srt.closure_index);
+  if (uni.raytrace_buf.skip_hardware_phase(
+          phase_closure.type == CLOSURE_BSDF_DIFFUSE_ID ||
+              phase_closure.type == CLOSURE_BSSRDF_BURLEY_ID,
+          phase_closure.type == CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID,
+          phase_closure.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID)) {
+    imageStore(srt.out_radiance_img, texel_fullres, float4(0.0f));
+    imageStore(srt.out_variance_img, texel_fullres, float4(0.0f));
+    imageStore(srt.out_hit_depth_img, texel_fullres, float4(0.0f));
+    return;
+  }
+
   /* Tracing resolution texel. */
   int2 texel_shifted = max(int2(0), texel_fullres - uni.raytrace_buf.trace_pixel_offset);
   int2 texel_nearest = texel_shifted / srt.raytrace_resolution_scale;
