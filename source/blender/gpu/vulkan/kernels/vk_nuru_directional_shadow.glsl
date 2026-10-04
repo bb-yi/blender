@@ -42,6 +42,8 @@ layout(binding = 17) uniform usampler2DArray gbuf_header_tx;
 layout(binding = 18) uniform sampler2DArray gbuf_normal_tx;
 layout(binding = 43) uniform writeonly image2DArray shadow_visibility_img;
 
+#include "vk_nuru_shadow_terminator_lib.glsl"
+
 vec3 barycentric_expand(vec2 barycentric)
 {
   return vec3(max(0.0f, 1.0f - barycentric.x - barycentric.y), barycentric.x, barycentric.y);
@@ -508,7 +510,8 @@ void main()
     return;
   }
   const vec2 uv = (vec2(tid) + 0.5f) / vec2(uniforms.resolution_layer.xy);
-  const float depth = 1.0f - textureLod(depth_tx, uv, 0.0f).r;
+  const float reverse_depth = textureLod(depth_tx, uv, 0.0f).r;
+  const float depth = 1.0f - reverse_depth;
   if (!depth_is_valid(depth)) {
     imageStore(shadow_visibility_img,
                ivec3(ivec2(tid), int(uint(uniforms.resolution_layer.z))),
@@ -538,8 +541,25 @@ void main()
    * to the world-space arithmetic bias below. Neighbor depth differences are NOT error bounds:
    * at a silhouette they can move the launch past its occluder and create a bright rim.
    * Unlike a pixel-footprint pull, this correction does not grow across geometry edges. */
-  const float depth_front = uintBitsToFloat(max(floatBitsToUint(depth), 4u) - 4u);
+  /* Cover the stored reverse-Z precision too: near an orthographic camera the
+   * subtraction loses bits, so forward-depth ULPs alone miss raster rounding. */
+  const float reverse_front = uintBitsToFloat(min(floatBitsToUint(reverse_depth) + 4u,
+                                                floatBitsToUint(1.0f)));
+  const float depth_front = min(1.0f - reverse_front,
+      uintBitsToFloat(max(floatBitsToUint(depth), 4u) - 4u));
   const vec3 P_corrected = point_screen_to_world(ivec2(tid), depth_front);
+  const float max_cutoff = uintBitsToFloat(uint(uniforms.world_sun_slot_pad.z));
+  const vec3 smooth_N = normal_unpack(texelFetch(gbuf_normal_tx, ivec3(tid, 0), 0).xy);
+  TerminatorReceiver receiver = terminator_none();
+  /* Include an angular margin for the G-buffer geometric-normal quantization. */
+  if (max_cutoff > 0.0 &&
+      min(dot(N, uniforms.light_direction_bias.xyz),
+          dot(smooth_N, uniforms.light_direction_bias.xyz)) <
+          max_cutoff + 0.25 + 2.0 * sin(0.5 * uniforms.shadow_params.x)) {
+    const vec3 toward_camera = normalize(point_screen_to_world(ivec2(tid), 0.0) - P);
+    const float recovery_distance = max(normal_bias * 16.0, length(P_corrected - P) * 2.0);
+    receiver = terminator_raster_receiver(P, toward_camera, smooth_N, recovery_distance);
+  }
   const int sample_count = (uniforms.shadow_params.x > 1.0e-6f) ? max(int(uniforms.shadow_params.y), 1) : 1;
   const bool enable_caustics = (uniforms.world_sun_slot_pad.y != 0);
   const float color_intensity = clamp(uniforms.shadow_params.z, 0.0f, 1.0f);
@@ -548,7 +568,8 @@ void main()
   vec3 visibility = vec3(0.0f);
   for (int sample_index = 0; sample_index < sample_count; sample_index++) {
     const vec3 sample_dir = sample_directional_shadow_direction(tid, sample_index);
-    const vec3 origin = P_corrected + N * normal_bias;
+    const vec3 offset = terminator_shadow_offset(receiver, P_corrected, sample_dir, normal_bias);
+    const vec3 origin = P_corrected + N * normal_bias + offset;
     visibility += hardware_shadow_visibility(scene, origin, sample_dir, ray_tmin, 100000.0f, transparent_shadows, enable_caustics, true, sample_dir, color_intensity, photons_intensity);
   }
   visibility /= float(sample_count);

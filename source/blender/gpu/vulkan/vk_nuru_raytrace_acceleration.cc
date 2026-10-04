@@ -99,6 +99,8 @@ struct GPUHardwareRaytraceScene {
   nuru_vk::RTBuffer triangle_smooth_normal_buffer;
   nuru_vk::RTBuffer triangle_local_position_buffer;
   nuru_vk::RTBuffer triangle_normal_range_buffer;
+  nuru_vk::RTBuffer shadow_object_transform_buffer;
+  float shadow_terminator_max_cutoff = 0.0f;
   std::vector<VkAccelerationStructureKHR> bottom_level_acceleration_structures;
   std::vector<nuru_vk::RTBuffer> bottom_level_buffers;
   /* RT-owned copies of the geometry (positions as tightly packed float3, indices as uint32).
@@ -737,6 +739,7 @@ struct SceneGeometryBuild {
   float reflection_layer_coverage = 0.0f;
   uint32_t closure_type = 1u;
   uint32_t proxy_flags = 0u;
+  float shadow_terminator_geometry_offset = 0.1f;
   std::vector<float4> triangle_normals;
   std::vector<float4> triangle_smooth_normals;
   std::vector<float4> triangle_local_positions;
@@ -1168,6 +1171,7 @@ static bool build_entry_blas(const GPUHardwareRaytraceSceneEntry &entry,
   r_geometry.packed_thickness = entry.packed_thickness;
   r_geometry.alpha = entry.alpha;
   r_geometry.reflection_layer_coverage = entry.reflection_layer_coverage;
+  r_geometry.shadow_terminator_geometry_offset = entry.shadow_terminator_geometry_offset;
   r_geometry.closure_type = entry.closure_type;
   r_geometry.proxy_flags = entry.proxy_flags;
   r_geometry.triangle_normals = build_triangle_normal_data(positions, indices, triangle_count);
@@ -1456,7 +1460,28 @@ static bool build_material_proxy_buffer(const std::vector<SceneGeometryBuild> &g
                                                      float(entry.closure_type),
                                                      float(entry.proxy_flags));
     proxies[entry.user_id].packed_thickness = float4(
-        entry.packed_thickness, entry.alpha, entry.reflection_layer_coverage, 0.0f);
+        entry.packed_thickness, entry.alpha, entry.reflection_layer_coverage,
+        std::clamp(entry.shadow_terminator_geometry_offset, 0.0f, 1.0f));
+  }
+  return true;
+}
+
+static bool build_shadow_object_transform_buffer(const std::vector<SceneGeometryBuild> &geometry,
+                                                RTBuffer &r_buffer)
+{
+  uint32_t max_user_id = 0;
+  for (const SceneGeometryBuild &entry : geometry) {
+    max_user_id = std::max(max_user_id, entry.user_id);
+  }
+  if (!rt_storage_buffer_create(r_buffer, (size_t(max_user_id) + 1) * sizeof(float4x4))) {
+    return false;
+  }
+  auto *matrices = static_cast<float4x4 *>(r_buffer.mapped);
+  for (uint32_t i = 0; i <= max_user_id; i++) {
+    matrices[i] = float4x4::identity();
+  }
+  for (const SceneGeometryBuild &entry : geometry) {
+    matrices[entry.user_id] = entry.object_to_world;
   }
   return true;
 }
@@ -1785,6 +1810,7 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       specs.push_back({0, BK::UBO});
       specs.push_back({1, BK::ACCELERATION_STRUCTURE});
       add_range(2, 5, BK::SSBO); /* sunlight, proxies, tri normals, smooth, ranges. */
+      add_range(8, 2, BK::SSBO); /* Terminator positions and object matrices. */
       add_range(16, 3, BK::SAMPLED);
       specs.push_back({40 + 3, BK::STORAGE_IMAGE});
       break;
@@ -1792,6 +1818,7 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       specs.push_back({0, BK::UBO});
       specs.push_back({1, BK::ACCELERATION_STRUCTURE});
       add_range(2, 6, BK::SSBO);
+      add_range(8, 2, BK::SSBO);
       add_range(16, 3, BK::SAMPLED);
       specs.push_back({40 + 3, BK::STORAGE_IMAGE});
       break;
@@ -1812,6 +1839,7 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       specs.push_back({0, BK::UBO});
       specs.push_back({1, BK::ACCELERATION_STRUCTURE});
       add_range(2, 4, BK::SSBO);
+      add_range(8, 2, BK::SSBO);
       add_range(16, 3, BK::SAMPLED);
       specs.push_back({40 + 3, BK::STORAGE_IMAGE});
       break;
@@ -1819,6 +1847,7 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       specs.push_back({0, BK::UBO});
       specs.push_back({1, BK::ACCELERATION_STRUCTURE});
       add_range(2, 5, BK::SSBO);
+      add_range(8, 2, BK::SSBO);
       add_range(16, 3, BK::SAMPLED);
       specs.push_back({40 + 3, BK::STORAGE_IMAGE});
       break;
@@ -1949,6 +1978,17 @@ static bool compile_kernel_spirv(const NuruKernel kernel, std::vector<uint32_t> 
   if (source == nullptr || source[0] == '\0') {
     return false;
   }
+
+  /* Raw Vulkan kernels do not use Blender's shader include resolver. Expand this shared
+   * implementation before hashing, so edits invalidate every consumer's SPIR-V cache. */
+  std::string expanded_source(source);
+  constexpr const char *terminator_include = "#include \"vk_nuru_shadow_terminator_lib.glsl\"";
+  const size_t include_pos = expanded_source.find(terminator_include);
+  if (include_pos != std::string::npos) {
+    expanded_source.replace(include_pos, std::strlen(terminator_include),
+                            nuru_kernels::shadow_terminator_lib_glsl());
+  }
+  source = expanded_source.c_str();
 
   std::string cache_path;
   if (kernel_cache_dir_get().has_value()) {
@@ -2914,7 +2954,12 @@ GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntr
   }
 
   std::vector<TriangleNormalRangeRecord> triangle_normal_ranges;
+  for (const SceneGeometryBuild &entry : built_geometry) {
+    scene->shadow_terminator_max_cutoff = std::max(
+        scene->shadow_terminator_max_cutoff, entry.shadow_terminator_geometry_offset);
+  }
   if (!build_emissive_radiance_buffer(built_geometry, scene->emissive_radiance_buffer) ||
+      !build_shadow_object_transform_buffer(built_geometry, scene->shadow_object_transform_buffer) ||
       !build_emissive_light_buffer(
           built_geometry, scene->emissive_light_buffer, scene->emissive_light_count) ||
       !build_diffuse_albedo_buffer(built_geometry, scene->diffuse_albedo_buffer) ||
@@ -3056,6 +3101,7 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     geometry.packed_thickness = entry.packed_thickness;
     geometry.alpha = entry.alpha;
     geometry.reflection_layer_coverage = entry.reflection_layer_coverage;
+    geometry.shadow_terminator_geometry_offset = entry.shadow_terminator_geometry_offset;
     geometry.closure_type = entry.closure_type;
     geometry.proxy_flags = entry.proxy_flags;
     geometry.triangle_normals = rebuilt ? rebuilt->triangle_normals :
@@ -3089,6 +3135,7 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
   RTBuffer new_triangle_smooth_normals;
   RTBuffer new_triangle_local_positions;
   RTBuffer new_triangle_normal_ranges;
+  RTBuffer new_shadow_object_transforms;
   auto cleanup_news = [&]() {
     destroy_acceleration_structure(new_tlas, new_tlas_buffer);
     rt_buffer_free(new_emissive);
@@ -3099,6 +3146,7 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     rt_buffer_free(new_triangle_smooth_normals);
     rt_buffer_free(new_triangle_local_positions);
     rt_buffer_free(new_triangle_normal_ranges);
+    rt_buffer_free(new_shadow_object_transforms);
     for (auto &pair : rebuilt_blas) {
       destroy_acceleration_structure(pair.second.acceleration_structure,
                                      pair.second.acceleration_buffer);
@@ -3123,6 +3171,12 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
       cleanup_news();
       return false;
     }
+  }
+  if (update_params.update_tlas &&
+      !build_shadow_object_transform_buffer(updated_geometry, new_shadow_object_transforms))
+  {
+    cleanup_news();
+    return false;
   }
   bool update_world_normals = !rebuilt_blas.empty();
   if (update_params.update_world_geometry_data) {
@@ -3185,6 +3239,8 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
                                    scene->top_level_buffer);
     scene->top_level_acceleration_structure = new_tlas;
     scene->top_level_buffer = new_tlas_buffer;
+    rt_buffer_free(scene->shadow_object_transform_buffer);
+    scene->shadow_object_transform_buffer = new_shadow_object_transforms;
   }
   if (update_params.update_emissive_data) {
     rt_buffer_free(scene->emissive_radiance_buffer);
@@ -3198,6 +3254,11 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     rt_buffer_free(scene->material_proxy_buffer);
     scene->diffuse_albedo_buffer = new_diffuse;
     scene->material_proxy_buffer = new_proxy;
+    scene->shadow_terminator_max_cutoff = 0.0f;
+    for (const SceneGeometryBuild &entry : updated_geometry) {
+      scene->shadow_terminator_max_cutoff = std::max(
+          scene->shadow_terminator_max_cutoff, entry.shadow_terminator_geometry_offset);
+    }
   }
   if (update_world_normals) {
     rt_buffer_free(scene->triangle_normal_buffer);
@@ -3603,7 +3664,7 @@ bool raytrace_scene_trace_directional_shadow(
   uniforms.world_sun_slot_pad = int4(
       params.world_sun_slot,
       params.use_caustics ? 1 : 0,
-      0,
+      gpu_vulkan_shadow_transparency_bits(scene->shadow_terminator_max_cutoff),
       gpu_vulkan_shadow_transparency_bits(params.shadow_transparency));
   uniforms.sampling_rand = params.sampling_rand;
 
@@ -3629,6 +3690,9 @@ bool raytrace_scene_trace_directional_shadow(
   args.ssbos.push_back(rt_buffer_binding(4, scene->triangle_normal_buffer));
   args.ssbos.push_back(rt_buffer_binding(5, scene->triangle_smooth_normal_buffer));
   args.ssbos.push_back(rt_buffer_binding(6, scene->triangle_normal_range_buffer));
+
+  args.ssbos.push_back(rt_buffer_binding(8, scene->triangle_local_position_buffer));
+  args.ssbos.push_back(rt_buffer_binding(9, scene->shadow_object_transform_buffer));
 
   args.images.push_back(sampled_binding(16 + 0, params.depth_tx));
   args.images.push_back(sampled_binding(16 + 1, params.gbuf_header_tx, /*arrayed=*/true));
@@ -3702,6 +3766,9 @@ bool raytrace_scene_trace_directional_hit_shadow(
   args.ssbos.push_back(rt_buffer_binding(5, scene->triangle_normal_range_buffer));
   args.ssbos.push_back(rt_buffer_binding(6, scene->material_proxy_buffer));
   args.ssbos.push_back(rt_buffer_binding(7, scene->triangle_smooth_normal_buffer));
+
+  args.ssbos.push_back(rt_buffer_binding(8, scene->triangle_local_position_buffer));
+  args.ssbos.push_back(rt_buffer_binding(9, scene->shadow_object_transform_buffer));
 
   args.images.push_back(sampled_binding(16 + 0, params.hit_normal_tx));
   args.images.push_back(sampled_binding(16 + 1, params.hit_world_position_tx));
@@ -3845,7 +3912,7 @@ bool raytrace_scene_trace_local_shadow(GPUHardwareRaytraceScene *scene,
   uniforms.sampling_rand = params.sampling_rand;
   uniforms.caustic_params = float4(std::max(params.photons_intensity, 0.0f),
                                    std::clamp(params.shadow_transparency, 0.0f, 1.0f),
-                                   0.0f,
+                                   scene->shadow_terminator_max_cutoff,
                                    0.0f);
 
   KernelArgs args;
@@ -3857,6 +3924,9 @@ bool raytrace_scene_trace_local_shadow(GPUHardwareRaytraceScene *scene,
   args.ssbos.push_back(rt_buffer_binding(3, scene->triangle_normal_buffer));
   args.ssbos.push_back(rt_buffer_binding(4, scene->triangle_smooth_normal_buffer));
   args.ssbos.push_back(rt_buffer_binding(5, scene->triangle_normal_range_buffer));
+
+  args.ssbos.push_back(rt_buffer_binding(8, scene->triangle_local_position_buffer));
+  args.ssbos.push_back(rt_buffer_binding(9, scene->shadow_object_transform_buffer));
 
   args.images.push_back(sampled_binding(16 + 0, params.depth_tx));
   args.images.push_back(sampled_binding(16 + 1, params.gbuf_header_tx, /*arrayed=*/true));
@@ -3920,6 +3990,9 @@ bool raytrace_scene_trace_local_hit_shadow(GPUHardwareRaytraceScene *scene,
   args.ssbos.push_back(rt_buffer_binding(4, scene->triangle_normal_range_buffer));
   args.ssbos.push_back(rt_buffer_binding(5, scene->material_proxy_buffer));
   args.ssbos.push_back(rt_buffer_binding(6, scene->triangle_smooth_normal_buffer));
+
+  args.ssbos.push_back(rt_buffer_binding(8, scene->triangle_local_position_buffer));
+  args.ssbos.push_back(rt_buffer_binding(9, scene->shadow_object_transform_buffer));
 
   args.images.push_back(sampled_binding(16 + 0, params.hit_normal_tx));
   args.images.push_back(sampled_binding(16 + 1, params.hit_world_position_tx));
@@ -4657,6 +4730,7 @@ GPUHardwareRaytraceScene::~GPUHardwareRaytraceScene()
   rt_buffer_free(emissive_light_buffer);
   rt_buffer_free(diffuse_albedo_buffer);
   rt_buffer_free(material_proxy_buffer);
+  rt_buffer_free(shadow_object_transform_buffer);
   rt_buffer_free(triangle_normal_buffer);
   rt_buffer_free(triangle_smooth_normal_buffer);
   rt_buffer_free(triangle_local_position_buffer);

@@ -73,6 +73,7 @@ static Vector<GPUHardwareRaytraceSceneEntry> build_hardware_rt_scene_entries(
     rt_entry.reflection_layer_coverage = entry.reflection_layer_coverage;
     rt_entry.closure_type = entry.closure_type;
     rt_entry.proxy_flags = entry.proxy_flags;
+    rt_entry.shadow_terminator_geometry_offset = entry.shadow_terminator_geometry_offset;
     emissive_peak = std::max(emissive_peak, math::reduce_max(rt_entry.emissive_radiance));
     if (math::reduce_max(rt_entry.emissive_radiance) > 0.0f) {
       emissive_entry_count++;
@@ -253,6 +254,7 @@ static bool hardware_scene_entries_material_proxy_changed(
         entry.packed_thickness != cached.packed_thickness ||
         entry.alpha != cached.alpha ||
         entry.reflection_layer_coverage != cached.reflection_layer_coverage ||
+        entry.shadow_terminator_geometry_offset != cached.shadow_terminator_geometry_offset ||
         entry.closure_type != cached.closure_type || entry.proxy_flags != cached.proxy_flags ||
         entry.material_runtime_hash != cached.material_runtime_hash)
     {

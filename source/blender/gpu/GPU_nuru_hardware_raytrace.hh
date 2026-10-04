@@ -62,6 +62,7 @@ struct GPUHardwareRaytraceSceneEntry {
   uint32_t proxy_flags = 0u;
   int material_slot = -1;
   bool is_sculpt = false;
+  float shadow_terminator_geometry_offset = 0.1f;
 };
 
 struct GPUHardwareRaytraceTraceParams {

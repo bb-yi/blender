@@ -45,6 +45,8 @@ layout(binding = 17) uniform usampler2DArray gbuf_header_tx;
 layout(binding = 18) uniform sampler2DArray gbuf_normal_tx;
 layout(binding = 43) uniform writeonly image2DArray shadow_visibility_img;
 
+#include "vk_nuru_shadow_terminator_lib.glsl"
+
 vec3 barycentric_expand(vec2 barycentric)
 {
   return vec3(max(0.0, 1.0 - barycentric.x - barycentric.y), barycentric.x, barycentric.y);
@@ -582,6 +584,17 @@ void main()
       view_ray_receiver_slack(ivec2(tid), depth, P, view_dir, N, depth_tx),
       0.5 * receiver_distance);
   const vec3 P_corrected = P - view_dir * receiver_slack;
+  const vec3 smooth_N = normal_unpack(texelFetch(gbuf_normal_tx, ivec3(tid, 0), 0).xy);
+  const vec3 center_L = normalize(uniforms.light_position_radius.xyz +
+                                  uniforms.shadow_offset_scale.xyz - P);
+  const float precision_bias = max(max(max(abs(P.x), abs(P.y)),
+                                       max(abs(P.z), receiver_distance)) * 1.25e-6, 1.0e-7);
+  TerminatorReceiver receiver = terminator_none();
+  if (uniforms.caustic_params.z > 0.0 &&
+      min(dot(N, center_L), dot(smooth_N, center_L)) < uniforms.caustic_params.z + 0.25) {
+    const vec3 toward_camera = normalize(point_screen_to_world(ivec2(tid), 0.0) - P);
+    receiver = terminator_raster_receiver(P, toward_camera, smooth_N, precision_bias * 16.0);
+  }
   const bool area_soft = is_area_light(uint(uniforms.resolution_layer_type.w)) && (max(uniforms.light_x_axis_size_x.w, uniforms.light_y_axis_size_y.w) * uniforms.shadow_offset_scale.w > 1.0e-6);
   const bool local_soft = (!is_area_light(uint(uniforms.resolution_layer_type.w))) && (uniforms.light_position_radius.w > 1.0e-6);
   const int sample_count = (area_soft || local_soft) ? max(int(uniforms.normal_bias_pad.y), 1) : 1;
@@ -599,8 +612,15 @@ void main()
       continue;
     }
     sample_L /= sample_distance;
-    const float ray_tmax = max(ray_tmin, sample_distance);
-    const vec3 origin = P_corrected + N * normal_bias;
+    float ray_tmax = max(ray_tmin, sample_distance);
+    const vec3 offset = terminator_shadow_offset(receiver, P, sample_L, precision_bias);
+    const vec3 origin = P_corrected + N * normal_bias + offset;
+    if (dot(offset, offset) > 0.0) {
+      /* Keep the sampled light point fixed when lifting the shadow-ray origin. */
+      sample_L = target - origin;
+      ray_tmax = max(ray_tmin, length(sample_L));
+      sample_L = normalize(sample_L);
+    }
     visibility += hardware_shadow_visibility(scene, origin, sample_L, ray_tmin, ray_tmax, transparent_shadows, enable_caustics, false, target, color_intensity, photons_intensity);
   }
   visibility /= float(sample_count);

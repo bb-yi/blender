@@ -891,7 +891,8 @@ void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_ha
          proxy.closure_type,
          proxy.flags,
          material_hash,
-         material.hit_eval.gpumat});
+         material.hit_eval.gpumat,
+         ob_handle.object->shadow_terminator_geometry_offset});
     hardware_raytrace_scene_signature_ = get_default_hash(
         hardware_raytrace_scene_signature_, ObjectKey(ob_handle, instance).hash(),
         geom, material_slot, is_sculpt, material_hash);

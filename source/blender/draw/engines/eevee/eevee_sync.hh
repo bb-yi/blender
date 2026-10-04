@@ -77,6 +77,7 @@ struct HardwareRaytraceSceneEntry {
   uint64_t material_runtime_hash = 0;
   /* Compiled during sync, so sparse draws never re-enter material sync with a stale ObjectRef. */
   GPUMaterial *hit_eval_material = nullptr;
+  float shadow_terminator_geometry_offset = 0.1f;
 };
 
 class SyncModule {

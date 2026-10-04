@@ -43,6 +43,8 @@ layout(binding = 17) uniform sampler2D hit_world_position_img;
 layout(binding = 18) uniform usampler2D hit_identity_img;
 layout(binding = 43) uniform writeonly image2DArray shadow_visibility_img;
 
+#include "vk_nuru_shadow_terminator_lib.glsl"
+
 uvec2 unpackUvec2x16(uint packed)
 {
   return uvec2(packed & 0xFFFFu, packed >> 16u);
@@ -446,6 +448,8 @@ void main()
   const float position_scale = max(max(abs(P.x), abs(P.y)), abs(P.z));
   const float normal_bias = max(position_scale * 1.0e-6f, 1.0e-7f);
   const float ray_tmin = 0.0f;
+  const uvec4 receiver_id = texelFetch(hit_identity_img, ivec2(tid), 0);
+  const TerminatorReceiver receiver = terminator_receiver(P, N, receiver_id.x, receiver_id.y);
   const int sample_count = (uniforms.shadow_params.x > 1.0e-6f) ? max(int(uniforms.shadow_params.y), 1) : 1;
   const bool enable_caustics = (uniforms.world_sun_slot_pad.y != 0);
   const float color_intensity = clamp(uniforms.shadow_params.z, 0.0f, 1.0f);
@@ -454,7 +458,8 @@ void main()
   vec3 visibility = vec3(0.0f);
   for (int sample_index = 0; sample_index < sample_count; sample_index++) {
     const vec3 sample_dir = sample_directional_shadow_direction(tid, sample_index);
-    const vec3 origin = P + shadow_N * normal_bias;
+    const vec3 offset = terminator_shadow_offset(receiver, P, sample_dir, normal_bias);
+    const vec3 origin = P + shadow_N * normal_bias + offset;
     visibility += hardware_shadow_visibility(scene, origin, sample_dir, ray_tmin, 100000.0f, transparent_shadows, enable_caustics, true, sample_dir, color_intensity, photons_intensity);
   }
   visibility /= float(sample_count);
