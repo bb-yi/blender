@@ -455,6 +455,12 @@ class RENDER_PT_eevee_raytracing(RenderButtonsPanel, Panel):
             sub = col.column()
             sub.active = props.use_hardware_raytracing_gi
             sub.prop(props.ray_tracing_options, "gi_spatial_samples")
+            sub = col.column()
+            sub.active = props.use_hardware_raytracing_reflections or props.use_hardware_raytracing_refractions
+            sub.prop(props, "use_hardware_raytracing_secondary_gi")
+            rays = sub.column()
+            rays.active = props.use_hardware_raytracing_secondary_gi
+            rays.prop(props, "hardware_raytracing_secondary_gi_samples")
 
         options = context.scene.eevee.ray_tracing_options
 

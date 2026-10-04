@@ -9942,6 +9942,20 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
   RNA_def_property_ui_text(prop, "Hardware GI", "Trace diffuse indirect lighting against scene geometry");
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
 
+  prop = RNA_def_property(srna, "use_hardware_raytracing_secondary_gi", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(
+      prop, nullptr, "hardware_raytracing_features", RAYTRACE_EEVEE_HARDWARE_SECONDARY_GI);
+  RNA_def_property_ui_text(prop,
+                           "GI in Reflections/Refractions",
+                           "Trace one diffuse bounce at reflected and refracted surfaces using "
+                           "physical material proxies (additional ray cost)");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "hardware_raytracing_secondary_gi_samples", PROP_INT, PROP_NONE);
+  RNA_def_property_range(prop, 1, 64);
+  RNA_def_property_ui_text(prop, "Receiver GI Rays", "Diffuse rays per specular hit and render sample");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
   prop = RNA_def_property(srna, "ray_tracing_reflection_bounces", PROP_INT, PROP_NONE);
   RNA_def_property_range(prop, 1, 16);
   RNA_def_property_ui_text(prop, "Reflection Bounces", "Maximum hardware reflection traversal depth");

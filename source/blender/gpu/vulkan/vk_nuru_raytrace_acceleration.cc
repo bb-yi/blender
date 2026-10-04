@@ -108,6 +108,9 @@ struct GPUHardwareRaytraceScene {
   std::vector<std::vector<float4>> local_triangle_normals;
   std::vector<std::vector<float4>> local_triangle_smooth_normals;
   std::vector<std::vector<float4>> local_triangle_positions;
+  /* Translation does not change the packed world normals. Keep the linear transforms that
+   * produced them so moving an object need not rebuild these whole-scene buffers. */
+  std::vector<float3x3> normal_transforms;
   int geometry_count = 0;
   int instance_count = 0;
   int emissive_light_count = 0;
@@ -1621,6 +1624,12 @@ struct HardwareShadowUniforms {
   float4 sampling_rand;
 };
 
+struct HardwareReceiverGIUniforms {
+  int4 samples_lights_environment_seed;
+  float4 world_probe_atlas_coord;
+  float4 sampling_rand;
+};
+
 struct HardwareLocalShadowUniforms {
   float4x4 viewinv;
   float4x4 wininv;
@@ -1651,6 +1660,7 @@ struct HardwareEnvironmentVisibilityUniforms {
 
 enum class NuruKernel : int {
   TRACE = 0,
+  RECEIVER_GI,
   DIRECTIONAL_SHADOW,
   DIRECTIONAL_HIT_SHADOW,
   ENVIRONMENT_VISIBILITY,
@@ -1689,6 +1699,8 @@ static const char *kernel_name(const NuruKernel kernel)
   switch (kernel) {
     case NuruKernel::TRACE:
       return "eevee_hardware_trace_override";
+    case NuruKernel::RECEIVER_GI:
+      return "eevee_hardware_receiver_gi";
     case NuruKernel::DIRECTIONAL_SHADOW:
       return "eevee_hardware_trace_directional_shadow";
     case NuruKernel::DIRECTIONAL_HIT_SHADOW:
@@ -1715,6 +1727,8 @@ static const char *kernel_glsl(const NuruKernel kernel)
   switch (kernel) {
     case NuruKernel::TRACE:
       return nuru_kernels::trace_override_glsl();
+    case NuruKernel::RECEIVER_GI:
+      return nuru_kernels::receiver_gi_glsl();
     case NuruKernel::DIRECTIONAL_SHADOW:
       return nuru_kernels::directional_shadow_glsl();
     case NuruKernel::DIRECTIONAL_HIT_SHADOW:
@@ -1750,6 +1764,13 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
   };
 
   switch (kernel) {
+    case NuruKernel::RECEIVER_GI:
+      specs.push_back({0, BK::UBO});
+      specs.push_back({1, BK::ACCELERATION_STRUCTURE});
+      add_range(2, 6, BK::SSBO);
+      add_range(16, 4, BK::SAMPLED);
+      specs.push_back({40, BK::STORAGE_IMAGE});
+      break;
     case NuruKernel::TRACE:
       specs.push_back({0, BK::UBO});
       specs.push_back({1, BK::ACCELERATION_STRUCTURE});
@@ -2859,6 +2880,7 @@ GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntr
     scene->local_triangle_normals.push_back(geometry.triangle_normals);
     scene->local_triangle_smooth_normals.push_back(geometry.triangle_smooth_normals);
     scene->local_triangle_positions.push_back(geometry.triangle_local_positions);
+    scene->normal_transforms.emplace_back(entry.object_to_world);
     scene->geometry_buffers.push_back(geometry.vertex_buffer);
     scene->geometry_buffers.push_back(geometry.index_buffer);
     if (built) {
@@ -2939,7 +2961,8 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
   if (scene == nullptr || scene->bottom_level_acceleration_structures.size() != entries.size() ||
       scene->local_triangle_normals.size() != entries.size() ||
       scene->local_triangle_smooth_normals.size() != entries.size() ||
-      scene->local_triangle_positions.size() != entries.size())
+      scene->local_triangle_positions.size() != entries.size() ||
+      scene->normal_transforms.size() != entries.size())
   {
     return false;
   }
@@ -3101,7 +3124,14 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
       return false;
     }
   }
+  bool update_world_normals = !rebuilt_blas.empty();
   if (update_params.update_world_geometry_data) {
+    for (const int i : entries.index_range()) {
+      update_world_normals |= scene->normal_transforms[i] != float3x3(entries[i].object_to_world);
+    }
+  }
+  update_world_normals &= update_params.update_world_geometry_data;
+  if (update_world_normals) {
     std::vector<TriangleNormalRangeRecord> triangle_normal_ranges;
     if (!build_triangle_normal_buffer(
             updated_geometry, new_triangle_normals, triangle_normal_ranges) ||
@@ -3169,11 +3199,14 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     scene->diffuse_albedo_buffer = new_diffuse;
     scene->material_proxy_buffer = new_proxy;
   }
-  if (update_params.update_world_geometry_data) {
+  if (update_world_normals) {
     rt_buffer_free(scene->triangle_normal_buffer);
     rt_buffer_free(scene->triangle_smooth_normal_buffer);
     scene->triangle_normal_buffer = new_triangle_normals;
     scene->triangle_smooth_normal_buffer = new_triangle_smooth_normals;
+    for (const int i : entries.index_range()) {
+      scene->normal_transforms[i] = float3x3(entries[i].object_to_world);
+    }
     if (new_triangle_local_positions.buffer != VK_NULL_HANDLE) {
       rt_buffer_free(scene->triangle_local_position_buffer);
       scene->triangle_local_position_buffer = new_triangle_local_positions;
@@ -3431,7 +3464,72 @@ bool raytrace_scene_trace(GPUHardwareRaytraceScene *scene,
     return false;
   }
 
-  return dispatch_kernel(scene, NuruKernel::TRACE, args, /*allow_batch=*/false);
+  /* The trace and its receiver gathers have no intervening render-graph work. Record them in
+   * one batch with GPU barriers instead of waiting for the primary trace on the CPU first. */
+  if (params.secondary_gi &&
+      (params.reflected_receiver_gi_tx == nullptr || params.layered_receiver_gi_tx == nullptr ||
+       params.transmission_receiver_gi_tx == nullptr || !raytrace_scene_shadow_batch_begin(scene)))
+  {
+    return false;
+  }
+  if (!dispatch_kernel(scene, NuruKernel::TRACE, args, /*allow_batch=*/params.secondary_gi)) {
+    if (params.secondary_gi) {
+      raytrace_scene_shadow_batch_end(scene);
+    }
+    return false;
+  }
+  if (!params.secondary_gi) {
+    return true;
+  }
+
+  HardwareReceiverGIUniforms gi_uniforms = {};
+  gi_uniforms.samples_lights_environment_seed = int4(
+      std::clamp(params.secondary_gi_samples, 1, 64),
+      params.light_buf != nullptr ? std::max(params.light_count, 0) : 0,
+      params.use_environment && params.world_probe_tx != nullptr ? 1 : 0,
+      params.closure_index);
+  gi_uniforms.world_probe_atlas_coord = params.world_probe_atlas_coord;
+  gi_uniforms.sampling_rand = params.sampling_rand;
+  KernelArgs gi_args;
+  gi_args.uniforms_data = &gi_uniforms;
+  gi_args.uniforms_size = sizeof(gi_uniforms);
+  gi_args.tlas = args.tlas;
+  gi_args.indirect_buffer = args.indirect_buffer;
+  gi_args.ssbos = {rt_buffer_binding(2, scene->emissive_radiance_buffer),
+                   rt_buffer_binding(3, scene->diffuse_albedo_buffer),
+                   rt_buffer_binding(4, scene->triangle_normal_buffer),
+                   rt_buffer_binding(5, scene->triangle_normal_range_buffer)};
+  tiles_binding.binding = 6;
+  light_binding.binding = 7;
+  gi_args.ssbos.push_back(tiles_binding);
+  gi_args.ssbos.push_back(light_binding);
+  struct Receiver {
+    gpu::Texture *position, *normal, *identity, *output;
+  };
+  const Receiver receivers[] = {
+      {params.hit_world_position_tx, params.hit_normal_tx, params.hit_identity_tx,
+       params.reflected_receiver_gi_tx},
+      {params.layered_receiver_world_position_tx, params.layered_receiver_normal_tx,
+       params.layered_receiver_identity_tx, params.layered_receiver_gi_tx},
+      {params.transmission_receiver_world_position_tx, params.transmission_receiver_normal_tx,
+       params.transmission_receiver_identity_tx, params.transmission_receiver_gi_tx}};
+  bool success = true;
+  for (const Receiver &receiver : receivers) {
+    gi_args.images = {sampled_binding(16, receiver.position),
+                     sampled_binding(17, receiver.normal),
+                     sampled_binding(18, receiver.identity),
+                     params.world_probe_tx != nullptr ?
+                         sampled_binding(19, params.world_probe_tx, true, true) :
+                         dummy_sampled_binding(19),
+                     storage_binding(40, receiver.output)};
+    if (!dispatch_kernel(scene, NuruKernel::RECEIVER_GI, gi_args, /*allow_batch=*/true)) {
+      success = false;
+      break;
+    }
+    gi_uniforms.samples_lights_environment_seed.w += 17;
+  }
+  const bool submitted = raytrace_scene_shadow_batch_end(scene);
+  return success && submitted;
 }
 
 bool raytrace_scene_shadow_batch_begin(GPUHardwareRaytraceScene *scene)

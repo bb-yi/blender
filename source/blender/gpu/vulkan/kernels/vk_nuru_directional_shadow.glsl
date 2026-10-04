@@ -155,58 +155,6 @@ vec3 estimate_world_normal(ivec2 texel, float depth, sampler2D depth_tx)
   return N;
 }
 
-/* Depth-reconstruction slack: the deferred receiver position comes from the depth buffer, so
- * its error lies along the view ray and is bounded by the in-pixel surface depth change. At
- * grazing seam pixels that bound reaches metres and the reconstructed point can land on the
- * lit side of its own surface (or past the end of its surface entirely), which both VSM and RT
- * shadows then report as unshadowed (the "glowing seam line" leak). Take the largest one-sided
- * neighbor depth delta along the view ray, but only from neighbors that are coplanar with the
- * receiver surface: a coplanar delta is genuine surface recession (grazing incidence), while
- * an off-plane delta is a silhouette depth gap to a different surface - pulling by that gap
- * skips the receiver's own occluders and rims silhouettes with light (sun-colored door-edge
- * artifact). Pulling the origin toward the camera is occlusion-safe by construction (the
- * camera directly sees the receiver), so only shadow correctness limits the pull. */
-float view_ray_receiver_slack(
-    ivec2 texel, float depth, vec3 P, vec3 view_dir, vec3 receiver_Ng, sampler2D depth_tx)
-{
-  /* World-space pixel pitch at the receiver depth: scale reference for the near-range gate. */
-  const float pitch = length(point_screen_to_world(texel + ivec2(1, 0), depth) - P);
-  float slack = 0.0f;
-  const ivec2 offsets[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
-  for (int i = 0; i < 4; i++) {
-    const float neighbor_depth = sample_depth_clamped(texel + offsets[i], depth_tx);
-    if (!depth_is_valid(neighbor_depth)) {
-      continue;
-    }
-    const vec3 offset = point_screen_to_world(texel + offsets[i], neighbor_depth) - P;
-    const float offset_len = length(offset);
-    if (!(offset_len > 1.0e-9f)) {
-      continue;
-    }
-    const float along_view = dot(offset, view_dir);
-    if (along_view < 0.0f) {
-      /* Neighbor is nearer than the receiver: pulling the origin toward the camera by this
-       * delta keeps it inside the receiver's free-space segment regardless of which surface
-       * the neighbor belongs to. This covers silhouette-edge pixels whose footprint straddles
-       * a nearer occluder (door-edge shimmer): the pulled origin lands in front of the
-       * occluder and the shadow ray gets blocked instead of flickering. */
-      slack = max(slack, -along_view);
-      continue;
-    }
-    /* Farther neighbors: accept only coplanar deltas (within ~14 degrees: genuine grazing
-     * recession) or near-range ones (adjacent perpendicular face of the same edge, e.g. a thin
-     * door's side face). Far off-plane deltas are silhouette gaps to a different surface and
-     * must not pull the origin (sun-rimmed silhouettes). */
-    const bool coplanar = abs(dot(offset, receiver_Ng)) <= 0.25f * offset_len;
-    const bool near_range = offset_len <= 8.0f * max(pitch, 1.0e-9f);
-    if (!coplanar && !near_range) {
-      continue;
-    }
-    slack = max(slack, along_view);
-  }
-  return slack;
-}
-
 vec2 rand2_shadow(uvec2 tid, int sample_index, int layer, vec4 sampling_rand)
 {
   /* The float sin(dot(pixel, seed)) hash produces spatially correlated shadow bands.
@@ -575,16 +523,23 @@ void main()
   if (dot(N, N) < 1.0e-10f) {
     N = uniforms.light_direction_bias.xyz;
   }
-  const float normal_bias = max(5.0e-3f, uniforms.light_direction_bias.w);
-  const float ray_tmin = max(5.0e-4f, normal_bias * 0.5f);
   const vec3 camera_position = uniforms.viewinv[3].xyz;
   const vec3 to_receiver = P - camera_position;
   const float receiver_distance = max(length(to_receiver), 1.0e-6f);
   const vec3 view_dir = to_receiver / receiver_distance;
-  const float receiver_slack = min(
-      view_ray_receiver_slack(ivec2(tid), depth, P, view_dir, N, depth_tx),
-      0.5f * receiver_distance);
-  const vec3 P_corrected = P - view_dir * receiver_slack;
+  N = dot(N, view_dir) < 0.0f ? N : -N;
+  const float position_scale = max(max(abs(P.x), abs(P.y)), abs(P.z));
+  /* Keep the launch on the visible side at every scene scale. A fixed 5mm offset and
+   * distance cutoff can cross an entire small wall or skip its neighboring face. */
+  const float normal_bias = max(max(position_scale, receiver_distance) * 1.25e-6f, 1.0e-7f);
+  const float ray_tmin = 0.0f;
+  /* The reverse-depth conversion and unprojection can put P just below its surface.
+   * Move toward the camera by four representable depth steps to cover rounding, in addition
+   * to the world-space arithmetic bias below. Neighbor depth differences are NOT error bounds:
+   * at a silhouette they can move the launch past its occluder and create a bright rim.
+   * Unlike a pixel-footprint pull, this correction does not grow across geometry edges. */
+  const float depth_front = uintBitsToFloat(max(floatBitsToUint(depth), 4u) - 4u);
+  const vec3 P_corrected = point_screen_to_world(ivec2(tid), depth_front);
   const int sample_count = (uniforms.shadow_params.x > 1.0e-6f) ? max(int(uniforms.shadow_params.y), 1) : 1;
   const bool enable_caustics = (uniforms.world_sun_slot_pad.y != 0);
   const float color_intensity = clamp(uniforms.shadow_params.z, 0.0f, 1.0f);

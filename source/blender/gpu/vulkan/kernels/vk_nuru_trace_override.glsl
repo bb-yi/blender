@@ -282,7 +282,7 @@ float hwrt_gi_ray_epsilon(float reference_distance)
   /* Nuru: GI rays need a scale-relative epsilon. Fixed world-unit offsets become huge when an
    * asset is scaled down and can skip sealed wall blockers at edges. Keep this far below typical
    * wall thickness while still large enough to avoid exact self-intersection. */
-  return clamp(max(reference_distance, 1.0e-4) * 1.25e-6, 1.0e-8, 2.0e-5);
+  return max(max(reference_distance, 1.0e-4) * 1.25e-6, 1.0e-8);
 }
 float hwrt_gi_self_hit_distance(float epsilon)
 {
@@ -460,7 +460,11 @@ float fast_gi_light_surface_attenuation(FastGILightRecord light, uint type, vec3
 float fast_gi_light_point_power(FastGILightRecord light, uint type, float dist, vec3 L)
 {
   if (fast_gi_is_sun(type)) {
-    return 1.0;
+    /* The exported diffuse power is disk radiance E / (PI * sin(half_angle)^2),
+     * not irradiance. Integrate its projected solid angle for unit-albedo Lambert radiance.
+     * shape_radius = tan(half_angle). This cancels the angle-dependent normalization. */
+    const float radius_squared = light.attenuation_spot.x * light.attenuation_spot.x;
+    return radius_squared / (1.0 + radius_squared);
   }
   /* Nuru: Lambert small-source solid-angle form; the previous 1/d^2-only form left Eevee's
    * 1/r^2 shape normalization uncancelled (~100x over-contribution for a default point light).
@@ -664,15 +668,20 @@ vec3 sample_trace_direct_light(uvec2 tid,
   }
   vec3 L = vec3(0.0, 0.0, 1.0);
   float light_distance = 100000.0;
-  L = normalize(-light.direction_type.xyz);
+  /* LightSunData::direction is surface-to-sun, as in Eevee's light_vector_get(). */
+  L = normalize(light.direction_type.xyz);
   const float attenuation = fast_gi_light_surface_attenuation(light, type, L, light_distance);
   const float facing = clamp(dot(N, L), 0.0, 1.0);
   if (!(attenuation > 1.0e-6) || !(facing > 1.0e-4)) {
     return vec3(0.0);
   }
   if (trace_visibility) {
-    const float visibility_origin_epsilon = hwrt_gi_ray_epsilon(light_distance);
-    const float visibility_ray_tmin = visibility_origin_epsilon;
+    /* A sun's arbitrary traversal limit is not a scene scale. In particular, using it
+     * here steps over blockers in small rooms. The normal offset already avoids self hits;
+     * a positive t_min would additionally hide neighboring faces at a corner. */
+    const float visibility_origin_epsilon = hwrt_gi_ray_epsilon(
+        max(max(abs(P.x), abs(P.y)), abs(P.z)));
+    const float visibility_ray_tmin = 0.0;
     const float visibility_self_hit_tmax = hwrt_gi_self_hit_distance(visibility_origin_epsilon);
     const vec3 origin = P + N * visibility_origin_epsilon;
     const float ray_tmax = 100000.0;
@@ -684,7 +693,7 @@ vec3 sample_trace_direct_light(uvec2 tid,
       /* Nuru: visibility to lights must be as tight as the diffuse gather itself. Ignore only
        * the exact source-triangle self hit; do not use a distance-scaled bias that can skip
        * sealed wall blockers. */
-      const vec3 retry_origin = origin + L * (occlusion.dist + visibility_ray_tmin);
+      const vec3 retry_origin = origin + L * (occlusion.dist + visibility_origin_epsilon);
       occlusion = trace_scene_closest(scene, retry_origin, L, visibility_ray_tmin, ray_tmax);
     }
     if (occlusion.hit) {
@@ -821,6 +830,15 @@ void main()
     return;
   }
   vec3 ray_origin = point_screen_to_world(uv, depth);
+  if (supports_hardware_refraction && !use_preserved_screen_hit) {
+    /* Cross the stored reverse-Z quantization interval before tracing the real exit face.
+     * Applying ULPs after `1 - depth` is insufficient for orthographic near surfaces: that
+     * subtraction loses the original depth precision. Otherwise the entry face is hit again
+     * and retained as an extra Principled layer, hiding the receiver behind the glass. */
+    const float reverse_depth = textureLod(depth_tx, uv, 0.0).r;
+    const float reverse_depth_back = uintBitsToFloat(max(floatBitsToUint(reverse_depth), 4u) - 4u);
+    ray_origin = point_screen_to_world(uv, 1.0 - reverse_depth_back);
+  }
   /* SAPPHIRE 12 seam-leak slack is a GI-launch-only correction (see its shadow/visibility kernel
    * siblings). Applying it to specular launches has no Metal counterpart: reflection/refraction
    * rays must start exactly on the surface. On curved refractive objects the per-pixel depth
@@ -837,10 +855,23 @@ void main()
       const vec3 to_receiver = ray_origin - camera_position;
       const float receiver_distance = max(length(to_receiver), 1.0e-6);
       const vec3 view_dir = to_receiver / receiver_distance;
+      /* G-buffer geometric-normal encoding, relative to the first closure normal. */
+      vec3 surface_N;
+      if (load_gbuffer_surface_normal(texel_fullres, gbuf_header, 0u, gbuf_normal_tx, surface_N)) {
+        launch_N = surface_N;
+        if ((gbuf_header & (63u << 20u)) != 0u) {
+          launch_N = normalize(vec3((uvec3(gbuf_header) >> (uvec3(0u, 1u, 2u) + 20u)) & 1u) -
+                               vec3((uvec3(gbuf_header) >> (uvec3(3u, 4u, 5u) + 20u)) & 1u));
+        }
+      }
+      launch_N = dot(launch_N, view_dir) < 0.0 ? launch_N : -launch_N;
       const float origin_slack = min(
           view_ray_origin_slack(uv, depth, ray_origin, view_dir, launch_N),
           0.5 * receiver_distance);
       ray_origin -= view_dir * origin_slack;
+      /* Stay on the visible side. Advancing 1e-3 along the sampled direction can jump over
+       * an adjacent wall at a closed-room corner before the first traversal even begins. */
+      ray_origin += launch_N * hwrt_gi_ray_epsilon(receiver_distance);
     }
   }
   int start_bounce = 0;
@@ -861,7 +892,9 @@ void main()
   /* Full HWRT can already traverse the real back-face of the refractive object on the first
    * bounce. Do not analytically skip through thickness here or we will overrun nearby receivers
    * and distort the apparent IOR. */
-  ray_origin += ray_direction * hwrt_specular_ray_epsilon(supports_hardware_refraction);
+  if (!supports_hardware_gi) {
+    ray_origin += ray_direction * hwrt_specular_ray_epsilon(supports_hardware_refraction);
+  }
   int max_bounces = 1;
   if (supports_hardware_reflection) {
     max_bounces = max(uniforms.reflection_bounces, 1);
@@ -1676,8 +1709,11 @@ void main()
         final_user_id,
         final_primitive_id,
         final_direction);
-    const float diffuse_origin_epsilon = hwrt_gi_ray_epsilon(max(final_segment_distance, total_distance));
-    const float diffuse_ray_tmin = diffuse_origin_epsilon;
+    const float hit_position_scale = max(max(abs(final_position.x), abs(final_position.y)),
+                                         abs(final_position.z));
+    const float diffuse_origin_epsilon = hwrt_gi_ray_epsilon(
+        max(hit_position_scale, max(final_segment_distance, total_distance)));
+    const float diffuse_ray_tmin = 0.0;
     const float diffuse_self_hit_tmax = hwrt_gi_self_hit_distance(diffuse_origin_epsilon);
     const vec3 diffuse_origin = final_position + diffuse_gather_N * diffuse_origin_epsilon;
     vec3 incoming = vec3(0.0);
@@ -1713,7 +1749,7 @@ void main()
         /* Nuru: ignore only the exact source triangle self-hit. Do not hide nearby blockers with
          * a large launch bias; sealed wall shells must remain visible to the dome ray. */
         const vec3 retry_origin = diffuse_origin + diffuse_dir * (diffuse_intersection.dist +
-                                                                   diffuse_ray_tmin);
+                                                                   diffuse_origin_epsilon);
         diffuse_intersection = trace_scene_closest(scene, retry_origin, diffuse_dir, diffuse_ray_tmin, 10000.0);
       }
       if (diffuse_intersection.hit) {

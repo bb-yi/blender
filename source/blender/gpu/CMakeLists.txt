@@ -878,7 +878,7 @@ if(WITH_VULKAN_BACKEND)
   foreach(HWRT_KERNEL
     trace_override directional_shadow directional_hit_shadow
     environment_visibility hit_environment_visibility local_shadow local_hit_shadow
-    oidn_pack oidn_unpack
+    receiver_gi oidn_pack oidn_unpack
   )
     data_to_c_simple(vulkan/kernels/vk_nuru_${HWRT_KERNEL}.glsl HWRT_KERNEL_C)
   endforeach()

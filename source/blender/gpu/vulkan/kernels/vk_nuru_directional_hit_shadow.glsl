@@ -441,8 +441,11 @@ void main()
   }
   N = normalize(N);
   const vec3 shadow_N = hit_shadow_receiver_normal(tid, N, hit_identity_img);
-  const float normal_bias = max(5.0e-3f, uniforms.light_direction_bias.w);
-  const float ray_tmin = max(5.0e-4f, normal_bias * 0.5f);
+  /* Full-precision hit positions do not need the primary raster receiver's 5mm bias.
+   * Bound float-position error instead, and do not step past neighboring triangles. */
+  const float position_scale = max(max(abs(P.x), abs(P.y)), abs(P.z));
+  const float normal_bias = max(position_scale * 1.0e-6f, 1.0e-7f);
+  const float ray_tmin = 0.0f;
   const int sample_count = (uniforms.shadow_params.x > 1.0e-6f) ? max(int(uniforms.shadow_params.y), 1) : 1;
   const bool enable_caustics = (uniforms.world_sun_slot_pad.y != 0);
   const float color_intensity = clamp(uniforms.shadow_params.z, 0.0f, 1.0f);

@@ -754,6 +754,17 @@ void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
+  if (!DNA_struct_member_exists(
+          fd->filesdna, "SceneEEVEE", "int", "hardware_raytracing_secondary_gi_samples"))
+  {
+    const SceneEEVEE defaults;
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.hardware_raytracing_secondary_gi_samples =
+          defaults.hardware_raytracing_secondary_gi_samples;
+      scene.eevee.hardware_raytracing_features &= ~RAYTRACE_EEVEE_HARDWARE_SECONDARY_GI;
+    }
+  }
+
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 1)) {
     for (Scene &scene : bmain->scenes) {
       scene.r.mode |= R_SAVE_OUTPUT;

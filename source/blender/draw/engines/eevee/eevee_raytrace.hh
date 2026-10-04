@@ -337,6 +337,7 @@ class RayTraceModule {
     /* Incoming throughput and whether traversal already accumulated this hit's proxy emission. */
     TextureFromPool emission_replay = {"hwrt_hit_emission_replay"};
     TextureFromPool shadow_visibility = {"hwrt_hit_shadow_visibility"};
+    TextureFromPool receiver_gi = {"hwrt_receiver_gi"};
     bool shadows_valid = false;
 
     void acquire(int2 extent);

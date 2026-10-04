@@ -289,16 +289,13 @@ bool hardware_hit_preserves_screen_baseline(ClosureUndetermined primary_closure)
 
 bool hardware_receiver_gi_primary_is_mirror_like(int2 texel_fullres)
 {
-  /* Nuru Secondary GI scope: receiver GI lights diffuse surfaces seen through MIRROR-LIKE
-   * scene-final reflections/refractions, where the reflected world otherwise fails closed to
-   * black. Rough lobes keep their existing probe/analytic transport: feeding the traced field
-   * there double-counts GI (the closed-room calibration repro doubled when the field went live
-   * for every Principled specular lobe). Threshold matches the caustics mirror gate. */
+  /* Receiver GI replaces the diffuse probe term; it never adds an extra copy of it.
+   * Keep the same contract for rough and sharp full-RT specular lobes. */
   ClosureUndetermined primary_cl = gbuffer::read_bin(texel_fullres, closure_index);
   if (hardware_hit_specular_mode(primary_cl) != RAYTRACE_SPECULAR_MODE_FULL_RT) {
     return false;
   }
-  return closure_apparent_roughness_get(primary_cl) < 0.32f;
+  return true;
 }
 
 bool hardware_primary_surface_has_full_rt_specular(int2 texel_fullres)
@@ -566,6 +563,11 @@ bool hardware_hit_visible_surface_lookup_matches(int2 texel,
   const gbuffer::Header gbuf_header = gbuffer::read_header(lookup_texel);
   const bool position_matches = hardware_hit_visible_surface_position_matches(
       P_hit, lookup_texel, lookup_depth);
+  /* A room's inner and outer faces share an object ID. That alone never establishes
+   * that the visible surface is the traced receiver. */
+  if (!position_matches) {
+    return false;
+  }
   if (gbuf_header.use_object_id()) {
     const uint visible_object_id = gbuffer::read_object_id(lookup_texel);
     /* Sparse replay resolves real hits to a concrete object id in `hit_identity.w` after compact,
@@ -579,13 +581,6 @@ bool hardware_hit_visible_surface_lookup_matches(int2 texel,
       return false;
     }
   }
-  else if (!position_matches) {
-    /* Ordinary opaque surfaces often skip the optional object-id payload entirely. Use a tight
-     * position check in that case so visible floors and walls can still seed scene-final specular
-     * from the already rendered raster sample instead of falling back to coarse replay lighting. */
-    return false;
-  }
-
   if (hardware_trace_phase == HWRT_TRACE_PHASE_SCENE_FINAL_SPECULAR) {
     /* The late mirror/refraction resolve should prefer the already composed visible surface once
      * the projected hit lands on the right object/position. Requiring close normal agreement here
@@ -798,7 +793,8 @@ bool hardware_hit_visible_direct_light_load(int2 texel,
   }
 
   radiance = texelFetch(hardware_direct_light_tx, lookup_texel, 0).rgb;
-  return dot(radiance, radiance) > 1.0e-10f;
+  /* A matched shadowed surface is a valid black sample, not a failed lookup. */
+  return true;
 }
 
 bool hardware_hit_raster_back_radiance_load(int2 texel,
@@ -953,21 +949,22 @@ bool hardware_reflected_receiver_gi_load(int2 texel, float3 &radiance)
 {
   float4 gi = texelFetch(hardware_reflected_receiver_gi_tx, texel, 0);
   radiance = max(gi.rgb, float3(0.0f));
-  return (gi.a > 0.5f) && (dot(radiance, radiance) > 1.0e-10f);
+  /* Valid black is occluded GI, not a request for unoccluded probe fallback. */
+  return gi.a > 0.5f;
 }
 
 bool hardware_layered_receiver_gi_load(int2 texel, float3 &radiance)
 {
   float4 gi = texelFetch(hardware_layered_receiver_gi_tx, texel, 0);
   radiance = max(gi.rgb, float3(0.0f));
-  return (gi.a > 0.5f) && (dot(radiance, radiance) > 1.0e-10f);
+  return gi.a > 0.5f;
 }
 
 bool hardware_transmission_receiver_gi_load(int2 texel, float3 &radiance)
 {
   float4 gi = texelFetch(hardware_transmission_receiver_gi_tx, texel, 0);
   radiance = max(gi.rgb, float3(0.0f));
-  return (gi.a > 0.5f) && (dot(radiance, radiance) > 1.0e-10f);
+  return gi.a > 0.5f;
 }
 
 bool hardware_secondary_photon_gi_load(int2 texel, float3 &radiance)
@@ -1568,11 +1565,13 @@ void hardware_hit_closure_light_terms(int2 texel_fullres,
   shadow_dispatch_texel_fullres = texel;
   shadow_dispatch_visibility_source = HWRT_SHADOW_VISIBILITY_MAIN_HIT;
   shadow_dispatch_allow_transmission_hardware_rt = false;
-  shadow_dispatch_force_unshadowed = primary_is_diffuse_gi || suppress_scene_final_direct_hit_light ||
-                                     scene_final_replayed_textured_receiver;
+  shadow_dispatch_force_unshadowed = suppress_scene_final_direct_hit_light ||
+                                    scene_final_replayed_textured_receiver;
   shadow_dispatch_use_hardware_rt = false;
-  if (!primary_is_diffuse_gi && !shadow_dispatch_force_unshadowed &&
-      (use_hardware_rt_shadows ||
+  /* GI requires visibility at the hit even when primary HW shadows are disabled. The hit
+   * shadow pass is already submitted for this path; do not discard its occlusion result. */
+  if (!shadow_dispatch_force_unshadowed &&
+      (primary_is_diffuse_gi || use_hardware_rt_shadows ||
        (use_hardware_rt_environment_visibility && !direct_lit_refracted_textured_receiver)))
   {
     shadow_dispatch_use_hardware_rt = hardware_hit_shadow_payload_valid(texel);
@@ -1984,8 +1983,10 @@ float3 layered_receiver_hit_radiance_resolve(int2 texel,
       primary_is_diffuse_gi ||
       (hardware_trace_phase == HWRT_TRACE_PHASE_SCENE_FINAL_SPECULAR);
   if (scene_final_layered_receiver_gi) {
-    radiance += (layered_receiver_gi_radiance * max(base_cl.color, float3(0.0f))) /
-                max(uniform_buf.clamp.indirect_scale, 1.0e-4f);
+    if (!layered_specular_texture_tint_only) {
+      radiance += layered_receiver_gi_radiance * max(base_cl.color, float3(0.0f)) *
+                  layered_base_visibility;
+    }
     if (add_probe_terms) {
       radiance += specular_probe * layered_specular_visibility;
     }
@@ -2211,11 +2212,10 @@ void transmission_receiver_hit_closure_light_terms(int2 texel_fullres,
   shadow_dispatch_texel_fullres = texel;
   shadow_dispatch_visibility_source = HWRT_SHADOW_VISIBILITY_TRANSMISSION_RECEIVER;
   shadow_dispatch_allow_transmission_hardware_rt = true;
-  shadow_dispatch_force_unshadowed = primary_is_diffuse_gi;
+  shadow_dispatch_force_unshadowed = false;
   shadow_dispatch_use_hardware_rt = false;
-  if (!primary_is_diffuse_gi &&
-      (use_hardware_rt_shadows ||
-       (use_hardware_rt_environment_visibility && !direct_lit_refracted_textured_receiver)))
+  if (primary_is_diffuse_gi || use_hardware_rt_shadows ||
+      (use_hardware_rt_environment_visibility && !direct_lit_refracted_textured_receiver))
   {
     shadow_dispatch_use_hardware_rt = transmission_receiver_hit_shadow_payload_valid(texel);
   }
@@ -2387,8 +2387,7 @@ float3 transmission_receiver_hit_radiance_resolve(int2 texel,
       primary_is_diffuse_gi ||
       (hardware_trace_phase == HWRT_TRACE_PHASE_SCENE_FINAL_SPECULAR);
   if (scene_final_transmission_receiver_gi) {
-    radiance += (transmission_receiver_gi_radiance * max(base_cl.color, float3(0.0f))) /
-                max(uniform_buf.clamp.indirect_scale, 1.0e-4f);
+    radiance += transmission_receiver_gi_radiance * max(base_cl.color, float3(0.0f));
     if (add_probe_terms) {
       radiance += specular_probe;
     }
@@ -2925,7 +2924,7 @@ void main()
   else if (!use_scene_final_textured_direct_view_raster &&
       !precombine_specular_caustics_phase && !scene_final_specular_phase &&
       primary_is_diffuse_gi && !hardware_hit_uses_caustics() &&
-      hardware_hit_visible_direct_light_load(texel, P_hit, N, true, raster_radiance))
+      hardware_hit_visible_direct_light_load(texel, P_hit, N, false, raster_radiance))
   {
     /* Primary RT shadows are evaluated before this pass. Diffuse GI can therefore transport the
      * current visible wall/surface direct-light energy instead of re-estimating it from a secondary
@@ -3001,10 +3000,9 @@ void main()
      * into the mirror when the receiver-photon pass is missing a sample. */
     const bool scene_final_visible_diffuse_receiver = false;
     float3 receiver_gi_radiance = float3(0.0f);
-    /* Nuru Secondary GI (Stage A revival): the dedicated receiver-GI kernel traces a small dome
-     * from the reflected diffuse hit and samples the light tree (suns + locals) with shadow-ray
-     * visibility. Gated by the Secondary GI scene toggle through the dispatch: when disabled the
-     * texture stays cleared and the load below returns false. */
+    /* One cosine-weighted diffuse bounce from the actual receiver, in scene-linear radiance.
+     * The producer excludes receiver albedo, specular throughput and indirect intensity.
+     * Apply those once in the normal resolve/composite path, just like the replaced probe term. */
     const bool receiver_gi_texture_loaded = hardware_reflected_receiver_gi_load(
         texel, receiver_gi_radiance);
     const bool scene_final_receiver_gi = scene_final_diffuse_receiver &&
@@ -3018,9 +3016,11 @@ void main()
       const bool add_probe_terms = primary_is_diffuse_gi || scene_final_specular_phase;
       if (scene_final_receiver_gi) {
         /* Scene-final mirrors use GI traced from the actual reflected diffuse hit. */
-        radiance += base_direct;
-        radiance += (receiver_gi_radiance * max(base_cl.color, float3(0.0f))) /
-                    max(uniform_buf.clamp.indirect_scale, 1.0e-4f);
+        if (!specular_texture_tint_only) {
+          radiance += base_direct * principled_base_layer_visibility;
+          radiance += receiver_gi_radiance * max(base_cl.color, float3(0.0f)) *
+                      principled_base_layer_visibility;
+        }
       }
       else if (scene_final_visible_diffuse_receiver) {
         /* Mirrors can reflect the resolved GI that is already visible for the receiver in the

@@ -1138,7 +1138,9 @@ void RayTraceModule::HardwareHitBuffers::acquire(int2 extent)
   material.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
   normal.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
   position.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
-  world_position.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
+  /* Shadow rays need the actual hit position. Half precision snaps hits onto adjacent
+   * wall edges and requires a large bias that then skips those same blockers. */
+  world_position.acquire_2d(extent, gpu::TextureFormat::SFLOAT_32_32_32_32, usage);
   barycentric.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
   emission_replay.acquire_2d(extent, gpu::TextureFormat::SFLOAT_32_32_32_32, usage);
   time.clear(float4(0.0f));
@@ -1156,6 +1158,7 @@ void RayTraceModule::HardwareHitBuffers::acquire(int2 extent)
 
 void RayTraceModule::HardwareHitBuffers::release()
 {
+  receiver_gi.release();
   shadow_visibility.release();
   shadows_valid = false;
   time.release();
@@ -1238,6 +1241,24 @@ bool RayTraceModule::submit_hardware_tracing(View &render_view, int trace_phase)
   hardware_screen_continuation_tx_.clear(float4(0.0f));
 
   GPUHardwareRaytraceTraceParams p;
+  p.secondary_gi = trace_phase == HWRT_TRACE_PHASE_SCENE_FINAL_SPECULAR &&
+                   (hardware_feature_mask_ & RAYTRACE_EEVEE_HARDWARE_SECONDARY_GI) != 0;
+  p.secondary_gi_samples = inst_.scene->eevee.hardware_raytracing_secondary_gi_samples;
+  for (HardwareHitBuffers *hit :
+       {&hardware_hit_, &hardware_layered_hit_, &hardware_transmission_hit_})
+  {
+    if (p.secondary_gi) {
+      hit->receiver_gi.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE);
+      hit->receiver_gi.clear(float4(0.0f));
+    }
+    else {
+      hit->receiver_gi.release();
+    }
+  }
+  p.reflected_receiver_gi_tx = hardware_hit_.receiver_gi;
+  p.layered_receiver_gi_tx = hardware_layered_hit_.receiver_gi;
+  p.transmission_receiver_gi_tx = hardware_transmission_hit_.receiver_gi;
   p.ray_data_tx = ray_data_tx_;
   p.depth_tx = renderbuf_depth_view_;
   p.gbuf_header_tx = inst_.gbuffer.header_tx;
@@ -1375,8 +1396,7 @@ bool RayTraceModule::submit_hardware_hit_lighting(View &render_view, int trace_p
   if (shader == nullptr) {
     return false;
   }
-  /* Optional receiver-GI/photon producers are not connected yet.
-   * Zero alpha explicitly marks their neutral payload as invalid in the pinned Nuru resolve. */
+  /* Inactive receiver GI and the unimplemented photon producer use an invalid neutral payload. */
   TextureFromPool neutral("Hardware Optional Payload");
   neutral.acquire_2d(data_.full_resolution, gpu::TextureFormat::SFLOAT_16_16_16_16);
   neutral.clear(float4(0.0f));
@@ -1473,9 +1493,13 @@ bool RayTraceModule::submit_hardware_hit_lighting(View &render_view, int trace_p
   pass.bind_texture("hardware_direct_light_tx",
                     hardware_direct_ready_ ? static_cast<gpu::Texture *>(hardware_direct_combined_tx_) :
                                              static_cast<gpu::Texture *>(neutral));
-  pass.bind_texture("hardware_reflected_receiver_gi_tx", &neutral);
-  pass.bind_texture("hardware_layered_receiver_gi_tx", &neutral);
-  pass.bind_texture("hardware_transmission_receiver_gi_tx", &neutral);
+  pass.bind_texture("hardware_reflected_receiver_gi_tx",
+                    hardware_hit_.receiver_gi ? &hardware_hit_.receiver_gi : &neutral);
+  pass.bind_texture("hardware_layered_receiver_gi_tx",
+                    hardware_layered_hit_.receiver_gi ? &hardware_layered_hit_.receiver_gi : &neutral);
+  pass.bind_texture("hardware_transmission_receiver_gi_tx",
+                    hardware_transmission_hit_.receiver_gi ? &hardware_transmission_hit_.receiver_gi :
+                                                          &neutral);
   pass.bind_texture("hardware_secondary_photon_gi_tx", &neutral);
   pass.bind_texture("hardware_layered_secondary_photon_gi_tx", &neutral);
   pass.bind_texture("hardware_transmission_secondary_photon_gi_tx", &neutral);
