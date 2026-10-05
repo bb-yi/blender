@@ -499,14 +499,14 @@ GLShaderInterface::GLShaderInterface(GLuint program, const shader::ShaderCreateI
     if (res.bind_type == ShaderCreateInfo::Resource::BindType::STORAGE_BUFFER) {
       copy_input_name(input, res.storagebuf.name, name_buffer_, name_buffer_offset);
       input->location = input->binding = res.slot;
-      enabled_ssbo_mask_ |= (1 << input->binding);
+      enabled_ssbo_mask_ |= (1u << input->binding);
       input++;
     }
   }
 
   for (const ShaderCreateInfo::Resource &res : info.geometry_resources_) {
     if (res.bind_type == ShaderCreateInfo::Resource::BindType::STORAGE_BUFFER) {
-      ssbo_attr_mask_ |= (1 << res.slot);
+      ssbo_attr_mask_ |= (1u << res.slot);
     }
     else {
       BLI_assert_msg(0, "Resource type is not supported for Geometry frequency");

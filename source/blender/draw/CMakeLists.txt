@@ -441,6 +441,8 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_geom_bake_mesh_basic_vert.glsl
   engines/eevee/shaders/eevee_geom_bake_mesh_vert.glsl
   engines/eevee/shaders/eevee_geom_mesh.bsl.hh
+  engines/eevee/shaders/eevee_geom_mesh_tess.bsl.hh
+  engines/eevee/shaders/eevee_geom_mesh_tess_lib.glsl
   engines/eevee/shaders/eevee_geom_pointcloud.bsl.hh
   engines/eevee/shaders/eevee_geom_types_lib.bsl.hh
   engines/eevee/shaders/eevee_geom_volume.bsl.hh

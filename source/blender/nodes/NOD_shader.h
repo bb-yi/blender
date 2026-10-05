@@ -31,6 +31,40 @@ void ntreeShaderEndExecTree(struct bNodeTreeExec *exec);
  */
 struct bNode *ntreeShaderOutputNode(struct bNodeTree *ntree, int target);
 
+/** Settings of a Tessellation Control node. */
+struct ShaderTessellationSettings {
+  /** #NodeShaderTessellationMode. */
+  int mode;
+  /** #NodeShaderTessellationNormal. */
+  int normal_mode;
+  /** Subdivision level range. Every edge is split into a number of segments in this range. */
+  int min_level;
+  int max_level;
+  /** Camera distance range over which the level decreases from `max_level` to `min_level`. */
+  float near_distance;
+  float far_distance;
+  /** Target edge length in pixels for #SHD_TESSELLATION_SCREEN_EDGE. */
+  float edge_length;
+  /** Phong tessellation factor. */
+  float phong;
+};
+
+/** Maximum subdivision level. Limited by the primitive expansion of the draw manager. */
+#define SHD_TESSELLATION_LEVEL_MAX 15
+
+ShaderTessellationSettings node_shader_tessellation_settings_get(const bNode &node);
+/**
+ * Return the Tessellation Control node linked to the tessellation input of the active EEVEE
+ * material output, or nullptr if the material is not tessellated.
+ */
+const bNode *ntreeShaderTessellationNode(bNodeTree *ntree);
+/**
+ * Pack the settings for the shader. Must match `eevee_geom_mesh_tess_lib.glsl`.
+ * Unpacked by the shader, the levels and mode being exact integers.
+ */
+void node_shader_tessellation_settings_pack(const ShaderTessellationSettings &settings,
+                                            float r_packed[4]);
+
 struct bNodeTree *npr_tree_get(struct bNodeTree *ntree);
 struct bNodeTree *npr_tree_get_from_mat(struct Material *material);
 struct bNodeTree *ntreeGPUNPRNodes(struct bNodeTree *material_tree, struct GPUMaterial *mat);

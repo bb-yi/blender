@@ -86,7 +86,7 @@ class GLContext : public Context {
 
   /** Used for debugging purpose. Bit-flags of all bound slots. */
   uint16_t bound_ubo_slots;
-  uint16_t bound_ssbo_slots;
+  uint32_t bound_ssbo_slots;
 
  private:
   /**

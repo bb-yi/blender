@@ -129,6 +129,7 @@ set(SRC
   nodes/node_shader_squeeze.cc
   nodes/node_shader_subsurface_scattering.cc
   nodes/node_shader_tangent.cc
+  nodes/node_shader_tessellation_control.cc
   nodes/node_shader_twirl.cc
   nodes/node_shader_water_ripples.cc
   nodes/node_shader_tex_brick.cc

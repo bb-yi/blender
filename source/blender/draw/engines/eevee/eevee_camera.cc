@@ -323,6 +323,7 @@ void Camera::sync()
   }
 
   data_.initialized = true;
+  view_changed_ = assign_if_different(last_persmat_, data_.persmat);
 
   update_bounds();
 }

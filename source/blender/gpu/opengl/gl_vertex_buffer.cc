@@ -95,7 +95,7 @@ void GLVertBuf::bind_as_ssbo(uint binding)
 
 #ifndef NDEBUG
   BLI_assert(binding < 16);
-  GLContext::get()->bound_ssbo_slots |= 1 << binding;
+  GLContext::get()->bound_ssbo_slots |= 1u << binding;
 #endif
 }
 

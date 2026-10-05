@@ -17,6 +17,7 @@
 #include "DNA_world_types.h"
 #include "DNA_light_types.h"
 
+#include "gpu_codegen.hh"
 #include "gpu_shader_create_info.hh"
 
 #include "NOD_shader.h"
@@ -28,6 +29,7 @@
 #include "BLI_assert.h"
 #include "BLI_math_bits.h"
 #include "BLI_set.hh"
+#include "BLI_string.h"
 #include <fmt/format.h>
 
 namespace blender::eevee {
@@ -1502,6 +1504,13 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
         info.vertex_function("eevee_geom_mesh");
       }
       break;
+    case MAT_GEOM_MESH_TESS:
+      geometry_info_name = "eevee_geom_mesh_tess_infos_";
+      info.name_ += "_mesh_tess";
+      info.define("MAT_GEOM_MESH");
+      info.vertex_source("eevee_geom_mesh_tess.bsl.hh");
+      info.vertex_function("eevee_geom_mesh_tess");
+      break;
     case MAT_GEOM_POINTCLOUD:
       geometry_info_name = "eevee_geom_pointcloud_infos_";
       info.name_ += "_pointcloud";
@@ -2171,6 +2180,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_BARYCENTRIC)) {
     switch (geometry_type) {
       case MAT_GEOM_MESH:
+      case MAT_GEOM_MESH_TESS:
         /* Support using gpu builtin barycentrics. */
         info.define("USE_BARYCENTRICS");
         info.builtins(BuiltinBits::BARYCENTRIC_COORD);
@@ -2189,7 +2199,69 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   info.builtins(BuiltinBits::CLIP_CONTROL);
 
   std::stringstream global_vars;
+  /* Interpolation of the material attributes of tessellated meshes. */
+  std::stringstream tess_attr_interp;
+  bool tess_attr_overflow = false;
   switch (geometry_type) {
+    case MAT_GEOM_MESH_TESS: {
+      /* Attributes are read from the mesh batch bound as storage buffers and interpolated into
+       * global variables named after the vertex inputs, used by #attrib_load. */
+      auto &codegen_info = *reinterpret_cast<GPUCodegenCreateInfo *>(codegen.create_info);
+      int slot = MAT_TESS_ATTR_BUF_SLOT_FIRST;
+      for (auto &input : vertex_inputs) {
+        global_vars << input.type << " " << input.name << ";\n";
+        if (slot > MAT_TESS_ATTR_BUF_SLOT_LAST) {
+          tess_attr_overflow = true;
+          continue;
+        }
+        char name[32];
+        SNPRINTF(name, "vbo_%s[]", input.name.c_str());
+        info.storage_buf(slot,
+                         Qualifier::read,
+                         "uint",
+                         codegen_info.name_buffer.append_sampler_name(name),
+                         Frequency::GEOMETRY);
+        SNPRINTF(name, "gpu_attr_%d", slot);
+        info.push_constant(gpu::shader::Type::int2_t,
+                           codegen_info.name_buffer.append_sampler_name(name));
+        SNPRINTF(name, "gpu_attr_%d_meta", slot);
+        info.push_constant(gpu::shader::Type::int_t,
+                           codegen_info.name_buffer.append_sampler_name(name));
+        const std::string fetch = fmt::format(
+            "gpu_attr_fetch_float4(vbo_{0}, gpu_attr_{1}, gpu_attr_{1}_meta, ",
+            input.name.c_str(),
+            slot);
+        /* float(float4) is not a valid constructor. Swizzle, then construct. */
+        const char *swizzle = "";
+        switch (input.type) {
+          case gpu::shader::Type::float_t:
+          case gpu::shader::Type::int_t:
+          case gpu::shader::Type::uint_t:
+          case gpu::shader::Type::bool_t:
+            swizzle = ".x";
+            break;
+          case gpu::shader::Type::float2_t:
+          case gpu::shader::Type::int2_t:
+          case gpu::shader::Type::uint2_t:
+            swizzle = ".xy";
+            break;
+          case gpu::shader::Type::float3_t:
+          case gpu::shader::Type::int3_t:
+          case gpu::shader::Type::uint3_t:
+            swizzle = ".xyz";
+            break;
+          default:
+            break;
+        }
+        tess_attr_interp << "  " << input.name << " = " << input.type << "(" << fetch
+                         << "vertices.x)" << swizzle << ") * weights.x + " << input.type << "("
+                         << fetch << "vertices.y)" << swizzle << ") * weights.y + " << input.type
+                         << "(" << fetch << "vertices.z)" << swizzle << ") * weights.z;\n";
+        slot++;
+      }
+      vertex_inputs.clear();
+      break;
+    }
     case MAT_GEOM_MESH:
       if (pipeline_type == MAT_PIPE_VOLUME_MATERIAL) {
         /* If mesh has a volume output, it can receive volume grid attributes from smoke
@@ -2275,6 +2347,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const char *domain_type_vert = "";
   switch (geometry_type) {
     case MAT_GEOM_MESH:
+    case MAT_GEOM_MESH_TESS:
       domain_type_frag = (pipeline_type == MAT_PIPE_VOLUME_MATERIAL) ? "VolumePoint" :
                                                                        "MeshVertex";
       domain_type_vert = "MeshVertex";
@@ -2307,6 +2380,26 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const bool use_vertex_displacement = !codegen.displacement.empty() &&
                                        (displacement_type != MAT_DISPLACEMENT_BUMP) &&
                                        !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME);
+  const bool use_tessellation_graph = (geometry_type == MAT_GEOM_MESH_TESS) &&
+                                      codegen.tessellation.has_value() &&
+                                      !codegen.tessellation->empty();
+  if (geometry_type == MAT_GEOM_MESH_TESS) {
+    /* Shade tessellated meshes using the normal of the displaced surface instead of bump. */
+    ShaderTessellationSettings tessellation_settings;
+    if (use_vertex_displacement &&
+        material_tessellation_settings_get(GPU_material_get_material(gpumat),
+                                           tessellation_settings) &&
+        tessellation_settings.normal_mode == SHD_TESSELLATION_NORMAL_GEOMETRY)
+    {
+      info.define("TESS_NORMAL_GEOMETRY");
+    }
+    if (tess_attr_overflow) {
+      std::cerr << "Error: EEVEE: Tessellated material " << GPU_material_get_name(gpumat)
+                << " uses too many attributes." << std::endl;
+      /* Fail the shader compilation explicitly, rather than reading unbound buffers. */
+      info.vertex_source_generated += "\n#error Tessellated material attribute limit exceeded\n";
+    }
+  }
 
   std::stringstream vert_gen, frag_gen;
 
@@ -2353,11 +2446,20 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     Set<StringRefNull> emitted_generated_sources;
     std::stringstream generated_source_block;
 
-    if (use_vertex_displacement) {
+    if (use_vertex_displacement || use_tessellation_graph) {
       generated_dependencies.add("eevee_geom_types_lib.bsl.hh");
       generated_dependencies.add("eevee_nodetree_lib.bsl.hh");
+    }
+    if (use_vertex_displacement) {
       material_graph_dependencies_append(gpumat,
                                          codegen.displacement.dependencies,
+                                         generated_dependencies,
+                                         emitted_generated_sources,
+                                         generated_source_block);
+    }
+    if (use_tessellation_graph) {
+      material_graph_dependencies_append(gpumat,
+                                         codegen.tessellation->dependencies,
                                          generated_dependencies,
                                          emitted_generated_sources,
                                          generated_source_block);
@@ -2370,7 +2472,20 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                              "return float3(0);\n");
     vert_gen << "}\n\n";
 
-    Vector<StringRefNull> dependencies = use_vertex_displacement ?
+    if (geometry_type == MAT_GEOM_MESH_TESS) {
+      /* Packed settings of the Tessellation Control node. Defaults to no subdivision. */
+      vert_gen << "float4 nodetree_tessellation()\n";
+      vert_gen << "{\n";
+      vert_gen << (use_tessellation_graph ? codegen.tessellation->serialized :
+                                            "return float4(17.0f, 0.0f, 0.0f, 0.0f);\n");
+      vert_gen << "}\n\n";
+      vert_gen << "void tess_attr_interp(uint3 vertices, float3 weights)\n";
+      vert_gen << "{\n";
+      vert_gen << tess_attr_interp.str();
+      vert_gen << "}\n\n";
+    }
+
+    Vector<StringRefNull> dependencies = (use_vertex_displacement || use_tessellation_graph) ?
                                              material_dependencies_finalize(generated_dependencies) :
                                              Vector<StringRefNull>{};
 
@@ -2459,7 +2574,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
 
     if (!codegen.displacement.empty() && !outline_shell) {
-      /* Bump displacement. Needed to recompute normals after displacement. */
+      /* Bump displacement. Needed to recompute normals after displacement.
+       * With #TESS_NORMAL_GEOMETRY, computes the normal of the displaced surface instead. */
       info.define("MAT_DISPLACEMENT_BUMP");
 
       frag_gen << "float3 nodetree_displacement()\n";
@@ -2819,11 +2935,15 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
   bool has_raycast = GPU_material_flag_get(mat, GPU_MATFLAG_RAYCAST);
   bool has_depth_offset = GPU_material_has_depth_offset_output(mat);
 
-  bool can_use_default = (is_shadow_pass &&
-                          (!has_vertex_displacement && !has_shadow_transparency)) ||
-                         (is_prepass && (!has_vertex_displacement && !has_transparency &&
-                                         !has_raytraced_transmission && !has_raycast &&
-                                         !has_depth_offset));
+  /* Tessellated geometry reads its settings from the material uniforms and must be identical
+   * in every pass. */
+  const bool is_tessellated = geometry_type == MAT_GEOM_MESH_TESS;
+  bool can_use_default = !is_tessellated &&
+                         ((is_shadow_pass &&
+                           (!has_vertex_displacement && !has_shadow_transparency)) ||
+                          (is_prepass && (!has_vertex_displacement && !has_transparency &&
+                                          !has_raytraced_transmission && !has_raycast &&
+                                          !has_depth_offset)));
   if (can_use_default) {
     GPUMaterial *mat = thunk->shader_module->material_shader_get(thunk->default_mat,
                                                                  thunk->default_mat->nodetree,
@@ -2889,9 +3009,20 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
   /* NPR passes normally only need the attached NPR tree, but true displacement lives on the
    * primary material output. Depth Offset is also a material output and must use the same custom
    * depth for DEPTH_EQUAL and screen-space position reads. */
+  /* Tessellation settings also live on the primary material output and must match the
+   * draw-call expansion in every pass. */
+  const bool needs_npr_tessellation = compile_npr_graph && geometry_type == MAT_GEOM_MESH_TESS;
   const bool compile_surface_graph = outline_shell ||
                                      (pipeline_type != MAT_PIPE_DEFERRED_NPR) ||
-                                     needs_npr_vertex_displacement || needs_npr_depth_offset;
+                                     needs_npr_vertex_displacement || needs_npr_depth_offset ||
+                                     needs_npr_tessellation;
+  /* The tessellation settings are uniforms, so the normal mode doesn't change the node graph
+   * code. It changes the generated shader and must be part of the shader key. */
+  ShaderTessellationSettings tessellation_settings;
+  const bool use_tessellation_geometry_normal =
+      geometry_type == MAT_GEOM_MESH_TESS &&
+      material_tessellation_settings_get(blender_mat, tessellation_settings) &&
+      tessellation_settings.normal_mode == SHD_TESSELLATION_NORMAL_GEOMETRY;
 
   uint64_t shader_uuid = shader_uuid_from_material_type(
       pipeline_type,
@@ -2902,7 +3033,7 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       blender_mat->blend_flag,
       outline_shell ? false : use_outline,
       outline_shell ? false : material_depth_offset_affects_lighting(blender_mat),
-      npr_tree_key,
+      (npr_tree_key << 1) | uint64_t(use_tessellation_geometry_normal),
       outline_shell);
 
   bool is_default_material = default_mat == nullptr;

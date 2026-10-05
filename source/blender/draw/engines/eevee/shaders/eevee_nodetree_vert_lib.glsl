@@ -15,6 +15,17 @@ void attrib_load(MeshVertex /*domain*/) {}
 void attrib_load(PointCloudPoint /*domain*/) {}
 void attrib_load(CurvesPoint /*domain*/) {}
 
+/* Packed settings of the Tessellation Control node (see #node_shader_tessellation_settings_pack).
+ * Default to no subdivision. */
+float4 nodetree_tessellation()
+{
+  return float4(17.0f, 0.0f, 0.0f, 0.0f);
+}
+
+/* Tessellated meshes only. Interpolate the material vertex attributes of the original triangle
+ * vertices before calling #attrib_load. */
+void tess_attr_interp(uint3 /*vertices*/, float3 /*weights*/) {}
+
 #ifndef NODETREE_FUNCTIONS /* Needed for linting. */
 #  define NODETREE_FUNCTIONS
 

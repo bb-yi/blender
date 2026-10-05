@@ -1104,11 +1104,59 @@ float2 bsdf_lut(float cos_theta, float roughness, float ior, bool do_multiscatte
 float derivative_scale_get();
 #endif
 
+#if defined(MAT_DISPLACEMENT_BUMP) && defined(TESS_NORMAL_GEOMETRY) && \
+    defined(GPU_FRAGMENT_SHADER)
+/**
+ * Return the normal of the displaced surface of tessellated meshes.
+ *
+ * The displacement is evaluated per pixel on the un-displaced surface, like in the vertex shader.
+ * The un-displaced surface tangents are projected on the plane of the smooth normal, so the
+ * result doesn't depend on the tessellation level and has no creases at the triangle edges.
+ */
+float3 tess_displaced_normal()
+{
+  constexpr float filter_width = 0.1f;
+
+  auto &interp = interface_get(eevee_geom_iface_info, interp);
+  auto &tess_interp = interface_get(eevee_geom_mesh_tess_iface_info, tess_interp);
+
+  const float3 P_shading = g_data.P;
+  const float3 N_shading = g_data.N;
+  /* Same inputs as the vertex shader displacement. */
+  g_data.P = tess_interp.P_base;
+  g_data.N = safe_normalize(interp.N);
+
+  /* Equivalent to `dF_branch` for a vector result. */
+  g_derivative_filter_width = filter_width * derivative_scale_get();
+  g_derivative_flag = 1;
+  const float3 disp_x = nodetree_displacement();
+  g_derivative_flag = -1;
+  const float3 disp_y = nodetree_displacement();
+  g_derivative_flag = 0;
+  const float3 disp = nodetree_displacement();
+
+  const float3 dPdx = gpu_dfdx(g_data.P) * g_derivative_filter_width;
+  const float3 dPdy = gpu_dfdy(g_data.P) * g_derivative_filter_width;
+  const float3 T_x = dPdx - dot(dPdx, g_data.N) * g_data.N;
+  const float3 T_y = dPdy - dot(dPdy, g_data.N) * g_data.N;
+  float3 Ng = cross(T_x + disp_x - disp, T_y + disp_y - disp);
+
+  g_data.P = P_shading;
+  if (dot(Ng, Ng) < 1e-30f) {
+    return N_shading;
+  }
+  /* Keep the side of the shading normal, relative to the un-displaced surface. */
+  return normalize((dot(cross(T_x, T_y), N_shading) < 0.0f) ? -Ng : Ng);
+}
+#endif
+
 #ifdef MAT_DISPLACEMENT_BUMP
 /* Return new shading normal. */
 float3 displacement_bump()
 {
-#  if !defined(MAT_GEOM_CURVES)
+#  if defined(TESS_NORMAL_GEOMETRY) && defined(GPU_FRAGMENT_SHADER)
+  return tess_displaced_normal();
+#  elif !defined(MAT_GEOM_CURVES)
   /* This is the filter width for automatic displacement + bump mapping, which is fixed.
    * NOTE: keep the same as default bump node filter width. */
   constexpr float bump_filter_width = 0.1f;

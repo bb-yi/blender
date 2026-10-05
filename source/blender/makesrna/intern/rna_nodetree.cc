@@ -9735,6 +9735,55 @@ static void def_sh_parallax(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
 }
 
+static void def_sh_tessellation_control(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem mode_items[] = {
+      {SHD_TESSELLATION_FIXED,
+       "FIXED",
+       0,
+       "Fixed",
+       "Subdivide every triangle edge the same number of times"},
+      {SHD_TESSELLATION_DISTANCE,
+       "DISTANCE",
+       0,
+       "Camera Distance",
+       "Reduce the subdivision level with the distance to the camera"},
+      {SHD_TESSELLATION_SCREEN_EDGE,
+       "SCREEN_EDGE",
+       0,
+       "Screen Edge Length",
+       "Subdivide edges until they reach a target length in pixels"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem normal_items[] = {
+      {SHD_TESSELLATION_NORMAL_BUMP,
+       "BUMP",
+       0,
+       "Bump",
+       "Shade the displaced surface using the material bump mapping"},
+      {SHD_TESSELLATION_NORMAL_GEOMETRY,
+       "GEOMETRY",
+       0,
+       "Geometry",
+       "Recompute the normal from the tessellated and displaced geometry"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, mode_items);
+  RNA_def_property_ui_text(prop, "Mode", "How the subdivision level of each edge is chosen");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+
+  prop = RNA_def_property(srna, "normal_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom2");
+  RNA_def_property_enum_items(prop, normal_items);
+  RNA_def_property_ui_text(prop, "Normal", "Normal used to shade the tessellated surface");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
 static void def_sh_render_texture(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem render_texture_items[] = {
@@ -14264,6 +14313,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeSqueeze");
   define("ShaderNode", "ShaderNodeSubsurfaceScattering", def_sh_subsurface);
   define("ShaderNode", "ShaderNodeTangent", def_sh_tangent);
+  define("ShaderNode", "ShaderNodeTessellationControl", def_sh_tessellation_control);
   define("ShaderNode", "ShaderNodeTwirl");
   define("ShaderNode", "ShaderNodeWaterRipples", def_sh_water_ripples);
   define("ShaderNode", "ShaderNodeTexBrick", def_sh_tex_brick);

@@ -87,13 +87,42 @@ ObjectHandle SyncModule::sync_object(const ObjectRef &ob_ref,
 /** \name Common
  * \{ */
 
+/**
+ * Return the subdivision level used by the shader of a material pass. Zero if the shader doesn't
+ * tessellate, which is the case of placeholder materials used during shader compilation.
+ */
+static int material_pass_tessellation_level(const Material &material, GPUMaterial *gpumat)
+{
+  if (material.tessellation_level == 0 || gpumat == nullptr) {
+    return 0;
+  }
+  constexpr uint64_t geometry_mask = (1u << 4u) - 1u;
+  const eMaterialGeometry geometry_type = eMaterialGeometry(GPU_material_uuid_get(gpumat) &
+                                                            geometry_mask);
+  if (geometry_type != MAT_GEOM_MESH_TESS) {
+    return 0;
+  }
+  /* Without the settings, the shader defaults to a single level. */
+  return GPU_material_has_tessellation_output(gpumat) ? material.tessellation_level : 1;
+}
+
 static inline void geometry_call(PassMain::Sub *sub_pass,
                                  gpu::Batch *geom,
-                                 ResourceHandleRange resource_handle)
+                                 ResourceHandleRange resource_handle,
+                                 int tessellation_level = 0)
 {
-  if (sub_pass != nullptr && geom != nullptr) {
-    sub_pass->draw(geom, resource_handle);
+  if (sub_pass == nullptr || geom == nullptr) {
+    return;
   }
+  if (tessellation_level > 0) {
+    /* Each triangle is subdivided into level^2 triangles inside the vertex shader.
+     * The batch content is only generated after object sync, so the resulting vertex count is
+     * unknown here. #GPU_batch_draw_expanded_parameter_get skips overflowing draw-calls. */
+    sub_pass->draw_expand(
+        geom, GPU_PRIM_TRIS, tessellation_level * tessellation_level, 1, resource_handle);
+    return;
+  }
+  sub_pass->draw(geom, resource_handle);
 }
 
 static inline void geometry_volume_call(PassMain::Sub *pass,
@@ -226,6 +255,7 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
   bool is_alpha_blend = false;
   bool has_transparent_shadows = false;
   bool has_time_dependent_shadows = false;
+  bool has_view_dependent_shadows = false;
   float inflate_bounds = 0.0f;
 
   for (const Material *material : materials) {
@@ -245,6 +275,8 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
     has_transparent_shadows |= material->has_transparent_shadows;
     has_time_dependent_shadows |= has_time_node &&
                                   (material->has_transparent_shadows || has_displacement);
+    /* View dependent tessellation changes the shadow caster geometry with the camera. */
+    has_view_dependent_shadows |= material->tessellation_view_dependent;
     has_time_dependent_shadows |= material->outline_shell_shadow.gpumat != nullptr &&
                                   GPU_material_is_time_dependent(
                                       material->outline_shell_shadow.gpumat);
@@ -265,8 +297,11 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
 
   inst_.cryptomatte.sync_object(ob_handle);
 
-  inst_.shadows.sync_object(
-      ob_handle, is_alpha_blend, has_transparent_shadows, has_time_dependent_shadows);
+  inst_.shadows.sync_object(ob_handle,
+                            is_alpha_blend,
+                            has_transparent_shadows,
+                            has_time_dependent_shadows,
+                            has_view_dependent_shadows);
 
   if (has_volume) {
     inst_.volume.object_sync(ob_handle);
@@ -355,7 +390,10 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
       const bool use_npr_geom = pass.gpumat == material.npr.gpumat ||
                                 pass.gpumat == material.planar_probe_npr.gpumat ||
                                 pass.gpumat == material.lightprobe_sphere_npr.gpumat;
-      geometry_call(pass.sub_pass, use_npr_geom ? geom_npr : geom, ob_handle.res_handle);
+      geometry_call(pass.sub_pass,
+                    use_npr_geom ? geom_npr : geom,
+                    ob_handle.res_handle,
+                    material_pass_tessellation_level(material, pass.gpumat));
     });
 
     gpu::Batch *geom_shell = (i < mat_geom_shell.size()) ? mat_geom_shell[i] :
@@ -369,11 +407,19 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
 
     sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass,
                                                            int instance) {
-      geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance));
+      geometry_call(pass.sub_pass,
+                    geom,
+                    ob_handle.res_handle.sub_handle(instance),
+                    material_pass_tessellation_level(material, pass.gpumat));
     });
 
     sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int instance) {
-      geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance));
+      /* The overlap masking pre-pass uses the shading material shader. */
+      GPUMaterial *gpumat = pass.gpumat ? pass.gpumat : material.shading.gpumat;
+      geometry_call(pass.sub_pass,
+                    geom,
+                    ob_handle.res_handle.sub_handle(instance),
+                    material_pass_tessellation_level(material, gpumat));
     });
   }
 
@@ -395,7 +441,8 @@ bool SyncModule::sync_sculpt(const ObjectRef &ob_ref)
   ObjectHandle ob_handle = sync_object(ob_ref, inst_.manager->unique_handle_for_sculpt(ob_ref));
 
   bool has_motion = false;
-  MaterialArray &material_array = inst_.materials.material_array_get(ob_handle, has_motion);
+  MaterialArray &material_array = inst_.materials.material_array_get(
+      ob_handle, has_motion, false);
   Vector<SculptBatch> batches_npr = sculpt_batches_per_material_get(
       ob_ref.object, material_array.gpu_materials_npr);
 

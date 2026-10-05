@@ -274,6 +274,7 @@ bool GPU_material_has_surface_output(GPUMaterial *mat);
 bool GPU_material_has_volume_output(GPUMaterial *mat);
 bool GPU_material_has_displacement_output(GPUMaterial *mat);
 bool GPU_material_has_depth_offset_output(GPUMaterial *mat);
+bool GPU_material_has_tessellation_output(GPUMaterial *mat);
 bool GPU_material_has_filter_output(GPUMaterial *mat);
 bool GPU_material_has_light_shader_output(GPUMaterial *mat);
 bool GPU_material_has_glsl_light_shader_eval(const GPUMaterial *mat);
@@ -518,6 +519,7 @@ struct GPUCodegenOutput {
   GPUGraphOutput volume;
   GPUGraphOutput thickness;
   std::optional<GPUGraphOutput> depth_offset;
+  std::optional<GPUGraphOutput> tessellation;
   GPUGraphOutput npr;
   GPUGraphOutput filter;
   Vector<int> filter_output_identifiers;
@@ -642,6 +644,8 @@ void GPU_material_output_volume(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_displacement(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_thickness(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_depth_offset(GPUMaterial *material, GPUNodeLink *link);
+/** \param link: Packed tessellation parameters (see `node_shader_tessellation_control.cc`). */
+void GPU_material_output_tessellation(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_filter_item(GPUMaterial *material, int identifier, GPUNodeLink *link);

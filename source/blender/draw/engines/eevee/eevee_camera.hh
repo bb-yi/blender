@@ -117,6 +117,9 @@ class Camera {
   /** Just for tracking camera changes, use Instance::camera_orig_object for data access. */
   Object *last_camera_object_ = nullptr;
   bool camera_changed_ = false;
+  /** View projection matrix of the last #sync, to detect view changes. */
+  float4x4 last_persmat_ = float4x4::zero();
+  bool view_changed_ = true;
 
  public:
   Camera(Instance &inst, CameraData &data) : inst_(inst), data_(data) {};
@@ -177,6 +180,11 @@ class Camera {
   bool camera_changed() const
   {
     return camera_changed_;
+  }
+  /** True if the view or projection changed since the previous sync. */
+  bool view_changed() const
+  {
+    return view_changed_;
   }
 
  private:

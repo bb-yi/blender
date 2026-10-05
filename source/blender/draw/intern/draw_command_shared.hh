@@ -65,12 +65,12 @@ struct [[host_shared]] DrawGroup {
     /* Ugly packing to support expanded draws without inflating the struct.
      * Makes vertex range restricted to smaller range for expanded draw. */
     uint32_t expand_prim_type : 4;
-    uint32_t expand_prim_len : 3;
-    uint32_t vertex_len : 25;
+    uint32_t vertex_len : 28;
 
     /** Needed to create the correct draw call. */
     gpu::Batch *gpu_batch;
-    uint64_t _cpu_pad0;
+    uint32_t expand_prim_len;
+    uint32_t _cpu_pad0;
   } desc;
 #else
   uint _cpu_reserved_1;

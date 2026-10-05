@@ -20,10 +20,34 @@
 
 #include "NOD_shader.h"
 
+#include "GPU_capabilities.hh"
+#include "GPU_context.hh"
+
 #include "eevee_instance.hh"
 #include "eevee_material.hh"
 
 namespace blender::eevee {
+
+bool material_tessellation_settings_get(blender::Material *mat,
+                                        ShaderTessellationSettings &r_settings)
+{
+  if (mat == nullptr || mat->nodetree == nullptr) {
+    return false;
+  }
+  /* The mesh data is read from storage buffers bound above the slots used by the engines.
+   * Metal doesn't support enough storage buffers. */
+  if (GPU_backend_get_type() == GPU_BACKEND_METAL ||
+      GPU_max_shader_storage_buffer_bindings() <= MAT_TESS_ATTR_BUF_SLOT_LAST)
+  {
+    return false;
+  }
+  const bNode *node = ntreeShaderTessellationNode(mat->nodetree);
+  if (node == nullptr) {
+    return false;
+  }
+  r_settings = node_shader_tessellation_settings_get(*node);
+  return true;
+}
 
 static bool material_depth_offset_affects_lighting(const blender::Material &material)
 {
@@ -482,6 +506,11 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
   const bool is_volume = ELEM(pipeline_type, MAT_PIPE_VOLUME_OCCUPANCY, MAT_PIPE_VOLUME_MATERIAL);
   blender::Material *default_mat = is_volume ? default_volume : default_surface;
 
+  /* Placeholder materials are not tessellated. The draw-calls are adjusted accordingly. */
+  const eMaterialGeometry fallback_geometry_type = (geometry_type == MAT_GEOM_MESH_TESS) ?
+                                                       MAT_GEOM_MESH :
+                                                       geometry_type;
+
   MaterialPass matpass = MaterialPass();
   matpass.gpumat = inst_.shaders.material_shader_get(
       blender_mat,
@@ -536,7 +565,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
           default_mat,
           default_mat->nodetree,
           pipeline_type,
-          geometry_type,
+          fallback_geometry_type,
           probe_capture,
           false,
           nullptr,
@@ -558,7 +587,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
           error_mat_,
           error_mat_->nodetree,
           pipeline_type,
-          geometry_type,
+          fallback_geometry_type,
           probe_capture,
           false,
           nullptr,
@@ -582,7 +611,9 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
   if (inst_.is_viewport() && use_deferred_compilation && pass_updated) {
     inst_.sampling.reset();
 
+    /* Tessellation changes the shape even without displacement (Phong smoothing). */
     const bool has_displacement = outline_shell ||
+                                  GPU_material_has_tessellation_output(matpass.gpumat) ||
                                   (GPU_material_has_displacement_output(matpass.gpumat) &&
                                    (blender_mat->displacement_method != MA_DISPLACEMENT_BUMP));
     const bool has_volume = GPU_material_has_volume_output(matpass.gpumat);
@@ -744,6 +775,14 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
   Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
     Material mat = {};
     mat.uses_outline_control = uses_outline_control;
+    ShaderTessellationSettings tessellation;
+    if (geometry_type == MAT_GEOM_MESH_TESS &&
+        material_tessellation_settings_get(blender_mat, tessellation))
+    {
+      mat.tessellation_level = tessellation.max_level;
+      mat.tessellation_view_dependent = tessellation.mode != SHD_TESSELLATION_FIXED &&
+                                        tessellation.min_level != tessellation.max_level;
+    }
     if (is_filter_material) {
       /* Filter-domain materials are scene fullscreen passes, not object surface materials. */
       material_telemetry_features_update(mat);
@@ -869,10 +908,14 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       mat.has_surface = GPU_material_has_surface_output(mat.shading.gpumat);
       mat.has_volume = GPU_material_has_volume_output(mat.shading.gpumat);
       if (mat.has_volume && !hide_on_camera) {
+        /* The volume of tessellated meshes is not tessellated. */
+        const eMaterialGeometry volume_geometry_type = geometry_type_is_mesh(geometry_type) ?
+                                                           MAT_GEOM_MESH :
+                                                           geometry_type;
         mat.volume_occupancy = material_pass_get(
-            ob, blender_mat, MAT_PIPE_VOLUME_OCCUPANCY, geometry_type);
+            ob, blender_mat, MAT_PIPE_VOLUME_OCCUPANCY, volume_geometry_type);
         mat.volume_material = material_pass_get(
-            ob, blender_mat, MAT_PIPE_VOLUME_MATERIAL, geometry_type);
+            ob, blender_mat, MAT_PIPE_VOLUME_MATERIAL, volume_geometry_type);
       }
     }
 
@@ -935,8 +978,10 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       }
     }
 
-    if (!inst_.is_baking() && !is_filter_material && geometry_type == MAT_GEOM_MESH)
+    if (!inst_.is_baking() && !is_filter_material && geometry_type_is_mesh(geometry_type))
     {
+      /* Shells are drawn using their own batch and are not tessellated. */
+      const eMaterialGeometry shell_geometry_type = MAT_GEOM_MESH;
       bNode *shell_node = material_outline_shell_node_get(blender_mat);
       if (shell_node != nullptr) {
         mat.outline_shell_bounds_inflation = material_outline_shell_bounds_inflation(
@@ -958,7 +1003,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
           mat.outline_shell_prepass = material_pass_get(ob,
                                                      blender_mat,
                                                      shell_prepass_pipe,
-                                                     geometry_type,
+                                                     shell_geometry_type,
                                                      MAT_PROBE_NONE,
                                                      true,
                                                      &shell_state,
@@ -968,7 +1013,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
           mat.outline_shell_shading = material_pass_get(ob,
                                                      blender_mat,
                                                      shell_shading_pipe,
-                                                     geometry_type,
+                                                     shell_geometry_type,
                                                      MAT_PROBE_NONE,
                                                      true,
                                                      &shell_state,
@@ -989,7 +1034,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
           mat.outline_shell_shadow = material_pass_get(ob,
                                                     blender_mat,
                                                     MAT_PIPE_SHADOW,
-                                                    geometry_type,
+                                                    shell_geometry_type,
                                                     MAT_PROBE_NONE,
                                                     true,
                                                     &shell_state,
@@ -1017,7 +1062,9 @@ blender::Material *MaterialModule::material_from_slot(Object *ob, int slot)
   return ma;
 }
 
-MaterialArray &MaterialModule::material_array_get(const ObjectHandle &ob_handle, bool has_motion)
+MaterialArray &MaterialModule::material_array_get(const ObjectHandle &ob_handle,
+                                                  bool has_motion,
+                                                  bool use_tessellation)
 {
   Object *ob = ob_handle.object;
 
@@ -1031,7 +1078,14 @@ MaterialArray &MaterialModule::material_array_get(const ObjectHandle &ob_handle,
   for (auto i : IndexRange(materials_len)) {
     blender::Material *blender_mat = (material_override) ? material_override :
                                                            material_from_slot(ob, i);
-    Material &mat = material_sync(ob_handle, blender_mat, to_material_geometry(ob), has_motion);
+    eMaterialGeometry geometry_type = to_material_geometry(ob);
+    ShaderTessellationSettings tessellation;
+    if (geometry_type == MAT_GEOM_MESH && use_tessellation && !inst_.is_baking() &&
+        material_tessellation_settings_get(blender_mat, tessellation))
+    {
+      geometry_type = MAT_GEOM_MESH_TESS;
+    }
+    Material &mat = material_sync(ob_handle, blender_mat, geometry_type, has_motion);
 
     /* \note Perform a whole copy since next material_sync() can move the Material memory location
      * (i.e: because of its container growing) */
