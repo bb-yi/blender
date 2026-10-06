@@ -428,6 +428,13 @@ static Vector<const bNode *> get_implicit_origin_nodes(const bNodeTree &ntree, b
       }
     }
   }
+  /* Portal In supplies Portal Out without an explicit bNodeLink. Use the cache built before
+   * topological sorting; the public lookup would re-enter topology cache construction. */
+  if (is_shader_portal_out_node(node)) {
+    if (const bNodeSocket *input = find_shader_portal_source_socket_cached(ntree, node)) {
+      origin_nodes.append(input->runtime->owner_node);
+    }
+  }
   return origin_nodes;
 }
 
@@ -438,6 +445,13 @@ static Vector<const bNode *> get_implicit_target_nodes(const bNodeTree &ntree, b
     const bNodeZoneType &zone_type = *zone_type_by_node_type(node.type_legacy);
     if (const bNode *output_node = zone_type.get_corresponding_output(ntree, node)) {
       target_nodes.append(output_node);
+    }
+  }
+  if (is_shader_portal_in_node(node)) {
+    for (const auto item : ntree.runtime->shader_portal_source_socket_by_out_node_id.items()) {
+      if (item.value->runtime->owner_node == &node) {
+        target_nodes.append(ntree.node_by_id(item.key));
+      }
     }
   }
   return target_nodes;

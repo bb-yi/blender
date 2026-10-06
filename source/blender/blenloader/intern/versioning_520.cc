@@ -620,8 +620,12 @@ void do_versions_after_linking_520(FileData *fd, Main *bmain)
     version_node_socket_index_animdata(bmain, NTREE_SHADER, SH_NODE_BSDF_PRINCIPLED, 5, 1, 31);
   }
 
-  /* The NPR branch previously used subversion 44 before this official migration landed. */
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 46)) {
+  /* Official 44/45 files already have valid camera-space paths. Only the NPR fork reused
+   * those subversions before importing this migration; its files contain use_outline. */
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 44) ||
+      (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 46) &&
+       DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "char", "use_outline")))
+  {
     /* We have to remove the invalid motion paths. Re-baking into clip space on file load would be
      * very expensive. */
     for (Object &object : bmain->objects) {

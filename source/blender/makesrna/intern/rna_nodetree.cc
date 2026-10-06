@@ -891,13 +891,9 @@ static void rna_NodeFilterMaskItem_object_set(PointerRNA *ptr,
   NodeFilterMaskItem *item = static_cast<NodeFilterMaskItem *>(ptr->data);
   Object *object = static_cast<Object *>(value.data);
   Object *new_object = (object != nullptr && OB_TYPE_IS_GEOMETRY(object->type)) ? object : nullptr;
-  if (item->object != nullptr && BKE_id_is_in_global_main(reinterpret_cast<ID *>(item->object))) {
-    id_us_min(reinterpret_cast<ID *>(item->object));
-  }
+  id_us_min(reinterpret_cast<ID *>(item->object));
   item->object = new_object;
-  if (item->object != nullptr && BKE_id_is_in_global_main(reinterpret_cast<ID *>(item->object))) {
-    id_us_plus(reinterpret_cast<ID *>(item->object));
-  }
+  id_us_plus(reinterpret_cast<ID *>(item->object));
 }
 
 static void rna_NodeFilterMaskItem_name_get(PointerRNA *ptr, char *value)

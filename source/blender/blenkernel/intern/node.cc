@@ -4441,6 +4441,18 @@ bNode *node_copy_with_mapping(bNodeTree *dst_tree,
     node_src.typeinfo->copyfunc(dst_tree, node_dst, &node_src);
   }
 
+  /* Storage copying must not change users for evaluated/localized copies, or for whole-tree
+   * copies whose ID users are handled by the generic ID copy code. Standalone node copies
+   * still own one user per mask item, just like #node_remove_node. */
+  if ((flag & LIB_ID_CREATE_NO_USER_REFCOUNT) == 0 &&
+      node_dst->type_legacy == SH_NODE_FILTER_OBJECT_MASK && node_dst->storage != nullptr)
+  {
+    const auto &storage = *static_cast<const NodeFilterMask *>(node_dst->storage);
+    for (const NodeFilterMaskItem &item : Span(storage.items, storage.items_num)) {
+      id_us_plus(reinterpret_cast<ID *>(item.object));
+    }
+  }
+
   if (dst_tree) {
     BKE_ntree_update_tag_node_new(dst_tree, node_dst);
   }
@@ -5137,17 +5149,13 @@ void node_remove_node(
     }
 
     /* Socket items with ID user references declared in #node_node_foreach_id must be
-     * decremented here: the per-node storage destruction path (#node_free_storage via
-     * #destruct_item) must never touch user counts, because it also runs for evaluated
+     * decremented here: the per-node storage destruction path (#node_free_storage)
+     * must never touch user counts, because it also runs for evaluated
      * copies whose ID pointers may already be released. */
     if (node.type_legacy == SH_NODE_FILTER_OBJECT_MASK && node.storage != nullptr) {
       NodeFilterMask *mask_storage = static_cast<NodeFilterMask *>(node.storage);
       for (NodeFilterMaskItem &item : MutableSpan(mask_storage->items, mask_storage->items_num)) {
-        if (item.object != nullptr &&
-            BKE_id_is_in_global_main(reinterpret_cast<ID *>(item.object)))
-        {
-          id_us_min(reinterpret_cast<ID *>(item.object));
-        }
+        id_us_min(reinterpret_cast<ID *>(item.object));
       }
     }
 

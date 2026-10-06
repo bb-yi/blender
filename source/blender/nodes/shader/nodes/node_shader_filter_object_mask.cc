@@ -59,16 +59,14 @@ struct FilterMaskItemsAccessor : public socket_items::SocketItemsAccessorDefault
   static socket_items::SocketItemsRef<NodeFilterMaskItem> get_items_from_node(bNode &node);
   static void copy_item(const NodeFilterMaskItem &src, NodeFilterMaskItem &dst)
   {
+    /* User counting belongs to the flag-aware node/ID copy path. */
     dst.object = src.object;
-    if (dst.object != nullptr && BKE_id_is_in_global_main(reinterpret_cast<ID *>(dst.object))) {
-      id_us_plus(reinterpret_cast<ID *>(dst.object));
-    }
   }
   static void destruct_item(NodeFilterMaskItem *item)
   {
-    /* Node storage destruction runs during COW copy teardown and database free, where the
-     * pointed-to IDs may already be released. User counting is handled by the node removal
-     * path instead, matching upstream socket items. */
+    /* Only item editing (remove/clear/replace) uses this destructor. Storage teardown frees
+     * the array directly, since generic ID/node deletion already handles its users. */
+    id_us_min(reinterpret_cast<ID *>(item->object));
     item->object = nullptr;
   }
   static void blend_write_item(BlendWriter * /*writer*/, const ItemT & /*item*/) {}
@@ -326,8 +324,10 @@ static void node_free_storage(bNode *node)
   if (node->storage == nullptr) {
     return;
   }
-  socket_items::destruct_array<FilterMaskItemsAccessor>(*node);
-  MEM_delete(static_cast<NodeFilterMask *>(node->storage));
+  /* Evaluated copies can contain already-freed object pointers. Never touch users here. */
+  auto *node_storage = static_cast<NodeFilterMask *>(node->storage);
+  MEM_SAFE_DELETE(node_storage->items);
+  MEM_delete(node_storage);
   node->storage = nullptr;
 }
 
@@ -390,9 +390,7 @@ static wmOperatorStatus filter_mask_items_from_selection_exec(bContext *C, wmOpe
     }
     NodeFilterMaskItem *item = socket_items::add_item<FilterMaskItemsAccessor>(node);
     item->object = object;
-    if (item->object != nullptr && BKE_id_is_in_global_main(reinterpret_cast<ID *>(item->object))) {
-      id_us_plus(reinterpret_cast<ID *>(item->object));
-    }
+    id_us_plus(reinterpret_cast<ID *>(item->object));
     existing_objects.add(object);
   }
   CTX_DATA_END;

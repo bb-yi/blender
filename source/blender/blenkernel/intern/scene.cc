@@ -1934,6 +1934,15 @@ Scene *BKE_scene_duplicate(Main *bmain,
     sce_copy->physics_settings = sce->physics_settings;
     sce_copy->audio = sce->audio;
     BKE_scene_copy_data_eevee(sce_copy, sce);
+    /* EMPTY bypasses generic ID copying, which normally accounts for these users. */
+    id_us_plus(reinterpret_cast<ID *>(sce_copy->eevee.filter_graph));
+    for (SceneFilterMaterial *filter_material = static_cast<SceneFilterMaterial *>(
+             sce_copy->eevee.filter_materials.first);
+         filter_material != nullptr;
+         filter_material = filter_material->next)
+    {
+      id_us_plus(reinterpret_cast<ID *>(filter_material->material));
+    }
 
     if (sce->id.properties) {
       sce_copy->id.properties = IDP_CopyProperty(sce->id.properties);
