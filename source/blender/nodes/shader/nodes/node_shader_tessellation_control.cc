@@ -12,6 +12,8 @@
 
 #include "BLI_math_base.h"
 
+#include "DNA_material_types.h"
+
 #include "NOD_shader.h"
 
 #include "node_shader_util.hh"
@@ -21,6 +23,9 @@
 #include "UI_resources.hh"
 
 namespace blender {
+
+/* Doesn't require the topology cache, which might not be available during render engine sync. */
+static const bNodeSocket *input_socket_find(const bNode &node, const StringRef identifier);
 
 namespace nodes::node_shader_tessellation_control_cc {
 
@@ -93,8 +98,27 @@ static int node_gpu_material(GPUMaterial *mat,
                              GPUNodeStack * /*in*/,
                              GPUNodeStack *out)
 {
+  ShaderTessellationSettings settings = node_shader_tessellation_settings_get(*node);
+  if (const Material *bmat = GPU_material_get_material(mat)) {
+    /* Bounds used by the conservative view culling of the tessellated surface. */
+    settings.max_displacement = bmat->inflate_bounds;
+    settings.backface_cull =
+        material_surface_cull_method_get(*bmat) == MA_SURFACE_CULL_BACK;
+    if (bmat->inflate_bounds <= 0.0f &&
+        bmat->displacement_method != MA_DISPLACEMENT_BUMP)
+    {
+      /* The material displaces vertices without a declared bound (Max Displacement is zero).
+       * Culling cannot be made conservative: mark it disabled. */
+      const bNode *output = ntreeShaderOutputNode(&node->owner_tree(), SHD_OUTPUT_EEVEE);
+      const bNodeSocket *socket =
+          (output != nullptr) ? input_socket_find(*output, "Displacement") : nullptr;
+      if (socket != nullptr && socket->link != nullptr) {
+        settings.max_displacement = -1.0f;
+      }
+    }
+  }
   float packed[4];
-  node_shader_tessellation_settings_pack(node_shader_tessellation_settings_get(*node), packed);
+  node_shader_tessellation_settings_pack(settings, packed);
   /* Uniform to avoid shader recompilation when tweaking the settings. */
   return GPU_link(mat, "set_rgba", GPU_uniform(packed), &out[0].link);
 }
@@ -141,13 +165,34 @@ ShaderTessellationSettings node_shader_tessellation_settings_get(const bNode &no
                                  settings.near_distance + 1e-4f);
   settings.edge_length = max_ff(socket_float_value(node, "Edge Length"), 1.0f);
   settings.phong = clamp_f(socket_float_value(node, "Phong Smoothing"), 0.0f, 1.0f);
+  settings.max_displacement = 0.0f;
+  settings.backface_cull = false;
   return settings;
+}
+
+int node_shader_tessellation_expansion(const ShaderTessellationSettings &settings)
+{
+  if (settings.mode == SHD_TESSELLATION_FIXED || settings.min_level == settings.max_level) {
+    return settings.max_level;
+  }
+  /* View dependent modes use fractional-odd partitioning, whose lattice resolution is the
+   * smallest odd number not below the subdivision factor (see `eevee_geom_mesh_tess_lib.glsl`).
+   */
+  return settings.max_level | 1;
 }
 
 void node_shader_tessellation_settings_pack(const ShaderTessellationSettings &settings,
                                             float r_packed[4])
 {
-  r_packed[0] = float(settings.max_level + settings.min_level * 16 + settings.mode * 256);
+  /* Quantize the displacement bound upward in 1/32 unit steps (9 bits). All 24 used bits must
+   * stay below 2^24 so the exact integers survive the float round-trip to the shader. A value
+   * of 511 marks displacement without a declared bound, which disables culling. */
+  const int margin_bits = (settings.max_displacement < 0.0f) ?
+                              511 :
+                              min_ii(510, int(ceilf(settings.max_displacement * 32.0f)));
+  r_packed[0] = float(settings.max_level + settings.min_level * 16 + settings.mode * 256 +
+                      node_shader_tessellation_expansion(settings) * 1024 +
+                      margin_bits * 16384 + int(settings.backface_cull) * 8388608);
   r_packed[1] = (settings.mode == SHD_TESSELLATION_SCREEN_EDGE) ? settings.edge_length :
                                                                   settings.near_distance;
   r_packed[2] = settings.far_distance;

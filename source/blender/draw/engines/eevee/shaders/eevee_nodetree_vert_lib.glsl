@@ -19,7 +19,7 @@ void attrib_load(CurvesPoint /*domain*/) {}
  * Default to no subdivision. */
 float4 nodetree_tessellation()
 {
-  return float4(17.0f, 0.0f, 0.0f, 0.0f);
+  return float4(1041.0f, 0.0f, 0.0f, 0.0f);
 }
 
 /* Tessellated meshes only. Interpolate the material vertex attributes of the original triangle

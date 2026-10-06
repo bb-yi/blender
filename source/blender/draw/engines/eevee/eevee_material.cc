@@ -779,7 +779,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
     if (geometry_type == MAT_GEOM_MESH_TESS &&
         material_tessellation_settings_get(blender_mat, tessellation))
     {
-      mat.tessellation_level = tessellation.max_level;
+      mat.tessellation_level = node_shader_tessellation_expansion(tessellation);
       mat.tessellation_view_dependent = tessellation.mode != SHD_TESSELLATION_FIXED &&
                                         tessellation.min_level != tessellation.max_level;
     }

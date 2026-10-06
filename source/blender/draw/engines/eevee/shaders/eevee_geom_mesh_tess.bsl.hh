@@ -75,7 +75,7 @@ struct GeomMeshTess {
   init_interface(id.raw_id);
 
   /* The subdivision levels only depend on the main camera, so that every view (including shadows
-   * and light-probes) renders the same surface. */
+   * and light-probes) renders the same surface. The culling uses the view being rendered. */
   const TessSettings settings = tess_settings_unpack(nodetree_tessellation());
   const CameraData camera = uni.uniform_buf.camera;
   const TessVertex tv = tess_vertex_get(settings,
@@ -83,7 +83,12 @@ struct GeomMeshTess {
                                         obj.model,
                                         camera.viewinv[3].xyz,
                                         camera.persmat,
-                                        float2(uni.uniform_buf.film.render_extent));
+                                        float2(uni.uniform_buf.film.render_extent),
+                                        view.winmat * view.viewmat,
+                                        view.position(),
+                                        view.forward(),
+                                        !view.is_perspective(),
+                                        pipe.is_shadow_pipe);
   if (tv.is_degenerate) {
     /* All the vertices of the sub-triangle are at the same position. Nothing is rasterized. */
     out_position = float4(0.0f, 0.0f, 0.0f, 1.0f);

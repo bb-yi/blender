@@ -47,6 +47,11 @@ struct ShaderTessellationSettings {
   float edge_length;
   /** Phong tessellation factor. */
   float phong;
+  /** Bound on the vertex displacement (#Material::inflate_bounds), used for culling.
+   * Negative when the material displaces vertices without a declared bound. */
+  float max_displacement;
+  /** Whether the material renders front faces only. */
+  bool backface_cull;
 };
 
 /** Maximum subdivision level. Limited by the primitive expansion of the draw manager. */
@@ -58,6 +63,12 @@ ShaderTessellationSettings node_shader_tessellation_settings_get(const bNode &no
  * material output, or nullptr if the material is not tessellated.
  */
 const bNode *ntreeShaderTessellationNode(bNodeTree *ntree);
+/**
+ * Primitive expansion level of a fully subdivided triangle: the resolution of its lattice.
+ * Equal to `max_level` rounded up to an odd number for the view dependent modes, which use
+ * fractional-odd partitioning.
+ */
+int node_shader_tessellation_expansion(const ShaderTessellationSettings &settings);
 /**
  * Pack the settings for the shader. Must match `eevee_geom_mesh_tess_lib.glsl`.
  * Unpacked by the shader, the levels and mode being exact integers.

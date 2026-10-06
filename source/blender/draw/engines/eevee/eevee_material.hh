@@ -470,7 +470,8 @@ struct Material {
   /* Absolute unlinked Strength value of the Outline Shell Output node.
    * Used to inflate the object bounds for vertex offsets. */
   float outline_shell_bounds_inflation;
-  /* Maximum subdivision level of tessellated materials. Zero if not tessellated.
+  /* Lattice resolution of fully subdivided triangles of tessellated materials
+   * (#node_shader_tessellation_expansion). Zero if not tessellated.
    * Passes using #MAT_GEOM_MESH_TESS shaders expand each triangle into level^2 triangles. */
   int tessellation_level;
   /* The tessellated geometry depends on the camera position. */
