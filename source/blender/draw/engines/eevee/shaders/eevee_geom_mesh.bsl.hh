@@ -22,6 +22,8 @@ namespace eevee {
 
 struct GeomMesh {
   [[legacy_info]] ShaderCreateInfo eevee_geom_iface_info;
+  /* WORKAROUND: Until we get condition support for interfaces. */
+  [[legacy_info]] ShaderCreateInfo eevee_geom_disp_iface_info;
 };
 
 struct GeomMeshVertIn {
@@ -94,6 +96,9 @@ struct GeomMeshVertIn {
   init_globals(uni, view, true);
   attrib_load(MeshVertex{vert_in.pos, to_float3x3(obj.model_inverse), lP_orco});
 
+  /* Used by #MAT_DISPLACEMENT_GEOM_NORMAL to evaluate the displacement in the fragment shader. */
+  auto &disp_interp = interface_get(eevee_geom_disp_iface_info, disp_interp);
+  disp_interp.P_base = interp.P;
   interp.P += nodetree_displacement();
 
   if (pipe.use_clip_plane) [[static_branch]] {

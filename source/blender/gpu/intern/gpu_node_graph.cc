@@ -1154,6 +1154,7 @@ void gpu_node_graph_free_nodes(GPUNodeGraph *graph)
   graph->outlink_displacement = nullptr;
   graph->outlink_thickness = nullptr;
   graph->outlink_depth_offset = nullptr;
+  graph->outlink_tessellation = nullptr;
   graph->outlink_npr = nullptr;
   graph->outlink_filter = nullptr;
   graph->outlink_light_shader = nullptr;
@@ -1233,6 +1234,7 @@ void gpu_node_graph_prune_unused(GPUNodeGraph *graph)
   gpu_nodes_tag(graph, graph->outlink_displacement, GPU_NODE_TAG_DISPLACEMENT);
   gpu_nodes_tag(graph, graph->outlink_thickness, GPU_NODE_TAG_THICKNESS);
   gpu_nodes_tag(graph, graph->outlink_depth_offset, GPU_NODE_TAG_DEPTH_OFFSET);
+  gpu_nodes_tag(graph, graph->outlink_tessellation, GPU_NODE_TAG_TESSELLATION);
   gpu_nodes_tag(graph, graph->outlink_npr, GPU_NODE_TAG_NPR);
   gpu_nodes_tag(graph, graph->outlink_filter, GPU_NODE_TAG_FILTER);
   for (GPUNodeGraphOutputLink &filter_link : graph->outlink_filters) {

@@ -942,6 +942,19 @@ enum NodeParallaxMode {
   SHD_PARALLAX_SECANT_RELIEF = 4,
 };
 
+/** #bNode.custom1 of the Tessellation Control node. */
+enum NodeShaderTessellationMode {
+  SHD_TESSELLATION_FIXED = 0,
+  SHD_TESSELLATION_DISTANCE = 1,
+  SHD_TESSELLATION_SCREEN_EDGE = 2,
+};
+
+/** #bNode.custom2 of the Tessellation Control node. */
+enum NodeShaderTessellationNormal {
+  SHD_TESSELLATION_NORMAL_BUMP = 0,
+  SHD_TESSELLATION_NORMAL_GEOMETRY = 1,
+};
+
 enum NodeCompareMode : int8_t {
   NODE_COMPARE_MODE_ELEMENT = 0,
   NODE_COMPARE_MODE_LENGTH = 1,

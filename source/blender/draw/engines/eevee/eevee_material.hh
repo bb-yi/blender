@@ -30,6 +30,7 @@ namespace blender {
 
 struct bNodeSocketValueFloat;
 struct bNodeSocketValueRGBA;
+struct ShaderTessellationSettings;
 
 namespace eevee {
 
@@ -44,6 +45,17 @@ static inline bool geometry_type_has_surface(eMaterialGeometry geometry_type)
 {
   return geometry_type < MAT_GEOM_VOLUME;
 }
+
+static inline bool geometry_type_is_mesh(eMaterialGeometry geometry_type)
+{
+  return ELEM(geometry_type, MAT_GEOM_MESH, MAT_GEOM_MESH_TESS);
+}
+
+/**
+ * Return true if the material is tessellated and tessellation is supported by the GPU backend.
+ */
+bool material_tessellation_settings_get(blender::Material *mat,
+                                        ShaderTessellationSettings &r_settings);
 
 enum eMaterialDisplacement {
   MAT_DISPLACEMENT_BUMP = 0,
@@ -458,6 +470,12 @@ struct Material {
   /* Absolute unlinked Strength value of the Outline Shell Output node.
    * Used to inflate the object bounds for vertex offsets. */
   float outline_shell_bounds_inflation;
+  /* Lattice resolution of fully subdivided triangles of tessellated materials
+   * (#node_shader_tessellation_expansion). Zero if not tessellated.
+   * Passes using #MAT_GEOM_MESH_TESS shaders expand each triangle into level^2 triangles. */
+  int tessellation_level;
+  /* The tessellated geometry depends on the camera position. */
+  bool tessellation_view_dependent;
   /* These pipelines need a sub-pass per object/instance, so the returned sub_pass for these are
    * always null and the sub-pass creation is handled directly by the SyncModule.
    * Note that this also applies to the shading MaterialPass in the case of alpha-blended
@@ -537,7 +555,9 @@ class MaterialModule {
   /**
    * Returned Material references are valid until the next call to this function or material_get().
    */
-  MaterialArray &material_array_get(const ObjectHandle &ob_handle, bool has_motion);
+  MaterialArray &material_array_get(const ObjectHandle &ob_handle,
+                                    bool has_motion,
+                                    bool use_tessellation = true);
   /**
    * Returned Material references are valid until the next call to this function or
    * material_array_get().

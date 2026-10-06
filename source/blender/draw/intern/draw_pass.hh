@@ -289,8 +289,9 @@ class PassBase {
    * primitive. Geometry attributes are still sourced from a `gpu::Batch`, however, the attributes
    * indexing needs to be done manually inside the shader.
    *
-   * \note primitive_type and primitive_len must be baked into the shader and without using
-   * specialization constant!
+   * \note primitive_type and primitive_len must be known by the shader (baked or read from a
+   * resource bound to the sub-pass) and without using specialization constant!
+   * \note primitive_len is limited to #DRW_EXPAND_PRIM_LEN_MAX.
    *
    * \note A primitive_len count of 0 will discard the draw call. It will not be recorded.
    * \note vertex_len and vertex_first are relative to the original primitive list.

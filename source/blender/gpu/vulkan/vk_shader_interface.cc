@@ -169,7 +169,7 @@ void VKShaderInterface::populate_shader_inputs(InitContext &ctx)
 
   for (const ShaderCreateInfo::Resource &res : info.geometry_resources_) {
     if (res.bind_type == ShaderCreateInfo::Resource::BindType::STORAGE_BUFFER) {
-      ssbo_attr_mask_ |= (1 << res.slot);
+      ssbo_attr_mask_ |= (1u << res.slot);
     }
     else {
       BLI_assert_msg(0, "Resource type is not supported for Geometry frequency");

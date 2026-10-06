@@ -831,6 +831,7 @@ class NODE_MT_shader_node_displacement_base(node_add_menu.NodeMenu):
         self.node_operator(layout, "ShaderNodeDisplacement")
         self.node_operator(layout, "ShaderNodeNormalMap")
         self.node_operator(layout, "ShaderNodeVectorDisplacement")
+        self.node_operator(layout, "ShaderNodeTessellationControl")
 
         self.draw_assets_for_catalog(layout, self.bl_label)
 

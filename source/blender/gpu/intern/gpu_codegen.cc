@@ -665,6 +665,10 @@ void GPUCodegen::generate_graphs()
     output.depth_offset = graph_serialize(
         GPU_NODE_TAG_DEPTH_OFFSET, graph.outlink_depth_offset, nullptr);
   }
+  if (graph.outlink_tessellation != nullptr) {
+    output.tessellation = graph_serialize(
+        GPU_NODE_TAG_TESSELLATION, graph.outlink_tessellation, nullptr);
+  }
   output.npr = graph_serialize(
       GPU_NODE_TAG_NPR | GPU_NODE_TAG_OUTLINE, graph.outlink_npr, "float4(0.0f)");
   if (!BLI_listbase_is_empty(&graph.outlink_filters)) {

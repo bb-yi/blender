@@ -146,6 +146,7 @@ struct GPUMaterial {
   bool has_volume_output = false;
   bool has_displacement_output = false;
   bool has_depth_offset_output = false;
+  bool has_tessellation_output = false;
   bool has_filter_output = false;
   bool has_light_shader_output = false;
   bool has_glsl_light_shader_eval = false;
@@ -548,6 +549,11 @@ bool GPU_material_has_displacement_output(GPUMaterial *mat)
 bool GPU_material_has_depth_offset_output(GPUMaterial *mat)
 {
   return mat->has_depth_offset_output;
+}
+
+bool GPU_material_has_tessellation_output(GPUMaterial *mat)
+{
+  return mat->has_tessellation_output;
 }
 
 bool GPU_material_has_filter_output(GPUMaterial *mat)
@@ -1186,6 +1192,14 @@ void GPU_material_output_depth_offset(GPUMaterial *material, GPUNodeLink *link)
   if (!material->graph.outlink_depth_offset) {
     material->graph.outlink_depth_offset = link;
     material->has_depth_offset_output = true;
+  }
+}
+
+void GPU_material_output_tessellation(GPUMaterial *material, GPUNodeLink *link)
+{
+  if (!material->graph.outlink_tessellation) {
+    material->graph.outlink_tessellation = link;
+    material->has_tessellation_output = true;
   }
 }
 

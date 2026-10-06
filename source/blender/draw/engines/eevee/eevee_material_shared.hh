@@ -62,6 +62,9 @@ enum eMaterialGeometry {
   MAT_GEOM_MESH = 0,
   MAT_GEOM_POINTCLOUD,
   MAT_GEOM_CURVES,
+  /* Mesh with material tessellation. Each triangle is subdivided inside the vertex shader using
+   * primitive expansion. The mesh data is read from storage buffers. */
+  MAT_GEOM_MESH_TESS,
   MAT_GEOM_VOLUME,
 
   /* Special case: The world background / HDRI environment shader. */

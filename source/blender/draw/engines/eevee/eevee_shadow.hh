@@ -382,11 +382,15 @@ class ShadowModule {
   void init();
 
   void begin_sync();
-  /** Register a shadow caster or receiver. */
+  /**
+   * Register a shadow caster or receiver.
+   * \param has_view_dependent_shadows: The caster shape changes with the camera.
+   */
   void sync_object(const ObjectHandle &ob_handle,
                    bool is_alpha_blend,
                    bool has_transparent_shadows,
-                   bool has_time_dependent_shadows);
+                   bool has_time_dependent_shadows,
+                   bool has_view_dependent_shadows);
   /** Conservatively tag shadow pages needed by a color-bake receiver bounds. */
   void sync_bake_receiver_bounds(const ResourceHandleRange &resource_handle);
   void end_sync();

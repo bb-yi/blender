@@ -41,6 +41,11 @@ GPU_SHADER_NAMED_INTERFACE_INFO(eevee_surf_flat_iface, interp_flat)
 FLAT(uint, resource_id_raw)
 GPU_SHADER_NAMED_INTERFACE_END(interp_flat)
 
+GPU_SHADER_NAMED_INTERFACE_INFO(eevee_surf_disp_iface, disp_interp)
+/* World space position of the surface before displacement. */
+SMOOTH(float3, P_base)
+GPU_SHADER_NAMED_INTERFACE_END(disp_interp)
+
 GPU_SHADER_NAMED_INTERFACE_INFO(eevee_bake_geom_iface, bake_interp)
 /* World geometric normal. */
 FLAT(float3, Ng)
@@ -59,6 +64,7 @@ VERTEX_SOURCE("eevee_geom_bake_mesh_vert.glsl")
 VERTEX_OUT(eevee_surf_iface)
 VERTEX_OUT(eevee_surf_flat_iface)
 VERTEX_OUT(eevee_bake_geom_iface)
+VERTEX_OUT(eevee_surf_disp_iface)
 ADDITIONAL_INFO(draw_modelmat)
 ADDITIONAL_INFO(draw_object_infos)
 ADDITIONAL_INFO(draw_resource_id_varying)
@@ -127,6 +133,11 @@ VERTEX_OUT(eevee_surf_curve_flat_iface)
 GPU_SHADER_CREATE_END()
 
 /* WORKAROUND: Until we get condition support for interfaces. */
+GPU_SHADER_CREATE_INFO(eevee_geom_disp_iface_info)
+VERTEX_OUT(eevee_surf_disp_iface)
+GPU_SHADER_CREATE_END()
+
+/* WORKAROUND: Until we get condition support for interfaces. */
 GPU_SHADER_CREATE_INFO(eevee_geom_pointcloud_iface_info)
 VERTEX_OUT(eevee_surf_pointcloud_iface)
 VERTEX_OUT(eevee_surf_pointcloud_flat_iface)
@@ -141,6 +152,24 @@ GPU_SHADER_CREATE_END()
 GPU_SHADER_NAMED_INTERFACE_INFO(eevee_clip_plane_iface, clip_interp)
 SMOOTH(float, clip_distance)
 GPU_SHADER_NAMED_INTERFACE_END(clip_interp)
+
+/* Mesh batch of tessellated meshes, bound as storage buffers (see #GPU_batch_bind_as_resources).
+ * Material attributes are added by the material code-generation. */
+GPU_SHADER_CREATE_INFO(eevee_geom_mesh_tess_data)
+TYPEDEF_SOURCE("eevee_defines.hh")
+PUSH_CONSTANT(bool, gpu_index_no_buffer)
+PUSH_CONSTANT(bool, gpu_index_16bit)
+PUSH_CONSTANT(int, gpu_index_base_index)
+STORAGE_BUF_FREQ(MAT_TESS_INDEX_BUF_SLOT, read, uint, gpu_index_buf[], GEOMETRY)
+STORAGE_BUF_FREQ(MAT_TESS_POS_BUF_SLOT, read, uint, vbo_pos[], GEOMETRY)
+PUSH_CONSTANT(int2, gpu_attr_17)
+PUSH_CONSTANT(int, gpu_attr_17_meta)
+STORAGE_BUF_FREQ(MAT_TESS_NOR_BUF_SLOT, read, uint, vbo_nor[], GEOMETRY)
+PUSH_CONSTANT(int2, gpu_attr_18)
+PUSH_CONSTANT(int, gpu_attr_18_meta)
+DEFINE("GPU_INDEX_LOAD")
+DEFINE("MAT_GEOM_MESH_TESS")
+GPU_SHADER_CREATE_END()
 
 /* WORKAROUND: Until we remove global accesses to the interface. */
 GPU_SHADER_CREATE_INFO(eevee_clip_plane)

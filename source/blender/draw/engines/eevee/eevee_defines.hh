@@ -376,6 +376,16 @@
 #define VELOCITY_GEO_NEXT_BUF_SLOT 3
 #define VELOCITY_INDIRECTION_BUF_SLOT 4
 
+/* Only for tessellated meshes (#MAT_GEOM_MESH_TESS). Mesh batch bound as storage buffers.
+ * Above the slots used by the engines to avoid any conflict.
+ * NOTE: The push constants names (`gpu_attr_N`) use these values and need to be updated too. */
+#define MAT_TESS_INDEX_BUF_SLOT 16
+#define MAT_TESS_POS_BUF_SLOT 17
+#define MAT_TESS_NOR_BUF_SLOT 18
+/* Material attributes. */
+#define MAT_TESS_ATTR_BUF_SLOT_FIRST 19
+#define MAT_TESS_ATTR_BUF_SLOT_LAST 31
+
 #define CLOSURE_WEIGHT_CUTOFF 1e-5f
 /* Treat closure as singular if the roughness is below this threshold. */
 #define BSDF_ROUGHNESS_THRESHOLD 2e-2f
