@@ -628,8 +628,12 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     }
   }
 
+  const bool is_blended = outline_shell ?
+                              blender_mat->outline_shell_transparency_method ==
+                                  MA_OUTLINE_SHELL_BLENDED :
+                              is_transparent;
   const bool is_late_registered_forward = is_forward &&
-                                          (is_transparent ||
+                                          (is_blended ||
                                            pipeline_type == MAT_PIPE_PREPASS_OVERLAP);
   if (!register_pass || is_volume || is_late_registered_forward) {
     /* Sub pass is generated later. */
@@ -984,6 +988,8 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       const eMaterialGeometry shell_geometry_type = MAT_GEOM_MESH;
       bNode *shell_node = material_outline_shell_node_get(blender_mat);
       if (shell_node != nullptr) {
+        mat.is_outline_shell_blended = blender_mat->outline_shell_transparency_method ==
+                                        MA_OUTLINE_SHELL_BLENDED;
         mat.outline_shell_bounds_inflation = material_outline_shell_bounds_inflation(
             shell_node);
         const SurfaceDrawState shell_state = surface_draw_state_outline_shell(*blender_mat);
@@ -1039,6 +1045,9 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                                     true,
                                                     &shell_state,
                                                     true);
+          mat.has_outline_shell_transparent_shadows =
+              mat.outline_shell_shadow.gpumat != nullptr &&
+              GPU_material_outline_shell_has_alpha(mat.outline_shell_shadow.gpumat);
         }
       }
     }

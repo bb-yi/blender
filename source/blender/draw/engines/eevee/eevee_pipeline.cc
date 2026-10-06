@@ -276,7 +276,8 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
                                                  bool force_write_id,
                                                  bool clear_deferred_prepass_marker)
 {
-  BLI_assert_msg(GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) == false,
+  BLI_assert_msg(draw_state.is_outline_shell ||
+                     GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) == false,
                  "Transparent stencil writers are not supported in v1.");
 
   MaterialStencilState stencil = material_stencil_state_get(blender_mat);
@@ -1054,7 +1055,8 @@ PassMain::Sub *ForwardPipeline::prepass_opaque_add(const SurfaceDrawState &draw_
                                                    GPUMaterial *gpumat,
                                                    bool has_motion)
 {
-  BLI_assert_msg(GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) == false,
+  BLI_assert_msg(draw_state.is_outline_shell ||
+                     GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) == false,
                  "Forward Transparent should be registered directly without calling "
                  "PipelineModule::material_add()");
 
@@ -1139,20 +1141,23 @@ void ForwardPipeline::transparent_add(const Object *ob,
                                       blender::Material *blender_mat,
                                       GPUMaterial *gpumat,
                                       PassMain::Sub *&r_prepass_subpass,
-                                      PassMain::Sub *&r_material_subpass)
+                                      PassMain::Sub *&r_material_subpass,
+                                      const SurfaceDrawState *state_override)
 {
-  DRWState prepass_state = material_write_state(blender_mat, false, true) |
+  const SurfaceDrawState draw_state = state_override ? *state_override :
+                                                       surface_draw_state_body(*blender_mat);
+  DRWState prepass_state = surface_write_state(draw_state, false, true) |
                            DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state;
   prepass_state = material_ztest_state_replace(
-      prepass_state, material_ztest_mode(blender_mat), inst_.film.depth.test_state);
-  prepass_state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
+      prepass_state, draw_state.ztest_mode, inst_.film.depth.test_state);
+  prepass_state |= material_surface_cull_state(draw_state.cull_method);
 
-  DRWState material_state = material_write_state(blender_mat, true, false) |
+  DRWState material_state = surface_write_state(draw_state, true, false) |
                             DRW_STATE_BLEND_TRANSPARENCY | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                             inst_.film.depth.test_state;
   material_state = material_ztest_state_replace(
-      material_state, material_ztest_mode(blender_mat), inst_.film.depth.test_state);
-  material_state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
+      material_state, draw_state.ztest_mode, inst_.film.depth.test_state);
+  material_state |= material_surface_cull_state(draw_state.cull_method);
 
   has_transparent_ = true;
   has_colored_transparency_ |= GPU_material_flag_get(gpumat,
@@ -1171,11 +1176,11 @@ void ForwardPipeline::transparent_add(const Object *ob,
   const bool has_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
 
   /* Prepass */
-  if (blender_mat->blend_flag & MA_BL_HIDE_BACKFACE) {
+  if (!draw_state.is_outline_shell && (blender_mat->blend_flag & MA_BL_HIDE_BACKFACE)) {
     PassMain::Sub *pass = &transparent_ps_.sub(GPU_material_get_name(gpumat), sorting_value);
     pass->state_set(prepass_state);
     pass->material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
-    pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
+    pass->push_constant("surface_cull_mode", int(draw_state.cull_method));
     material_stencil_test_only_state_set(*pass, blender_mat);
     if (has_raycast) {
       pass->bind_texture(RAYCAST_DEPTH_TEX_SLOT, &inst_.render_buffers.raycast_depth_tx);
@@ -1190,8 +1195,10 @@ void ForwardPipeline::transparent_add(const Object *ob,
     PassMain::Sub *pass = &transparent_ps_.sub(GPU_material_get_name(gpumat), sorting_value);
     pass->state_set(material_state);
     pass->material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
-    pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
-    material_stencil_test_only_state_set(*pass, blender_mat);
+    pass->push_constant("surface_cull_mode", int(draw_state.cull_method));
+    if (!draw_state.is_outline_shell) {
+      material_stencil_test_only_state_set(*pass, blender_mat);
+    }
     pass->bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(*pass);
     if (has_raycast) {

@@ -246,6 +246,9 @@ const char *GPU_material_get_name(GPUMaterial *material);
 Material *GPU_material_get_material(GPUMaterial *material);
 bool GPU_material_is_world(const GPUMaterial *material);
 bool GPU_material_is_outline_shell(const GPUMaterial *material);
+/* Root Alpha only, not transparency used inside a Shader to RGB color branch. */
+bool GPU_material_outline_shell_has_alpha(const GPUMaterial *material);
+void GPU_material_outline_shell_alpha_set(GPUMaterial *material, bool has_alpha);
 /**
  * Return true if the material compilation has not yet begin or begin.
  */

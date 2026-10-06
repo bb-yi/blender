@@ -314,7 +314,8 @@ static inline SurfaceDrawState surface_draw_state_outline_shell(const blender::M
   return {material_outline_shell_cull_method_get(mat),
           material_outline_shell_ztest_mode_get(mat),
           true,
-          mat.outline_shell_depth_write != 0,
+          mat.outline_shell_depth_write != 0 &&
+              mat.outline_shell_transparency_method != MA_OUTLINE_SHELL_BLENDED,
           true};
 }
 
@@ -451,6 +452,8 @@ struct MaterialPass {
 
 struct Material {
   bool is_alpha_blend_transparent;
+  bool is_outline_shell_blended;
+  bool has_outline_shell_transparent_shadows;
   bool has_transparent_shadows;
   bool has_surface;
   bool has_volume;

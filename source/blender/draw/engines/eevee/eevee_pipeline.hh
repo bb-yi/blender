@@ -346,7 +346,8 @@ class ForwardPipeline {
                        blender::Material *blender_mat,
                        GPUMaterial *gpumat,
                        PassMain::Sub *&r_prepass_subpass,
-                       PassMain::Sub *&r_material_subpass);
+                       PassMain::Sub *&r_material_subpass,
+                       const SurfaceDrawState *state_override = nullptr);
   PassMain::Sub *outline_occlusion_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 
   bool use_colored_transparency() const;

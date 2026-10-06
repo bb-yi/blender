@@ -120,6 +120,7 @@ struct GPUMaterial {
   /* The node graph is rooted at an Outline Shell Output node instead of the
    * regular material output. */
   bool is_outline_shell = false;
+  bool outline_shell_has_alpha = false;
   /* 1D Texture array containing all color bands. */
   gpu::Texture *coba_tex = nullptr;
   /* Builder for coba_tex. */
@@ -442,6 +443,16 @@ bool GPU_material_is_world(const GPUMaterial *material)
 bool GPU_material_is_outline_shell(const GPUMaterial *material)
 {
   return material->is_outline_shell;
+}
+
+bool GPU_material_outline_shell_has_alpha(const GPUMaterial *material)
+{
+  return material->outline_shell_has_alpha;
+}
+
+void GPU_material_outline_shell_alpha_set(GPUMaterial *material, bool has_alpha)
+{
+  material->outline_shell_has_alpha = has_alpha;
 }
 
 GPUPass *GPU_material_get_pass(GPUMaterial *material)

@@ -204,14 +204,22 @@ void SyncModule::sync_volume_passes(const ObjectHandle &ob_handle,
 
 void SyncModule::sync_alpha_blended_passes(const ObjectHandle &ob_handle,
                                            const Material &material,
-                                           FunctionRef<void(const MaterialPass &, int)> sync_cb)
+                                           FunctionRef<void(const MaterialPass &, int)> sync_cb,
+                                           bool outline_shell)
 {
   const bool hide_on_camera = ob_handle.object->visibility_flag & OB_HIDE_CAMERA;
-  if (hide_on_camera || !material.is_alpha_blend_transparent) {
+  if (hide_on_camera || !(outline_shell ? material.is_outline_shell_blended :
+                                         material.is_alpha_blend_transparent))
+  {
     return;
   }
 
-  blender::Material *blender_mat = GPU_material_get_material(material.shading.gpumat);
+  const MaterialPass &shading = outline_shell ? material.outline_shell_shading : material.shading;
+  if (shading.gpumat == nullptr) {
+    return;
+  }
+  blender::Material *blender_mat = GPU_material_get_material(shading.gpumat);
+  const SurfaceDrawState shell_state = surface_draw_state_outline_shell(*blender_mat);
 
   for (int instance : IndexRange(ob_handle.instances_count())) {
     PassMain::Sub *prepass = nullptr;
@@ -220,12 +228,15 @@ void SyncModule::sync_alpha_blended_passes(const ObjectHandle &ob_handle,
     inst_.pipelines.forward.transparent_add(ob_handle.object,
                                             ob_handle.object_to_world(instance).location(),
                                             blender_mat,
-                                            material.shading.gpumat,
+                                            shading.gpumat,
                                             prepass,
-                                            matpass);
+                                            matpass,
+                                            outline_shell ? &shell_state : nullptr);
 
-    sync_cb(MaterialPass{material.overlap_masking.gpumat, prepass}, instance);
-    sync_cb(MaterialPass{material.shading.gpumat, matpass}, instance);
+    if (prepass != nullptr) {
+      sync_cb(MaterialPass{material.overlap_masking.gpumat, prepass}, instance);
+    }
+    sync_cb(MaterialPass{shading.gpumat, matpass}, instance);
   }
 }
 
@@ -271,8 +282,9 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
                                   (bl_material->displacement_method != MA_DISPLACEMENT_BUMP);
     const bool has_time_node = GPU_material_is_time_dependent(gpu_material);
 
-    is_alpha_blend |= material->is_alpha_blend_transparent;
-    has_transparent_shadows |= material->has_transparent_shadows;
+    is_alpha_blend |= material->is_alpha_blend_transparent || material->is_outline_shell_blended;
+    has_transparent_shadows |= material->has_transparent_shadows ||
+                               material->has_outline_shell_transparent_shadows;
     has_time_dependent_shadows |= has_time_node &&
                                   (material->has_transparent_shadows || has_displacement);
     /* View dependent tessellation changes the shadow caster geometry with the camera. */
@@ -413,6 +425,22 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
                     material_pass_tessellation_level(material, pass.gpumat));
     });
 
+    sync_alpha_blended_passes(
+        ob_handle,
+        material,
+        [&](const MaterialPass &pass, int instance) {
+          geometry_call(pass.sub_pass, geom_shell, ob_handle.res_handle.sub_handle(instance));
+        },
+        true);
+  }
+
+  /* Stable equal-depth sorting: all shell slots precede all body slots for this object. */
+  for (auto i : material_array.gpu_materials.index_range()) {
+    gpu::Batch *geom = mat_geom[i];
+    Material &material = material_array.materials[i];
+    if (geom == nullptr || (material.has_volume && !material.has_surface)) {
+      continue;
+    }
     sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int instance) {
       /* The overlap masking pre-pass uses the shading material shader. */
       GPUMaterial *gpumat = pass.gpumat ? pass.gpumat : material.shading.gpumat;

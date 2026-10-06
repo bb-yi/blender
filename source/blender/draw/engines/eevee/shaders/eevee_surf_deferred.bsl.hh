@@ -22,6 +22,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_nodetree)
 #include "eevee_nodetree_frag_lib.glsl"
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_surf_common.bsl.hh"
+#include "eevee_transparency.bsl.hh"
 #include "eevee_thickness_lib.bsl.hh"
 
 float4 closure_to_rgba(Closure /*cl*/)
@@ -134,6 +135,17 @@ DeferredFragOut surf_deferred_impl([[resource_table]] PipelineConstants &pipe,
   fragment_displacement();
 
   nodetree_surface(closure_rand);
+
+#ifdef MAT_OUTLINE_SHELL
+  if (hashed_transparency::should_discard(average(g_transmittance),
+                                         uni.pipeline_buf.alpha_hash_scale,
+                                         sampling.rng_1D_get(SAMPLING_TRANSPARENCY),
+                                         g_data.P))
+  {
+    gpu_discard_fragment();
+    return frag_out;
+  }
+#endif
 
   g_holdout = saturate(g_holdout);
 

@@ -1150,6 +1150,16 @@ void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 54) ||
+      !DNA_struct_member_exists(
+          fd->filesdna, "Material", "float", "outline_shell_alpha_threshold"))
+  {
+    for (Material &material : bmain->materials) {
+      material.outline_shell_transparency_method = MA_OUTLINE_SHELL_DITHERED;
+      material.outline_shell_alpha_threshold = 0.5f;
+    }
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.

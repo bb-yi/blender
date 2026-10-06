@@ -86,7 +86,11 @@ void surf_depth([[resource_table]] PipelineConstants &pipe,
 #endif
 
     float transparency = average(g_transmittance);
-    if (transparency > threshold) {
+    if (transparency > threshold
+#ifdef MAT_OUTLINE_SHELL
+        || transparency >= 1.0f
+#endif
+    ) {
       gpu_discard_fragment();
       return;
     }
