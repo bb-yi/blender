@@ -41,6 +41,11 @@ GPU_SHADER_NAMED_INTERFACE_INFO(eevee_surf_flat_iface, interp_flat)
 FLAT(uint, resource_id_raw)
 GPU_SHADER_NAMED_INTERFACE_END(interp_flat)
 
+GPU_SHADER_NAMED_INTERFACE_INFO(eevee_surf_disp_iface, disp_interp)
+/* World space position of the surface before displacement. */
+SMOOTH(float3, P_base)
+GPU_SHADER_NAMED_INTERFACE_END(disp_interp)
+
 GPU_SHADER_NAMED_INTERFACE_INFO(eevee_bake_geom_iface, bake_interp)
 /* World geometric normal. */
 FLAT(float3, Ng)
@@ -59,6 +64,7 @@ VERTEX_SOURCE("eevee_geom_bake_mesh_vert.glsl")
 VERTEX_OUT(eevee_surf_iface)
 VERTEX_OUT(eevee_surf_flat_iface)
 VERTEX_OUT(eevee_bake_geom_iface)
+VERTEX_OUT(eevee_surf_disp_iface)
 ADDITIONAL_INFO(draw_modelmat)
 ADDITIONAL_INFO(draw_object_infos)
 ADDITIONAL_INFO(draw_resource_id_varying)
@@ -105,11 +111,6 @@ GPU_SHADER_NAMED_INTERFACE_INFO(eevee_surf_curve_flat_iface, curve_interp_flat)
 FLAT(int, strand_id)
 GPU_SHADER_NAMED_INTERFACE_END(curve_interp_flat)
 
-GPU_SHADER_NAMED_INTERFACE_INFO(eevee_surf_tess_iface, tess_interp)
-/* World space position of the tessellated surface before displacement. */
-SMOOTH(float3, P_base)
-GPU_SHADER_NAMED_INTERFACE_END(tess_interp)
-
 GPU_SHADER_NAMED_INTERFACE_INFO(eevee_surf_pointcloud_iface, pointcloud_interp)
 SMOOTH(float, radius)
 SMOOTH(float3, position)
@@ -132,8 +133,8 @@ VERTEX_OUT(eevee_surf_curve_flat_iface)
 GPU_SHADER_CREATE_END()
 
 /* WORKAROUND: Until we get condition support for interfaces. */
-GPU_SHADER_CREATE_INFO(eevee_geom_mesh_tess_iface_info)
-VERTEX_OUT(eevee_surf_tess_iface)
+GPU_SHADER_CREATE_INFO(eevee_geom_disp_iface_info)
+VERTEX_OUT(eevee_surf_disp_iface)
 GPU_SHADER_CREATE_END()
 
 /* WORKAROUND: Until we get condition support for interfaces. */

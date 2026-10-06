@@ -1104,26 +1104,26 @@ float2 bsdf_lut(float cos_theta, float roughness, float ior, bool do_multiscatte
 float derivative_scale_get();
 #endif
 
-#if defined(MAT_DISPLACEMENT_BUMP) && defined(TESS_NORMAL_GEOMETRY) && \
-    defined(GPU_FRAGMENT_SHADER)
+#if defined(MAT_DISPLACEMENT_BUMP) && defined(GPU_FRAGMENT_SHADER) && \
+    (defined(TESS_NORMAL_GEOMETRY) || defined(MAT_DISPLACEMENT_GEOM_NORMAL))
 /**
- * Return the normal of the displaced surface of tessellated meshes.
+ * Return the normal of the displaced surface.
  *
  * The displacement is evaluated per pixel on the un-displaced surface, like in the vertex shader.
  * The un-displaced surface tangents are projected on the plane of the smooth normal, so the
  * result doesn't depend on the tessellation level and has no creases at the triangle edges.
  */
-float3 tess_displaced_normal()
+float3 displaced_surface_normal()
 {
   constexpr float filter_width = 0.1f;
 
   auto &interp = interface_get(eevee_geom_iface_info, interp);
-  auto &tess_interp = interface_get(eevee_geom_mesh_tess_iface_info, tess_interp);
+  auto &disp_interp = interface_get(eevee_geom_disp_iface_info, disp_interp);
 
   const float3 P_shading = g_data.P;
   const float3 N_shading = g_data.N;
   /* Same inputs as the vertex shader displacement. */
-  g_data.P = tess_interp.P_base;
+  g_data.P = disp_interp.P_base;
   g_data.N = safe_normalize(interp.N);
 
   /* Equivalent to `dF_branch` for a vector result. */
@@ -1154,8 +1154,9 @@ float3 tess_displaced_normal()
 /* Return new shading normal. */
 float3 displacement_bump()
 {
-#  if defined(TESS_NORMAL_GEOMETRY) && defined(GPU_FRAGMENT_SHADER)
-  return tess_displaced_normal();
+#  if defined(GPU_FRAGMENT_SHADER) && \
+      (defined(TESS_NORMAL_GEOMETRY) || defined(MAT_DISPLACEMENT_GEOM_NORMAL))
+  return displaced_surface_normal();
 #  elif !defined(MAT_GEOM_CURVES)
   /* This is the filter width for automatic displacement + bump mapping, which is fixed.
    * NOTE: keep the same as default bump node filter width. */

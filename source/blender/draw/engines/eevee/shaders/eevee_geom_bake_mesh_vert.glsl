@@ -30,6 +30,7 @@ void main()
   init_globals();
   attrib_load(MeshVertex{pos, to_float3x3(drw_modelinv()), drw_object_orco(pos)});
 
+  disp_interp.P_base = interp.P;
   interp.P += nodetree_displacement();
 
   gl_Position = float4(bake_uv * 2.0f - 1.0f, 0.0f, 1.0f);

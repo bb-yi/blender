@@ -2400,6 +2400,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       info.vertex_source_generated += "\n#error Tessellated material attribute limit exceeded\n";
     }
   }
+  if (use_vertex_displacement && geometry_type == MAT_GEOM_MESH) {
+    /* Shade displaced meshes with the normal of the displaced surface, not the displacement
+     * height field approximation (which is only meaningful along the surface normal). */
+    info.define("MAT_DISPLACEMENT_GEOM_NORMAL");
+  }
 
   std::stringstream vert_gen, frag_gen;
 

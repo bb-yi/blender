@@ -32,7 +32,7 @@ struct GeomMeshTess {
   [[legacy_info]] ShaderCreateInfo eevee_geom_iface_info;
   [[legacy_info]] ShaderCreateInfo eevee_geom_mesh_tess_data;
   /* WORKAROUND: Until we get condition support for interfaces. */
-  [[legacy_info]] ShaderCreateInfo eevee_geom_mesh_tess_iface_info;
+  [[legacy_info]] ShaderCreateInfo eevee_geom_disp_iface_info;
 };
 
 [[vertex]] [[clip_control]] void geom_mesh_tess(
@@ -100,9 +100,9 @@ struct GeomMeshTess {
   float3 lP = tess_phong(tv, tv.lP, tv.weights, settings.phong);
   interp.P = obj.point_object_to_world(lP);
   interp.N = safe_normalize(obj.normal_object_to_world(tess_normal_interpolate(tv, tv.weights)));
-  /* Used by #TESS_NORMAL_GEOMETRY to evaluate the displacement in the fragment shader. */
-  auto &tess_interp = interface_get(eevee_geom_mesh_tess_iface_info, tess_interp);
-  tess_interp.P_base = interp.P;
+  /* Used by #MAT_DISPLACEMENT_GEOM_NORMAL to evaluate the displacement in the fragment shader. */
+  auto &disp_interp = interface_get(eevee_geom_disp_iface_info, disp_interp);
+  disp_interp.P_base = interp.P;
 
   /* Compute Original Coordinate (ORCO). */
   float3 lP_orco = lP * ob_infos.orco_mul + ob_infos.orco_add;
