@@ -99,7 +99,12 @@ static int node_gpu_material(GPUMaterial *mat,
                              GPUNodeStack *out)
 {
   ShaderTessellationSettings settings = node_shader_tessellation_settings_get(*node);
-  if (const Material *bmat = GPU_material_get_material(mat)) {
+  const Material *bmat = GPU_material_get_material(mat);
+  if (bmat == nullptr) {
+    /* Cannot check the displacement bound: culling cannot be made conservative. */
+    settings.max_displacement = -1.0f;
+  }
+  else {
     /* Bounds used by the conservative view culling of the tessellated surface. */
     settings.max_displacement = bmat->inflate_bounds;
     settings.backface_cull =
