@@ -1306,17 +1306,6 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     version_replace_outline_control_width_variation(bmain);
   }
 
-  /* Official files keep padding here and have no NPR shadow-map scale, even in 5.2. */
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 47) ||
-      !DNA_struct_member_exists(fd->filesdna, "Light", "float", "shadow_map_scale"))
-  {
-    for (Light &light : bmain->lights) {
-      if (light.shadow_map_scale <= 0.0f) {
-        light.shadow_map_scale = 1.0f;
-      }
-    }
-  }
-
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 48) ||
       !DNA_struct_member_exists(fd->filesdna, "Material", "char", "stencil_enabled"))
   {

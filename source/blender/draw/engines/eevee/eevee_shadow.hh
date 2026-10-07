@@ -81,7 +81,6 @@ struct ShadowTileMap : public ShadowTileMapData {
   eCubeFace cubeface = Z_NEG;
   /** Cached, used for detecting updates. */
   float4x4 object_mat = float4x4::identity();
-  float shadow_map_scale = 1.0f;
 
  public:
   ShadowTileMap(int tiles_index_) : ShadowTileMapData{}
@@ -98,7 +97,6 @@ struct ShadowTileMap : public ShadowTileMapData {
   void sync_orthographic(const float4x4 &object_mat_,
                          int2 origin_offset,
                          int clipmap_level,
-                         float shadow_map_scale,
                          eShadowProjectionType projection_type_,
                          uint2 shadow_set_membership_ = ~uint2(0));
 

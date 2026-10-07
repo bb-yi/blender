@@ -152,13 +152,8 @@ struct Resources {
   {
     [[resource_table]] const Uniform &uni = uniforms;
     float3 ws_camera_position = uni.uniform_buf.camera.viewinv[3].xyz;
-    float3 ws_camera_backward = uni.uniform_buf.camera.viewinv[2].xyz;
-    float3 ws_clipmap_focus = ws_camera_position -
-                              ws_camera_backward * light.sun().focus_distance;
-    float3 ws_clipmap_center = mix(
-        ws_camera_position, ws_clipmap_focus, clamp(light.sun().focus_blend, 0.0f, 1.0f));
-    float3 ls_clipmap_center = transform_direction_transposed(light.object_to_world,
-                                                              ws_clipmap_center);
+    float3 ls_camera_position = transform_direction_transposed(light.object_to_world,
+                                                               ws_camera_position);
 
     int level_min = light.sun().clipmap_lod_min;
     int level_max = light.sun().clipmap_lod_max;
@@ -170,7 +165,7 @@ struct Resources {
       /* Compute full offset from world origin to the smallest clipmap tile centered around the
        * camera position. The offset is computed in smallest tile unit. */
       float tile_size = shadow_directional_coverage_get(level) / float(SHADOW_TILEMAP_RES);
-      int2 level_offset = int2(round(ls_clipmap_center.xy / tile_size));
+      int2 level_offset = int2(round(ls_camera_position.xy / tile_size));
 
       orthographic_sync(light.tilemap_index + lod,
                         light.object_to_world,
@@ -197,9 +192,9 @@ struct Resources {
     }
 
     /* Used for selecting the clipmap level. */
-    light.object_to_world.x.w = ls_clipmap_center.x;
-    light.object_to_world.y.w = ls_clipmap_center.y;
-    light.object_to_world.z.w = ls_clipmap_center.z;
+    light.object_to_world.x.w = ls_camera_position.x;
+    light.object_to_world.y.w = ls_camera_position.y;
+    light.object_to_world.z.w = ls_camera_position.z;
 
     LightSunData sun_data = light.sun();
     /* Used as origin for the clipmap_base_offset trick. */
