@@ -690,6 +690,7 @@ class RENDER_PT_eevee_sampling_shadows(RenderButtonsPanel, Panel):
 
         col = layout.column()
         col.prop(props, "shadow_resolution_scale", text="Resolution")
+        col.prop(props, "shadow_page_resolution", text="Page Resolution")
 
 
 class RENDER_PT_eevee_sampling(RenderButtonsPanel, Panel):

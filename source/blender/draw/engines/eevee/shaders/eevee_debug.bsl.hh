@@ -583,7 +583,8 @@ ShadowDebugOutput debug_shadow_lod_panels([[resource_table]] const ShadowDebug &
   }
 
   float2 tilemap_uv = (float2(panel_p) + 0.5f) / float(panel_size);
-  ShadowCoordinates coord = shadow_coordinate_from_uvs(tilemap_index, tilemap_uv);
+  ShadowCoordinates coord = shadow_coordinate_from_uvs(
+      tilemap_index, tilemap_uv, int(light.shadow_page_lod));
   ShadowSamplingTile tile = shadow_tile_load(
       srd.shadow_tilemaps_tx, coord.tilemap_tile, coord.tilemap_index);
   if (!tile.is_valid) {
@@ -591,7 +592,7 @@ ShadowDebugOutput debug_shadow_lod_panels([[resource_table]] const ShadowDebug &
     return debug_shadow_color_output(checker ? float3(0.18f) : float3(0.07f));
   }
 
-  float shadow_depth = srd.read_depth(coord);
+  float shadow_depth = srd.read_depth(coord, int(light.shadow_page_lod));
   float clip_near = orderedIntBitsToFloat(light.clip_near);
   float clip_far = orderedIntBitsToFloat(light.clip_far);
   float clip_range = max(clip_far - clip_near, 1e-8f);
@@ -669,7 +670,7 @@ ShadowDebugOutput debug_atlas_values([[resource_table]] const ShadowDebug &srt,
   [[resource_table]] const ShadowRenderData &srd = srt.shadow_data;
 
   ShadowCoordinates coord = srt.debug_coord_get(P, light);
-  float depth = srd.read_depth(coord);
+  float depth = srd.read_depth(coord, int(light.shadow_page_lod));
   return {
       .valid = true,
       .color_add = float4((depth == -1) ? float3(1.0f, 0.0f, 0.0f) : float3(1.0f / depth), 0.0f) *
@@ -687,7 +688,7 @@ struct AtomicCostCtx {
     [[resource_table]] const ShadowRenderData &srd = srt.shadow_data;
 
     ShadowCoordinates coord = srt.debug_coord_get(P, light);
-    uint u_cost = floatBitsToUint(srd.read_depth(coord));
+    uint u_cost = floatBitsToUint(srd.read_depth(coord, int(light.shadow_page_lod)));
     return float(u_cost - floatBitsToUint(FLT_MAX));
   }
 

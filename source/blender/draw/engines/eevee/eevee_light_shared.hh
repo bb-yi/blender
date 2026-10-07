@@ -214,8 +214,8 @@ struct [[host_shared]] LightData {
   uint2 shadow_set_membership;
 
   float shadow_map_scale;
-  float _pad7;
-  float _pad8;
+  float shadow_page_lod;
+  float shadow_page_res;
   float _pad9;
   float _pad10;
   float _pad11;
