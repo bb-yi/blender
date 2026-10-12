@@ -10,9 +10,9 @@
 
 #include <cstring>
 
-#include "BLI_listbase.h"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_action_types.h"
 #include "DNA_constraint_types.h"
@@ -151,7 +151,7 @@ RNANodeIdentifier RNANodeQuery::construct_node_identifier(const PointerRNA *ptr,
                                                           RNAPointerSource source)
 {
   RNANodeIdentifier node_identifier;
-  if (ptr->type == nullptr) {
+  if (!ptr->has_type()) {
     return node_identifier;
   }
   /* Set default values for returns. */
@@ -388,6 +388,13 @@ RNANodeIdentifier RNANodeQuery::construct_node_identifier(const PointerRNA *ptr,
   }
   else if (ELEM(ptr->type, RNA_MeshVertex, RNA_MeshEdge, RNA_MeshLoop, RNA_MeshPolygon)) {
     node_identifier.type = NodeType::GEOMETRY;
+    return node_identifier;
+  }
+  else if (ptr->owner_id && GS(ptr->owner_id->name) == ID_SCE &&
+           RNA_struct_search_closest_ancestor_by_type(ptr, RNA_SceneCompositorEffect))
+  {
+    node_identifier.type = NodeType::COMPOSITOR;
+    node_identifier.operation_code = OperationCode::COMPOSITOR_EVAL;
     return node_identifier;
   }
   if (prop != nullptr) {

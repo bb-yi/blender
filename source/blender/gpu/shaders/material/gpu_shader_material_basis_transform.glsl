@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "gpu_shader_math_vector_safe_lib.glsl"
+#include "gpu_shader_math_vector_safe.bsl.hh"
 
 float3 basis_transform_fallback_result(float3 value, float fallback_mode)
 {

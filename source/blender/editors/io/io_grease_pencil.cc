@@ -9,8 +9,8 @@
 #ifdef WITH_IO_GREASE_PENCIL
 
 #  include "BLI_path_utils.hh"
-#  include "BLI_string.h"
-#  include "BLI_string_utf8.h"
+#  include "BLI_string.hh"
+#  include "BLI_string_utf8.hh"
 
 #  include "DNA_space_types.h"
 #  include "DNA_view3d_types.h"
@@ -115,7 +115,7 @@ static bool get_invoke_region(bContext *C,
 
   ARegion *region = BKE_area_find_region_type(area, RGN_TYPE_WINDOW);
   *r_region = region;
-  *r_view3d = static_cast<View3D *>(area->spacedata.first);
+  *r_view3d = area->spacedata.first_as<View3D>();
   *r_rv3d = static_cast<RegionView3D *>(region->regiondata);
   return true;
 }

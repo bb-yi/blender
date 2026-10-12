@@ -13,8 +13,8 @@
 
 #include "DNA_text_types.h"
 
-#include "BLI_array_store.h"
-#include "BLI_array_utils.h" /* For `BLI_array_is_zeroed`. */
+#include "BLI_array_store.hh"
+#include "BLI_array_utils_c.hh" /* For `BLI_array_is_zeroed`. */
 
 #include "BKE_context.hh"
 #include "BKE_main.hh"
@@ -55,14 +55,13 @@ static void text_state_encode(TextState *state, Text *text, BArrayStore *buffer_
   state->buf_array_state = BLI_array_store_state_add(buffer_store, buf, buf_len, nullptr);
   MEM_delete(buf);
 
-  state->cursor_line = txt_get_span(static_cast<TextLine *>(text->lines.first), text->curl);
+  state->cursor_line = txt_get_span(text->lines.first(), text->curl);
   state->cursor_column = text->curc;
 
   if (txt_has_sel(text)) {
     state->cursor_line_select = (text->curl == text->sell) ?
                                     state->cursor_line :
-                                    txt_get_span(static_cast<TextLine *>(text->lines.first),
-                                                 text->sell);
+                                    txt_get_span(text->lines.first(), text->sell);
     state->cursor_column_select = text->selc;
   }
   else {
@@ -228,7 +227,7 @@ static void text_undosys_foreach_ID_ref(UndoStep *us_p,
 
 void ED_text_undosys_type(UndoType *ut)
 {
-  ut->name = "Text";
+  ut->identifier = "TEXT";
   ut->poll = text_undosys_poll;
   ut->step_encode_init = text_undosys_step_encode_init;
   ut->step_encode = text_undosys_step_encode;
@@ -252,7 +251,7 @@ UndoStep *ED_text_undo_push_init(bContext *C)
 {
   UndoStack *ustack = ED_undo_stack_get();
   Main *bmain = CTX_data_main(C);
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
   if (wm->op_undo_depth <= 1) {
     UndoStep *us_p = BKE_undosys_step_push_init_with_type(
         ustack, C, nullptr, BKE_UNDOSYS_TYPE_TEXT);

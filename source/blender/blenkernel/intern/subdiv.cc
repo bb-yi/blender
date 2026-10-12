@@ -6,6 +6,8 @@
  * \ingroup bke
  */
 
+#include "BKE_attribute_math.hh"
+#include "BKE_mesh.hh"
 #include "BKE_subdiv.hh"
 
 #include "DNA_mesh_types.h"
@@ -105,7 +107,7 @@ Subdiv *new_from_converter(const Settings *settings, OpenSubdiv_Converter *conve
   topology_refiner_settings.level = settings->level;
   topology_refiner_settings.is_adaptive = settings->is_adaptive;
   opensubdiv::TopologyRefinerImpl *osd_topology_refiner = nullptr;
-  if (converter->getNumVertices(converter) != 0) {
+  if (converter->verts_num != 0) {
     osd_topology_refiner = opensubdiv::TopologyRefinerImpl::createFromConverter(
         converter, topology_refiner_settings);
   }

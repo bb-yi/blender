@@ -220,6 +220,10 @@ class VertexColourImportTest(AbstractAlembicTest):
         self.assertAlmostEqualFloatArray(layer.data[98].color, (0.9019607, 0.4745098, 0.2666666, 1.0))
         self.assertAlmostEqualFloatArray(layer.data[99].color, (0.8941176, 0.4705882, 0.2627451, 1.0))
 
+        mesh = ob.data
+        self.assertEqual(mesh.color_attributes.active_color_name, 'Cf')
+        self.assertEqual(mesh.color_attributes.default_color_name, 'Cf')
+
     def test_import_from_blender(self):
         # Blender saved per-vertex, and as RGBA.
         res = bpy.ops.wm.alembic_import(
@@ -234,6 +238,67 @@ class VertexColourImportTest(AbstractAlembicTest):
         self.assertAlmostEqualFloatArray(layer.data[0].color, (1.0, 0.0156862, 0.3607843, 1.0))
         self.assertAlmostEqualFloatArray(layer.data[98].color, (0.0941176, 0.1215686, 0.9137254, 1.0))
         self.assertAlmostEqualFloatArray(layer.data[99].color, (0.1294117, 0.3529411, 0.7529411, 1.0))
+
+        mesh = ob.data
+        self.assertEqual(mesh.color_attributes.active_color_name, 'Cf')
+        self.assertEqual(mesh.color_attributes.default_color_name, 'Cf')
+
+
+class VertexColourImportExportTest(AbstractAlembicTest):
+    def setUp(self):
+        self._tempdir = tempfile.TemporaryDirectory()
+        self.tempdir = pathlib.Path(self._tempdir.name)
+
+    def test_export_import_default_active(self):
+        """Test export and import of the default and active color attribute names"""
+
+        abc_path = str(self.tempdir / "vertex-colours-default-active.abc")
+
+        # Export
+        bpy.ops.wm.open_mainfile(filepath=str(args.testdir / "vertex-colours-default-active.blend"))
+        self.assertIn('FINISHED', bpy.ops.wm.alembic_export(
+            filepath=abc_path,
+            vcolors=True
+        ))
+
+        # Import back
+        res = bpy.ops.wm.alembic_import(filepath=abc_path, as_background_job=False)
+        self.assertEqual({'FINISHED'}, res)
+
+        ob = bpy.context.active_object
+        mesh = ob.data
+        self.assertEqual(mesh.color_attributes.active_color_name, 'Active')
+        self.assertEqual(mesh.color_attributes.default_color_name, 'Default')
+
+    def test_export_import_invalid_name(self):
+        """Test export and import of the default and active color attribute with invalid names"""
+
+        abc_path = str(self.tempdir / "vertex-colours-default-active.abc")
+
+        # Export
+        bpy.ops.wm.open_mainfile(filepath=str(args.testdir / "vertex-colours-default-active.blend"))
+
+        ob = bpy.context.active_object
+        mesh = ob.data
+        mesh.color_attributes['Active'].name = 'Active/001'
+        mesh.color_attributes['Default'].name = 'Default/001'
+        self.assertEqual(mesh.color_attributes.active_color_name, 'Active/001')
+        self.assertEqual(mesh.color_attributes.default_color_name, 'Default/001')
+
+        self.assertIn('FINISHED', bpy.ops.wm.alembic_export(
+            filepath=abc_path,
+            vcolors=True
+        ))
+
+        # Import back
+        bpy.ops.wm.open_mainfile(filepath=str(args.testdir / "empty.blend"))
+        res = bpy.ops.wm.alembic_import(filepath=abc_path, as_background_job=False)
+        self.assertEqual({'FINISHED'}, res)
+
+        ob = bpy.context.active_object
+        mesh = ob.data
+        self.assertEqual(mesh.color_attributes.active_color_name, 'Active_001')
+        self.assertEqual(mesh.color_attributes.default_color_name, 'Default_001')
 
 
 class CameraExportImportTest(unittest.TestCase):
@@ -305,7 +370,7 @@ class CameraExportImportTest(unittest.TestCase):
 
         # A MeshSequenceCache modifier should be present on every imported object
         for blender_mesh in [blender_mesh1, blender_mesh2]:
-            self.assertTrue(len(blender_mesh.modifiers) == 1 and blender_mesh.modifiers[0].type ==
+            self.assertTrue(len(blender_mesh.modifiers) >= 1 and blender_mesh.modifiers[0].type ==
                             'MESH_SEQUENCE_CACHE', f"{blender_mesh.name} has incorrect modifiers")
 
         # Conversion from USD to Blender convention
@@ -320,8 +385,10 @@ class CameraExportImportTest(unittest.TestCase):
             blender_mesh2_eval = bpy.data.objects["mesh_vert_crease"].evaluated_get(depsgraph)
 
             # The file was written using a simple formula for each frame's crease value
-            expected_edge_creases = [round(frame / 24.0, 3)] * 12
-            expected_vert_creases = [round(frame / 24.0, 3)] * 4
+            expected_edge_creases = [round(frame / 24.0, 3)] * 48
+            # Creases are not propagated to edges that do not come from a coarse edge
+            expected_edge_creases.extend([0.0] * 144)
+            expected_vert_creases = [round(frame / 24.0, 3)] * 25
 
             # Check crease values
             blender_crease_data = [round(d.value, 3) for d in blender_mesh1_eval.data.attributes["crease_edge"].data]
@@ -335,6 +402,56 @@ class CameraExportImportTest(unittest.TestCase):
                 blender_crease_data,
                 expected_vert_creases,
                 f"Frame {frame}: {blender_mesh2_eval.name} crease values do not match")
+
+    def test_mesh_subd_params(self):
+        """Test export of subdivision parameters."""
+
+        abc_path = str(self.tempdir / "mesh_subd_params.abc")
+
+        # Export
+        bpy.ops.wm.open_mainfile(filepath=str(args.testdir / "mesh_subd_params.blend"))
+        self.assertIn('FINISHED', bpy.ops.wm.alembic_export(
+            filepath=abc_path,
+            subdiv_schema=True
+        ))
+
+        # Re-import what we just exported into an empty file.
+        bpy.ops.wm.open_mainfile(filepath=str(args.testdir / "empty.blend"))
+        bpy.ops.wm.alembic_import(
+            filepath=abc_path,
+            as_background_job=False)
+
+        uv_smooth_options = [
+            'NONE',
+            'PRESERVE_CORNERS',
+            # NOTE: in Blender this should be PRESERVE_CORNERS_AND_JUNCTIONS, however
+            # Alembic does not have this concept.
+            'PRESERVE_CORNERS',
+            'PRESERVE_CORNERS_JUNCTIONS_AND_CONCAVE',
+            'PRESERVE_BOUNDARIES',
+            'SMOOTH_ALL'
+        ]
+
+        boundary_smooth_options = [
+            'PRESERVE_CORNERS',
+            'ALL'
+        ]
+
+        for uv_smooth_index in range(len(uv_smooth_options)):
+            uv_smooth = uv_smooth_options[uv_smooth_index]
+
+            for boundary_smooth_index in range(len(boundary_smooth_options)):
+                boundary_smooth = boundary_smooth_options[boundary_smooth_index]
+
+                obj_name = 'obj{}{}'.format(uv_smooth_index, boundary_smooth_index)
+
+                obj = bpy.data.objects[obj_name]
+                modifier = obj.modifiers['Subdivision']
+
+                self.assertEqual(modifier.uv_smooth, uv_smooth)
+                self.assertEqual(modifier.boundary_smooth, boundary_smooth)
+                self.assertEqual(modifier.levels, 1 + uv_smooth_index)
+                self.assertEqual(modifier.render_levels, 2 + uv_smooth_index)
 
     def do_export_import_test(self, *, flatten: bool):
         bpy.ops.wm.open_mainfile(filepath=str(args.testdir / "camera_transforms.blend"))
@@ -618,6 +735,85 @@ class AlembicAnimatedCameraImportTests(AbstractAlembicTest):
                 camera.stereo.interocular_distance,
                 delta=1e-6,
                 msg=f"Frame {frame}: {camera_object.name} interocular_distance values do not match")
+
+
+class AlembicAnimatedSchemaImportTests(AbstractAlembicTest):
+    def do_import_test(self, abc_file_name, first_frame, last_frame, object_name):
+        res = bpy.ops.wm.alembic_import(
+            filepath=str(self.testdir / abc_file_name),
+            as_background_job=False)
+        self.assertEqual({'FINISHED'}, res)
+
+        # The data stored in the attribute is random, so we check that the object
+        # has a modifier (which should only be added if the data is animated) and
+        # the frame range for the scene is detected properly.
+
+        scene = bpy.context.scene
+        self.assertEqual(scene.frame_start, first_frame)
+        self.assertEqual(scene.frame_end, last_frame)
+
+        ob = bpy.data.objects[object_name]
+        self.assertEqual(len(ob.modifiers), 1)
+
+        modifier = ob.modifiers[0]
+        self.assertEqual(modifier.type, 'MESH_SEQUENCE_CACHE')
+
+    def test_animated_point_width(self):
+        self.do_import_test("point-width-animated.abc", 12, 144, "PointCloud")
+
+    def test_animated_point_velocity(self):
+        self.do_import_test("point-velocity-animated.abc", 13, 169, "PointCloud")
+
+    def test_animated_curve_width(self):
+        self.do_import_test("curve-width-animated.abc", 12, 144, "Curves")
+
+    def test_animated_curve_velocity(self):
+        self.do_import_test("curve-velocity-animated.abc", 13, 169, "Curves")
+
+
+class AlembicEmptyGeometrySamplesTests(AbstractAlembicTest):
+    def setUp(self):
+        self._tempdir = tempfile.TemporaryDirectory()
+        self.tempdir = pathlib.Path(self._tempdir.name)
+
+    def test_empty_geometry_samples(self):
+        bpy.ops.wm.open_mainfile(filepath=str(args.testdir / "empty-geometry-samples.blend"))
+
+        abc_path = self.tempdir / "empty-geometry-samples.abc"
+        self.assertIn('FINISHED', bpy.ops.wm.alembic_export(
+            filepath=str(abc_path),
+        ))
+
+        # Re-import what we just exported into an empty file.
+        bpy.ops.wm.open_mainfile(filepath=str(args.testdir / "empty.blend"))
+        self.assertIn('FINISHED', bpy.ops.wm.alembic_import(filepath=str(abc_path)))
+
+        scene = bpy.context.scene
+        self.assertEqual(scene.frame_start, 1)
+        self.assertEqual(scene.frame_end, 11)
+
+        # Simple animation where geometry exists only on even frames
+        for frame in range(1, 12):
+            bpy.context.scene.frame_set(frame)
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+
+            curves_object = bpy.data.objects["Curves"].evaluated_get(depsgraph)
+            curves = curves_object.data
+
+            mesh_object = bpy.data.objects["Plane"].evaluated_get(depsgraph)
+            mesh = mesh_object.data
+
+            points_object = bpy.data.objects["PointCloud"].evaluated_get(depsgraph)
+            points = points_object.data
+
+            if frame % 2 == 0:
+                self.assertEqual(len(curves.points), 8)
+                self.assertEqual(len(mesh.vertices), 4)
+                self.assertEqual(len(points.points), 1)
+            else:
+                self.assertEqual(len(curves.points), 0)
+                self.assertEqual(len(mesh.vertices), 0)
+                self.assertEqual(len(points.points), 0)
 
 
 class AlembicImportComparisonTests(unittest.TestCase):

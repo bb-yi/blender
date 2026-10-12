@@ -13,6 +13,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "bmesh.hh"
+#include "bmesh_iterators_parallel.hh"
 #include "intern/bmesh_structure.hh"
 
 namespace blender {
@@ -130,7 +131,7 @@ void *BM_iter_as_arrayN(BMesh *bm,
                         const char itype,
                         void *data,
                         int *r_len,
-                        /* optional args to avoid an alloc (normally stack array) */
+                        /* Optional args to avoid an allocation (normally stack array). */
                         void **stack_array,
                         int stack_array_size)
 {
@@ -176,7 +177,7 @@ void *BMO_iter_as_arrayN(BMOpSlot slot_args[BMO_OP_MAX_SLOTS],
                          const char *slot_name,
                          const char restrictmask,
                          int *r_len,
-                         /* optional args to avoid an alloc (normally stack array) */
+                         /* Optional args to avoid an allocation (normally stack array). */
                          void **stack_array,
                          int stack_array_size)
 {
@@ -656,6 +657,29 @@ void *bmiter__loop_of_face_step(BMIter__loop_of_face *iter)
   }
 
   return l_curr;
+}
+
+void BM_iter_parallel(BMesh *bm,
+                      const char itype,
+                      TaskParallelMempoolFunc func,
+                      void *userdata,
+                      const TaskParallelSettings *settings)
+{
+  switch (BMIterType(itype)) {
+    case BM_VERTS_OF_MESH:
+      BLI_task_parallel_mempool(bm->vpool, userdata, func, settings);
+      break;
+    case BM_EDGES_OF_MESH:
+      BLI_task_parallel_mempool(bm->epool, userdata, func, settings);
+      break;
+    case BM_FACES_OF_MESH:
+      BLI_task_parallel_mempool(bm->fpool, userdata, func, settings);
+      break;
+    default:
+      /* Should never happen. */
+      BLI_assert_unreachable();
+      break;
+  }
 }
 
 }  // namespace blender

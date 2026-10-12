@@ -4,18 +4,21 @@
 
 #pragma once
 
-void light_shader_globals_init()
+#include "eevee_nodetree_lib.bsl.hh"
+
+void light_shader_globals_init(out ShadingData sd)
 {
-  g_data.is_strand = false;
-  g_data.hair_diameter = 0.0f;
-  g_data.hair_strand_id = 0;
-  g_data.ray_type = RAY_TYPE_CAMERA;
-  g_data.ray_depth = 0.0f;
-  g_data.barycentric_coords = float2(0.0f);
-  g_data.barycentric_dists = float3(0.0f);
-  g_data.curve_T = float3(0.0f);
-  g_data.curve_B = float3(0.0f);
-  g_data.curve_N = float3(0.0f);
+  sd = ShadingData{};
+  sd.is_strand = false;
+  sd.hair_diameter = 0.0f;
+  sd.hair_strand_id = 0;
+  sd.ray_type = uchar(RAY_TYPE_CAMERA);
+  sd.ray_depth = 0.0f;
+  sd.barycentric_coords = float2(0.0f);
+  sd.barycentric_dists = float3(0.0f);
+  sd.curve_T = float3(0.0f);
+  sd.curve_B = float3(0.0f);
+  sd.curve_N = float3(0.0f);
 }
 
 float4 light_shader_result_clamp(float4 result)

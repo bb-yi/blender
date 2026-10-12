@@ -16,8 +16,8 @@
 #include <cstring> /* required for memset */
 
 #include "BLI_index_range.hh"
-#include "BLI_math_bits.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_bits.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_curve_types.h"
 #include "DNA_key_types.h"
@@ -214,13 +214,15 @@ void depsgraph_tag_to_component_opcode(const ID *id,
       *component_type = NodeType::NTREE_OUTPUT;
       *operation_code = OperationCode::NTREE_OUTPUT;
       break;
-
     case ID_RECALC_HIERARCHY:
       *component_type = NodeType::HIERARCHY;
       *operation_code = OperationCode::HIERARCHY;
       break;
+    case ID_RECALC_COMPOSITOR:
+      *component_type = NodeType::COMPOSITOR;
+      *operation_code = OperationCode::COMPOSITOR_EVAL;
+      break;
 
-    case ID_RECALC_PROVISION_27:
     case ID_RECALC_PROVISION_28:
     case ID_RECALC_PROVISION_29:
     case ID_RECALC_PROVISION_30:
@@ -430,9 +432,8 @@ const char *update_source_as_string(eUpdateSource source)
 
 int deg_recalc_flags_for_legacy_zero()
 {
-  const uint ID_RECALC_PROVISION_ALL = (ID_RECALC_PROVISION_27 | ID_RECALC_PROVISION_28 |
-                                        ID_RECALC_PROVISION_29 | ID_RECALC_PROVISION_30 |
-                                        ID_RECALC_PROVISION_31);
+  const uint ID_RECALC_PROVISION_ALL = (ID_RECALC_PROVISION_28 | ID_RECALC_PROVISION_29 |
+                                        ID_RECALC_PROVISION_30 | ID_RECALC_PROVISION_31);
   return ID_RECALC_ALL & ~(ID_RECALC_PSYS_ALL | ID_RECALC_ANIMATION | ID_RECALC_FRAME_CHANGE |
                            ID_RECALC_SOURCE | ID_RECALC_EDITORS | ID_RECALC_PROVISION_ALL);
 }
@@ -820,11 +821,11 @@ const char *DEG_update_tag_as_string(IDRecalcFlag flag)
       return "TAG_FOR_UNDO";
     case ID_RECALC_NTREE_OUTPUT:
       return "ID_RECALC_NTREE_OUTPUT";
-
     case ID_RECALC_HIERARCHY:
       return "ID_RECALC_HIERARCHY";
+    case ID_RECALC_COMPOSITOR:
+      return "ID_RECALC_COMPOSITOR";
 
-    case ID_RECALC_PROVISION_27:
     case ID_RECALC_PROVISION_28:
     case ID_RECALC_PROVISION_29:
     case ID_RECALC_PROVISION_30:
@@ -973,6 +974,9 @@ void DEG_ids_clear_recalc(Depsgraph *depsgraph, const bool backup)
      * the recalc flag. */
     id_node->is_user_modified = false;
     id_node->is_cow_explicitly_tagged = false;
+    for (deg::ComponentNode *component_node : id_node->components.values()) {
+      component_node->is_user_modified = false;
+    }
     deg_graph_clear_id_recalc_flags(id_node->id_cow);
     if (deg_graph->is_active) {
       deg_graph_clear_id_recalc_flags(id_node->id_orig);

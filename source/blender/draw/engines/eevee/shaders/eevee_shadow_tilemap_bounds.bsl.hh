@@ -12,10 +12,10 @@
 #pragma once
 
 #include "draw_shader_shared.hh"
-#include "draw_shape_lib.glsl"
 #include "eevee_light_shared.hh"
+#include "draw_shape.bsl.hh"
 #include "eevee_shadow_shared.hh"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_utildefines.bsl.hh"
 
 namespace eevee::shadow {
 
@@ -55,7 +55,7 @@ struct TilemapBoundsCtx {
   bool is_valid;
   uint local_id;
 
-  void eval_directional([[resource_table]] TilemapBounds &srt, uint l_index, LightData light)
+  void eval_directional(TilemapBounds &srt, uint l_index, LightData light)
   {
     if (light.tilemap_index == LIGHT_NO_SHADOW) {
       return;
@@ -105,9 +105,7 @@ struct TilemapBoundsCtx {
      * thread 0. */
   }
 
-  void eval_local([[resource_table]] TilemapBounds & /*srt*/, uint /*index*/, LightData /*light*/)
-  {
-  }
+  void eval_local(TilemapBounds & /*srt*/, uint /*index*/, LightData /*light*/) {}
 };
 
 }  // namespace eevee::shadow

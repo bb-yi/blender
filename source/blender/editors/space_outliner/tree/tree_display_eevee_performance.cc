@@ -20,7 +20,7 @@
 
 #include "BKE_scene_runtime.hh"
 
-#include "BLI_hash.h"
+#include "BLI_hash_c.hh"
 
 #include "DNA_outliner_types.h"
 #include "DNA_scene_types.h"
@@ -30,6 +30,7 @@
 
 #include "../outliner_intern.hh"
 #include "tree_display.hh"
+#include "tree_element_label.hh"
 
 namespace blender::ed::outliner {
 
@@ -547,14 +548,14 @@ void collect_report_attribution_keys(const ParsedReport &report,
 }
 
 struct PerformanceTreeBuilder {
-  SpaceOutliner &space_outliner;
+  AbstractTreeDisplay &tree_display;
   ID &owner_id;
   std::unordered_map<std::string, short> key_indices;
 
-  PerformanceTreeBuilder(SpaceOutliner &space_outliner,
+  PerformanceTreeBuilder(AbstractTreeDisplay &tree_display,
                          ID &owner_id,
                          std::vector<std::string> persistent_keys)
-      : space_outliner(space_outliner), owner_id(owner_id)
+      : tree_display(tree_display), owner_id(owner_id)
   {
     std::sort(persistent_keys.begin(), persistent_keys.end());
     persistent_keys.erase(
@@ -592,13 +593,12 @@ struct PerformanceTreeBuilder {
                          const std::string &persistent_key,
                          const bool default_open = false)
   {
-    TreeElement *te = AbstractTreeDisplay::add_element(&space_outliner,
-                                                       &tree,
-                                                       &owner_id,
-                                                       (void *)label.c_str(),
-                                                       parent,
-                                                       TSE_GENERIC_LABEL,
-                                                       stable_index_for_key(persistent_key));
+    TreeElement *te = tree_display.add_element<TreeElementLabel>(
+        {.lb = &tree,
+         .parent = parent,
+         .index = stable_index_for_key(persistent_key),
+         .owner_id = &owner_id},
+        label.c_str());
     if (default_open) {
       TreeStoreElem *tselem = TREESTORE(te);
       if (tselem != nullptr && !tselem->used) {
@@ -1339,7 +1339,7 @@ ListBaseT<TreeElement> TreeDisplayEeveePerformance::build_tree(const TreeSourceD
     SnapshotReportCache report_cache(sort_by_time);
     std::vector<std::string> persistent_keys;
     collect_structured_snapshot_keys(*snapshots, persistent_keys, report_cache);
-    PerformanceTreeBuilder builder{space_outliner_, scene.id, std::move(persistent_keys)};
+    PerformanceTreeBuilder builder{*this, scene.id, std::move(persistent_keys)};
     append_structured_snapshots(builder, tree, *snapshots, sort_by_time, report_cache);
     return tree;
   }
@@ -1353,7 +1353,7 @@ ListBaseT<TreeElement> TreeDisplayEeveePerformance::build_tree(const TreeSourceD
     SnapshotReportCache report_cache(sort_by_time);
     std::vector<std::string> persistent_keys;
     collect_structured_snapshot_keys(empty_snapshots, persistent_keys, report_cache);
-    PerformanceTreeBuilder builder{space_outliner_, scene.id, std::move(persistent_keys)};
+    PerformanceTreeBuilder builder{*this, scene.id, std::move(persistent_keys)};
     append_structured_snapshots(builder, tree, empty_snapshots, sort_by_time, report_cache);
     return tree;
   }
@@ -1372,7 +1372,7 @@ ListBaseT<TreeElement> TreeDisplayEeveePerformance::build_tree(const TreeSourceD
   std::vector<std::string> persistent_keys;
   collect_report_keys(viewport_report, persistent_keys);
   collect_report_keys(render_report, persistent_keys);
-  PerformanceTreeBuilder builder{space_outliner_, scene.id, persistent_keys};
+  PerformanceTreeBuilder builder{*this, scene.id, persistent_keys};
 
   append_parsed_report(builder, tree, viewport_report);
   append_parsed_report(builder, tree, render_report);

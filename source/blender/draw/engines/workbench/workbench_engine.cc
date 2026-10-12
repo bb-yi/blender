@@ -2,8 +2,12 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_rect.h"
-#include "BLI_string.h"
+/** \file
+ * \ingroup draw_engine
+ */
+
+#include "BLI_rect.hh"
+#include "BLI_string.hh"
 
 #include "DNA_fluid_types.h"
 
@@ -117,7 +121,7 @@ class Instance : public DrawEngine {
     transparent_ps_.sync(scene_state_, resources_);
     transparent_depth_ps_.sync(scene_state_, resources_);
 
-    shadow_ps_.sync();
+    shadow_ps_.sync(resources_);
     volume_ps_.sync(resources_);
     outline_ps_.sync(resources_);
     dof_ps_.sync(resources_, this->draw_ctx);
@@ -129,6 +133,7 @@ class Instance : public DrawEngine {
   void end_sync() final
   {
     resources_.material_buf.push_update();
+    shadow_ps_.end_sync();
   }
 
   Material get_material(ObjectRef ob_ref, eV3DShadingColorType color_type, int slot = 0)
@@ -165,7 +170,7 @@ class Instance : public DrawEngine {
       return;
     }
 
-    const ObjectState object_state = ObjectState(this->draw_ctx, scene_state_, resources_, ob);
+    ObjectState object_state = ObjectState(this->draw_ctx, scene_state_, resources_, ob, manager);
 
     bool is_object_data_visible = (DRW_object_visibility_in_active_context(ob) &
                                    OB_VISIBLE_SELF) &&
@@ -191,12 +196,12 @@ class Instance : public DrawEngine {
     if (is_object_data_visible) {
       if (object_state.sculpt_pbvh) {
         ResourceHandleRange handle = manager.unique_handle_for_sculpt(ob_ref);
-        this->sculpt_sync(ob_ref, handle, object_state);
+        this->sculpt_sync(manager, ob_ref, handle, object_state);
         emitter_handle = handle;
       }
       else if (ob->type == OB_MESH) {
         ResourceHandleRange handle = manager.unique_handle(ob_ref);
-        this->mesh_sync(ob_ref, handle, object_state);
+        this->mesh_sync(manager, ob_ref, handle, object_state);
         emitter_handle = handle;
       }
       else if (ob->type == OB_POINTCLOUD) {
@@ -216,7 +221,7 @@ class Instance : public DrawEngine {
       }
     }
 
-    if (ob->type == OB_MESH && ob->modifiers.first != nullptr) {
+    if (ob->type == OB_MESH && ob->modifiers.first() != nullptr) {
       for (ModifierData &md : ob->modifiers) {
         if (md.type != eModifierType_ParticleSystem) {
           continue;
@@ -279,7 +284,10 @@ class Instance : public DrawEngine {
     });
   }
 
-  void mesh_sync(ObjectRef &ob_ref, ResourceHandleRange handle, const ObjectState &object_state)
+  void mesh_sync(Manager &manager,
+                 ObjectRef &ob_ref,
+                 ResourceHandleRange handle,
+                 const ObjectState &object_state)
   {
     bool has_transparent_material = false;
 
@@ -307,7 +315,7 @@ class Instance : public DrawEngine {
 
           MaterialTexture texture;
           if (object_state.color_type == V3D_SHADING_TEXTURE_COLOR) {
-            texture = MaterialTexture(ob_ref.object, material_slot);
+            texture = MaterialTexture(manager, ob_ref.object, material_slot);
           }
 
           this->draw_mesh(
@@ -345,7 +353,10 @@ class Instance : public DrawEngine {
     }
   }
 
-  void sculpt_sync(ObjectRef &ob_ref, ResourceHandleRange handle, const ObjectState &object_state)
+  void sculpt_sync(Manager &manager,
+                   ObjectRef &ob_ref,
+                   ResourceHandleRange handle,
+                   const ObjectState &object_state)
   {
     SculptBatchFeature features = SCULPT_BATCH_DEFAULT;
     if (object_state.color_type == V3D_SHADING_VERTEX_COLOR) {
@@ -364,7 +375,7 @@ class Instance : public DrawEngine {
 
         MaterialTexture texture;
         if (object_state.color_type == V3D_SHADING_TEXTURE_COLOR) {
-          texture = MaterialTexture(ob_ref.object, batch.material_slot);
+          texture = MaterialTexture(manager, ob_ref.object, batch.material_slot);
         }
 
         this->draw_mesh(
@@ -391,10 +402,14 @@ class Instance : public DrawEngine {
     resources_.material_buf.append(mat);
     int material_index = resources_.material_buf.size() - 1;
 
-    this->draw_to_mesh_pass(ob_ref, mat.is_transparent(), [&](MeshPass &mesh_pass) {
+    const bool is_gsplat = pointcloud_is_gsplat(ob_ref.object);
+    const bool has_transparency = mat.is_transparent();
+
+    this->draw_to_mesh_pass(ob_ref, has_transparency, [&](MeshPass &mesh_pass) {
       PassMain::Sub &pass =
-          mesh_pass.get_subpass(eGeometryType::POINTCLOUD).sub("Point Cloud SubPass");
-      gpu::Batch *batch = pointcloud_sub_pass_setup(pass, ob_ref.object);
+          is_gsplat ? mesh_pass.get_subpass(eGeometryType::GSPLAT).sub("GSplatSubPass") :
+                      mesh_pass.get_subpass(eGeometryType::POINTCLOUD).sub("PointCloudSubPass");
+      gpu::Batch *batch = pointcloud_sub_pass_setup(pass, ob_ref, handle);
       pass.draw(batch, handle, material_index);
     });
   }
@@ -412,7 +427,7 @@ class Instance : public DrawEngine {
     Material mat = this->get_material(ob_ref, object_state.color_type, psys->part->omat - 1);
     MaterialTexture texture;
     if (object_state.color_type == V3D_SHADING_TEXTURE_COLOR) {
-      texture = MaterialTexture(ob_ref.object, psys->part->omat - 1);
+      texture = MaterialTexture(manager, ob_ref.object, psys->part->omat - 1);
     }
     resources_.material_buf.append(mat);
     int material_index = resources_.material_buf.size() - 1;
@@ -453,7 +468,7 @@ class Instance : public DrawEngine {
   {
     int2 resolution = scene_state_.resolution;
 
-    /** Always setup in-front depth, since Overlays can be updated without causing a Workbench
+    /* Always setup in-front depth, since Overlays can be updated without causing a Workbench
      * re-sync (See #113580). */
     bool needs_depth_in_front = !transparent_ps_.accumulation_in_front_ps_.is_empty() ||
                                 (!opaque_ps_.gbuffer_in_front_ps_.is_empty() &&
@@ -474,6 +489,9 @@ class Instance : public DrawEngine {
           draw_ctx, manager, View::default_get(), scene_state_, resources_, depth_in_front_tx);
       return;
     }
+
+    /* Hand off gsplat compute workload before draws. */
+    DRW_gsplat_ensure_radiance(manager, view_);
 
     anti_aliasing_ps_.setup_view(view_, scene_state_);
 
@@ -809,6 +827,8 @@ RenderEngineType DRW_engine_viewport_workbench_type = {
     /*bake*/ nullptr,
     /*view_update*/ nullptr,
     /*view_draw*/ nullptr,
+    /*view_pause*/ nullptr,
+    /*view_resume*/ nullptr,
     /*update_script_node*/ nullptr,
     /*update_render_passes*/ &workbench_render_update_passes,
     /*update_custom_camera*/ nullptr,

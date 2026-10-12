@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.2.0 LTS Release Candidate (b'3d8c46ac31f4')\n"
+"Project-Id-Version: Blender 5.3.0 Beta (b'8f7aae950179')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-07-13 07:34+0000\n"
+"POT-Creation-Date: 2026-10-12 07:32+0000\n"
 "PO-Revision-Date: 2025-11-19 06:24+0000\n"
 "Last-Translator: \"M. Amin Taheri\" <amintaheri2001@gmail.com>\n"
 "Language-Team: Persian <https://translate.blender.org/projects/blender-ui/ui/fa/>\n"
@@ -1248,6 +1248,10 @@ msgid "Particles"
 msgstr "ﺕﺍﺭﺫ"
 
 
+msgid "Path"
+msgstr "ﺮﯿﺴﻣ"
+
+
 msgid "Blender RNA"
 msgstr "RNA ﺭﺪﻨﻠﺑ"
 
@@ -1665,10 +1669,6 @@ msgid "Gamma"
 msgstr "ﺎﻣﺎﮔ"
 
 
-msgid "View"
-msgstr "ﺶﯾﺎﻤﻧ"
-
-
 msgid "Color mapping settings"
 msgstr "ﯽﮕﻧﺭ ﺖﺷﺎﮕﻧ ﺕﺎﻤﯿﻈﻨﺗ"
 
@@ -2035,6 +2035,10 @@ msgstr "ﺎﻤﻧ ﻥﺎﮑﻣ"
 
 msgid "Plane"
 msgstr "ﻪﺤﻔﺻ"
+
+
+msgid "View"
+msgstr "ﺶﯾﺎﻤﻧ"
 
 
 msgid "Render"
@@ -2608,6 +2612,10 @@ msgid "Paint"
 msgstr "ﮓﻧﺭ"
 
 
+msgid "Use Unified Strength"
+msgstr "ﺪﺤﺘﻣ ﺖﻣﻭﺎﻘﻣ ﺯﺍ ﻩﺩﺎﻔﺘﺳﺍ"
+
+
 msgctxt "Unit"
 msgid "Velocity Unit"
 msgstr "ﺖﻋﺮﺳ ﯼﺎﮑﯾ"
@@ -2636,10 +2644,6 @@ msgstr "ﺩﺎﻌﺑﺍ"
 
 msgid "Path Duration"
 msgstr "ﺮﯿﺴﻣ ﻝﻮﻃ"
-
-
-msgid "Path"
-msgstr "ﺮﯿﺴﻣ"
 
 
 msgid "Text on Curve"
@@ -3094,44 +3098,44 @@ msgid "Math"
 msgstr "ﯽﺿﺎﯾﺭ"
 
 
-msgid "Pivot Point"
-msgstr "ﺶﺧﺮﭼ ﻪﻄﻘﻧ"
+msgid "Convert"
+msgstr "ﻞﯾﺪﺒﺗ"
 
 
 msgid "Import"
 msgstr "ﻥﺩﺮﮐ ﺩﺭﺍﻭ"
 
 
-msgid "Mirror"
-msgstr "ﻪﻨﯾﺁ"
-
-
-msgid "UV"
-msgstr "UV"
-
-
-msgid "Add Image"
-msgstr "ﺮﯾﻮﺼﺗ ﻥﺩﺮﮐ‌ﻪﻓﺎﺿﺍ"
-
-
-msgid "Relations"
-msgstr "ﻂﺑﺍﻭﺭ"
-
-
-msgid "Apply"
-msgstr "ﻝﺎﻤﻋﺍ"
+msgid "Layout"
+msgstr "ﺡﺮﻃ"
 
 
 msgid "Linked"
 msgstr "ﻂﺒﺗﺮﻣ"
 
 
-msgid "Layout"
-msgstr "ﺡﺮﻃ"
+msgid "UV"
+msgstr "UV"
 
 
-msgid "Convert"
-msgstr "ﻞﯾﺪﺒﺗ"
+msgid "Apply"
+msgstr "ﻝﺎﻤﻋﺍ"
+
+
+msgid "Mirror"
+msgstr "ﻪﻨﯾﺁ"
+
+
+msgid "Relations"
+msgstr "ﻂﺑﺍﻭﺭ"
+
+
+msgid "Add Image"
+msgstr "ﺮﯾﻮﺼﺗ ﻥﺩﺮﮐ‌ﻪﻓﺎﺿﺍ"
+
+
+msgid "Pivot Point"
+msgstr "ﺶﺧﺮﭼ ﻪﻄﻘﻧ"
 
 
 msgid "Tracking"
@@ -3374,10 +3378,6 @@ msgid "Previous frame"
 msgstr "ﯽﻠﺒﻗ ﻢﯾﺮﻓ"
 
 
-msgid "Double"
-msgstr "ﯽﯾﺎﺗﻭﺩ"
-
-
 msgid "Use Red Channel"
 msgstr "ﺰﻣﺮﻗ ﻝﺎﻧﺎﮐ ﺯﺍ ﻩﺩﺎﻔﺘﺳﺍ"
 
@@ -3509,6 +3509,11 @@ msgstr "ﯽﺷ ﺕﺎﻋﻼ﻿ﻃﺍ"
 
 msgid "Points to Curves"
 msgstr "ﺎﻫ‌ﯽﻨﺤﻨﻣ ﻪﺑ ﻁﺎﻘﻧ"
+
+
+msgctxt "Volume"
+msgid "Float"
+msgstr "ﺭﻭﺎﻨﺷ"
 
 
 msgid "Add Shader"
@@ -4320,12 +4325,12 @@ msgid "Restrict"
 msgstr "ﻥﺩﺮﮐ ﺩﻭﺪﺤﻣ"
 
 
-msgid "Motion Tracking"
-msgstr "ﺖﮐﺮﺣ ﯽﺑﺎﯾﺩﺭ"
-
-
 msgid "Transform Orientations"
 msgstr "ﻞﮑﺷ ﺮﯿﯿﻐﺗ ﺖﻬﺟ"
+
+
+msgid "Motion Tracking"
+msgstr "ﺖﮐﺮﺣ ﯽﺑﺎﯾﺩﺭ"
 
 
 msgid "Bone Constraints"
@@ -4645,10 +4650,6 @@ msgid "Lock Borders"
 msgstr "ﺯﺮﻣ ﻥﺩﺮﮐ ﻞﻔﻗ"
 
 
-msgid "Use Unified Strength"
-msgstr "ﺪﺤﺘﻣ ﺖﻣﻭﺎﻘﻣ ﺯﺍ ﻩﺩﺎﻔﺘﺳﺍ"
-
-
 msgid "Unit System"
 msgstr "ﺪﺣﺍﻭ ﻢﺘﺴﯿﺳ"
 
@@ -4663,11 +4664,6 @@ msgstr "ﻥﺎﯾﺩﺍﺭ"
 
 msgid "Face Angles"
 msgstr "ﺢﻄﺳ ﯼﺎﯾﺍﻭﺯ"
-
-
-msgctxt "Volume"
-msgid "Float"
-msgstr "ﺭﻭﺎﻨﺷ"
 
 
 msgid "Error Message"
@@ -4737,6 +4733,11 @@ msgid "Credits"
 msgstr "ﺕﺍﺭﺎﺒﺘﻋﺍ"
 
 
+msgctxt "Operator"
+msgid "Search..."
+msgstr "...ﻮﺠﺘﺴﺟ"
+
+
 msgid "Extrapolate"
 msgstr "ﻥﺩﺮﮐ ﺱﺎﯿﻗ"
 
@@ -4751,11 +4752,6 @@ msgstr "ﻩﺪﺸﻧ ﺺﺨﺸﻣ"
 
 msgid "Auto Normalize"
 msgstr "ﺭﺎﮐﺩﻮﺧ ﯼﺯﺎﺳ ﯼﺩﺎﻋ"
-
-
-msgctxt "Operator"
-msgid "Search..."
-msgstr "...ﻮﺠﺘﺴﺟ"
 
 
 msgid "Priority"
@@ -4995,14 +4991,6 @@ msgstr "ﻪﺘﺨﯾﺭ ﻥﻭﺮﯿﺑ ﺵﺮﺘﺴﮔ"
 
 msgid "Reset Curve"
 msgstr "ﯽﻨﺤﻨﻣ ﯽﻧﺎﺸﻧﺯﺎﺑ"
-
-
-msgid "H"
-msgstr "H"
-
-
-msgid "S"
-msgstr "S"
 
 
 msgid "Zoom in"
@@ -5360,8 +5348,16 @@ msgid "Uniformity"
 msgstr "ﻥﺎﺴﮑﯾ"
 
 
+msgid "S"
+msgstr "S"
+
+
 msgid "Old"
 msgstr "ﯽﻤﯾﺪﻗ"
+
+
+msgid "H"
+msgstr "H"
 
 
 msgid "Blender File View"

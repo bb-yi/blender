@@ -9,55 +9,38 @@
 #include "eevee_light_lib.bsl.hh"
 #include "eevee_hiz.bsl.hh"
 #include "infos/eevee_common_infos.hh"
+#include "eevee_ltc_lib.bsl.hh"
 #include "eevee_shadow.bsl.hh"
 #include "eevee_shadow_tracing.bsl.hh"
 #include "eevee_thickness_lib.bsl.hh"
-#include "gpu_shader_utildefines_lib.glsl"
-
-#if !defined(SRT_CONSTANT_light_closure_eval_count_reflect)
-#  define SRT_CONSTANT_light_closure_eval_count_reflect 0
-#endif
-#if !defined(SRT_CONSTANT_light_closure_eval_count_transmit)
-#  define SRT_CONSTANT_light_closure_eval_count_transmit 0
-#endif
-
-#ifdef GLSL_CPP_STUBS
-#  define LIGHT_STACK_SIZE_REFLECT 3
-#elif SRT_CONSTANT_light_closure_eval_count_reflect == 0
-#  define LIGHT_STACK_SIZE_REFLECT 1 /* Avoid compilation error. */
-#else
-#  define LIGHT_STACK_SIZE_REFLECT SRT_CONSTANT_light_closure_eval_count_reflect
-#endif
-
-#ifdef GLSL_CPP_STUBS
-#  define LIGHT_STACK_SIZE_TRANSMIT 3
-#elif SRT_CONSTANT_light_closure_eval_count_transmit == 0
-#  define LIGHT_STACK_SIZE_TRANSMIT 1 /* Avoid compilation error. */
-#else
-#  define LIGHT_STACK_SIZE_TRANSMIT SRT_CONSTANT_light_closure_eval_count_transmit
-#endif
 
 namespace eevee {
 
 struct NPRShadowSurfaceData {
-  [[legacy_info]] ShaderCreateInfo eevee_npr_shadow_surface_data;
-  [[resource_table]] srt_t<HiZ> hiz;
+  [[sampler(NPR_SHADOW_OBJECT_ID_TEX_SLOT)]] usampler2D npr_shadow_object_id_tx;
+  [[sampler(NPR_SHADOW_NORMAL_TEX_SLOT)]] sampler2D npr_shadow_normal_tx;
+  [[resource_table]] HiZ hiz;
 };
 
-struct LightEvalData {
+struct LightEvalConstants {
   [[compilation_constant]] bool use_light_shader_texture_eval;
   [[compilation_constant]] bool use_light_shader_surfel_eval;
   [[compilation_constant]] bool use_npr_light_policy;
-
-  [[resource_table]] srt_t<ShadowRenderData> shadow_data;
-  [[resource_table]] srt_t<UtilityTexture> utility_tx;
-  [[resource_table, condition(use_npr_light_policy)]] srt_t<NPRShadowSurfaceData> npr_surface;
-  [[resource_table, condition(use_light_shader_texture_eval)]] srt_t<LightShaderEvalData>
-      light_shader_data;
-  [[resource_table, condition(use_light_shader_surfel_eval)]] srt_t<LightShaderSurfelEvalData>
-      light_shader_surfel_data;
   [[compilation_constant]] int light_closure_eval_count_reflect;
   [[compilation_constant]] int light_closure_eval_count_transmit;
+  /* Same as above but clamped to a minimum of 1 to avoid zero sized arrays. */
+  [[compilation_constant]] int light_closure_count_reflect;
+  [[compilation_constant]] int light_closure_count_transmit;
+};
+
+struct LightEvalData {
+  [[resource_table]] LightEvalConstants constants;
+
+  [[resource_table]] ShadowRenderData shadow_data;
+  [[resource_table]] UtilityTexture utility_tx;
+  [[resource_table, condition(use_npr_light_policy)]] NPRShadowSurfaceData npr_surface;
+  [[resource_table, condition(use_light_shader_texture_eval)]] LightShaderEvalData light_shader_data;
+  [[resource_table, condition(use_light_shader_surfel_eval)]] LightShaderSurfelEvalData light_shader_surfel_data;
 };
 
 namespace light {
@@ -65,23 +48,17 @@ namespace light {
 template<bool is_transmission> struct ClosureStack {};
 
 template<> struct ClosureStack<false> {
-  ClosureLight cl[LIGHT_STACK_SIZE_REFLECT];
+  [[capacity(light_closure_count_reflect)]] ClosureLight cl[3];
 };
 
 template<> struct ClosureStack<true> {
-  ClosureLight cl[LIGHT_STACK_SIZE_TRANSMIT];
+  [[capacity(light_closure_count_transmit)]] ClosureLight cl[3];
 };
-
-float power_get(LightData light, LightingType type)
-{
-  /* Mask anything above 3. See LIGHT_TRANSLUCENT_WITH_THICKNESS. */
-  return light.power[type & 3u];
-}
 
 float light_shader_shape_radiance_get(LightData light)
 {
   if (light.type == LIGHT_RECT || light.type == LIGHT_ELLIPSE) {
-    float area = light.area().size.x * light.area().size.y * 4.0f;
+    float area = light.area.size.x * light.area.size.y * 4.0f;
     if (light.type == LIGHT_ELLIPSE) {
       area *= M_PI * 0.25f;
     }
@@ -89,12 +66,12 @@ float light_shader_shape_radiance_get(LightData light)
   }
 
   if (is_sphere_light(light.type)) {
-    float area = 4.0f * M_PI * square(light.local().local.shape_radius);
+    float area = 4.0f * M_PI * square(light.local.local.shape_radius);
     return 1.0f / (area * M_PI);
   }
 
   if (is_sun_light(light.type)) {
-    float inv_sin_sq = 1.0f + 1.0f / square(light.sun().shape_radius);
+    float inv_sin_sq = 1.0f + 1.0f / square(light.sun.shape_radius);
     return M_1_PI * inv_sin_sq;
   }
 
@@ -104,7 +81,7 @@ float light_shader_shape_radiance_get(LightData light)
 float light_shader_point_radiance_get(LightData light)
 {
   if (light.type == LIGHT_RECT || light.type == LIGHT_ELLIPSE) {
-    float area = light.area().size.x * light.area().size.y * 4.0f;
+    float area = light.area.size.x * light.area.size.y * 4.0f;
     float tmp = M_PI_2 / (M_PI_2 + sqrt(area));
     float mrp_scaling = tmp + (1.0f - tmp) * M_1_PI;
     return M_1_PI * mrp_scaling;
@@ -160,25 +137,8 @@ void light_shader_eval_apply(LightData &light,
   light_shader_no_distance_falloff = true;
   if (!is_directional) {
     attenuation *= light_influence_cutoff(lv.dist,
-                                          light.local().local.influence_radius_invsqr_surface);
+                                          light.local.local.influence_radius_invsqr_surface);
   }
-}
-
-float light_shader_no_distance_ltc(sampler2DArray util_tx,
-                                   LightData light,
-                                   LightVector lv,
-                                   LightVertices vertices,
-                                   ClosureLight cl,
-                                   float3 V,
-                                   const bool is_directional)
-{
-  float ltc_result = light_ltc(util_tx, light, cl.N, V, lv, cl.ltc_mat, vertices);
-  return ltc_result / max(light_shader_distance_falloff_get(light, lv, is_directional), 1e-8f);
-}
-
-bool light_linking_affects_receiver(uint2 light_set_membership, uchar receiver_light_set)
-{
-  return bitmask64_test(light_set_membership, receiver_light_set);
 }
 
 struct NPRShadowContext {
@@ -230,8 +190,8 @@ float npr_shadow_soft_spatial([[resource_table]] LightEvalData &srt,
   [[resource_table]] const draw::View &views = srd.views;
   [[resource_table]] const NPRShadowSurfaceData &surface = srt.npr_surface;
   [[resource_table]] const HiZ &hiz = surface.hiz;
-  const auto &object_id_tx = sampler_get(eevee_npr_shadow_surface_data, npr_shadow_object_id_tx);
-  const auto &normal_tx = sampler_get(eevee_npr_shadow_surface_data, npr_shadow_normal_tx);
+  const auto &object_id_tx = surface.npr_shadow_object_id_tx;
+  const auto &normal_tx = surface.npr_shadow_normal_tx;
   float penumbra = saturate(1.0f - abs(center_visibility * 2.0f - 1.0f));
   int2 size = textureSize(object_id_tx, 0);
   if (penumbra <= 1e-3f || any(lessThanEqual(size, int2(1)))) {
@@ -292,10 +252,10 @@ float npr_shadow_soft_spatial([[resource_table]] LightEvalData &srt,
     sample_ctx.P = sample_P;
     sample_ctx.Ng = sample_N;
     sample_ctx.N = sample_N;
-    float2 ray_tap = fract(hammersley_2d(tap, tap_count) + frame_3d.xy + uv);
-    float2 pcf_tap = fract(hammersley_2d(tap, tap_count) + frame_2d + uv.yx +
+    float2 ray_tap = fract(random::hammersley_2d(tap, tap_count) + frame_3d.xy + uv);
+    float2 pcf_tap = fract(random::hammersley_2d(tap, tap_count) + frame_2d + uv.yx +
                             float2(0.19f, 0.61f));
-    float z = fract(van_der_corput_radical_inverse(uint(tap) * 747796405u + 2891336453u) +
+    float z = fract(random::detail::van_der_corput_radical_inverse(uint(tap) * 747796405u + 2891336453u) +
                     frame_3d.z + dot(uv, float2(0.25f, 0.5f)));
     visibility_sum += npr_shadow_seeded(srd, light, is_directional, sample_ctx, 2u,
                                         ray_count, step_count, float3(ray_tap, z), pcf_tap) * weight;
@@ -322,9 +282,9 @@ float npr_shadow_visibility([[resource_table]] LightEvalData &srt,
   float2 frame_2d = float2(0.0f);
   float3 random_shadow = float3(0.5f);
   float2 random_pcf = float2(0.0f);
-  if (srd.shadow_random) [[static_branch]] {
-    [[resource_table]] const Sampling sampling = srd.sampling;
-    [[resource_table]] const UtilityTexture util = srd.util_tx;
+  if (srd.constants.shadow_random) [[static_branch]] {
+    [[resource_table]] const Sampling &sampling = srd.sampling;
+    [[resource_table]] const UtilityTexture &util = srd.util_tx;
     float3 blue_noise = util.fetch(ctx.texel, UTIL_BLUE_NOISE_LAYER).rgb;
     frame_3d = sampling.rng_3D_get(SAMPLING_SHADOW_U);
     frame_2d = sampling.rng_2D_get(SAMPLING_SHADOW_X);
@@ -349,9 +309,9 @@ float npr_shadow_visibility([[resource_table]] LightEvalData &srt,
     if (tap >= eval_count) {
       break;
     }
-    float2 ray_tap = fract(hammersley_2d(tap, eval_count) + frame_3d.xy);
-    float2 pcf_tap = fract(hammersley_2d(tap, eval_count) + frame_2d + float2(0.37f, 0.13f));
-    float z = fract(van_der_corput_radical_inverse(uint(tap) * 1103515245u + 12345u) + frame_3d.z);
+    float2 ray_tap = fract(random::hammersley_2d(tap, eval_count) + frame_3d.xy);
+    float2 pcf_tap = fract(random::hammersley_2d(tap, eval_count) + frame_2d + float2(0.37f, 0.13f));
+    float z = fract(random::detail::van_der_corput_radical_inverse(uint(tap) * 1103515245u + 12345u) + frame_3d.z);
     visibility += npr_shadow_seeded(srd, light, is_directional, ctx, type,
                                     ray_count, step_count, float3(ray_tap, z), pcf_tap);
   }
@@ -361,7 +321,7 @@ float npr_shadow_visibility([[resource_table]] LightEvalData &srt,
         srt, light, is_directional, ctx, samples, visibility, frame_3d, frame_2d);
     float seed = dot(ctx.P, float3(0.06711056f, 0.00583715f, 0.049981f)) +
                  dot(light_vector, float3(0.03125f, 0.125f, 0.2109375f));
-    float noise = interleaved_gradient_noise(ctx.texel, seed, 0.0f) - 0.5f;
+    float noise = random::interleaved_gradient(ctx.texel, seed, 0.0f) - 0.5f;
     visibility = saturate(visibility + noise * saturate(visibility * (1.0f - visibility) * 4.0f) /
                                          float(max(eval_count * ray_count * 2, 1)));
   }
@@ -371,7 +331,7 @@ float npr_shadow_visibility([[resource_table]] LightEvalData &srt,
 void eval_single_closure(sampler2DArray util_tx,
                          LightData light,
                          LightVector lv,
-                         LightVertices vertices,
+                         LightShape shape,
                          ClosureLight &cl,
                          float3 V,
                          float attenuation,
@@ -385,10 +345,17 @@ void eval_single_closure(sampler2DArray util_tx,
   if (attenuation < 1e-30f) {
     return;
   }
-  float ltc_result = light_shader_no_distance_falloff ?
-                         light_shader_no_distance_ltc(
-                             util_tx, light, lv, vertices, cl, V, is_directional) :
-                         light_ltc(util_tx, light, cl.N, V, lv, cl.ltc_mat, vertices);
+
+  /* TODO(not_mark): remove, and update tests as this causes precision change. */
+  /* Load LTC matrix and rotate into orthonormal basis around N. */
+  LTCData ltc_data = LTCData::unpack_from(cl);
+  float3x3 T = from_incident_vector(cl.N, V);
+  ltc_data.Minv = ltc_data.Minv * transpose(T);
+  float ltc_result = ltc::evaluate(util_tx, light, shape, lv, ltc_data);
+  if (light_shader_no_distance_falloff) {
+    ltc_result /= max(light_shader_distance_falloff_get(light, lv, is_directional), 1e-8f);
+  }
+
   float3 out_radiance = light.color * ltc_result;
   float visibility = shadow * attenuation;
   cl.light_shadowed += visibility * out_radiance;
@@ -413,7 +380,7 @@ template<bool is_transmission> struct EvalCtx {
   void eval_closure([[resource_table]] LightEvalData &srt,
                     LightData light,
                     LightVector lv,
-                    LightVertices vertices,
+                    LightShape shape,
                     ClosureLight &cl,
                     float attenuation,
                     float native_shadow,
@@ -421,7 +388,7 @@ template<bool is_transmission> struct EvalCtx {
                     bool is_directional)
   {
     float visibility = native_shadow;
-    if (srt.use_npr_light_policy) [[static_branch]] {
+    if (srt.constants.use_npr_light_policy) [[static_branch]] {
       if (closure_npr_policy_enabled(cl.npr_policy)) {
         /* This is native direct illumination, including the SSS back-light term. Custom NPR
          * M/A is already scaled in the node and bypasses this native result at resolve time. */
@@ -449,42 +416,30 @@ template<bool is_transmission> struct EvalCtx {
       }
     }
     [[resource_table]] const UtilityTexture &util = srt.utility_tx;
-    eval_single_closure(util.utility_tx, light, lv, vertices, cl, V, attenuation, visibility,
+    eval_single_closure(util.utility_tx, light, lv, shape, cl, V, attenuation, visibility,
                          light_shader_no_distance_falloff, is_directional);
   }
+  int ray_count;
+  int ray_step_count;
 
-  void light_eval_single([[resource_table]] LightEvalData &srt,
-                         uint l_idx,
-                         LightData light,
-                         const bool is_directional)
+  void light_eval_single(LightEvalData &srt, uint l_idx,
+                         LightData light, const bool is_directional)
   {
-    [[resource_table]] ShadowRenderData &srd = srt.shadow_data;
-    [[resource_table]] Uniform &uni = srd.uniforms;
-
     if (!light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
       return;
     }
 
-#if defined(SPECIALIZED_SHADOW_PARAMS) || defined(SRT_CONSTANT_shadow_ray_count)
-    int ray_count = shadow_ray_count;
-    int ray_step_count = shadow_ray_step_count;
-#else
-    int ray_count = uni.uniform_buf.shadow.ray_count;
-    int ray_step_count = uni.uniform_buf.shadow.step_count;
-#endif
-
-    LightVector lv = light_vector_get(light, is_directional, P);
+    LightVector lv = LightVector::get(light, is_directional, P);
 
     /* TODO(fclem): Get rid of this special case. */
     bool is_translucent_with_thickness = is_transmission &&
                                          (stack.cl[0].type == LIGHT_TRANSLUCENT_WITH_THICKNESS);
 
     float attenuation = light_attenuation_surface(light, is_directional, lv);
-    float facing = light_attenuation_facing(light, lv.L, lv.dist, stack.cl[0].N, is_transmission);
     bool light_shader_no_distance_falloff = false;
 
     if (!is_transmission) [[static_branch]] {
-      if (srt.use_light_shader_texture_eval) [[static_branch]] {
+      if (srt.constants.use_light_shader_texture_eval) [[static_branch]] {
         [[resource_table]] const LightShaderEvalData &light_shader_data = srt.light_shader_data;
         int light_shader_index = light_shader_data.light_shader_index_buf[l_idx];
         int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
@@ -510,7 +465,7 @@ template<bool is_transmission> struct EvalCtx {
                                   light_shader_no_distance_falloff);
         }
       }
-      if (srt.use_light_shader_surfel_eval) [[static_branch]] {
+      if (srt.constants.use_light_shader_surfel_eval) [[static_branch]] {
         [[resource_table]] const LightShaderSurfelEvalData &light_shader_data =
             srt.light_shader_surfel_data;
         int light_shader_index = light_shader_data.surfel_light_shader_index_buf[l_idx];
@@ -539,29 +494,23 @@ template<bool is_transmission> struct EvalCtx {
       }
     }
 
-    if (!is_translucent_with_thickness) {
-      /* Only do attenuation for this case, since we integrate the whole sphere for translucency.
-       * Moreover, stack.cl[0].N is overwritten for is_translucent_with_thickness. */
-      attenuation *= facing;
-    }
-
     if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
       return;
     }
 
     float shadow = 1.0f;
     bool needs_native_shadow = true;
-    if (srt.use_npr_light_policy) [[static_branch]] {
+    if (srt.constants.use_npr_light_policy) [[static_branch]] {
       needs_native_shadow = false;
       for (uint i = 0u; i < 3u; i++) [[unroll]] {
-        if (is_transmission) [[static_branch]] {
-          if (srt.light_closure_eval_count_transmit > i) [[static_branch]] {
+        if constexpr (is_transmission) {
+          if (srt.constants.light_closure_eval_count_transmit > i) [[static_branch]] {
             needs_native_shadow = needs_native_shadow ||
                                     !closure_npr_policy_enabled(stack.cl[i].npr_policy);
           }
         }
         else {
-          if (srt.light_closure_eval_count_reflect > i) [[static_branch]] {
+          if (srt.constants.light_closure_eval_count_reflect > i) [[static_branch]] {
             needs_native_shadow = needs_native_shadow ||
                                     !closure_npr_policy_enabled(stack.cl[i].npr_policy);
           }
@@ -569,7 +518,7 @@ template<bool is_transmission> struct EvalCtx {
       }
     }
     if (light.tilemap_index != LIGHT_NO_SHADOW && needs_native_shadow) {
-      shadow = shadow_eval(srd,
+      shadow = shadow_eval(srt.shadow_data,
                            light,
                            is_directional,
                            is_transmission,
@@ -581,27 +530,23 @@ template<bool is_transmission> struct EvalCtx {
                            stack.cl[0].N,
                            terminator_normal_offset,
                            terminator_geometry_offset,
+                           1.0f,
                            ray_count,
                            ray_step_count);
     }
 
-    if (is_translucent_with_thickness) {
-      /* This makes the LTC compute the solid angle of the light (still with the cosine term
-       * applied but that still works great enough in practice). */
-      stack.cl[0].N = lv.L;
-      /* Adjust power because of the second lambertian distribution. */
-      attenuation *= M_1_PI;
-    }
+    LightShape shape = LightShape::get(light, lv);
 
-    LightVertices light_shape_vertices = light_shape_corners(light, lv);
+    const UtilityTexture &util = srt.utility_tx;
+    const auto &util_tx = util.utility_tx;
 
     for (uint i = 0u; i < 3; i++) [[unroll]] {
-      if (is_transmission) [[static_branch]] {
-        if (srt.light_closure_eval_count_transmit > i) [[static_branch]] {
+      if constexpr (is_transmission) {
+        if (srt.constants.light_closure_eval_count_transmit > i) [[static_branch]] {
           this->eval_closure(srt,
                               light,
                               lv,
-                              light_shape_vertices,
+                              shape,
                               stack.cl[i],
                               attenuation,
                               shadow,
@@ -610,11 +555,11 @@ template<bool is_transmission> struct EvalCtx {
         }
       }
       else {
-        if (srt.light_closure_eval_count_reflect > i) [[static_branch]] {
+        if (srt.constants.light_closure_eval_count_reflect > i) [[static_branch]] {
           this->eval_closure(srt,
                               light,
                               lv,
-                              light_shape_vertices,
+                              shape,
                               stack.cl[i],
                               attenuation,
                               shadow,
@@ -625,12 +570,12 @@ template<bool is_transmission> struct EvalCtx {
     }
   }
 
-  void eval_directional([[resource_table]] LightEvalData &srt, uint l_idx, LightData light)
+  void eval_directional(LightEvalData &srt, uint l_idx, LightData light)
   {
     light_eval_single(srt, l_idx, light, true);
   }
 
-  void eval_local([[resource_table]] LightEvalData &srt, uint l_idx, LightData light)
+  void eval_local(LightEvalData &srt, uint l_idx, LightData light)
   {
     light_eval_single(srt, l_idx, light, false);
   }
@@ -659,28 +604,28 @@ EvalCtx<true> init_from_reflect_ctx(EvalCtx<false> ctx)
   ctx_tr.terminator_geometry_offset = ctx.terminator_geometry_offset;
   ctx_tr.light_shader_surfel_index = ctx.light_shader_surfel_index;
   ctx_tr.light_shader_surfel_len = ctx.light_shader_surfel_len;
+  ctx_tr.ray_count = ctx.ray_count;
+  ctx_tr.ray_step_count = ctx.ray_step_count;
   return ctx_tr;
 }
 
 }  // namespace light
 
 struct LightEvalIterator {
-  [[resource_table]] srt_t<LightEvalData> inner;
-  [[resource_table]] srt_t<LightRenderData> light_data;
+  [[resource_table]] LightEvalData inner;
+  [[resource_table]] LightRenderData light_data;
 
   void eval_reflection(light::EvalCtx<false> &ctx, float vPz)
   {
-    [[resource_table]] LightEvalData &srt = inner;
-    if (srt.light_closure_eval_count_reflect > 0) [[static_branch]] {
-      light::foreach_visible(light_data, ctx.texel, vPz, ctx, srt);
+    if (inner.constants.light_closure_eval_count_reflect > 0) [[static_branch]] {
+      light::foreach_visible(light_data, ctx.texel, vPz, ctx, inner);
     }
   }
 
   void eval_transmission(light::EvalCtx<true> &ctx, float vPz)
   {
-    [[resource_table]] LightEvalData &srt = inner;
-    if (srt.light_closure_eval_count_transmit > 0) [[static_branch]] {
-      light::foreach_visible(light_data, ctx.texel, vPz, ctx, srt);
+    if (inner.constants.light_closure_eval_count_transmit > 0) [[static_branch]] {
+      light::foreach_visible(light_data, ctx.texel, vPz, ctx, inner);
     }
   }
 };

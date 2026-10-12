@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #include "NOD_register.hh"
 
 #include "node_shader_register.hh"
@@ -67,8 +71,13 @@ void register_shader_nodes()
   register_node_type_sh_input_aov();
   register_node_type_sh_invert();
   register_node_type_sh_layer_weight();
-  register_node_type_sh_light_info();
+  register_node_type_sh_npr_light_info();
+  register_node_type_sh_light_accumulation();
+  register_node_type_sh_light_evaluation();
   register_node_type_sh_light_falloff();
+  register_node_type_sh_light_info();
+  register_node_type_sh_light_iter_internal_input();
+  register_node_type_sh_light_iter_internal_output();
   register_node_type_sh_light_path();
   register_node_type_sh_map_range();
   register_node_type_sh_mapping();
@@ -119,6 +128,7 @@ void register_shader_nodes()
   register_node_type_sh_sepcolor();
   register_node_type_sh_sepxyz();
   register_node_type_sh_shadertorgb();
+  register_node_type_sh_shadow_raycast();
   register_node_type_sh_squeeze();
   register_node_type_sh_subsurface_scattering();
   register_node_type_sh_tangent();

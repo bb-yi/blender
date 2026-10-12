@@ -2,26 +2,25 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
+#include <limits>
 #include <string>
 
 #include <fmt/format.h>
 
+#include "BLI_enum_flags.hh"
 #include "BLI_index_range.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_base.hh"
 #include "BLI_set.hh"
 #include "BLI_string_ref.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_string_utils.hh"
 
-#include "BKE_compositor.hh"
-#include "BKE_context.hh"
-#include "BKE_cryptomatte.hh"
-#include "BKE_node.hh"
-#include "BKE_node_legacy_types.hh"
-#include "BKE_node_runtime.hh"
-
-#include "DEG_depsgraph_build.hh"
-
-#include "WM_api.hh"
+#include "BLT_translation.hh"
 
 #include "DNA_layer_types.h"
 #include "DNA_node_types.h"
@@ -31,9 +30,402 @@
 #include "DNA_view3d_types.h"
 #include "DNA_windowmanager_types.h"
 
+#include "RNA_access.hh"
+#include "RNA_path.hh"
+#include "RNA_prototypes.hh"
+
+#include "BLO_read_write.hh"
+
+#include "BKE_anim_data.hh"
+#include "BKE_animsys.hh"
+#include "BKE_compositor.hh"
+#include "BKE_compute_context_cache.hh"
+#include "BKE_compute_contexts.hh"
+#include "BKE_context.hh"
+#include "BKE_cryptomatte.hh"
+#include "BKE_global.hh"
+#include "BKE_idprop.hh"
+#include "BKE_lib_id.hh"
+#include "BKE_lib_query.hh"
+#include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
+#include "BKE_node_runtime.hh"
+#include "BKE_node_tree_zones.hh"
+
+#include "DEG_depsgraph.hh"
+#include "DEG_depsgraph_build.hh"
+#include "DEG_depsgraph_query.hh"
+
+#include "WM_api.hh"
+
+#include "IMB_imbuf.hh"
+
 #include "NOD_dependencies.hh"
 
 namespace blender::bke::compositor {
+
+/* --------------------------------------------------------------------
+ * Cache.
+ */
+
+Cache::~Cache()
+{
+  this->clear_frames();
+}
+
+ImBuf *Cache::get_frame(const int frame_number, const int view_identifier)
+{
+  std::scoped_lock lock{frames_mutex_};
+  const FrameKey key = FrameKey(frame_number, view_identifier);
+  ImBuf *cached_frame = this->frames_.lookup_try(key).value_or(nullptr);
+  if (!cached_frame) {
+    return nullptr;
+  }
+
+  IMB_refImBuf(cached_frame);
+  return cached_frame;
+}
+
+void Cache::add_frame(const int frame_number, const int view_identifier, ImBuf *image_buffer)
+{
+  std::scoped_lock lock{frames_mutex_};
+  /* First evict frames if needed to maintain the memory cache limit. In almost all cases, the
+   * while loop will run exactly once, since the images in the cache will almost always have the
+   * same size, so one goes out, one goes in. So we needn't worry about performance. */
+  const int64_t cache_limit = size_t(U.memcachelimit) * 1024 * 1024;
+  const int64_t image_size = IMB_get_size_in_memory(image_buffer);
+  while (!this->frames_.is_empty() && this->size() + image_size > cache_limit) {
+    this->evict_frame(frame_number);
+  }
+
+  this->frames_.add_new(FrameKey(frame_number, view_identifier), image_buffer);
+}
+
+void Cache::clear_frames()
+{
+  std::scoped_lock lock{frames_mutex_};
+  for (ImBuf *image_buffer : this->frames_.values()) {
+    IMB_freeImBuf(image_buffer);
+  }
+  this->frames_.clear();
+}
+
+Vector<Cache::FrameRange> Cache::compute_frame_ranges()
+{
+  /* Compute a sorted vector of all cached frames. */
+  VectorSet<int> frame_numbers_set;
+  {
+    std::scoped_lock lock{frames_mutex_};
+    frame_numbers_set.reserve(this->frames_.size());
+    for (const FrameKey &key : this->frames_.keys()) {
+      frame_numbers_set.add(key.frame_number);
+    }
+  }
+  Vector<int> frame_numbers = frame_numbers_set.extract_vector();
+  std::ranges::sort(frame_numbers);
+
+  Vector<FrameRange> frame_ranges;
+  for (const int frame : frame_numbers) {
+    /* We start a new range by appending a singleton range of the current frame, either because
+     * this is the first range or because the last range will not be contiguous with the current
+     * frame. */
+    if (frame_ranges.is_empty() || frame - frame_ranges.last().end > 1) {
+      frame_ranges.append(FrameRange(frame, frame));
+    }
+    else {
+      /* Otherwise, the frame is contiguous with the last range, so we just grow its size by 1. */
+      frame_ranges.last().end++;
+    }
+  }
+
+  return frame_ranges;
+}
+
+void Cache::evict_frame(const int current_frame_number)
+{
+  if (this->frames_.is_empty()) {
+    return;
+  }
+
+  /* Find the keys with the maximum and minimum frame numbers. */
+  FrameKey minimum_key = FrameKey(std::numeric_limits<int>::max());
+  FrameKey maximum_key = FrameKey(std::numeric_limits<int>::lowest());
+  for (const FrameKey &key : this->frames_.keys()) {
+    if (key.frame_number < minimum_key.frame_number) {
+      minimum_key = key;
+    }
+    if (key.frame_number > maximum_key.frame_number) {
+      maximum_key = key;
+    }
+  }
+
+  /* Prioritize evicting frames that are behind the current frame and are furthest from it. */
+  if (minimum_key.frame_number < current_frame_number) {
+    IMB_freeImBuf(this->frames_.pop(minimum_key));
+    return;
+  }
+
+  /* Otherwise, evict the frame that is after the current frame and is furthest from it. */
+  IMB_freeImBuf(this->frames_.pop(maximum_key));
+}
+
+int64_t Cache::size()
+{
+  int64_t size = 0;
+  for (ImBuf *image_buffer : this->frames_.values()) {
+    size += IMB_get_size_in_memory(image_buffer);
+  }
+  return size;
+}
+
+/* --------------------------------------------------------------------
+ * Scene Compositor Effects.
+ */
+
+bool is_enabled(const Scene &scene, const ExecutionMode mode)
+{
+  if (mode == ExecutionMode::Render && !(scene.r.scemode & R_DOCOMP)) {
+    return false;
+  }
+
+  for (SceneCompositorEffect &effect : scene.compositor_effects) {
+    if (is_effect_enabled(effect, mode)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+SceneCompositorEffect *get_effect(const Scene &scene, StringRef name)
+{
+  return static_cast<SceneCompositorEffect *>(BLI_findstring(
+      &(scene.compositor_effects), name.data(), offsetof(SceneCompositorEffect, name)));
+}
+
+SceneCompositorEffect *get_active_effect(const Scene &scene)
+{
+  for (SceneCompositorEffect &effect : scene.compositor_effects) {
+    if (flag_is_set(effect.flags, SceneCompositorEffectFlags::IsActive)) {
+      return &effect;
+    }
+  }
+
+  return nullptr;
+}
+
+bool is_effect_enabled(const SceneCompositorEffect &effect, const ExecutionMode mode)
+{
+  const bNodeTree *original_node_group = DEG_get_original(effect.node_group);
+  if (!original_node_group || ID_MISSING(original_node_group)) {
+    return false;
+  }
+
+  switch (mode) {
+    case ExecutionMode::Render:
+      return flag_is_set(effect.flags, SceneCompositorEffectFlags::EnableForRender);
+    case ExecutionMode::Preview:
+      return flag_is_set(effect.flags, SceneCompositorEffectFlags::EnableForPreview);
+  }
+
+  BLI_assert_unreachable();
+  return false;
+}
+
+void set_active_effect(const Scene &scene, SceneCompositorEffect &effect)
+{
+  for (SceneCompositorEffect &other_effect : scene.compositor_effects) {
+    other_effect.flags &= ~SceneCompositorEffectFlags::IsActive;
+  }
+
+  /* Activate the active state of the effect. */
+  effect.flags |= SceneCompositorEffectFlags::IsActive;
+}
+
+void rename_effect(Scene &scene,
+                   SceneCompositorEffect &effect,
+                   StringRef new_name,
+                   const bool update_animation_data)
+{
+  std::string old_name = effect.name;
+  new_name.copy_utf8_truncated(effect.name);
+  BLI_uniquename(&scene.compositor_effects,
+                 &effect,
+                 CTX_DATA_(BLT_I18NCONTEXT_ID_SCENE, "Scene Effect"),
+                 '.',
+                 offsetof(SceneCompositorEffect, name),
+                 sizeof(effect.name));
+
+  if (!update_animation_data) {
+    return;
+  }
+
+  /* Fix all the animation data which may link to this. */
+  BKE_animdata_fix_paths(scene.id,
+                         "compositor_effects",
+                         RNA_path_name_to_infix(old_name.c_str()),
+                         RNA_path_name_to_infix(effect.name),
+                         true,
+                         *G_MAIN);
+}
+
+SceneCompositorEffect &new_effect(Scene &scene, StringRef name)
+{
+  SceneCompositorEffect &effect = *MEM_new<SceneCompositorEffect>("Scene Compositor Effect");
+  rename_effect(scene, effect, name, false);
+  BLI_addtail(&scene.compositor_effects, &effect);
+  set_active_effect(scene, effect);
+  return effect;
+}
+
+SceneCompositorEffect &duplicate_effect(Scene &scene, SceneCompositorEffect &source_effect)
+{
+  SceneCompositorEffect &new_effect = *MEM_dupalloc(&source_effect);
+  if (source_effect.node_group) {
+    id_us_plus(&new_effect.node_group->id);
+  }
+  if (source_effect.system_properties) {
+    new_effect.system_properties = IDP_CopyProperty_ex(source_effect.system_properties, 0);
+  }
+  BLI_addtail(&scene.compositor_effects, &new_effect);
+  rename_effect(scene, new_effect, source_effect.name, false);
+  set_active_effect(scene, new_effect);
+  return new_effect;
+}
+
+static void free_effect(SceneCompositorEffect &effect, const bool decrement_user_count)
+{
+  if (decrement_user_count && effect.node_group) {
+    id_us_min(&effect.node_group->id);
+  }
+
+  if (effect.system_properties) {
+    IDP_FreeProperty_ex(effect.system_properties, decrement_user_count);
+  }
+
+  MEM_delete(&effect);
+}
+
+void remove_effect(Scene &scene, SceneCompositorEffect &effect)
+{
+  BLI_remlink(&scene.compositor_effects, &effect);
+
+  const bool was_active = flag_is_set(effect.flags, SceneCompositorEffectFlags::IsActive);
+  if (was_active && !scene.compositor_effects.is_empty()) {
+    set_active_effect(scene, *scene.compositor_effects.begin());
+  }
+
+  free_effect(effect, true);
+}
+
+void copy_effects(Scene &target_scene, const Scene &source_scene, const int flags)
+{
+  target_scene.compositor_effects.clear_no_delete();
+  for (const SceneCompositorEffect &source_effect : source_scene.compositor_effects) {
+    SceneCompositorEffect &new_effect = *MEM_dupalloc(&source_effect);
+    BLI_addtail(&target_scene.compositor_effects, &new_effect);
+    if (source_effect.system_properties) {
+      new_effect.system_properties = IDP_CopyProperty_ex(source_effect.system_properties, flags);
+    }
+  }
+}
+
+void free_effects(Scene &scene)
+{
+  for (SceneCompositorEffect &effect : scene.compositor_effects.items_mutable()) {
+    free_effect(effect, false);
+  }
+  scene.compositor_effects.clear_no_delete();
+}
+
+void clear_effects(Scene &scene)
+{
+  for (SceneCompositorEffect &effect : scene.compositor_effects.items_reversed_mutable()) {
+    remove_effect(scene, effect);
+  }
+}
+
+void for_each_id_in_effects(const Scene &scene, LibraryForeachIDData &data)
+{
+  for (SceneCompositorEffect &effect : scene.compositor_effects) {
+    BKE_LIB_FOREACHID_PROCESS_IDSUPER(&data, effect.node_group, IDWALK_CB_USER);
+    if (effect.system_properties) {
+      BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(
+          &data,
+          IDP_foreach_property(
+              effect.system_properties, IDP_TYPE_FILTER_ID, [&](IDProperty *property) {
+                BKE_lib_query_idpropertiesForeachIDLink_callback(property, &data);
+              }));
+    }
+  }
+}
+
+void write_effects(const Scene &scene, BlendWriter &writer)
+{
+  writer.write_struct_list(&scene.compositor_effects);
+  for (const SceneCompositorEffect &effect : scene.compositor_effects) {
+    if (effect.system_properties) {
+      IDP_BlendWrite(&writer, effect.system_properties);
+    }
+  }
+}
+
+void read_effects(Scene &scene, BlendDataReader &reader)
+{
+  BLO_read_struct_list(&reader, SceneCompositorEffect, &scene.compositor_effects);
+  for (SceneCompositorEffect &effect : scene.compositor_effects) {
+    BLO_read_struct(&reader, IDProperty, &effect.system_properties);
+    IDP_BlendDataRead(&reader, &effect.system_properties);
+  }
+}
+
+const SceneCompositorEffect *get_effect_from_property(const PointerRNA &property_ptr)
+{
+  const std::optional<AncestorPointerRNA> effect_ptr = RNA_struct_search_closest_ancestor_by_type(
+      &property_ptr, RNA_SceneCompositorEffect);
+  if (effect_ptr.has_value()) {
+    return static_cast<const SceneCompositorEffect *>(effect_ptr->data);
+  }
+
+  const Scene *scene = id_cast<const Scene *>(property_ptr.owner_id);
+  for (SceneCompositorEffect &effect : scene->compositor_effects) {
+    bool found = false;
+    IDP_foreach_property(effect.system_properties, 0, [&](IDProperty *id_property) {
+      if (id_property == property_ptr.data) {
+        found = true;
+      }
+    });
+    if (found) {
+      return &effect;
+    }
+  }
+  return nullptr;
+}
+
+void update_effect_node_group_interface(Main &main, Scene &scene, SceneCompositorEffect &effect)
+{
+  if (!effect.system_properties) {
+    effect.system_properties =
+        bke::idprop::create_group("SceneCompositorEffectProperties").release();
+  }
+
+  /* In case the node group is missing, do not update the properties to avoid the values reverting
+   * to their default value if the node group later becomes available. */
+  if (!effect.node_group || ID_MISSING(effect.node_group)) {
+    return;
+  }
+
+  PointerRNA properties_ptr = RNA_pointer_create_discrete(
+      &scene.id, RNA_SceneCompositorEffectProperties, &effect);
+  RNA_ensure_and_sync_system_properties(main, properties_ptr, *effect.system_properties);
+
+  DEG_id_tag_update(&scene.id, ID_RECALC_COMPOSITOR);
+  WM_main_add_notifier(NC_SCENE | ND_COMPO_RESULT, &scene);
+}
+
+/* --------------------------------------------------------------------
+ * Query.
+ */
 
 /* Adds the pass names of the passes used by the given Render Layer node to the given used passes.
  * This essentially adds the pass names of the outputs that are logically linked. */
@@ -138,7 +530,7 @@ static void add_passes_used_by_cryptomatte_node(const bNode *node,
  * passes. This is called recursively for node groups. */
 static void add_used_passes_recursive(const bNodeTree *node_tree,
                                       const ViewLayer *view_layer,
-                                      const bool is_root_tree,
+                                      const bool is_root_tree_of_first_effect,
                                       Set<const bNodeTree *> &node_trees_already_searched,
                                       Set<std::string> &used_passes)
 {
@@ -166,7 +558,7 @@ static void add_used_passes_recursive(const bNodeTree *node_tree,
         add_passes_used_by_render_layer_node(node, used_passes);
         break;
       case NODE_GROUP_INPUT:
-        if (is_root_tree) {
+        if (is_root_tree_of_first_effect) {
           add_passes_used_by_group_input_node(node, used_passes);
         }
         break;
@@ -179,19 +571,47 @@ static void add_used_passes_recursive(const bNodeTree *node_tree,
   }
 }
 
-Set<std::string> get_used_passes(const Scene &scene, const ViewLayer *view_layer)
+Set<std::string> get_used_passes(const Scene &scene,
+                                 const ViewLayer *view_layer,
+                                 const ExecutionMode mode)
 {
   Set<std::string> used_passes;
+  bool is_first_effect = true;
   Set<const bNodeTree *> node_trees_already_searched;
-  add_used_passes_recursive(
-      scene.compositing_node_group, view_layer, true, node_trees_already_searched, used_passes);
+  for (const SceneCompositorEffect &effect : scene.compositor_effects) {
+    if (!is_effect_enabled(effect, mode)) {
+      continue;
+    }
+    add_used_passes_recursive(
+        effect.node_group, view_layer, is_first_effect, node_trees_already_searched, used_passes);
+    is_first_effect = false;
+  }
   return used_passes;
+}
+
+bool is_viewport_compositor_enabled(const View3D &view_3d, const RegionView3D &region_view_3d)
+{
+  if (view_3d.shading.use_compositor == V3D_SHADING_USE_COMPOSITOR_DISABLED) {
+    return false;
+  }
+
+  if (!ELEM(view_3d.shading.type, OB_MATERIAL, OB_TEXTURE, OB_RENDER)) {
+    return false;
+  }
+
+  if (view_3d.shading.use_compositor == V3D_SHADING_USE_COMPOSITOR_CAMERA &&
+      region_view_3d.persp != RV3D_CAMOB)
+  {
+    return false;
+  }
+
+  return true;
 }
 
 bool is_viewport_compositor_used(const bContext &context)
 {
   const Scene *scene = CTX_data_scene(&context);
-  if (!scene->compositing_node_group) {
+  if (!is_enabled(*scene, ExecutionMode::Preview)) {
     return false;
   }
 
@@ -199,19 +619,17 @@ bool is_viewport_compositor_used(const bContext &context)
   for (const wmWindow &window : window_manager->windows) {
     const bScreen *screen = WM_window_get_active_screen(&window);
     for (const ScrArea &area : screen->areabase) {
-      const SpaceLink &space = *static_cast<const SpaceLink *>(area.spacedata.first);
+      const SpaceLink &space = *area.spacedata.first();
       if (space.spacetype == SPACE_VIEW3D) {
         const View3D &view_3d = reinterpret_cast<const View3D &>(space);
-
-        if (view_3d.shading.use_compositor == V3D_SHADING_USE_COMPOSITOR_DISABLED) {
-          continue;
+        for (ARegion &region : area.regionbase) {
+          if (region.regiontype == RGN_TYPE_WINDOW) {
+            const RegionView3D &region_view_3d = *static_cast<RegionView3D *>(region.regiondata);
+            if (is_viewport_compositor_enabled(view_3d, region_view_3d)) {
+              return true;
+            }
+          }
         }
-
-        if (!(view_3d.shading.type >= OB_MATERIAL)) {
-          continue;
-        }
-
-        return true;
       }
     }
   }
@@ -219,40 +637,22 @@ bool is_viewport_compositor_used(const bContext &context)
   return false;
 }
 
-bool node_tree_has_linked_file_output(const bNodeTree *node_tree)
-{
-  if (node_tree == nullptr) {
-    return false;
-  }
+/* --------------------------------------------------------------------
+ * Depsgraph.
+ */
 
-  node_tree->ensure_topology_cache();
-  for (const bNode *node : node_tree->nodes_by_type("CompositorNodeOutputFile"_ustr)) {
-    if (!node->is_muted()) {
-      for (const bNodeSocket &input : node->inputs) {
-        if (input.is_directly_linked()) {
-          return true;
-        }
-      }
-    }
-  }
-
-  for (const bNode *node : node_tree->group_nodes()) {
-    if (node->is_muted() || !node->id) {
-      continue;
-    }
-
-    if (node_tree_has_linked_file_output(reinterpret_cast<const bNodeTree *>(node->id))) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-void add_depsgraph_relations(Scene &scene, DepsNodeHandle *compositor_output_depsgraph_node)
+void add_depsgraph_relations(Scene &scene,
+                             const SceneCompositorEffect &effect,
+                             DepsNodeHandle *compositor_output_depsgraph_node)
 {
   nodes::EvalDependencies evaluation_dependencies = nodes::gather_eval_dependencies_recursive(
-      *scene.compositing_node_group);
+      *effect.node_group);
+
+  IDP_foreach_property(effect.system_properties, IDP_TYPE_FILTER_ID, [&](IDProperty *property) {
+    if (ID *id = IDP_ID_get(property)) {
+      evaluation_dependencies.add_generic_id_full(id);
+    }
+  });
 
   for (ID *id : evaluation_dependencies.ids.values()) {
     switch (ID_Type(GS(id->name))) {
@@ -271,6 +671,12 @@ void add_depsgraph_relations(Scene &scene, DepsNodeHandle *compositor_output_dep
                                   object,
                                   DEG_OB_COMP_PARAMETERS,
                                   "Camera Parameters -> Compositor");
+        }
+        if (object->type == OB_ARMATURE && info.pose) {
+          DEG_add_object_relation(compositor_output_depsgraph_node,
+                                  object,
+                                  DEG_OB_COMP_EVAL_POSE,
+                                  "Armature Pose -> Compositor");
         }
         break;
       }
@@ -309,6 +715,146 @@ void add_depsgraph_relations(Scene &scene, DepsNodeHandle *compositor_output_dep
   if (evaluation_dependencies.time_dependent) {
     DEG_add_time_source_relation(compositor_output_depsgraph_node, "Time Source -> Compositor");
   }
+}
+
+/* --------------------------------------------------------------------
+ * Compute Contexts.
+ */
+
+const ComputeContext *get_zone_viewer_compute_context(
+    const bNode &node,
+    const bke::bNodeTreeZone *zone,
+    const ComputeContext &compute_context,
+    bke::ComputeContextCache &compute_context_cache)
+{
+  const ComputeContext *current_context = &compute_context;
+  const bke::bNodeTreeZones *zones = node.owner_tree().zones();
+  if (!zones) {
+    return current_context;
+  }
+  const bke::bNodeTreeZone *node_zone = zones->get_zone_by_node(node.identifier);
+  Vector<const bke::bNodeTreeZone *> zone_stack = zones->get_zones_to_enter(zone, node_zone);
+
+  for (const bke::bNodeTreeZone *current_zone : zone_stack) {
+    const bNode &output_node = *current_zone->output_node();
+    if (output_node.is_type("GeometryNodeRepeatOutput"_ustr)) {
+      const auto *repeat_storage = static_cast<NodeGeometryRepeatOutput *>(output_node.storage);
+      const int inspection_index = repeat_storage->inspection_index;
+      current_context = &compute_context_cache.for_repeat_zone(
+          current_context, *current_zone->output_node(), inspection_index);
+    }
+    else if (output_node.is_type("NodeClosureOutput"_ustr)) {
+      /* Viewers inside closures are not supported and are ignored. */
+      return nullptr;
+    }
+    else {
+      BLI_assert_unreachable();
+      return nullptr;
+    }
+  }
+
+  return current_context;
+}
+
+/* Recursively search node groups to find the node group whose instance key matches the given
+ * active node group instance key, and return the compute context of the viewer node that lies
+ * inside it. Returns a nullptr if no active viewer node exists inside the node group. */
+static const ComputeContext *compute_viewer_compute_context_recursive(
+    const bNodeTree &node_group,
+    const ComputeContext &compute_context,
+    const bNodeInstanceKey instance_key,
+    const bNodeInstanceKey active_node_group_instance_key,
+    bke::ComputeContextCache &compute_context_cache)
+{
+  node_group.ensure_topology_cache();
+
+  /* If this is the active node group, returns the hash of the compute context of the active viewer
+   * node that inside it. */
+  if (active_node_group_instance_key == instance_key) {
+    for (const bNode *node : node_group.nodes_by_type("CompositorNodeViewer"_ustr)) {
+      if (node->flag & NODE_DO_OUTPUT && !node->is_muted()) {
+        const ComputeContext *zone_viewer_compute_context = get_zone_viewer_compute_context(
+            *node, nullptr, compute_context, compute_context_cache);
+        return zone_viewer_compute_context;
+      }
+    }
+    return nullptr;
+  }
+
+  /* Otherwise, we have to check node groups recursively. */
+  for (const bNode *group_node : node_group.group_nodes()) {
+    const ID *original_node_group = DEG_get_original(group_node->id);
+    if (group_node->is_muted() || !original_node_group || ID_MISSING(original_node_group)) {
+      continue;
+    }
+
+    const ComputeContext *zone_compute_context = get_zone_viewer_compute_context(
+        *group_node, nullptr, compute_context, compute_context_cache);
+    if (!zone_compute_context) {
+      continue;
+    }
+
+    const bNodeTree &child_node_group = *id_cast<const bNodeTree *>(group_node->id);
+    const bNodeInstanceKey child_instance_key = bke::node_instance_key(
+        instance_key, &node_group, group_node);
+    const bke::GroupNodeComputeContext &child_compute_context =
+        compute_context_cache.for_group_node(
+            zone_compute_context, group_node->identifier, &group_node->owner_tree());
+    const ComputeContext *viewer_compute_context = compute_viewer_compute_context_recursive(
+        child_node_group,
+        child_compute_context,
+        child_instance_key,
+        active_node_group_instance_key,
+        compute_context_cache);
+    if (viewer_compute_context) {
+      return viewer_compute_context;
+    }
+  }
+
+  return nullptr;
+}
+
+const ComputeContext *compute_viewer_compute_context(
+    const Scene &scene, bke::ComputeContextCache &compute_context_cache)
+{
+  const bke::DataBlockComputeContext &scene_compute_context = compute_context_cache.for_data_block(
+      nullptr, scene.id);
+  const SceneCompositorEffect *active_effect = get_active_effect(scene);
+  if (!active_effect) {
+    return nullptr;
+  }
+
+  if (!is_effect_enabled(*active_effect, ExecutionMode::Preview)) {
+    return nullptr;
+  }
+
+  const bke::SceneCompositorEffectComputeContext &effect_compute_context =
+      compute_context_cache.for_scene_compositor_effect(&scene_compute_context, *active_effect);
+
+  const bNodeTree *original_node_group = DEG_get_original(active_effect->node_group);
+  if (!original_node_group || ID_MISSING(original_node_group)) {
+    return nullptr;
+  }
+
+  return compute_viewer_compute_context_recursive(*active_effect->node_group,
+                                                  effect_compute_context,
+                                                  bke::NODE_INSTANCE_KEY_BASE,
+                                                  active_effect->node_group->active_viewer_key,
+                                                  compute_context_cache);
+}
+
+const ComputeContext *compute_viewer_compute_context(
+    const Scene &scene,
+    const bNodeTree &root_node_group,
+    bke::ComputeContextCache &compute_context_cache)
+{
+  const bke::DataBlockComputeContext &scene_compute_context = compute_context_cache.for_data_block(
+      nullptr, scene.id);
+  return compute_viewer_compute_context_recursive(root_node_group,
+                                                  scene_compute_context,
+                                                  bke::NODE_INSTANCE_KEY_BASE,
+                                                  root_node_group.active_viewer_key,
+                                                  compute_context_cache);
 }
 
 }  // namespace blender::bke::compositor

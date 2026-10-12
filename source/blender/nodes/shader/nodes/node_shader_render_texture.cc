@@ -73,7 +73,8 @@ static int node_shader_gpu_render_texture(GPUMaterial *mat,
                         in,
                         out,
                         GPU_constant(&use_explicit_vector),
-                        GPU_constant(&render_texture_uid));
+                        GPU_constant(&render_texture_uid),
+                        GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_render_texture_cc

@@ -11,11 +11,11 @@
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_set.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 #include "BKE_image.hh"
@@ -2211,8 +2211,6 @@ static wmOperatorStatus update_image_from_plane_marker_exec(bContext *C, wmOpera
 
   WM_event_add_notifier(C, NC_MOVIECLIP | NA_EDITED, clip);
   WM_event_add_notifier(C, NC_IMAGE | NA_EDITED, plane_track->image);
-
-  BKE_image_partial_update_mark_full_update(plane_track->image);
 
   return OPERATOR_FINISHED;
 }

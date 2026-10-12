@@ -12,7 +12,7 @@
  */
 
 #include "BLI_bounds.hh"
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 #include "BLI_math_matrix.hh"
 
 #include "BKE_curve.hh"
@@ -20,7 +20,7 @@
 #include "BKE_mesh.h"
 #include "BKE_object.hh"
 #include "BKE_volume.hh"
-#include "BLI_hash.h"
+#include "BLI_hash_c.hh"
 #include "DNA_curve_types.h"
 #include "DNA_layer_types.h"
 #include "DNA_meta_types.h"
@@ -61,6 +61,16 @@ inline std::ostream &operator<<(std::ostream &stream, const ObjectMatrices &matr
 /* -------------------------------------------------------------------- */
 /** \name ObjectInfos
  * \{ */
+
+inline float shadow_terminator_normal_offset_get(const Object &object,
+                                                 const float4x4 &object_to_world)
+{
+  if (object.shadow_terminator_normal_offset == 0.0f) {
+    return 0.0f;
+  }
+  using namespace blender::math;
+  return object.shadow_terminator_normal_offset * reduce_max(to_scale(object_to_world));
+}
 
 inline void ObjectInfos::sync()
 {
@@ -113,10 +123,13 @@ inline void ObjectInfos::sync(const draw::ObjectRef ref,
   SET_FLAG_FROM_TEST(flag, is_active_edit_mode, eObjectInfoFlag::OBJECT_ACTIVE_EDIT_MODE);
 
   if (ref.object->shadow_terminator_normal_offset > 0.0f) {
-    using namespace blender::math;
     shadow_terminator_geometry_offset = ref.object->shadow_terminator_geometry_offset;
-    shadow_terminator_normal_offset = ref.object->shadow_terminator_normal_offset *
-                                      reduce_max(to_scale(ref.object->object_to_world()));
+    shadow_terminator_normal_offset = 0.0f;
+    if (!ref.is_dupli()) {
+      /* Normal offset is scaled by world transform, so it must be computed per instance. */
+      shadow_terminator_normal_offset = shadow_terminator_normal_offset_get(
+          *ref.object, ref.object->object_to_world());
+    }
   }
   else {
     shadow_terminator_geometry_offset = 0.0f;

@@ -14,7 +14,7 @@
 #include "BLI_kdtree.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_offset_indices.hh"
-#include "BLI_rect.h"
+#include "BLI_rect.hh"
 #include "BLI_stack.hh"
 #include "BLI_task.hh"
 
@@ -104,7 +104,7 @@ Array<float2> polyline_fit_curve(Span<float2> points,
 
   Array<int32_t> indices(corner_mask.size());
   corner_mask.to_indices(indices.as_mutable_span());
-  uint *indicies_ptr = corner_mask.is_empty() ? nullptr : reinterpret_cast<uint *>(indices.data());
+  uint *indices_ptr = corner_mask.is_empty() ? nullptr : reinterpret_cast<uint *>(indices.data());
 
   float *cubic_array;
   uint cubic_array_len;
@@ -113,7 +113,7 @@ Array<float2> polyline_fit_curve(Span<float2> points,
                                            2,
                                            error_threshold,
                                            CURVE_FIT_CALC_HIGH_QUALITY,
-                                           indicies_ptr,
+                                           indices_ptr,
                                            indices.size(),
                                            &cubic_array,
                                            &cubic_array_len,
@@ -595,13 +595,10 @@ static void generate_corner(const float3 &pt_a,
       r_src_indices.append_n_times(src_point_index, 2);
       return;
     }
-    else {
-      const float3 miter_point = pt_b + miter * radius / miter_invscale;
-
-      r_perimeter.append(miter_point);
-      r_src_indices.append(src_point_index);
-      return;
-    }
+    const float3 miter_point = pt_b + miter * radius / miter_invscale;
+    r_perimeter.append(miter_point);
+    r_src_indices.append(src_point_index);
+    return;
   }
 
   /* Avoid division by tiny values for steep angles. */

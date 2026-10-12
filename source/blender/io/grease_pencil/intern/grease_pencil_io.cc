@@ -4,10 +4,10 @@
 
 #include "BLI_bounds.hh"
 #include "BLI_color_types.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_matrix.hh"
-#include "BLI_math_vector.h"
 #include "BLI_math_vector.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BKE_attribute.hh"
 #include "BKE_camera.h"
@@ -245,14 +245,15 @@ void GreasePencilExporter::prepare_render_params(Scene &scene, const int frame_n
 
   if (use_camera_view) {
     /* Camera rectangle (in screen space). */
-    rctf camera_rect;
-    ED_view3d_calc_camera_border(&scene,
-                                 context_.depsgraph,
-                                 context_.region,
-                                 context_.v3d,
-                                 context_.rv3d,
-                                 true,
-                                 &camera_rect);
+    const rctf camera_rect = BKE_camera_view_border(&scene,
+                                                    context_.depsgraph,
+                                                    context_.v3d,
+                                                    context_.rv3d,
+                                                    context_.region->winx,
+                                                    context_.region->winy,
+                                                    true,
+                                                    false,
+                                                    true);
     screen_rect_ = {{camera_rect.xmin, camera_rect.ymin}, {camera_rect.xmax, camera_rect.ymax}};
     camera_persmat_ = persmat_from_camera_object(scene);
 
@@ -422,8 +423,8 @@ void GreasePencilExporter::foreach_shape_in_layer(const Object &object,
       "miter_angle", bke::AttrDomain::Point, GP_STROKE_MITER_ANGLE_ROUND);
   /* Point attributes. */
   const Span<float3> positions = curves.positions();
-  const Span<float3> positions_left = *curves.handle_positions_left();
-  const Span<float3> positions_right = *curves.handle_positions_right();
+  const std::optional<Span<float3>> positions_left = curves.handle_positions_left();
+  const std::optional<Span<float3>> positions_right = curves.handle_positions_right();
   const VArray<int8_t> types = curves.curve_types();
   const std::optional<GroupedSpan<int>> fills = drawing.fills();
   const VArraySpan<float> radii = drawing.radii();
@@ -569,8 +570,9 @@ void GreasePencilExporter::foreach_shape_in_layer(const Object &object,
         const OffsetIndices outline_points_by_curve = outline.points_by_curve();
         const VArray<bool> outline_cyclic = outline.cyclic();
         const Span<float3> outline_positions = outline.positions();
-        const Span<float3> outline_positions_left = *outline.handle_positions_left();
-        const Span<float3> outline_positions_right = *outline.handle_positions_right();
+        const std::optional<Span<float3>> outline_positions_left = outline.handle_positions_left();
+        const std::optional<Span<float3>> outline_positions_right =
+            outline.handle_positions_right();
         const VArray<int8_t> outline_types = outline.curve_types();
 
         Array<int> outline_shape(outline.curves_num());

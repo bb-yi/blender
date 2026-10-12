@@ -2,12 +2,16 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include <cstring>
 
 #include "BKE_file_handler.hh"
 
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BLT_translation.hh"
 
@@ -138,6 +142,79 @@ std::string FileHandlerType::get_default_filename(const StringRefNull name)
   BLI_path_make_safe_filename(filename);
 
   return filename;
+}
+
+static std::string extensions_common_prefix(const Span<std::string> extensions)
+{
+  std::string prefix = extensions.first();
+  for (const std::string &extension : extensions.drop_front(1)) {
+    const int64_t max_len = std::min<int64_t>(prefix.size(), extension.size());
+    int64_t i = 0;
+    while (i < max_len && prefix[i] == extension[i]) {
+      i++;
+    }
+    prefix.resize(i);
+  }
+  return prefix;
+}
+
+static bool extensions_group_is_collapsible(const Span<std::string> extensions)
+{
+  const std::string prefix = extensions_common_prefix(extensions);
+  const int64_t prefix_letters = prefix.size() - (!prefix.empty() && prefix[0] == '.' ? 1 : 0);
+  return prefix_letters >= 3 && std::ranges::all_of(extensions, [&](const auto &extension) {
+           return extension.size() <= prefix.size() + 1;
+         });
+}
+
+std::string FileHandlerType::label_with_extensions() const
+{
+  if (file_extensions.is_empty()) {
+    return label;
+  }
+
+  std::string extensions;
+  const Span<std::string> all_extensions = file_extensions.as_span();
+  int64_t group_start = 0;
+  while (group_start < all_extensions.size()) {
+    int64_t group_size = 1;
+    while (group_start + group_size < all_extensions.size() &&
+           extensions_group_is_collapsible(all_extensions.slice(group_start, group_size + 1)))
+    {
+      group_size++;
+    }
+
+    const Span<std::string> group = all_extensions.slice(group_start, group_size);
+    if (!extensions.empty()) {
+      extensions += "/";
+    }
+    if (group.size() > 1) {
+      extensions += extensions_common_prefix(group) + "*";
+    }
+    else {
+      extensions += group.first();
+    }
+
+    group_start += group_size;
+  }
+
+  return std::string(label) + " (" + extensions + ")";
+}
+
+std::optional<std::string> FileHandlerType::filter_glob_from_extensions() const
+{
+  if (file_extensions.is_empty()) {
+    return std::nullopt;
+  }
+
+  std::string filter_glob;
+  bool is_first = true;
+  for (StringRef extension : file_extensions) {
+    filter_glob += StringRef((is_first ? "" : ";")) +
+                   ((!extension.is_empty() && extension[0] == '.') ? "*" : "*.") + extension;
+    is_first = false;
+  }
+  return filter_glob;
 }
 
 }  // namespace blender::bke

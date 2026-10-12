@@ -18,13 +18,13 @@
 #include "BLI_array.hh"
 #include "BLI_convexhull_2d.hh"
 #include "BLI_math_angle_types.hh"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_matrix_types.hh"
-#include "BLI_math_rotation.h"
 #include "BLI_math_rotation.hh"
-#include "BLI_math_vector.h"
+#include "BLI_math_rotation_c.hh"
 #include "BLI_math_vector.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_rand.hh"
 
@@ -96,7 +96,7 @@ TEST(convexhull_2d, IsConvex)
       p = float2(rng.get_float(), rng.get_float());
     }
     Array<float2> points_hull = convexhull_2d_as_array(points);
-    if (UNLIKELY(points_hull.size() < 3)) {
+    if (points_hull.size() < 3) [[unlikely]] {
       continue;
     }
 
@@ -271,7 +271,8 @@ TEST(convexhull_2d, Simple)
               float(math::AngleRadian::from_degree(90.0f)),
               ROTATION_EPS);
 
-  for (const Array<float2> &points_orig : {
+  for (const Array<float2> &points_orig :
+       {
            points_square_diagonal,
            points_square_aligned,
        })

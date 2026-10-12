@@ -120,7 +120,7 @@ class MultiDevice : public Device {
     return error_msg;
   }
 
-  BVHLayoutMask get_bvh_layout_mask(const uint kernel_features) const override
+  BVHLayoutMask get_bvh_layout_mask(const uint64_t kernel_features) const override
   {
     BVHLayoutMask bvh_layout_mask = BVH_LAYOUT_ALL;
     BVHLayoutMask bvh_layout_mask_all = BVH_LAYOUT_NONE;
@@ -172,7 +172,7 @@ class MultiDevice : public Device {
     return bvh_layout_mask;
   }
 
-  bool load_kernels(const uint kernel_features) override
+  bool load_kernels(const uint64_t kernel_features) override
   {
     for (SubDevice &sub : devices) {
       if (!sub.device->load_kernels(kernel_features)) {
@@ -303,10 +303,16 @@ class MultiDevice : public Device {
     }
 
     device_ptr key = mem.device_pointer;
+    if (key == 0) {
+      return device_ptr(0);
+    }
+
     for (SubDevice &sub : devices) {
       if (sub.device.get() == sub_device) {
-        auto it = sub.ptr_map.find(key);
-        return (it != sub.ptr_map.end()) ? it->second : device_ptr(0);
+        /* Memory may be owned by a peer device when distributing memory across devices. */
+        SubDevice *owner_sub = find_matching_mem_device(key, sub);
+        auto it = owner_sub->ptr_map.find(key);
+        return (it != owner_sub->ptr_map.end()) ? it->second : device_ptr(0);
       }
     }
 
@@ -483,9 +489,15 @@ class MultiDevice : public Device {
       return false;
     }
 
-    for (const SubDevice &sub : devices) {
+    for (SubDevice &sub : devices) {
       if (sub.device.get() == sub_device) {
-        return sub_device->is_shared(shared_pointer, sub.ptr_map.at(key), sub_device);
+        /* Memory may be owned by a peer device when distributing memory across devices. */
+        SubDevice *owner_sub = find_matching_mem_device(key, sub);
+        auto it = owner_sub->ptr_map.find(key);
+        if (it == owner_sub->ptr_map.end()) {
+          return false;
+        }
+        return owner_sub->device->is_shared(shared_pointer, it->second, owner_sub->device.get());
       }
     }
 

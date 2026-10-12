@@ -8,8 +8,8 @@
 
 #include <cstdlib>
 
-#include "BLI_math_vector.h"
-#include "BLI_string_utf8.h"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string_utf8.hh"
 
 #include "BKE_nla.hh"
 #include "BKE_unit.hh"
@@ -164,6 +164,7 @@ TransModeInfo TransMode_timescale = {
     /*snap_distance_fn*/ nullptr,
     /*snap_apply_fn*/ timescale_snap_apply_fn,
     /*draw_fn*/ nullptr,
+    /*status_fn*/ nullptr,
 };
 
 }  // namespace blender::ed::transform

@@ -2,9 +2,14 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_listbase.h"
-#include "BLI_string.h"
+/** \file
+ * \ingroup bke
+ */
 
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
+
+#include "DNA_brush_types.h"
 #include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
 #include "DNA_scene_types.h"
@@ -43,35 +48,23 @@ static TexPaintSlot *get_active_slot(Object *ob)
 
 using namespace blender::bke::paint::canvas;
 
-bool BKE_paint_canvas_image_get(PaintModeSettings *settings,
-                                Object *ob,
-                                Image **r_image,
-                                ImageUser **r_image_user)
+std::optional<CanvasImageData> BKE_paint_canvas_image_get(const ImagePaintSettings &settings,
+                                                          Object &object)
 {
-  *r_image = nullptr;
-  *r_image_user = nullptr;
-
-  switch (settings->canvas_source) {
-    case PAINT_CANVAS_SOURCE_COLOR_ATTRIBUTE:
-      break;
-
-    case PAINT_CANVAS_SOURCE_IMAGE:
-      *r_image = settings->canvas_image;
-      *r_image_user = &settings->image_user;
-      break;
-
-    case PAINT_CANVAS_SOURCE_MATERIAL: {
-      TexPaintSlot *slot = get_active_slot(ob);
-      if (slot == nullptr) {
-        break;
-      }
-
-      *r_image = slot->ima;
-      *r_image_user = slot->image_user;
-      break;
+  if (settings.mode == PAINT_CANVAS_SOURCE_MATERIAL) {
+    TexPaintSlot *slot = get_active_slot(&object);
+    if (slot == nullptr || slot->ima == nullptr) {
+      return std::nullopt;
     }
+    return std::make_optional<CanvasImageData>({slot->ima, slot->image_user});
   }
-  return *r_image != nullptr;
+  if (settings.mode == PAINT_CANVAS_SOURCE_IMAGE) {
+    if (settings.canvas == nullptr) {
+      return std::nullopt;
+    }
+    return std::make_optional<CanvasImageData>({settings.canvas, ImageUser{}});
+  }
+  return std::nullopt;
 }
 
 static bool has_uv_map_attribute(const Mesh &mesh, const StringRef name)
@@ -79,12 +72,10 @@ static bool has_uv_map_attribute(const Mesh &mesh, const StringRef name)
   return bke::mesh::is_uv_map(mesh.attributes().lookup_meta_data(name));
 }
 
-std::optional<StringRef> BKE_paint_canvas_uvmap_name_get(const PaintModeSettings *settings,
+std::optional<StringRef> BKE_paint_canvas_uvmap_name_get(const ImagePaintSettings &settings,
                                                          Object *ob)
 {
-  switch (settings->canvas_source) {
-    case PAINT_CANVAS_SOURCE_COLOR_ATTRIBUTE:
-      return std::nullopt;
+  switch (settings.mode) {
     case PAINT_CANVAS_SOURCE_IMAGE: {
       /* Use active uv map of the object. */
       if (ob->type != OB_MESH) {
@@ -122,16 +113,35 @@ std::optional<StringRef> BKE_paint_canvas_uvmap_name_get(const PaintModeSettings
   return std::nullopt;
 }
 
-std::string BKE_paint_canvas_key_get(PaintModeSettings *settings, Object *ob)
+std::string BKE_paint_canvas_key_get(ImagePaintSettings &settings, Object *ob)
 {
   std::stringstream ss;
   ss << "UV_MAP:" << BKE_paint_canvas_uvmap_name_get(settings, ob).value_or("");
+  const Brush *brush = settings.paint.brush;
+  const bool is_mask_brush = brush && brush->image_brush_type == IMAGE_PAINT_BRUSH_TYPE_MASK;
 
-  Image *image;
-  ImageUser *image_user;
-  if (BKE_paint_canvas_image_get(settings, ob, &image, &image_user)) {
+  Image *image = nullptr;
+  ImageUser tile_user;
+
+  if (is_mask_brush) {
+    image = settings.stencil;
+    tile_user = ImageUser{};
+  }
+  else if (std::optional<CanvasImageData> canvas_image_data = BKE_paint_canvas_image_get(settings,
+                                                                                         *ob))
+  {
+    image = canvas_image_data->first;
+
+    if (std::holds_alternative<ImageUser *>(canvas_image_data->second)) {
+      tile_user = *std::get<ImageUser *>(canvas_image_data->second);
+    }
+    else {
+      tile_user = std::get<ImageUser>(canvas_image_data->second);
+    }
+  }
+
+  if (image) {
     ss << ",SEAM_MARGIN:" << image->seam_margin;
-    ImageUser tile_user = *image_user;
     for (ImageTile &image_tile : image->tiles) {
       tile_user.tile = image_tile.tile_number;
       ImBuf *image_buffer = BKE_image_acquire_ibuf(image, &tile_user, nullptr);

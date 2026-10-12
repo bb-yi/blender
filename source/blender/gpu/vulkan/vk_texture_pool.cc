@@ -70,7 +70,8 @@ static VkImage create_and_bind_vk_image(const VKImageInfo &info, const std::stri
 
   /* Create VkImage handle from provided VkImageCreateInfo */
   VkImage image;
-  VkResult create_result = vkCreateImage(device.vk_handle(), &info.create_info, nullptr, &image);
+  VkResult create_result = device.functions.vkCreateImage(
+      device.vk_handle(), &info.create_info, nullptr, &image);
   UNUSED_VARS_NDEBUG(create_result);
   BLI_assert(create_result == VK_SUCCESS);
 
@@ -103,11 +104,13 @@ inline VkMemoryRequirements get_image_memory_requirements(const VkImageCreateInf
         .pCreateInfo = &image_info,
         .planeAspect = VK_IMAGE_ASPECT_NONE,
     };
-    device.functions.vkGetDeviceImageMemoryRequirements(device.vk_handle(), &reqs_info, &reqs_out);
+    device.functions.vkGetDeviceImageMemoryRequirementsKHR(
+        device.vk_handle(), &reqs_info, &reqs_out);
   }
   else {
     VkImage image = VK_NULL_HANDLE;
-    VkResult result = vkCreateImage(device.vk_handle(), &image_info, nullptr, &image);
+    VkResult result = device.functions.vkCreateImage(
+        device.vk_handle(), &image_info, nullptr, &image);
     UNUSED_VARS_NDEBUG(result);
     BLI_assert(result == VK_SUCCESS);
 
@@ -116,8 +119,8 @@ inline VkMemoryRequirements get_image_memory_requirements(const VkImageCreateInf
         .pNext = nullptr,
         .image = image,
     };
-    vkGetImageMemoryRequirements2(device.vk_handle(), &reqs_info, &reqs_out);
-    vkDestroyImage(device.vk_handle(), image, nullptr);
+    device.functions.vkGetImageMemoryRequirements2(device.vk_handle(), &reqs_info, &reqs_out);
+    device.functions.vkDestroyImage(device.vk_handle(), image, nullptr);
   }
 
   return reqs_out.memoryRequirements;
@@ -384,8 +387,8 @@ Texture *VKTexturePool::acquire_texture_impl(int3 extent,
       .imageType = to_vk_image_type(type),
       .format = to_vk_format(format),
       .extent = texture->vk_extent_3d(0),
-      .mipLevels = static_cast<uint32_t>(max_ii(texture->mip_count(), 1)),
-      .arrayLayers = static_cast<uint32_t>(texture->vk_layer_count(1)),
+      .mipLevels = uint32_t(max_ii(texture->mip_count(), 1)),
+      .arrayLayers = uint32_t(texture->layer_count()),
       .samples = VK_SAMPLE_COUNT_1_BIT,
       .tiling = VK_IMAGE_TILING_OPTIMAL,
       .usage = to_vk_image_usage(usage, to_format_flag(format), false),
@@ -440,6 +443,7 @@ Texture *VKTexturePool::acquire_texture_impl(int3 extent,
   else {
     texture->vk_image_ = create_and_bind_vk_image(image_info, name_str);
   }
+  texture->vk_image_usage_ = create_info.usage;
   debug::object_label(texture->vk_image_, name_str);
 
   if (G.debug & G_DEBUG_GPU) {
@@ -463,6 +467,19 @@ void VKTexturePool::release_texture(Texture *texture)
   TextureHandle texture_handle = acquired_.lookup_key({unwrap(texture)});
   VKImageInfo image_info = texture_handle.image_info;
   AllocationHandle allocation_handle = allocations_.lookup_key({image_info.allocation});
+
+  /* Avoiding WRITE_AFTER_WRITE/READ_AFTER_WRITE hazards (#161990) when reusing the same cached
+   * VkImage. Reset the tracked layout to undefined so the next alias to use this memory
+   * transitions from VK_IMAGE_LAYOUT_UNDEFINED, as required for memory aliasing. */
+  VKContext &context = *VKContext::get();
+  render_graph::VKSynchronizationNode::CreateInfo synchronization = {
+      .vk_image = texture_handle.texture->vk_image_handle(),
+      .vk_image_layout = VK_IMAGE_LAYOUT_GENERAL,
+      .vk_image_aspect = to_vk_image_aspect_flag_bits(texture_handle.texture->device_format_get()),
+      .vk_access_flags = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+      .reset_layout_to_undefined = true,
+  };
+  context.render_graph().add_node(synchronization);
 
   if (G.debug & G_DEBUG_GPU) {
     current_usage_data_.acquired_segment_size -= image_info.segment.size;

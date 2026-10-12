@@ -5,11 +5,12 @@
 #pragma once
 
 #include "draw_view.bsl.hh"
+#include "eevee_camera_lib.bsl.hh"
 #include "eevee_camera_shared.hh"
 #include "eevee_defines.hh"
 #include "eevee_velocity_shared.hh"
-#include "gpu_shader_math_base_lib.glsl"
-#include "gpu_shader_math_matrix_transform_lib.glsl"
+#include "gpu_shader_math_base.bsl.hh"
+#include "gpu_shader_math_matrix_transform.bsl.hh"
 
 namespace eevee::velocity {
 
@@ -70,11 +71,24 @@ struct CameraVelocity {
    */
   float4 surface_velocity(float3 P_prv, float3 P, float3 P_nxt) const
   {
-    /* NOTE: We use CameraData matrices instead of drw_view().persmat to avoid adding the TAA
-     * jitter to the velocity. */
-    float2 prev_uv = project_point(camera_prev.persmat, P_prv).xy;
-    float2 curr_uv = project_point(camera_curr.persmat, P).xy;
-    float2 next_uv = project_point(camera_next.persmat, P_nxt).xy;
+    float2 prev_uv, curr_uv, next_uv;
+    const bool panoramic = is_panoramic(camera_curr.type);
+    if (panoramic) {
+      /* Project through the panoramic mapping so the motion vector lands in the same warped film
+       * space the accumulation buffer is stored in. */
+      prev_uv = eevee::camera::uv_from_view(camera_prev,
+                                            transform_point(camera_prev.viewmat, P_prv));
+      curr_uv = eevee::camera::uv_from_view(camera_curr, transform_point(camera_curr.viewmat, P));
+      next_uv = eevee::camera::uv_from_view(camera_next,
+                                            transform_point(camera_next.viewmat, P_nxt));
+    }
+    else {
+      /* NOTE: We use CameraData matrices instead of drw_view().persmat to avoid adding the TAA
+       * jitter to the velocity. */
+      prev_uv = project_point(camera_prev.persmat, P_prv).xy;
+      curr_uv = project_point(camera_curr.persmat, P).xy;
+      next_uv = project_point(camera_next.persmat, P_nxt).xy;
+    }
     /* Fix issue with perspective division. */
     if (any(isnan(prev_uv))) {
       prev_uv = curr_uv;
@@ -85,8 +99,11 @@ struct CameraVelocity {
     /* NOTE: We output both vectors in the same direction so we can reuse the same vector
      * with RGRG swizzle in viewport. */
     float4 motion = float4(prev_uv - curr_uv, curr_uv - next_uv);
-    /* Convert NDC velocity to UV velocity */
-    motion *= 0.5f;
+    if (!panoramic) {
+      /* Convert NDC velocity to UV velocity. `uv_from_view` above already returns UV space
+       * directly for the panoramic case. */
+      motion *= 0.5f;
+    }
 
     return motion;
   }
@@ -123,27 +140,38 @@ struct CameraVelocity {
   float4 background_velocity(float3 vV) const
   {
     float3 V = transform_direction(camera_curr.viewinv, vV);
-    /* NOTE: We use CameraData matrices instead of drw_view().winmat to avoid adding the TAA jitter
-     * to the velocity. */
-    float2 prev_uv =
-        project_point(camera_prev.winmat, transform_direction(camera_prev.viewmat, V)).xy;
-    float2 curr_uv =
-        project_point(camera_curr.winmat, transform_direction(camera_curr.viewmat, V)).xy;
-    float2 next_uv =
-        project_point(camera_next.winmat, transform_direction(camera_next.viewmat, V)).xy;
+    float2 prev_uv, curr_uv, next_uv;
+    const bool panoramic = is_panoramic(camera_curr.type);
+    if (panoramic) {
+      /* Project through the panoramic mapping so the motion vector lands in the same warped film
+       * space the accumulation buffer is stored in. */
+      prev_uv = eevee::camera::uv_from_view(camera_prev,
+                                            transform_direction(camera_prev.viewmat, V));
+      curr_uv = eevee::camera::uv_from_view(camera_curr,
+                                            transform_direction(camera_curr.viewmat, V));
+      next_uv = eevee::camera::uv_from_view(camera_next,
+                                            transform_direction(camera_next.viewmat, V));
+    }
+    else {
+      /* NOTE: We use CameraData matrices instead of drw_view().winmat to avoid adding the TAA
+       * jitter to the velocity. */
+      prev_uv = project_point(camera_prev.winmat, transform_direction(camera_prev.viewmat, V)).xy;
+      curr_uv = project_point(camera_curr.winmat, transform_direction(camera_curr.viewmat, V)).xy;
+      next_uv = project_point(camera_next.winmat, transform_direction(camera_next.viewmat, V)).xy;
+    }
     /* NOTE: We output both vectors in the same direction so we can reuse the same vector
      * with RGRG swizzle in viewport. */
     float4 motion = float4(prev_uv - curr_uv, curr_uv - next_uv);
-    /* Convert NDC velocity to UV velocity */
-    motion *= 0.5f;
+    if (!panoramic) {
+      /* Convert NDC velocity to UV velocity. `uv_from_view` above already returns UV space
+       * directly for the panoramic case. */
+      motion *= 0.5f;
+    }
 
     return motion;
   }
 
-  float4 resolve([[resource_table]] const draw::View &views,
-                 float4 vector,
-                 float2 uv,
-                 float depth) const
+  float4 resolve(const draw::View &views, float4 vector, float2 uv, float depth) const
   {
     const ViewMatrices view = views.get(0);
     if (vector.x == VELOCITY_INVALID) {
@@ -165,10 +193,7 @@ struct CameraVelocity {
    * motion data for performance reasons.
    * Returns motion vector in render UV space.
    */
-  float4 resolve([[resource_table]] const draw::View &views,
-                 sampler2D vector_tx,
-                 int2 texel,
-                 float depth) const
+  float4 resolve(const draw::View &views, sampler2D vector_tx, int2 texel, float depth) const
   {
     float2 uv = (float2(texel) + 0.5f) / float2(textureSize(vector_tx, 0).xy);
     float4 vector = texelFetch(vector_tx, texel, 0);
@@ -176,10 +201,22 @@ struct CameraVelocity {
   }
 };
 
-struct GeometryVelocity {
-  [[legacy_info]] ShaderCreateInfo eevee_velocity_iface_info;
+/* -------------------------------------------------------------------- */
 
-  [[resource_table]] srt_t<CameraVelocity> camera;
+/* Pass world space deltas to the fragment shader.
+ * This is to make sure that the resulting motion vectors are valid even with displacement.
+ * WARNING: The next value is invalid when rendering the viewport. */
+struct VertOutVelocity {
+  [[smooth]] float3 prev;
+  [[smooth]] float3 next;
+};
+
+/* Surface Velocity
+ *
+ * Combined with the depth pre-pass shader.
+ * Outputs the view motion vectors for animated objects. */
+struct GeometryVelocity {
+  [[resource_table]] CameraVelocity camera;
 
   [[storage(VELOCITY_OBJ_PREV_BUF_SLOT, read)]] const float4x4 (&velocity_obj_prev_buf)[];
   [[storage(VELOCITY_OBJ_NEXT_BUF_SLOT, read)]] const float4x4 (&velocity_obj_next_buf)[];

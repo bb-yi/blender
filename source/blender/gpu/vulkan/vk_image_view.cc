@@ -8,57 +8,48 @@
 
 #include "vk_image_view.hh"
 #include "vk_backend.hh"
+#include "vk_common.hh"
 #include "vk_debug.hh"
 #include "vk_device.hh"
 #include "vk_texture.hh"
 
 namespace blender::gpu {
 
-static VkFormat to_non_srgb_format(const VkFormat format)
-{
-  switch (format) {
-    case VK_FORMAT_R8G8B8_SRGB:
-      return VK_FORMAT_R8G8B8_UNORM;
-    case VK_FORMAT_R8G8B8A8_SRGB:
-      return VK_FORMAT_R8G8B8A8_UNORM;
-
-    default:
-      break;
-  }
-  return format;
-}
-
 VKImageView::VKImageView(VKTexture &texture, const VKImageViewInfo &info, StringRefNull name)
     : info(info)
 {
-  const VkImageAspectFlags allowed_bits = VK_IMAGE_ASPECT_COLOR_BIT |
-                                          (info.use_stencil ? VK_IMAGE_ASPECT_STENCIL_BIT :
-                                                              VK_IMAGE_ASPECT_DEPTH_BIT);
-  TextureFormat device_format = texture.device_format_get();
-  VkImageAspectFlags image_aspect = to_vk_image_aspect_flag_bits(device_format) & allowed_bits;
-
-  vk_format_ = to_vk_format(device_format);
-  if (texture.format_flag_get() & GPU_FORMAT_SRGB && !info.use_srgb) {
-    vk_format_ = to_non_srgb_format(vk_format_);
-  }
-
   VkImageViewCreateInfo image_view_info = {};
   image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   image_view_info.image = texture.vk_image_handle();
   image_view_info.viewType = to_vk_image_view_type(texture.type_get(), info.usage, info.arrayed);
-  image_view_info.format = vk_format_;
+  image_view_info.format = info.vk_format;
   image_view_info.components.r = to_vk_component_swizzle(info.swizzle[0]);
   image_view_info.components.g = to_vk_component_swizzle(info.swizzle[1]);
   image_view_info.components.b = to_vk_component_swizzle(info.swizzle[2]);
   image_view_info.components.a = to_vk_component_swizzle(info.swizzle[3]);
-  image_view_info.subresourceRange.aspectMask = image_aspect;
+  image_view_info.subresourceRange.aspectMask = info.vk_image_aspects;
   image_view_info.subresourceRange.baseMipLevel = info.mip_range.first();
   image_view_info.subresourceRange.levelCount = info.mip_range.size();
   image_view_info.subresourceRange.baseArrayLayer = info.layer_range.first();
   image_view_info.subresourceRange.layerCount = info.layer_range.size();
 
+  /* When extended usage is enabled for storage images, it means the original format
+   * is not supported. So we must strip USAGE_STORAGE for the image view that has the
+   * same format as the image, and only leave it for the other image view with the
+   * format that will be used for storage. */
+  VkImageViewUsageCreateInfo view_usage_info = {VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO};
+  if (vk_need_extended_usage_for_storage_image(texture.usage_get(), texture.format_flag_get()) &&
+      info.vk_format == to_vk_format(texture.device_format_get()))
+  {
+    view_usage_info.usage = texture.vk_image_usage_get() & ~VK_IMAGE_USAGE_STORAGE_BIT;
+    BLI_assert(view_usage_info.usage != 0);
+    view_usage_info.pNext = image_view_info.pNext;
+    image_view_info.pNext = &view_usage_info;
+  }
+
   const VKDevice &device = VKBackend::get().device;
-  vkCreateImageView(device.vk_handle(), &image_view_info, nullptr, &vk_image_view_);
+  device.functions.vkCreateImageView(
+      device.vk_handle(), &image_view_info, nullptr, &vk_image_view_);
   debug::object_label(vk_image_view_, name.c_str());
 }
 

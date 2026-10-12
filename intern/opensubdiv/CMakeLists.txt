@@ -62,9 +62,6 @@ if(WITH_OPENSUBDIV)
 
 
     # Topology.
-    internal/topology/mesh_topology.cc
-    internal/topology/mesh_topology_compare.cc
-    internal/topology/mesh_topology.h
     internal/topology/topology_refiner_factory.cc
     internal/topology/topology_refiner_impl.cc
     internal/topology/topology_refiner_impl_compare.cc
@@ -86,6 +83,8 @@ if(WITH_OPENSUBDIV)
   endif()
 
   set(GLSL_SRC
+    internal/evaluator/shaders/infos/osd_eval_infos.hh
+
     internal/evaluator/shaders/osd_eval_stencils_comp.glsl
     internal/evaluator/shaders/osd_eval_patches_comp.glsl
   )
@@ -95,6 +94,7 @@ if(WITH_OPENSUBDIV)
     ../../source/blender/draw/intern/shaders
 
     internal/evaluator/shaders
+    internal/evaluator/shaders/infos
   )
 
   set(GLSL_C "")
@@ -112,7 +112,7 @@ if(WITH_OPENSUBDIV)
   set(GLSL_METADATA_CONTENT "")
   set(GLSL_INFOS_CONTENT "")
   foreach(GLSL_FILE ${GLSL_SRC})
-    get_filename_component(GLSL_FILE_NAME ${GLSL_FILE} NAME)
+    cmake_path(GET GLSL_FILE FILENAME GLSL_FILE_NAME)
     string(REPLACE "." "_" GLSL_FILE_NAME_UNDERSCORES ${GLSL_FILE_NAME})
     string(APPEND GLSL_FILE_NAME_UNDERSCORES "_tmp")
     string(APPEND GLSL_SOURCE_CONTENT "SHADER_SOURCE\(${GLSL_FILE_NAME_UNDERSCORES}, \"${GLSL_FILE_NAME}\", \"${GLSL_FILE}\"\)\n")
@@ -141,13 +141,3 @@ else()
 endif()
 
 blender_add_lib(bf_intern_opensubdiv "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
-
-# Tests.
-
-if(WITH_GTESTS AND WITH_OPENSUBDIV)
-  set(TEST_SRC
-    internal/topology/mesh_topology_test.cc
-  )
-
-  blender_add_test_suite_lib(intern_opensubdiv "${TEST_SRC}" "${INC}" "${INC_SYS}" "${LIB};bf_intern_opensubdiv")
-endif()

@@ -9,8 +9,9 @@
 #include <algorithm>
 #include <cstring>
 
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_action_types.h"
 #include "DNA_screen_types.h"
@@ -36,6 +37,20 @@
 namespace blender {
 
 namespace ed::outliner {
+
+bool outliner_treesort_tiebreak(bool a_is_object,
+                                const char *a_name,
+                                bool b_is_object,
+                                const char *b_name)
+{
+  if (a_is_object != b_is_object) {
+    return !a_is_object;
+  }
+  if (!a_is_object) {
+    return false;
+  }
+  return BLI_strcasecmp_natural(a_name, b_name) < 0;
+}
 
 /* -------------------------------------------------------------------- */
 /** \name Tree View Context
@@ -110,7 +125,7 @@ static TreeElement *outliner_find_item_at_x_in_row_recursive(const TreeElement *
                                                              float view_co_x,
                                                              bool *r_is_merged_icon)
 {
-  TreeElement *child_te = static_cast<TreeElement *>(parent_te->subtree.first);
+  TreeElement *child_te = parent_te->subtree.first();
 
   while (child_te) {
     const bool over_element = (view_co_x > child_te->xs) && (view_co_x < child_te->xend);
@@ -295,7 +310,7 @@ bool outliner_tree_traverse(const SpaceOutliner *space_outliner,
                             TreeTraversalFunc func,
                             void *customdata)
 {
-  for (TreeElement *te = static_cast<TreeElement *>(tree->first), *te_next; te; te = te_next) {
+  for (TreeElement *te = tree->first(), *te_next; te; te = te_next) {
     TreeTraversalAction func_retval = TRAVERSE_CONTINUE;
     /* in case te is freed in callback */
     TreeStoreElem *tselem = TREESTORE(te);
@@ -365,6 +380,9 @@ float outliner_right_columns_width(const SpaceOutliner *space_outliner)
       }
       ATTR_FALLTHROUGH;
     case SO_SCENES:
+      if (space_outliner->flag & SO_USERS_COLUMN) {
+        num_columns++;
+      }
       if (space_outliner->show_restrict_flags & SO_RESTRICT_SELECT) {
         num_columns++;
       }

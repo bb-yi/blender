@@ -6,7 +6,7 @@
 
 #include "eevee_reverse_z_lib.bsl.hh"
 #include "eevee_velocity.bsl.hh"
-#include "gpu_shader_fullscreen_lib.glsl"
+#include "gpu_shader_fullscreen.bsl.hh"
 
 namespace eevee::dlss5 {
 
@@ -37,7 +37,7 @@ struct FragOut {
 struct VelocityResources {
   [[sampler(0)]] sampler2D velocity_tx;
   [[sampler(1)]] sampler2DDepth depth_tx;
-  [[resource_table]] srt_t<CameraVelocity> camera;
+  [[resource_table]] CameraVelocity camera;
   [[push_constant]] int guide_overscan;
   [[push_constant]] int guide_scale;
   [[push_constant]] float2 guide_ratio;
@@ -58,7 +58,7 @@ struct SrPrepareResources {
   [[sampler(1)]] sampler2D outline_tx;
   [[sampler(2)]] sampler2DDepth depth_tx;
   [[sampler(3)]] sampler2D velocity_tx;
-  [[resource_table]] srt_t<CameraVelocity> camera;
+  [[resource_table]] CameraVelocity camera;
   [[push_constant]] bool has_outline;
   [[push_constant]] bool use_motion;
   [[push_constant]] int guide_overscan;

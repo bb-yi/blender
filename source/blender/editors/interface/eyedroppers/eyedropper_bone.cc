@@ -17,9 +17,9 @@
 #include "BKE_report.hh"
 #include "BKE_screen.hh"
 
-#include "BLI_assert.h"
-#include "BLI_math_vector.h"
-#include "BLI_string_utf8.h"
+#include "BLI_assert.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string_utf8.hh"
 
 #include "RNA_access.hh"
 #include "RNA_prototypes.hh"
@@ -81,7 +81,7 @@ static void datadropper_draw_cb(const bContext * /*C*/, ARegion * /*region*/, vo
 
 static bool is_bone_dropper_valid(BoneDropper *bone_dropper)
 {
-  if ((bone_dropper->ptr.data == nullptr) || (bone_dropper->prop == nullptr)) {
+  if (!bone_dropper->ptr || (bone_dropper->prop == nullptr)) {
     return false;
   }
   if (!RNA_property_editable(&bone_dropper->ptr, bone_dropper->prop)) {

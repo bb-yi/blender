@@ -15,10 +15,10 @@
 
 #include "BLT_translation.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BKE_action.hh"
 #include "BKE_armature.hh"
@@ -751,7 +751,7 @@ static wmOperatorStatus armature_fill_bones_exec(bContext *C, wmOperator *op)
     float curs[3];
 
     /* Get Points - selected joint */
-    ebp = static_cast<EditBonePoint *>(points.first);
+    ebp = points.first();
 
     /* Get points - cursor (tail) */
     invert_m4_m4(obedit->runtime->world_to_object.ptr(), obedit->object_to_world().ptr());
@@ -774,7 +774,7 @@ static wmOperatorStatus armature_fill_bones_exec(bContext *C, wmOperator *op)
     short headtail = 0;
 
     /* check that the points don't belong to the same bone */
-    ebp_a = static_cast<EditBonePoint *>(points.first);
+    ebp_a = points.first();
     ebp_b = ebp_a->next;
 
     if (((ebp_a->head_owner == ebp_b->tail_owner) && (ebp_a->head_owner != nullptr)) ||
@@ -1282,7 +1282,7 @@ static wmOperatorStatus armature_delete_selected_exec(bContext *C, wmOperator * 
 
     BKE_pose_channels_remove(obedit, armature_delete_ebone_cb, arm);
 
-    for (curBone = static_cast<EditBone *>(arm->edbo->first); curBone; curBone = ebone_next) {
+    for (curBone = arm->edbo->first(); curBone; curBone = ebone_next) {
       ebone_next = curBone->next;
       if (animrig::bone_is_selected(arm, curBone)) {
         if (curBone == arm->act_edbone) {
@@ -1441,7 +1441,7 @@ static wmOperatorStatus armature_dissolve_selected_exec(bContext *C, wmOperator 
 
     BKE_pose_channels_remove(obedit, armature_dissolve_ebone_cb, arm);
 
-    for (ebone = static_cast<EditBone *>(arm->edbo->first); ebone; ebone = ebone_next) {
+    for (ebone = arm->edbo->first(); ebone; ebone = ebone_next) {
       ebone_next = ebone->next;
 
       if (ebone->flag & BONE_DONE) {

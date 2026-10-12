@@ -2,11 +2,11 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
- /** \file
-  * \ingroup eevee
-  *
-  * An instance contains all structures needed to do a complete render.
-  */
+/** \file
+ * \ingroup eevee
+ *
+ * An instance contains all structures needed to do a complete render.
+ */
 
 #include <algorithm>
 #include <cmath>
@@ -14,17 +14,20 @@
 
 #include "CLG_log.h"
 
+#include "BKE_camera.h"
 #include "BKE_global.hh"
 #include "BKE_object.hh"
 #include "BKE_scene.hh"
 
-#include "BLI_rect.h"
-#include "BLI_time.h"
+#include "BLI_rect.hh"
+#include "BLI_time.hh"
+#include "BLI_timecode.hh"
 
 #include "BLT_translation.hh"
 
 #include "DEG_depsgraph_query.hh"
 
+#include "DNA_camera_types.h"
 #include "DNA_lightprobe_types.h"
 #include "DNA_modifier_types.h"
 
@@ -33,6 +36,7 @@
 #include "GPU_context.hh"
 #include "GPU_pass.hh"
 #include "GPU_platform.hh"
+#include "GPU_work_in_flight.hh"
 #include "IMB_imbuf_types.hh"
 
 #include "RE_engine.h"
@@ -47,1039 +51,998 @@
 #include "draw_debug.hh"
 #include "draw_view_data.hh"
 
-namespace blender::eevee
+namespace blender::eevee {
+
+CLG_LogRef Instance::log = {"eevee"};
+
+void *Instance::debug_scope_render_frame = nullptr;
+void *Instance::debug_scope_render_sample = nullptr;
+void *Instance::debug_scope_irradiance_setup = nullptr;
+void *Instance::debug_scope_irradiance_sample = nullptr;
+
+/* -------------------------------------------------------------------- */
+/** \name Initialization
+ *
+ * Initialization functions need to be called once at the start of a frame.
+ * Active camera, render extent and enabled render passes are immutable until next init.
+ * This takes care of resizing output buffers and view in case a parameter changed.
+ * IMPORTANT: xxx.init() functions are NOT meant to acquire and allocate DRW resources.
+ * Any attempt to do so will likely produce use after free situations.
+ * \{ */
+
+void Instance::init()
 {
+  this->draw_ctx = DRW_context_get();
 
-  CLG_LogRef Instance::log = { "eevee" };
+  Depsgraph *depsgraph = draw_ctx->depsgraph;
+  Scene *scene = draw_ctx->scene;
+  View3D *v3d = draw_ctx->v3d;
+  ARegion *region = draw_ctx->region;
+  RegionView3D *rv3d = draw_ctx->rv3d;
 
-  void* Instance::debug_scope_render_frame = nullptr;
-  void* Instance::debug_scope_render_sample = nullptr;
-  void* Instance::debug_scope_irradiance_setup = nullptr;
-  void* Instance::debug_scope_irradiance_sample = nullptr;
+  DefaultTextureList *dtxl = draw_ctx->viewport_texture_list_get();
+  int2 size = int2(GPU_texture_width(dtxl->color), GPU_texture_height(dtxl->color));
 
-  /* -------------------------------------------------------------------- */
-  /** \name Initialization
-   *
-   * Initialization functions need to be called once at the start of a frame.
-   * Active camera, render extent and enabled render passes are immutable until next init.
-   * This takes care of resizing output buffers and view in case a parameter changed.
-   * IMPORTANT: xxx.init() functions are NOT meant to acquire and allocate DRW resources.
-   * Any attempt to do so will likely produce use after free situations.
-   * \{ */
+  draw::View &default_view = draw::View::default_get();
 
-  void Instance::init()
-  {
-    this->draw_ctx = DRW_context_get();
+  Object *camera = nullptr;
+  /* Get render borders. */
+  rcti rect;
+  BLI_rcti_init(&rect, 0, size[0], 0, size[1]);
+  rcti visible_rect = rect;
+  if (v3d) {
+    if (rv3d && (rv3d->persp == RV3D_CAMOB)) {
+      camera = v3d->camera;
+    }
+    /* Panoramic camera need the full film, none of the border resize below apply.
+     * TODO: passepartout crop is unsupported for panoramic camera.
+     * Could reuse the uv_scale/uv_bias remap already used for camera shift (see Camera::sync). */
+    const bool is_panoramic_camera =
+        camera && camera->type == OB_CAMERA &&
+        reinterpret_cast<const blender::Camera *>(camera->data)->type == CAM_PANO;
 
-    Depsgraph* depsgraph = draw_ctx->depsgraph;
-    Scene* scene = draw_ctx->scene;
-    View3D* v3d = draw_ctx->v3d;
-    ARegion* region = draw_ctx->region;
-    RegionView3D* rv3d = draw_ctx->rv3d;
-
-    DefaultTextureList* dtxl = draw_ctx->viewport_texture_list_get();
-    int2 size = int2(GPU_texture_width(dtxl->color), GPU_texture_height(dtxl->color));
-
-    draw::View& default_view = draw::View::default_get();
-
-    Object* camera = nullptr;
-    /* Get render borders. */
-    rcti rect;
-    BLI_rcti_init(&rect, 0, size[0], 0, size[1]);
-    rcti visible_rect = rect;
-    if (v3d)
-    {
-      if (rv3d && (rv3d->persp == RV3D_CAMOB))
-      {
-        camera = v3d->camera;
-      }
-
-      if (camera)
-      {
-        if (scene->r.mode & R_BORDER) {
-          if (draw_ctx->is_viewport_image_render() || draw_ctx->is_viewport_xr()) {
-            rect.xmin = scene->r.border.xmin * size[0];
-            rect.ymin = scene->r.border.ymin * size[1];
-            rect.xmax = scene->r.border.xmax * size[0];
-            rect.ymax = scene->r.border.ymax * size[1];
-          }
-          else {
-            rctf viewborder;
-            /* TODO(fclem) Might be better to get it from DRW. */
-            ED_view3d_calc_camera_border(scene, depsgraph, region, v3d, rv3d, false, &viewborder);
-            float viewborder_sizex = BLI_rctf_size_x(&viewborder);
-            float viewborder_sizey = BLI_rctf_size_y(&viewborder);
-            rect.xmin = floorf(viewborder.xmin + (scene->r.border.xmin * viewborder_sizex));
-            rect.ymin = floorf(viewborder.ymin + (scene->r.border.ymin * viewborder_sizey));
-            rect.xmax = floorf(viewborder.xmin + (scene->r.border.xmax * viewborder_sizex));
-            rect.ymax = floorf(viewborder.ymin + (scene->r.border.ymax * viewborder_sizey));
-            /* Clamp it to the viewport area. */
-            rect.xmin = max(rect.xmin, 0);
-            rect.ymin = max(rect.ymin, 0);
-            rect.xmax = min(rect.xmax, size.x);
-            rect.ymax = min(rect.ymax, size.y);
-          }
+    if (draw_ctx->is_viewport_image_render() || draw_ctx->is_viewport_xr()) {
+      if (camera) {
+        if (!is_panoramic_camera && (scene->r.mode & R_BORDER)) {
+          rect.xmin = scene->r.border.xmin * size[0];
+          rect.ymin = scene->r.border.ymin * size[1];
+          rect.xmax = scene->r.border.xmax * size[0];
+          rect.ymax = scene->r.border.ymax * size[1];
         }
       }
-      else if (v3d->flag2 & V3D_RENDER_BORDER)
-      {
+      else if (v3d->flag2 & V3D_RENDER_BORDER) {
         rect.xmin = v3d->render_border.xmin * size[0];
         rect.ymin = v3d->render_border.ymin * size[1];
         rect.xmax = v3d->render_border.xmax * size[0];
         rect.ymax = v3d->render_border.ymax * size[1];
       }
-
-      if (draw_ctx->is_viewport_image_render() || draw_ctx->is_viewport_xr())
+    }
+    else {
+      rctf border;
+      if (rv3d && !is_panoramic_camera &&
+          BKE_camera_view_render_border(
+              scene, depsgraph, v3d, rv3d, size[0], size[1], &border, nullptr))
       {
-        const float2 vp_size = draw_ctx->viewport_size_get();
-        visible_rect.xmax = vp_size[0];
-        visible_rect.ymax = vp_size[1];
-        visible_rect.xmin = visible_rect.ymin = 0;
-      }
-      else
-      {
-        visible_rect = *ED_region_visible_rect(region);
+        BLI_rcti_rctf_copy_floor(&rect, &border);
+        /* Clamp it to the viewport area. */
+        rect.xmin = max(rect.xmin, 0);
+        rect.ymin = max(rect.ymin, 0);
+        rect.xmax = min(rect.xmax, size.x);
+        rect.ymax = min(rect.ymax, size.y);
       }
     }
 
-    init(size, &rect, &visible_rect, nullptr, depsgraph, camera, nullptr, &default_view, v3d, rv3d);
+    if (draw_ctx->is_viewport_image_render() || draw_ctx->is_viewport_xr()) {
+      const float2 vp_size = draw_ctx->viewport_size_get();
+      visible_rect.xmax = vp_size[0];
+      visible_rect.ymax = vp_size[1];
+      visible_rect.xmin = visible_rect.ymin = 0;
+    }
+    else {
+      visible_rect = *ED_region_visible_rect(region);
+    }
   }
 
-  bool Instance::performance_capture_requested(const DRWContext &draw_ctx) const
+  init(size, &rect, &visible_rect, nullptr, depsgraph, camera, nullptr, &default_view, v3d, rv3d);
+}
+
+bool Instance::performance_capture_requested(const DRWContext &draw_ctx) const
+{
+  if (draw_ctx.scene == nullptr ||
+      (draw_ctx.scene->eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER) == 0)
   {
-    if (draw_ctx.scene == nullptr ||
-        (draw_ctx.scene->eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER) == 0)
+    return false;
+  }
+
+  /* Draw performance is a shared viewport ledger. Final renders and auxiliary selection/XR
+   * loops have their own lifetimes and must not be mixed into it. */
+  return ELEM(draw_ctx.mode, DRWContext::VIEWPORT, DRWContext::VIEWPORT_RENDER);
+}
+
+void Instance::performance_frame_end(const DrawPerformanceMetrics &metrics)
+{
+  telemetry.draw_performance_end(metrics);
+}
+
+void Instance::init(const int2 &output_res,
+                    const rcti *output_rect,
+                    const rcti *visible_rect,
+                    RenderEngine *render_,
+                    Depsgraph *depsgraph_,
+                    Object *camera_object_,
+                    const RenderLayer *render_layer_,
+                    View *drw_view_,
+                    const View3D *v3d_,
+                    const RegionView3D *rv3d_)
+{
+  this->draw_ctx = DRW_context_get();
+
+  render = render_;
+  depsgraph = depsgraph_;
+  camera_orig_object = camera_object_;
+  render_layer = render_layer_;
+  drw_view = drw_view_;
+  v3d = v3d_;
+  rv3d = rv3d_;
+  manager = DRW_manager_get();
+  update_eval_members();
+  Scene *telemetry_scene = DEG_get_input_scene(depsgraph);
+  if (telemetry_scene == nullptr) {
+    telemetry_scene = scene;
+  }
+  const bool telemetry_source_changed = telemetry.source_binding_update(
+      telemetry_scene ? telemetry_scene->id.session_uid : 0, view_layer ? view_layer->name : "");
+
+  info_ = "";
+
+  if (is_viewport()) {
+    is_image_render = draw_ctx->is_image_render();
+    is_viewport_image_render = draw_ctx->is_viewport_image_render();
+    is_playback = draw_ctx->is_playback();
+    is_navigating = draw_ctx->is_navigating();
+    is_painting = draw_ctx->is_painting();
+    is_transforming = draw_ctx->is_transforming();
+    draw_overlays = v3d && (v3d->flag2 & V3D_HIDE_OVERLAYS) == 0;
+
+    if (telemetry_source_changed) {
+      sampling.reset();
+    }
+    if (is_playback) {
+      sampling.reset();
+    }
+
+    /* Note: Do not update the value here as we use it during sync for checking ID updates. */
+    if (depsgraph_last_update_ != DEG_get_update_count(depsgraph)) {
+      sampling.reset();
+    }
+    const bool profiler_enabled = telemetry.enabled();
+    const int output_offset_x = output_rect ? output_rect->xmin : 0;
+    const int output_offset_y = output_rect ? output_rect->ymin : 0;
+    const int output_extent_x = output_rect ? BLI_rcti_size_x(output_rect) : output_res.x;
+    const int output_extent_y = output_rect ? BLI_rcti_size_y(output_rect) : output_res.y;
+    if (telemetry.epoch_inputs_update(profiler_enabled,
+                                      output_res.x,
+                                      output_res.y,
+                                      output_offset_x,
+                                      output_offset_y,
+                                      output_extent_x,
+                                      output_extent_y))
     {
-      return false;
+      sampling.reset();
     }
-
-    /* Draw performance is a shared viewport ledger. Final renders and auxiliary selection/XR
-     * loops have their own lifetimes and must not be mixed into it. */
-    return ELEM(draw_ctx.mode, DRWContext::VIEWPORT, DRWContext::VIEWPORT_RENDER);
-  }
-
-  void Instance::performance_frame_end(const DrawPerformanceMetrics &metrics)
-  {
-    telemetry.draw_performance_end(metrics);
-  }
-
-  void Instance::init(const int2& output_res,
-    const rcti* output_rect,
-    const rcti* visible_rect,
-    RenderEngine* render_,
-    Depsgraph* depsgraph_,
-    Object* camera_object_,
-    const RenderLayer* render_layer_,
-    View* drw_view_,
-    const View3D* v3d_,
-    const RegionView3D* rv3d_)
-  {
-    this->draw_ctx = DRW_context_get();
-
-    render = render_;
-    depsgraph = depsgraph_;
-    camera_orig_object = camera_object_;
-    render_layer = render_layer_;
-    drw_view = drw_view_;
-    v3d = v3d_;
-    rv3d = rv3d_;
-    manager = DRW_manager_get();
-    update_eval_members();
-    Scene *telemetry_scene = DEG_get_input_scene(depsgraph);
-    if (telemetry_scene == nullptr) {
-      telemetry_scene = scene;
-    }
-    const bool telemetry_source_changed = telemetry.source_binding_update(
-      telemetry_scene ? telemetry_scene->id.session_uid : 0,
-      view_layer ? view_layer->name : "");
-
-    info_ = "";
-
-    if (is_viewport())
+    if (assign_if_different(is_viewport_compositor_used, draw_ctx->is_viewport_compositor_used()))
     {
-      is_image_render = draw_ctx->is_image_render();
-      is_viewport_image_render = draw_ctx->is_viewport_image_render();
-      is_playback = draw_ctx->is_playback();
-      is_navigating = draw_ctx->is_navigating();
-      is_painting = draw_ctx->is_painting();
-      is_transforming = draw_ctx->is_transforming();
-      draw_overlays = v3d && (v3d->flag2 & V3D_HIDE_OVERLAYS) == 0;
-
-      if (telemetry_source_changed) {
+      sampling.reset();
+    }
+    if (assign_if_different(debug_mode, eDebugMode(G.debug_value))) {
+      sampling.reset();
+    }
+    /* The shared telemetry source owns the resolution epoch. */
+    if (output_rect) {
+      int2 offset = int2(output_rect->xmin, output_rect->ymin);
+      int2 extent = int2(BLI_rcti_size_x(output_rect), BLI_rcti_size_y(output_rect));
+      if (offset != film.get_data().offset || extent != film.get_data().extent) {
         sampling.reset();
       }
-      if (is_playback) {
-        sampling.reset();
-      }
-
-      /* Note: Do not update the value here as we use it during sync for checking ID updates. */
-      if (depsgraph_last_update_ != DEG_get_update_count(depsgraph))
-      {
-        sampling.reset();
-      }
-      const bool profiler_enabled = telemetry.enabled();
-      const int output_offset_x = output_rect ? output_rect->xmin : 0;
-      const int output_offset_y = output_rect ? output_rect->ymin : 0;
-      const int output_extent_x = output_rect ? BLI_rcti_size_x(output_rect) : output_res.x;
-      const int output_extent_y = output_rect ? BLI_rcti_size_y(output_rect) : output_res.y;
-      if (telemetry.epoch_inputs_update(profiler_enabled,
-                                        output_res.x,
-                                        output_res.y,
-                                        output_offset_x,
-                                        output_offset_y,
-                                        output_extent_x,
-                                        output_extent_y))
-      {
-        sampling.reset();
-      }
-      if (assign_if_different(is_viewport_compositor_enabled,
-        draw_ctx->is_viewport_compositor_enabled()))
-      {
-        sampling.reset();
-      }
-      if (assign_if_different(debug_mode, eDebugMode(G.debug_value)))
-      {
-        sampling.reset();
-      }
-      /* The shared telemetry source owns the resolution epoch. */
-      if (output_rect)
-      {
-        int2 offset = int2(output_rect->xmin, output_rect->ymin);
-        int2 extent = int2(BLI_rcti_size_x(output_rect), BLI_rcti_size_y(output_rect));
-        if (offset != film.get_data().offset || extent != film.get_data().extent)
-        {
-          sampling.reset();
-        }
-      }
-      if (assign_if_different(overlays_enabled_, v3d && !(v3d->flag2 & V3D_HIDE_OVERLAYS)))
-      {
-        sampling.reset();
-      }
-      const bool is_material_or_rendered =
-        v3d && ELEM(v3d->shading.type, OB_MATERIAL, OB_RENDER);
-      const bool show_shadow_lod = draw_overlays && is_material_or_rendered &&
-        (v3d->overlay.flag & V3D_OVERLAY_SHOW_SHADOW_LOD);
-      if (assign_if_different(shadow_lod_overlay_, show_shadow_lod))
-      {
-        sampling.reset();
-      }
-      const int shadow_lod_opacity_encoded = v3d ?
-                                                  ((v3d->overlay.flag &
-                                                    V3D_OVERLAY_SHADOW_LOD_OPACITY_MASK) >>
-                                                   V3D_OVERLAY_SHADOW_LOD_OPACITY_SHIFT) :
-                                                  0;
-      const int shadow_lod_opacity_percent = shadow_lod_opacity_encoded == 0 ?
+    }
+    if (assign_if_different(overlays_enabled_, v3d && !(v3d->flag2 & V3D_HIDE_OVERLAYS))) {
+      sampling.reset();
+    }
+    const bool is_material_or_rendered = v3d && ELEM(v3d->shading.type, OB_MATERIAL, OB_RENDER);
+    const bool show_shadow_lod = draw_overlays && is_material_or_rendered &&
+                                 (v3d->overlay.flag & V3D_OVERLAY_SHOW_SHADOW_LOD);
+    if (assign_if_different(shadow_lod_overlay_, show_shadow_lod)) {
+      sampling.reset();
+    }
+    const int shadow_lod_opacity_encoded = v3d ? ((v3d->overlay.flag &
+                                                   V3D_OVERLAY_SHADOW_LOD_OPACITY_MASK) >>
+                                                  V3D_OVERLAY_SHADOW_LOD_OPACITY_SHIFT) :
+                                                 0;
+    const int shadow_lod_opacity_percent = shadow_lod_opacity_encoded == 0 ?
                                                V3D_OVERLAY_SHADOW_LOD_OPACITY_DEFAULT :
                                                shadow_lod_opacity_encoded - 1;
-      const float shadow_lod_opacity = float(shadow_lod_opacity_percent) * 0.01f;
-      if (assign_if_different(shadow_lod_overlay_opacity_, shadow_lod_opacity))
-      {
-        sampling.reset();
-      }
-      if (is_painting)
-      {
-        sampling.reset();
-      }
-      if ((is_navigating || is_transforming) &&
-          (scene->eevee.flag & SCE_EEVEE_SHADOW_JITTERED_VIEWPORT))
-      {
-        sampling.reset();
-      }
+    const float shadow_lod_opacity = float(shadow_lod_opacity_percent) * 0.01f;
+    if (assign_if_different(shadow_lod_overlay_opacity_, shadow_lod_opacity)) {
+      sampling.reset();
     }
-    else
-    {
-      is_image_render = true;
-      shadow_lod_overlay_ = false;
-      shadow_lod_overlay_opacity_ = 0.7f;
+    if (is_painting) {
+      sampling.reset();
     }
-
-    rcti lookdev_rect = *visible_rect;
-    if (is_viewport() && v3d && rv3d && rv3d->persp == RV3D_CAMOB && v3d->camera &&
-        !draw_ctx->is_viewport_image_render() && !draw_ctx->is_viewport_xr())
+    if ((is_navigating || is_transforming) &&
+        (scene->eevee.flag & SCE_EEVEE_SHADOW_JITTERED_VIEWPORT))
     {
-      rctf camera_border;
-      /* Anchor reference spheres to camera border. */
-      ED_view3d_calc_camera_border(
-          scene, depsgraph, draw_ctx->region, v3d, rv3d, false, &camera_border);
-      BLI_rcti_rctf_copy(&lookdev_rect, &camera_border);
+      sampling.reset();
     }
+  }
+  else {
+    is_image_render = true;
+    shadow_lod_overlay_ = false;
+    shadow_lod_overlay_opacity_ = 0.7f;
+  }
 
-    anisotropic_filtering = GPU_anisotropic_filtering_flags(scene->r.anisotropic_filter);
+  rcti lookdev_rect = *visible_rect;
+  if (is_viewport() && v3d && rv3d && rv3d->persp == RV3D_CAMOB && v3d->camera &&
+      !draw_ctx->is_viewport_image_render() && !draw_ctx->is_viewport_xr())
+  {
+    /* Anchor reference spheres to camera border. */
+    const rctf camera_border = BKE_camera_view_border(scene,
+                                                      depsgraph,
+                                                      v3d,
+                                                      rv3d,
+                                                      draw_ctx->region->winx,
+                                                      draw_ctx->region->winy,
+                                                      false,
+                                                      false,
+                                                      false);
+    BLI_rcti_rctf_copy(&lookdev_rect, &camera_border);
+  }
 
-    sampling.init(scene);
-    camera.init();
-    filter_materials.init();
-    native_postfx_outputs.init();
-    film.init(output_res, output_rect);
-    render_buffers.init();
-    render_textures.init();
-    ambient_occlusion.init();
-    velocity.init();
-    raytracing.init();
-    depth_of_field.init();
-    shadows.init();
-    motion_blur.init();
-    main_view.init();
-    light_probes.init();
-    planar_probes.init();
-    /* Irradiance Cache needs reflection probes to be initialized. */
-    sphere_probes.init();
-    volume_probes.init();
-    volume.init();
-    lookdev.init(&lookdev_rect);
+  anisotropic_filtering = GPU_anisotropic_filtering_flags(scene->r.anisotropic_filter);
 
-    if (GPU_backend_get_type() == GPU_BACKEND_VULKAN &&
-        scene->eevee.dlss5_mode == SCE_EEVEE_DLSSNR && scene->eevee.dlss5_intensity != 0.0f)
-    {
-      dlss5.warmup();
-    }
+  sampling.init(scene);
+  camera.init();
+  filter_materials.init();
+  native_postfx_outputs.init();
+  film.init(output_res, output_rect);
+  render_buffers.init();
+  render_textures.init();
+  ambient_occlusion.init();
+  velocity.init();
+  raytracing.init();
+  depth_of_field.init();
+  shadows.init();
+  motion_blur.init();
+  main_view.init();
+  light_probes.init();
+  planar_probes.init();
+  /* Irradiance Cache needs reflection probes to be initialized. */
+  sphere_probes.init();
+  volume_probes.init();
+  volume.init();
+  lookdev.init(&lookdev_rect);
 
-    /* Request static shaders */
-    ShaderGroups shader_request = DEFERRED_LIGHTING_SHADERS | SHADOW_SHADERS | FILM_SHADERS |
-      HIZ_SHADERS | SPHERE_PROBE_SHADERS | VOLUME_PROBE_SHADERS |
-      LIGHT_CULLING_SHADERS;
-    SET_FLAG_FROM_TEST(shader_request, depth_of_field.enabled(), DEPTH_OF_FIELD_SHADERS);
-    SET_FLAG_FROM_TEST(shader_request, needs_planar_probe_passes(), DEFERRED_PLANAR_SHADERS);
-    SET_FLAG_FROM_TEST(shader_request, needs_lightprobe_sphere_passes(), DEFERRED_CAPTURE_SHADERS);
-    SET_FLAG_FROM_TEST(shader_request, motion_blur.postfx_enabled(), MOTION_BLUR_SHADERS);
-    SET_FLAG_FROM_TEST(shader_request, raytracing.use_fast_gi(), FAST_GI_SHADERS);
-    SET_FLAG_FROM_TEST(shader_request, raytracing.use_raytracing(), RAYTRACING_SHADERS);
-    SET_FLAG_FROM_TEST(shader_request, scene->eevee.filter_graph != nullptr, FILTER_GRAPH_SHADERS);
+  if (GPU_backend_get_type() == GPU_BACKEND_VULKAN &&
+      scene->eevee.dlss5_mode == SCE_EEVEE_DLSSNR && scene->eevee.dlss5_intensity != 0.0f)
+  {
+    dlss5.warmup();
+  }
 
-    loaded_shaders = ShaderGroups::NONE;
-    loaded_shaders |= shaders.static_shaders_load_async(shader_request);
-    loaded_shaders |= materials.default_materials_load_async();
+  /* Request static shaders */
+  ShaderGroups shader_request = DEFERRED_LIGHTING_SHADERS | SHADOW_SHADERS | FILM_SHADERS |
+                                HIZ_SHADERS | SPHERE_PROBE_SHADERS | VOLUME_PROBE_SHADERS |
+                                LIGHT_CULLING_SHADERS;
+  SET_FLAG_FROM_TEST(shader_request, depth_of_field.enabled(), DEPTH_OF_FIELD_SHADERS);
+  SET_FLAG_FROM_TEST(shader_request, needs_planar_probe_passes(), DEFERRED_PLANAR_SHADERS);
+  SET_FLAG_FROM_TEST(shader_request, needs_lightprobe_sphere_passes(), DEFERRED_CAPTURE_SHADERS);
+  SET_FLAG_FROM_TEST(shader_request, motion_blur.postfx_enabled(), MOTION_BLUR_SHADERS);
+  SET_FLAG_FROM_TEST(shader_request, raytracing.use_fast_gi(), FAST_GI_SHADERS);
+  SET_FLAG_FROM_TEST(shader_request, raytracing.use_raytracing(), RAYTRACING_SHADERS);
+  SET_FLAG_FROM_TEST(shader_request, scene->eevee.filter_graph != nullptr, FILTER_GRAPH_SHADERS);
 
-    if (is_image_render)
-    {
-      /* Ensure all deferred shaders have been compiled to kick-start asynchronous specialization. */
-      loaded_shaders |= shaders.static_shaders_wait_ready(DEFERRED_LIGHTING_SHADERS);
-    }
+  loaded_shaders = ShaderGroups::NONE;
+  loaded_shaders |= shaders.static_shaders_load_async(shader_request);
+  loaded_shaders |= materials.default_materials_load_async();
 
-    if (loaded_shaders & DEFERRED_LIGHTING_SHADERS)
-    {
-      bool ready = shaders.request_specializations(
+  if (is_image_render) {
+    /* Ensure all deferred shaders have been compiled to kick-start asynchronous specialization. */
+    loaded_shaders |= shaders.static_shaders_wait_ready(DEFERRED_LIGHTING_SHADERS);
+  }
+
+  if (loaded_shaders & DEFERRED_LIGHTING_SHADERS) {
+    bool ready = shaders.request_specializations(
         is_image_render,
         render_buffers.data.shadow_id,
         shadows.get_data().ray_count,
         shadows.get_data().step_count,
         DeferredLayer::do_split_direct_indirect_radiance(*this),
         DeferredLayer::do_merge_direct_indirect_eval(*this));
-      SET_FLAG_FROM_TEST(loaded_shaders, ready, DEFERRED_LIGHTING_SHADERS);
-    }
-
-    if (is_image_render)
-    {
-      loaded_shaders |= shaders.static_shaders_wait_ready(shader_request);
-      loaded_shaders |= materials.default_materials_wait_ready();
-    }
-
-    /* Needed bits to be able to display something to the screen. */
-    needed_shaders = shader_request | DEFAULT_MATERIALS;
-
-    if (is_image_render && shaders.static_shaders_has_failed(shader_request))
-    {
-      info_append_i18n("Error: Failed to compile EEVEE engine shaders");
-    }
-    skip_render_ = !is_loaded(needed_shaders) || !film.is_valid_render_extent();
+    SET_FLAG_FROM_TEST(loaded_shaders, ready, DEFERRED_LIGHTING_SHADERS);
   }
 
-  bool Instance::init_light_bake(Depsgraph* depsgraph, draw::Manager* manager)
-  {
-    telemetry.reset_epoch();
-    this->depsgraph = depsgraph;
-    this->manager = manager;
-    camera_orig_object = nullptr;
-    render = nullptr;
-    render_layer = nullptr;
-    drw_view = nullptr;
-    v3d = nullptr;
-    rv3d = nullptr;
-    update_eval_members();
-
-    is_light_bake = true;
-    debug_mode = eDebugMode(G.debug_value);
-    info_ = "";
-
-    sampling.init(scene);
-    camera.init();
-    filter_materials.init();
-    native_postfx_outputs.init();
-    /* Film isn't used but init to avoid side effects in other module. */
-    rcti empty_rect{ 0, 0, 0, 0 };
-    film.init(int2(1), &empty_rect);
-    render_buffers.init();
-    render_textures.init();
-    ambient_occlusion.init();
-    velocity.init();
-    raytracing.init();
-    depth_of_field.init();
-    shadows.init();
-    motion_blur.init();
-    main_view.init();
-    light_probes.init();
-    planar_probes.init();
-    /* Irradiance Cache needs reflection probes to be initialized. */
-    sphere_probes.init();
-    volume_probes.init();
-    volume.init();
-    lookdev.init(&empty_rect);
-
-    needed_shaders = IRRADIANCE_BAKE_SHADERS | LIGHT_CULLING_SHADERS | SHADOW_SHADERS |
-                     SURFEL_SHADERS;
-    shaders.static_shaders_load_async(needed_shaders);
-    loaded_shaders = shaders.static_shaders_wait_ready(needed_shaders);
-    if (shaders.static_shaders_has_failed(needed_shaders))
-    {
-      info_append_i18n("Error: Failed to compile EEVEE light bake shaders");
-      return false;
-    }
-    return is_loaded(needed_shaders);
+  if (is_image_render) {
+    loaded_shaders |= shaders.static_shaders_wait_ready(shader_request);
+    loaded_shaders |= materials.default_materials_wait_ready();
   }
 
-  void Instance::set_time(float time)
-  {
-    BLI_assert(render);
-    DRW_render_set_time(render, depsgraph, floorf(time), fractf(time));
-    update_eval_members();
-  }
+  /* Needed bits to be able to display something to the screen. */
+  needed_shaders = shader_request | DEFAULT_MATERIALS;
 
-  void Instance::update_eval_members()
-  {
-    Scene *scene_input = DEG_get_input_scene(depsgraph);
-    if (render && render->re && render->re->scene) {
-      scene_input = render->re->scene;
-    }
-    scene = DEG_get_evaluated_scene(depsgraph);
-    if (scene == nullptr) {
-      scene = scene_input;
-    }
-    view_layer = DEG_get_evaluated_view_layer(depsgraph);
-    if (view_layer == nullptr) {
-      view_layer = DEG_get_input_view_layer(depsgraph);
-    }
-    if (render && scene_input) {
-      ViewLayer *render_view_layer = nullptr;
-      if (render_layer && render_layer->name[0] != '\0') {
-        for (ViewLayer &candidate : scene_input->view_layers) {
-          if (std::strcmp(candidate.name, render_layer->name) == 0) {
-            render_view_layer = &candidate;
-            break;
-          }
+  if (is_image_render && shaders.static_shaders_has_failed(shader_request)) {
+    info_append_i18n("Error: Failed to compile EEVEE engine shaders");
+  }
+  skip_render_ = !is_loaded(needed_shaders) || !film.is_valid_render_extent();
+
+  if (!samples_in_flight) {
+    /** Allow up to 3 samples in flight on the GPU. */
+    samples_in_flight = gpu::WorkInFlight::create(3);
+  }
+}
+
+bool Instance::init_light_bake(Depsgraph *depsgraph, draw::Manager *manager)
+{
+  telemetry.reset_epoch();
+  this->depsgraph = depsgraph;
+  this->manager = manager;
+  camera_orig_object = nullptr;
+  render = nullptr;
+  render_layer = nullptr;
+  drw_view = nullptr;
+  v3d = nullptr;
+  rv3d = nullptr;
+  update_eval_members();
+
+  is_light_bake = true;
+  debug_mode = eDebugMode(G.debug_value);
+  info_ = "";
+
+  sampling.init(scene);
+  camera.init();
+  filter_materials.init();
+  native_postfx_outputs.init();
+  /* Film isn't used but init to avoid side effects in other module. */
+  rcti empty_rect{0, 0, 0, 0};
+  film.init(int2(1), &empty_rect);
+  render_buffers.init();
+  render_textures.init();
+  ambient_occlusion.init();
+  velocity.init();
+  raytracing.init();
+  depth_of_field.init();
+  shadows.init();
+  motion_blur.init();
+  main_view.init();
+  light_probes.init();
+  planar_probes.init();
+  /* Irradiance Cache needs reflection probes to be initialized. */
+  sphere_probes.init();
+  volume_probes.init();
+  volume.init();
+  lookdev.init(&empty_rect);
+
+  needed_shaders = IRRADIANCE_BAKE_SHADERS | LIGHT_CULLING_SHADERS | SHADOW_SHADERS |
+                   SURFEL_SHADERS;
+  shaders.static_shaders_load_async(needed_shaders);
+  loaded_shaders = shaders.static_shaders_wait_ready(needed_shaders);
+  if (shaders.static_shaders_has_failed(needed_shaders)) {
+    info_append_i18n("Error: Failed to compile EEVEE light bake shaders");
+    return false;
+  }
+  return is_loaded(needed_shaders);
+}
+
+void Instance::set_time(float time)
+{
+  BLI_assert(render);
+  DRW_render_set_time(render, depsgraph, floorf(time), fractf(time));
+  update_eval_members();
+}
+
+void Instance::update_eval_members()
+{
+  Scene *scene_input = DEG_get_input_scene(depsgraph);
+  if (render && render->re && render->re->scene) {
+    scene_input = render->re->scene;
+  }
+  scene = DEG_get_evaluated_scene(depsgraph);
+  if (scene == nullptr) {
+    scene = scene_input;
+  }
+  view_layer = DEG_get_evaluated_view_layer(depsgraph);
+  if (view_layer == nullptr) {
+    view_layer = DEG_get_input_view_layer(depsgraph);
+  }
+  if (render && scene_input) {
+    ViewLayer *render_view_layer = nullptr;
+    if (render_layer && render_layer->name[0] != '\0') {
+      for (ViewLayer &candidate : scene_input->view_layers) {
+        if (std::strcmp(candidate.name, render_layer->name) == 0) {
+          render_view_layer = &candidate;
+          break;
         }
       }
-      if (render_view_layer == nullptr) {
-        render_view_layer = static_cast<ViewLayer *>(scene_input->view_layers.first);
-      }
-      view_layer = render_view_layer;
     }
-    camera_eval_object = (camera_orig_object) ? DEG_get_evaluated(depsgraph, camera_orig_object) :
-      nullptr;
-
-    const float frame = scene ? (float(scene->r.cfra) + scene->r.subframe) : 0.0f;
-    const float frame_start = scene ? float(scene->r.sfra) : 0.0f;
-    const float frame_end = scene ? float(scene->r.efra) : frame_start;
-    const float frame_range = frame_end - frame_start;
-    const float fps = (scene && scene->r.frs_sec_base != 0.0f) ?
-      (float(scene->r.frs_sec) / scene->r.frs_sec_base) :
-      24.0f;
-
-    const float seconds = (std::abs(fps) > 1e-8f) ? (frame / fps) : 0.0f;
-
-    uniform_data.data.scene.frame = frame;
-    uniform_data.data.scene.time = seconds;
-    uniform_data.data.scene.timeline = (std::abs(frame_range) > 1e-8f) ?
-      clamp_f((frame - frame_start) / frame_range, 0.0f, 1.0f) :
-      0.0f;
-    uniform_data.data.scene._pad0 = 0.0f;
+    if (render_view_layer == nullptr) {
+      render_view_layer = scene_input->view_layers.first();
+    }
+    view_layer = render_view_layer;
   }
+  camera_eval_object = (camera_orig_object) ? DEG_get_evaluated(depsgraph, camera_orig_object) :
+                                              nullptr;
 
-  /** \} */
+  const float frame = scene ? (float(scene->r.cfra) + scene->r.subframe) : 0.0f;
+  const float frame_start = scene ? float(scene->r.sfra) : 0.0f;
+  const float frame_end = scene ? float(scene->r.efra) : frame_start;
+  const float frame_range = frame_end - frame_start;
+  const float fps = (scene && scene->r.frs_sec_base != 0.0f) ?
+                        (float(scene->r.frs_sec) / scene->r.frs_sec_base) :
+                        24.0f;
 
-  /* -------------------------------------------------------------------- */
-  /** \name Sync
-   *
-   * Sync will gather data from the scene that can change over a time step (i.e: motion steps).
-   * IMPORTANT: xxx.sync() functions area responsible for creating DRW resources as
-   * well as querying temp texture pool. All DRWPasses should be ready by the end end_sync().
-   * \{ */
+  const float seconds = (std::abs(fps) > 1e-8f) ? (frame / fps) : 0.0f;
 
-  void Instance::begin_sync()
-  {
-    update_eval_members();
-    telemetry.maybe_begin_viewport_frame();
-    ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncBegin);
-    dlss5_settings_changed_ = false;
-    if (scene != nullptr) {
-      const SceneEEVEE &dlss5 = scene->eevee;
-      bool changed = false;
-      changed |= assign_if_different(dlss5_mode_, dlss5.dlss5_mode);
-      changed |= assign_if_different(dlss5_intensity_, dlss5.dlss5_intensity);
-      changed |= assign_if_different(dlss5_local_tone_strength_,
-                                     dlss5.dlss5_local_tone_strength);
-      changed |= assign_if_different(dlss5_local_structure_strength_,
-                                     dlss5.dlss5_local_structure_strength);
-      changed |= assign_if_different(dlss5_skin_structure_strength_,
-                                     dlss5.dlss5_skin_structure_strength);
-      changed |= assign_if_different(dlss5_use_auto_mask_, dlss5.dlss5_use_auto_mask != 0);
-      changed |= assign_if_different(dlss5_ui_correction_, dlss5.dlss5_ui_correction != 0);
-      changed |= assign_if_different(dlss5_style_, dlss5.dlss5_style);
-      dlss5_settings_changed_ = changed;
-      if (changed && is_viewport()) {
-        this->dlss5.invalidate();
-        sampling.reset();
-      }
-    }
-    /* Needs to be first for sun light parameters.
-     * Also not skipped to be able to request world shader.
-     * If engine shaders are not ready, will skip the pipeline sync. */
-    {
-      ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginWorld);
-      world.sync();
-    }
+  uniform_data.data.scene.frame = frame;
+  uniform_data.data.scene.time = seconds;
+  uniform_data.data.scene.timeline = (std::abs(frame_range) > 1e-8f) ?
+                                         clamp_f((frame - frame_start) / frame_range, 0.0f, 1.0f) :
+                                         0.0f;
+  uniform_data.data.scene._pad0 = 0.0f;
+}
 
-    if (skip_render_)
-    {
-      return;
-    }
+/** \} */
 
-    {
-      ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginSceneModules);
-      materials.begin_sync();
-      velocity.begin_sync(); /* NOTE: Also syncs camera. */
-      lights.begin_sync();
-      shadows.begin_sync();
-      volume.begin_sync();
-      pipelines.begin_sync();
-      cryptomatte.begin_sync();
-      sphere_probes.begin_sync();
-      light_probes.begin_sync();
-    }
+/* -------------------------------------------------------------------- */
+/** \name Sync
+ *
+ * Sync will gather data from the scene that can change over a time step (i.e: motion steps).
+ * IMPORTANT: xxx.sync() functions area responsible for creating DRW resources as
+ * well as querying temp texture pool. All DRWPasses should be ready by the end end_sync().
+ * \{ */
 
-    {
-      ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginViewEffects);
-      depth_of_field.sync();
-      raytracing.sync();
-      motion_blur.sync();
-      hiz_buffer.sync();
-      main_view.sync();
-      film.sync();
-    }
-
-    {
-      ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginNPRPost);
-      render_textures.begin_sync();
-      filter_materials.begin_sync();
-      outline.begin_sync();
-      ambient_occlusion.sync();
-      volume_probes.sync();
-      lookdev.sync();
-    }
-
-    use_surfaces = (view_layer->layflag & SCE_LAY_SOLID) != 0;
-    use_curves = (view_layer->layflag & SCE_LAY_STRAND) != 0;
-    use_volumes = (view_layer->layflag & SCE_LAY_VOLUMES) != 0;
-
-    if (is_light_bake)
-    {
-      /* Do not use render layer visibility during bake.
-       * NOTE: This is arbitrary and could be changed if needed. */
-      use_surfaces = use_curves = use_volumes = true;
-    }
-
-    if (is_viewport() && velocity.camera_has_motion())
-    {
+void Instance::begin_sync()
+{
+  update_eval_members();
+  telemetry.maybe_begin_viewport_frame();
+  ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncBegin);
+  dlss5_settings_changed_ = false;
+  if (scene != nullptr) {
+    const SceneEEVEE &dlss5 = scene->eevee;
+    bool changed = false;
+    changed |= assign_if_different(dlss5_mode_, dlss5.dlss5_mode);
+    changed |= assign_if_different(dlss5_intensity_, dlss5.dlss5_intensity);
+    changed |= assign_if_different(dlss5_local_tone_strength_, dlss5.dlss5_local_tone_strength);
+    changed |= assign_if_different(dlss5_local_structure_strength_,
+                                   dlss5.dlss5_local_structure_strength);
+    changed |= assign_if_different(dlss5_skin_structure_strength_,
+                                   dlss5.dlss5_skin_structure_strength);
+    changed |= assign_if_different(dlss5_use_auto_mask_, dlss5.dlss5_use_auto_mask != 0);
+    changed |= assign_if_different(dlss5_ui_correction_, dlss5.dlss5_ui_correction != 0);
+    changed |= assign_if_different(dlss5_style_, dlss5.dlss5_style);
+    dlss5_settings_changed_ = changed;
+    if (changed && is_viewport()) {
+      this->dlss5.invalidate();
       sampling.reset();
     }
   }
-
-  void Instance::object_sync(ObjectRef& ob_ref, Manager& /*manager*/)
+  /* Needs to be first for sun light parameters.
+   * Also not skipped to be able to request world shader.
+   * If engine shaders are not ready, will skip the pipeline sync. */
   {
-    ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncObjects);
-    if (skip_render_) {
-      return;
-    }
-
-    Object *ob = ob_ref.object;
-    const bool is_renderable_type = ELEM(ob->type,
-                                         OB_CURVES,
-                                         OB_GREASE_PENCIL,
-                                         OB_MESH,
-                                         OB_POINTCLOUD,
-                                         OB_VOLUME,
-                                         OB_LAMP,
-                                         OB_LIGHTPROBE);
-    const int ob_visibility = DRW_object_visibility_in_active_context(ob);
-    const bool partsys_is_visible = (ob_visibility & OB_VISIBLE_PARTICLES) != 0 &&
-                                    (ob->type == OB_MESH);
-    const bool object_is_visible = DRW_object_is_renderable(ob) &&
-                                   (ob_visibility & OB_VISIBLE_SELF) != 0;
-
-    if (!is_renderable_type || (!partsys_is_visible && !object_is_visible)) {
-      return;
-    }
-
-    if (partsys_is_visible && ob != draw_ctx->object_edit) {
-      auto sync_hair = [&](const HairParticleInfo &info) { sync.sync_curves(ob_ref, &info); };
-      foreach_hair_particle(*this, ob_ref, sync_hair);
-    }
-
-    if (object_is_visible) {
-      switch (ob->type) {
-        case OB_LAMP:
-          lights.sync_light(ob_ref);
-          break;
-        case OB_MESH:
-          if (!sync.sync_sculpt(ob_ref)) {
-            sync.sync_mesh(ob_ref);
-          }
-          break;
-        case OB_POINTCLOUD:
-          sync.sync_pointcloud(ob_ref);
-          break;
-        case OB_VOLUME:
-          sync.sync_volume(ob_ref);
-          break;
-        case OB_CURVES:
-          sync.sync_curves(ob_ref);
-          break;
-        case OB_LIGHTPROBE:
-          light_probes.sync_probe(ob_ref);
-          break;
-        default:
-          break;
-      }
-    }
+    ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginWorld);
+    world.sync();
   }
 
-  void Instance::end_sync()
+  if (skip_render_) {
+    return;
+  }
+
   {
-    ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncEnd);
-    if (skip_render_)
-    {
-      /* We might run in the case where the next check sets skip_render_ to false after the
-       * begin_sync was skipped, which would call `end_sync` function with invalid data. */
-      return;
-    }
+    ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginSceneModules);
+    materials.begin_sync();
+    velocity.begin_sync(); /* NOTE: Also syncs camera. */
+    lights.begin_sync();
+    shadows.begin_sync();
+    volume.begin_sync();
+    pipelines.begin_sync();
+    cryptomatte.begin_sync();
+    sphere_probes.begin_sync();
+    light_probes.begin_sync();
+  }
 
-    {
-      ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndShaderReadiness);
-      bool use_sss = pipelines.deferred.closure_bits_get() & CLOSURE_SSS;
-      bool use_volume = volume.will_enable();
+  {
+    ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginViewEffects);
+    depth_of_field.sync();
+    raytracing.sync();
+    motion_blur.sync();
+    hiz_buffer.sync();
+    main_view.sync();
+    film.sync();
+  }
 
-      ShaderGroups request_bits = NONE;
-      SET_FLAG_FROM_TEST(request_bits, use_sss, SUBSURFACE_SHADERS);
-      SET_FLAG_FROM_TEST(request_bits, use_volume, VOLUME_EVAL_SHADERS);
-      loaded_shaders |= shaders.static_shaders_load_async(request_bits);
-      needed_shaders |= request_bits;
+  {
+    ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginNPRPost);
+    render_textures.begin_sync();
+    filter_materials.begin_sync();
+    outline.begin_sync();
+    ambient_occlusion.sync();
+    volume_probes.sync();
+    lookdev.sync();
+  }
 
-      if (is_image_render)
-      {
-        loaded_shaders |= shaders.static_shaders_wait_ready(request_bits);
-      }
-    }
+  use_surfaces = (view_layer->layflag & SCE_LAY_SOLID) != 0;
+  use_curves = (view_layer->layflag & SCE_LAY_STRAND) != 0;
+  use_volumes = (view_layer->layflag & SCE_LAY_VOLUMES) != 0;
 
-    {
-      ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndMaterialsVelocity);
-      materials.end_sync();
-      velocity.end_sync();
-    }
+  if (is_light_bake) {
+    /* Do not use render layer visibility during bake.
+     * NOTE: This is arbitrary and could be changed if needed. */
+    use_surfaces = use_curves = use_volumes = true;
+  }
 
-    {
-      ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndVolumeShadowsLights);
-      volume.end_sync();  /* Needs to be before shadows. */
-      shadows.end_sync(); /* Needs to be before lights. */
-      lights.end_sync();
-    }
+  if (is_viewport() && velocity.camera_has_motion()) {
+    sampling.reset();
+  }
+}
 
-    {
-      ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndFrameState);
-      const bool viewport_soft_shadow_transform =
-          is_viewport() && is_transforming &&
-          (scene->eevee.flag & SCE_EEVEE_SHADOW_ENABLED) &&
-          (scene->eevee.flag & SCE_EEVEE_SHADOW_JITTERED_VIEWPORT);
-      discard_viewport_history_ = is_viewport() &&
-                                  (shadows.viewport_history_invalidated() ||
-                                   viewport_soft_shadow_transform);
-      if (is_viewport())
-      {
-        const bool uses_scene_time = materials.has_time_dependent_materials() ||
-          world.uses_scene_time() || filter_materials.uses_scene_time() ||
-          lights.has_time_dependent_light_shaders();
-        const float scene_time = uniform_data.data.scene.frame;
-        const bool scene_time_changed = uses_scene_time && last_viewport_scene_time_valid_ &&
-          std::abs(scene_time - last_viewport_scene_time_) > 1e-8f;
-        if (scene_time_changed)
-        {
-          sampling.reset();
-          discard_viewport_history_ = true;
+void Instance::object_sync(ObjectRef &ob_ref, Manager & /*manager*/)
+{
+  ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncObjects);
+  if (skip_render_) {
+    return;
+  }
+
+  Object *ob = ob_ref.object;
+  const bool is_renderable_type = ELEM(ob->type,
+                                       OB_CURVES,
+                                       OB_GREASE_PENCIL,
+                                       OB_MESH,
+                                       OB_POINTCLOUD,
+                                       OB_VOLUME,
+                                       OB_LAMP,
+                                       OB_LIGHTPROBE);
+  const int ob_visibility = DRW_object_visibility_in_active_context(ob);
+  const bool partsys_is_visible = (ob_visibility & OB_VISIBLE_PARTICLES) != 0 &&
+                                  (ob->type == OB_MESH);
+  const bool object_is_visible = DRW_object_is_renderable(ob) &&
+                                 (ob_visibility & OB_VISIBLE_SELF) != 0;
+
+  if (!is_renderable_type || (!partsys_is_visible && !object_is_visible)) {
+    return;
+  }
+
+  if (partsys_is_visible && ob != draw_ctx->object_edit) {
+    auto sync_hair = [&](const HairParticleInfo &info) { sync.sync_curves(ob_ref, &info); };
+    foreach_hair_particle(*this, ob_ref, sync_hair);
+  }
+
+  if (object_is_visible) {
+    switch (ob->type) {
+      case OB_LAMP:
+        lights.sync_light(ob_ref);
+        break;
+      case OB_MESH:
+        if (!sync.sync_sculpt(ob_ref)) {
+          sync.sync_mesh(ob_ref);
         }
-        last_viewport_scene_time_ = scene_time;
-        last_viewport_scene_time_valid_ = true;
-      }
-
-      sampling.end_sync();
-      subsurface.end_sync();
-      film.end_sync();
-      cryptomatte.end_sync();
-      pipelines.end_sync();
-      outline.sync();
+        break;
+      case OB_POINTCLOUD:
+        sync.sync_pointcloud(ob_ref);
+        break;
+      case OB_VOLUME:
+        sync.sync_volume(ob_ref);
+        break;
+      case OB_CURVES:
+        sync.sync_curves(ob_ref);
+        break;
+      case OB_LIGHTPROBE:
+        light_probes.sync_probe(ob_ref);
+        break;
+      default:
+        break;
     }
+  }
+}
 
-    {
-      ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndNPRPost);
-      render_textures.end_sync();
-      filter_materials.end_sync();
-    }
-
-    {
-      ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndProbesUniforms);
-      light_probes.end_sync();
-      sphere_probes.end_sync();
-      planar_probes.end_sync();
-      uniform_data.push_update();
-    }
-
-    depsgraph_last_update_ = DEG_get_update_count(depsgraph);
+void Instance::end_sync()
+{
+  ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncEnd);
+  if (skip_render_) {
+    /* We might run in the case where the next check sets skip_render_ to false after the
+     * begin_sync was skipped, which would call `end_sync` function with invalid data. */
+    return;
   }
 
-  void Instance::render_sync()
   {
-    manager->begin_sync();
+    ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndShaderReadiness);
+    bool use_sss = pipelines.deferred.closure_bits_get() & CLOSURE_SSS;
+    bool use_volume = volume.will_enable();
 
-    begin_sync();
+    ShaderGroups request_bits = NONE;
+    SET_FLAG_FROM_TEST(request_bits, use_sss, SUBSURFACE_SHADERS);
+    SET_FLAG_FROM_TEST(request_bits, use_volume, VOLUME_EVAL_SHADERS);
+    loaded_shaders |= shaders.static_shaders_load_async(request_bits);
+    needed_shaders |= request_bits;
 
-    DRW_render_object_iter(
-      render, depsgraph, [this](draw::ObjectRef& ob_ref, RenderEngine*, Depsgraph*)
-      {
+    if (is_image_render) {
+      loaded_shaders |= shaders.static_shaders_wait_ready(request_bits);
+    }
+  }
+
+  if (is_viewport() && manager->has_deferred_textures()) {
+    sampling.reset();
+  }
+  {
+    ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndMaterialsVelocity);
+    materials.end_sync();
+    velocity.end_sync();
+  }
+
+  {
+    ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndVolumeShadowsLights);
+    volume.end_sync();  /* Needs to be before shadows. */
+    shadows.end_sync(); /* Needs to be before lights. */
+    lights.end_sync();
+  }
+
+  {
+    ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndFrameState);
+    const bool viewport_soft_shadow_transform = is_viewport() && is_transforming &&
+                                                (scene->eevee.flag & SCE_EEVEE_SHADOW_ENABLED) &&
+                                                (scene->eevee.flag &
+                                                 SCE_EEVEE_SHADOW_JITTERED_VIEWPORT);
+    discard_viewport_history_ = is_viewport() && (shadows.viewport_history_invalidated() ||
+                                                  viewport_soft_shadow_transform);
+    if (is_viewport()) {
+      const bool uses_scene_time = materials.has_time_dependent_materials() ||
+                                   world.uses_scene_time() || filter_materials.uses_scene_time() ||
+                                   lights.has_time_dependent_light_shaders();
+      const float scene_time = uniform_data.data.scene.frame;
+      const bool scene_time_changed = uses_scene_time && last_viewport_scene_time_valid_ &&
+                                      std::abs(scene_time - last_viewport_scene_time_) > 1e-8f;
+      if (scene_time_changed) {
+        sampling.reset();
+        discard_viewport_history_ = true;
+      }
+      last_viewport_scene_time_ = scene_time;
+      last_viewport_scene_time_valid_ = true;
+    }
+
+    sampling.end_sync();
+    subsurface.end_sync();
+    film.end_sync();
+    cryptomatte.end_sync();
+    pipelines.end_sync();
+    outline.sync();
+  }
+
+  {
+    ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndNPRPost);
+    render_textures.end_sync();
+    filter_materials.end_sync();
+  }
+
+  {
+    ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndProbesUniforms);
+    light_probes.end_sync();
+    sphere_probes.end_sync();
+    planar_probes.end_sync();
+    uniform_data.push_update();
+  }
+
+  depsgraph_last_update_ = DEG_get_update_count(depsgraph);
+}
+
+void Instance::render_sync()
+{
+  manager->begin_sync();
+
+  begin_sync();
+
+  DRW_render_object_iter(
+      render, depsgraph, [this](draw::ObjectRef &ob_ref, RenderEngine *, Depsgraph *) {
         this->object_sync(ob_ref, *this->manager);
       });
 
-    velocity.geometry_steps_fill();
+  velocity.geometry_steps_fill();
 
-    end_sync();
+  end_sync();
 
-    manager->end_sync();
+  manager->end_sync();
+}
+
+void Instance::wait_for_material_passes()
+{
+  const int64_t queued_shaders = materials.queued_shaders_count;
+  const int64_t queued_textures = materials.queued_textures_count;
+  const bool record_wait = telemetry.enabled() && telemetry.frame_active();
+  const double wait_start_time = record_wait ? BLI_time_now_seconds() : 0.0;
+  GPU_pass_cache_wait_for_all();
+  if (record_wait) {
+    telemetry.shader_wait_add(
+        queued_shaders, queued_textures, BLI_time_now_seconds() - wait_start_time);
+  }
+}
+
+bool Instance::needs_lightprobe_sphere_passes() const
+{
+  return sphere_probes.update_probes_this_sample_;
+}
+
+bool Instance::do_lightprobe_sphere_sync() const
+{
+  return (materials.queued_shaders_count == 0) && (materials.queued_textures_count == 0) &&
+         needs_lightprobe_sphere_passes();
+}
+
+bool Instance::needs_planar_probe_passes() const
+{
+  return planar_probes.update_probes_;
+}
+
+bool Instance::do_planar_probe_sync() const
+{
+  return (materials.queued_shaders_count == 0) && (materials.queued_textures_count == 0) &&
+         needs_planar_probe_passes();
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Rendering
+ * \{ */
+
+void Instance::render_sample()
+{
+  if (sampling.finished_viewport()) {
+    /* The Draw Manager still performed a complete sync before this cached-film display. Keep
+     * that sync-only capture so a converged redraw cannot hide a long synchronization spike. */
+    DRW_submission_start();
+    film.display();
+    lookdev.display();
+    DRW_submission_end();
+    return;
   }
 
-  void Instance::wait_for_material_passes()
-  {
-    const int64_t queued_shaders = materials.queued_shaders_count;
-    const int64_t queued_textures = materials.queued_textures_count;
-    const bool record_wait = telemetry.enabled() && telemetry.frame_active();
-    const double wait_start_time = record_wait ? BLI_time_now_seconds() : 0.0;
-    GPU_pass_cache_wait_for_all();
-    if (record_wait) {
-      telemetry.shader_wait_add(queued_shaders,
-                                queued_textures,
-                                BLI_time_now_seconds() - wait_start_time);
+  /* Motion blur may need to do re-sync after a certain number of sample. */
+  if (!is_viewport() && sampling.do_render_sync()) {
+    render_sync();
+    while (materials.queued_shaders_count > 0 || materials.queued_textures_count > 0) {
+      wait_for_material_passes();
+      /** WORKAROUND: Re-sync now that all shaders are compiled. */
+      /* This may need to happen more than once, since actual materials may require more passes
+       * (eg. volume ones) than the fallback material used for queued passes. */
+      /* TODO(@pragma37): There seems to be an issue where multiple `step_object_sync` calls on the
+       * same step can cause mismatching `has_motion` values between sync. */
+      render_sync();
     }
   }
 
-  bool Instance::needs_lightprobe_sphere_passes() const
-  {
-    return sphere_probes.update_probes_this_sample_;
+  /* Camera/object changes can request a reset after RayTraceModule::sync(). Observe
+   * the final reset state before sampling.step() consumes it. This only advances the NPR
+   * generation counter; native and DLSS history invalidation remain independent. */
+  if (is_viewport() && sampling.is_reset()) {
+    raytracing.reset_npr_history();
   }
 
-  bool Instance::do_lightprobe_sphere_sync() const
+  DebugScope debug_scope(debug_scope_render_sample, "EEVEE.render_sample");
+
   {
-    return (materials.queued_shaders_count == 0) && (materials.queued_textures_count == 0) &&
-      needs_lightprobe_sphere_passes();
-  }
+    /* Critical section. Potential gpu::Shader concurrent usage. */
+    DRW_submission_start();
 
-  bool Instance::needs_planar_probe_passes() const
-  {
-    return planar_probes.update_probes_;
-  }
+    dlss5_reset_ = discard_viewport_history_ ||
+                   (is_viewport() &&
+                    (dlss5_settings_changed_ || velocity.camera_changed_projection())) ||
+                   (is_image_render && sampling.sample_index() == 0);
+    sampling.step();
+    film.update_sample_table();
+    uniform_data.push_update();
 
-  bool Instance::do_planar_probe_sync() const
-  {
-    return (materials.queued_shaders_count == 0) && (materials.queued_textures_count == 0) &&
-      needs_planar_probe_passes();
-  }
-
-  /** \} */
-
-  /* -------------------------------------------------------------------- */
-  /** \name Rendering
-   * \{ */
-
-  void Instance::render_sample()
-  {
-    if (sampling.finished_viewport())
+    capture_view.render_world();
+    lookdev.rotate_world();
+    capture_view.render_probes();
     {
-      /* The Draw Manager still performed a complete sync before this cached-film display. Keep
-       * that sync-only capture so a converged redraw cannot hide a long synchronization spike. */
-      DRW_submission_start();
-      film.display();
-      lookdev.display();
-      DRW_submission_end();
+      ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::RenderTextures);
+      render_textures.render();
+    }
+
+    main_view.render();
+
+    lookdev_view.render();
+
+    DRW_submission_end();
+  }
+  motion_blur.step();
+}
+
+void Instance::render_read_result(RenderLayer *render_layer, const char *view_name)
+{
+  ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::ReadResult);
+  eViewLayerEEVEEPassType pass_bits = film.output_passes_get();
+  const bool record_readbacks = telemetry.enabled() && telemetry.frame_active();
+
+  const auto record_readback = [&](const TelemetryPassReadbackType type,
+                                   const char *name,
+                                   const RenderPass *rp,
+                                   const double readback_start_time) {
+    if (!record_readbacks || rp == nullptr) {
       return;
     }
+    telemetry.pass_readback_add(type,
+                                name,
+                                rp->rectx,
+                                rp->recty,
+                                rp->channels,
+                                BLI_time_now_seconds() - readback_start_time);
+  };
 
-    /* Motion blur may need to do re-sync after a certain number of sample. */
-    if (!is_viewport() && sampling.do_render_sync())
-    {
-      render_sync();
-      while (materials.queued_shaders_count > 0 || materials.queued_textures_count > 0)
-      {
-        wait_for_material_passes();
-        /** WORKAROUND: Re-sync now that all shaders are compiled. */
-        /* This may need to happen more than once, since actual materials may require more passes
-         * (eg. volume ones) than the fallback material used for queued passes. */
-         /* TODO(@pragma37): There seems to be an issue where multiple `step_object_sync` calls on the
-          * same step can cause mismatching `has_motion` values between sync. */
-        render_sync();
-      }
+  for (auto i : IndexRange(EEVEE_RENDER_PASS_MAX_BIT + 1)) {
+    eViewLayerEEVEEPassType pass_type = eViewLayerEEVEEPassType(pass_bits & (1 << i));
+    if (pass_type == 0) {
+      continue;
     }
 
-    /* Camera/object changes can request a reset after RayTraceModule::sync(). Observe
-     * the final reset state before sampling.step() consumes it. This only advances the NPR
-     * generation counter; native and DLSS history invalidation remain independent. */
-    if (is_viewport() && sampling.is_reset()) {
-      raytracing.reset_npr_history();
-    }
-
-    DebugScope debug_scope(debug_scope_render_sample, "EEVEE.render_sample");
-
-    {
-      /* Critical section. Potential gpu::Shader concurrent usage. */
-      DRW_submission_start();
-
-      dlss5_reset_ = discard_viewport_history_ ||
-                     (is_viewport() && (dlss5_settings_changed_ || velocity.camera_changed_projection())) ||
-                     (is_image_render && sampling.sample_index() == 0);
-      sampling.step();
-      film.update_sample_table();
-      uniform_data.push_update();
-
-      capture_view.render_world();
-      lookdev.rotate_world();
-      capture_view.render_probes();
-      {
-        ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::RenderTextures);
-        render_textures.render();
-      }
-
-      main_view.render();
-
-      lookdev_view.render();
-
-      DRW_submission_end();
-    }
-    motion_blur.step();
-  }
-
-  void Instance::render_read_result(RenderLayer* render_layer, const char* view_name)
-  {
-    ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::ReadResult);
-    eViewLayerEEVEEPassType pass_bits = film.output_passes_get();
-    const bool record_readbacks = telemetry.enabled() && telemetry.frame_active();
-
-    const auto record_readback = [&](const TelemetryPassReadbackType type,
-                                     const char *name,
-                                     const RenderPass *rp,
-                                     const double readback_start_time) {
-      if (!record_readbacks || rp == nullptr) {
-        return;
-      }
-      telemetry.pass_readback_add(type,
-                                  name,
-                                  rp->rectx,
-                                  rp->recty,
-                                  rp->channels,
-                                  BLI_time_now_seconds() - readback_start_time);
-    };
-
-    for (auto i : IndexRange(EEVEE_RENDER_PASS_MAX_BIT + 1))
-    {
-      eViewLayerEEVEEPassType pass_type = eViewLayerEEVEEPassType(pass_bits & (1 << i));
-      if (pass_type == 0)
-      {
-        continue;
-      }
-
-      Vector<std::string> pass_names = Film::pass_to_render_pass_names(pass_type, view_layer);
-      for (int64_t pass_offset : IndexRange(pass_names.size()))
-      {
-        RenderPass* rp = RE_pass_find_by_name(
+    Vector<std::string> pass_names = Film::pass_to_render_pass_names(pass_type, view_layer);
+    for (int64_t pass_offset : IndexRange(pass_names.size())) {
+      RenderPass *rp = RE_pass_find_by_name(
           render_layer, pass_names[pass_offset].c_str(), view_name);
-        if (!rp)
-        {
-          continue;
-        }
-        const double readback_start_time = record_readbacks ? BLI_time_now_seconds() : 0.0;
-        float* result = film.read_pass(pass_type, pass_offset);
-
-        if (result)
-        {
-          record_readback(TelemetryPassReadbackType::RenderPass,
-                          pass_names[pass_offset].c_str(),
-                          rp,
-                          readback_start_time);
-          BLI_mutex_lock(&render->update_render_passes_mutex);
-          /* WORKAROUND: We use texture read to avoid using a frame-buffer to get the render result.
-           * However, on some implementation, we need a buffer with a few extra bytes for the read to
-           * happen correctly (see #GLTexture::read()). So we need a custom memory allocation. */
-           /* Avoid `memcpy()`, replace the pointer directly. */
-          RE_pass_set_buffer_data(rp, result);
-          BLI_mutex_unlock(&render->update_render_passes_mutex);
-        }
-      }
-    }
-
-    /* AOVs. */
-    for (ViewLayerAOV& aov : view_layer->aovs)
-    {
-      if ((aov.flag & AOV_CONFLICT) != 0)
-      {
-        continue;
-      }
-      RenderPass* rp = RE_pass_find_by_name(render_layer, aov.name, view_name);
-      if (!rp)
-      {
+      if (!rp) {
         continue;
       }
       const double readback_start_time = record_readbacks ? BLI_time_now_seconds() : 0.0;
-      float* result = film.read_aov(&aov);
+      float *result = film.read_pass(pass_type, pass_offset);
 
-      if (result)
-      {
-        record_readback(TelemetryPassReadbackType::AOV, aov.name, rp, readback_start_time);
+      if (result) {
+        record_readback(TelemetryPassReadbackType::RenderPass,
+                        pass_names[pass_offset].c_str(),
+                        rp,
+                        readback_start_time);
         BLI_mutex_lock(&render->update_render_passes_mutex);
         /* WORKAROUND: We use texture read to avoid using a frame-buffer to get the render result.
          * However, on some implementation, we need a buffer with a few extra bytes for the read to
          * happen correctly (see #GLTexture::read()). So we need a custom memory allocation. */
-         /* Avoid #memcpy(), replace the pointer directly. */
+        /* Avoid `memcpy()`, replace the pointer directly. */
         RE_pass_set_buffer_data(rp, result);
         BLI_mutex_unlock(&render->update_render_passes_mutex);
-      }
-    }
-
-    /* Generated native camera post-FX outputs. */
-    for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs)
-    {
-      if ((output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED) == 0 ||
-          (output.flag & (VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT |
-                          VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID)) != 0)
-      {
-        continue;
-      }
-      RenderPass* rp = RE_pass_find_by_name(render_layer, output.name, view_name);
-      if (!rp)
-      {
-        continue;
-      }
-      const double readback_start_time = record_readbacks ? BLI_time_now_seconds() : 0.0;
-      float* result = film.read_native_postfx_output(&output);
-
-      if (result)
-      {
-        record_readback(
-            TelemetryPassReadbackType::NativePostFX, output.name, rp, readback_start_time);
-        BLI_mutex_lock(&render->update_render_passes_mutex);
-        RE_pass_set_buffer_data(rp, result);
-        BLI_mutex_unlock(&render->update_render_passes_mutex);
-      }
-    }
-
-    /* The vector pass is initialized to weird values. Set it to neutral value if not rendered. */
-    if ((pass_bits & EEVEE_RENDER_PASS_VECTOR) == 0)
-    {
-      for (const std::string& vector_pass_name :
-        Film::pass_to_render_pass_names(EEVEE_RENDER_PASS_VECTOR, view_layer))
-      {
-        RenderPass* vector_rp = RE_pass_find_by_name(
-          render_layer, vector_pass_name.c_str(), view_name);
-        if (vector_rp)
-        {
-          memset(vector_rp->ibuf->float_data_for_write(),
-            0,
-            sizeof(float) * 4 * vector_rp->rectx * vector_rp->recty);
-        }
       }
     }
   }
 
-  /** \} */
+  /* AOVs. */
+  for (ViewLayerAOV &aov : view_layer->aovs) {
+    if ((aov.flag & AOV_CONFLICT) != 0) {
+      continue;
+    }
+    RenderPass *rp = RE_pass_find_by_name(render_layer, aov.name, view_name);
+    if (!rp) {
+      continue;
+    }
+    const double readback_start_time = record_readbacks ? BLI_time_now_seconds() : 0.0;
+    float *result = film.read_aov(&aov);
 
-  /* -------------------------------------------------------------------- */
-  /** \name Interface
-   * \{ */
+    if (result) {
+      record_readback(TelemetryPassReadbackType::AOV, aov.name, rp, readback_start_time);
+      BLI_mutex_lock(&render->update_render_passes_mutex);
+      /* WORKAROUND: We use texture read to avoid using a frame-buffer to get the render result.
+       * However, on some implementation, we need a buffer with a few extra bytes for the read to
+       * happen correctly (see #GLTexture::read()). So we need a custom memory allocation. */
+      /* Avoid #memcpy(), replace the pointer directly. */
+      RE_pass_set_buffer_data(rp, result);
+      BLI_mutex_unlock(&render->update_render_passes_mutex);
+    }
+  }
 
-  void Instance::render_frame(RenderEngine* engine, RenderLayer* render_layer, const char* view_name)
-  {
-    telemetry.render_run_id_set(engine ? engine->render_run_id : 0);
-    telemetry.render_view_name_set(view_name);
-    telemetry.maybe_begin_final_frame();
-    skip_render_ = skip_render_ || !is_loaded(needed_shaders);
-
-    if (skip_render_)
+  /* Generated native camera post-FX outputs. */
+  for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs) {
+    if ((output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED) == 0 ||
+        (output.flag & (VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT |
+                        VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID)) != 0)
     {
-      telemetry.reset();
-      if (!info_.empty())
-      {
-        RE_engine_set_error_message(engine, info_.c_str());
-        info_ = "";
+      continue;
+    }
+    RenderPass *rp = RE_pass_find_by_name(render_layer, output.name, view_name);
+    if (!rp) {
+      continue;
+    }
+    const double readback_start_time = record_readbacks ? BLI_time_now_seconds() : 0.0;
+    float *result = film.read_native_postfx_output(&output);
+
+    if (result) {
+      record_readback(
+          TelemetryPassReadbackType::NativePostFX, output.name, rp, readback_start_time);
+      BLI_mutex_lock(&render->update_render_passes_mutex);
+      RE_pass_set_buffer_data(rp, result);
+      BLI_mutex_unlock(&render->update_render_passes_mutex);
+    }
+  }
+
+  /* The vector pass is initialized to weird values. Set it to neutral value if not rendered. */
+  if ((pass_bits & EEVEE_RENDER_PASS_VECTOR) == 0) {
+    for (const std::string &vector_pass_name :
+         Film::pass_to_render_pass_names(EEVEE_RENDER_PASS_VECTOR, view_layer))
+    {
+      RenderPass *vector_rp = RE_pass_find_by_name(
+          render_layer, vector_pass_name.c_str(), view_name);
+      if (vector_rp) {
+        memset(vector_rp->ibuf->float_data_for_write(),
+               0,
+               sizeof(float) * 4 * vector_rp->rectx * vector_rp->recty);
       }
-      return;
+    }
+  }
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Interface
+ * \{ */
+
+void Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, const char *view_name)
+{
+  telemetry.render_run_id_set(engine ? engine->render_run_id : 0);
+  telemetry.render_view_name_set(view_name);
+  telemetry.maybe_begin_final_frame();
+  skip_render_ = skip_render_ || !is_loaded(needed_shaders);
+
+  if (skip_render_) {
+    telemetry.reset();
+    if (!info_.empty()) {
+      RE_engine_set_error_message(engine, info_.c_str());
+      info_ = "";
+    }
+    return;
+  }
+
+  DebugScope debug_scope(debug_scope_render_frame, "EEVEE.render_frame");
+
+  bool native_retry = false;
+
+  /* TODO: Break on RE_engine_test_break(engine) */
+  double start_time = BLI_time_now_seconds();
+  while (!sampling.finished()) {
+    samples_in_flight->begin_work();
+    this->render_sample();
+
+    if (dlss_sr.active() && dlss_sr.failed() && !native_retry) {
+      samples_in_flight->end_work();
+      native_retry = true;
+      GPU_finish();
+      dlss_sr.use_native_after_failure();
+      dlss5.invalidate();
+      sampling.restart_render();
+      film.discard_history();
+      const int2 full_extent = film.display_extent_get();
+      const int2 offset = film.film_offset_get();
+      const int2 extent = film.film_extent_get();
+      rcti rect{offset.x, offset.x + extent.x, offset.y, offset.y + extent.y};
+      /* init() already moved the scene into the shutter interval. Restore the
+       * request time saved by motion blur, not the current evaluated subframe. */
+      motion_blur.restore_time();
+      this->init(full_extent,
+                 &rect,
+                 &rect,
+                 render,
+                 depsgraph,
+                 camera_orig_object,
+                 this->render_layer,
+                 const_cast<View *>(drw_view),
+                 v3d,
+                 rv3d);
+      render_sync();
+      continue;
     }
 
-    DebugScope debug_scope(debug_scope_render_frame, "EEVEE.render_frame");
-
-    bool native_retry = false;
-
-    /* TODO: Break on RE_engine_test_break(engine) */
-    while (!sampling.finished())
-    {
-      this->render_sample();
-
-      if (dlss_sr.active() && dlss_sr.failed() && !native_retry) {
-        native_retry = true;
-        GPU_finish();
-        dlss_sr.use_native_after_failure();
-        dlss5.invalidate();
-        sampling.restart_render();
-        film.discard_history();
-        const int2 full_extent = film.display_extent_get();
-        const int2 offset = film.film_offset_get();
-        const int2 extent = film.film_extent_get();
-        rcti rect{offset.x, offset.x + extent.x, offset.y, offset.y + extent.y};
-        /* init() already moved the scene into the shutter interval. Restore the
-         * request time saved by motion blur, not the current evaluated subframe. */
-        motion_blur.restore_time();
-        this->init(full_extent,
-                   &rect,
-                   &rect,
-                   render,
-                   depsgraph,
-                   camera_orig_object,
-                   this->render_layer,
-                   const_cast<View *>(drw_view),
-                   v3d,
-                   rv3d);
-        render_sync();
-        continue;
-      }
-
-      if ((sampling.sample_index() == 1) || ((sampling.sample_index() % 25) == 0) ||
+    if ((sampling.sample_index() == 1) || ((sampling.sample_index() % 25) == 0) ||
         sampling.finished())
-      {
-        /* TODO: Use `fmt`. */
-        std::string re_info = "Rendering " + std::to_string(sampling.sample_index()) + " / " +
-          std::to_string(sampling.sample_count()) + " samples";
-        RE_engine_update_stats(engine, nullptr, re_info.c_str());
-      }
+    {
+      /* TODO: Use `fmt`. */
+      std::string re_info = "Rendering " + std::to_string(sampling.sample_index()) + " / " +
+                            std::to_string(sampling.sample_count()) + " samples";
+      RE_engine_update_stats(engine, nullptr, re_info.c_str());
+    }
 
-      /* Metal: Perform render step between samples to allow flushing of freed GPUBackend resources.
-       * Vulkan: Perform render step between samples to avoid allocation of a high amount of command
-       * buffer memory that can eventually result in out-of-memory errors or a TDR when submitted as
-       * one large command buffer. */
-      if (ELEM(GPU_backend_get_type(), GPU_BACKEND_METAL, GPU_BACKEND_VULKAN))
-      {
-        GPU_flush();
-      }
-      GPU_render_step();
+    samples_in_flight->end_work();
+    GPU_render_step();
+    sampling.update_time();
 
 #if 0
       /* TODO(fclem) print progression. */
@@ -1097,160 +1060,150 @@ namespace blender::eevee
         DRW_render_context_enable(render->re);
       }
 #endif
-    }
+  }
 
-    this->film.cryptomatte_sort();
+  this->film.cryptomatte_sort();
 
-    this->render_read_result(render_layer, view_name);
-    telemetry.maybe_end_final_frame();
-    if (telemetry.enabled())
-    {
-      const std::string report = telemetry.render_report();
-      if (!report.empty())
-      {
-        printf("%s", report.c_str());
-      }
-    }
-
-    if (!info_.empty())
-    {
-      RE_engine_set_error_message(
-        engine, RPT_("Errors during render. See the System Console for more info."));
-      printf("%s", info_.c_str());
-      info_ = "";
+  this->render_read_result(render_layer, view_name);
+  telemetry.maybe_end_final_frame();
+  if (telemetry.enabled()) {
+    const std::string report = telemetry.render_report();
+    if (!report.empty()) {
+      printf("%s", report.c_str());
     }
   }
 
-  void Instance::draw_viewport()
-  {
-    if (skip_render_ || !is_loaded(needed_shaders))
-    {
-      DefaultFramebufferList* dfbl = draw_ctx->viewport_framebuffer_list_get();
-      GPU_framebuffer_clear_color_depth(dfbl->default_fb, double4(0.0), 1.0f);
-      if (!is_loaded(needed_shaders & ~WORLD_SHADERS))
-      {
-        if (shaders.static_shaders_has_failed(needed_shaders & ~WORLD_SHADERS))
-        {
-          info_append_i18n("Error: Failed to compile EEVEE engine shaders");
-        }
-        else
-        {
-          info_append_i18n("Compiling EEVEE engine shaders");
-          DRW_viewport_request_redraw();
-        }
+  if (!is_viewport()) {
+    double time_elapsed = BLI_time_now_seconds() - start_time;
+    std::string message = fmt::format(
+        "Rendered {} samples in {:.6f} seconds", sampling.sample_index(), time_elapsed);
+    CLOG_INFO(&Instance::log, "%s", message.c_str());
+  }
+
+  if (!info_.empty()) {
+    RE_engine_set_error_message(
+        engine, RPT_("Errors during render. See the System Console for more info."));
+    printf("%s", info_.c_str());
+    info_ = "";
+  }
+}
+
+void Instance::draw_viewport()
+{
+  if (skip_render_ || !is_loaded(needed_shaders)) {
+    DefaultFramebufferList *dfbl = draw_ctx->viewport_framebuffer_list_get();
+    GPU_framebuffer_clear_color_depth(dfbl->default_fb, double4(0.0), 1.0f);
+    if (!is_loaded(needed_shaders & ~WORLD_SHADERS)) {
+      if (shaders.static_shaders_has_failed(needed_shaders & ~WORLD_SHADERS)) {
+        info_append_i18n("Error: Failed to compile EEVEE engine shaders");
       }
-      /* Do not swap if the velocity module didn't go through a full sync cycle. */
-      if (!is_loaded(needed_shaders))
-      {
-        /* The velocity module can reference some gpu::Batch. Calling this function
-         * make sure we release these references and don't de-reference them later as
-         * they might have been freed. */
-        velocity.step_swap();
+      else {
+        info_append_i18n("Compiling EEVEE engine shaders");
+        DRW_viewport_request_redraw();
       }
-      return;
     }
-
-    render_sample();
-    velocity.step_swap();
-
-    if (is_viewport_compositor_enabled)
-    {
-      this->film.write_viewport_compositor_passes();
+    /* Do not swap if the velocity module didn't go through a full sync cycle. */
+    if (!is_loaded(needed_shaders)) {
+      /* The velocity module can reference some gpu::Batch. Calling this function
+       * make sure we release these references and don't de-reference them later as
+       * they might have been freed. */
+      velocity.step_swap();
     }
+    return;
+  }
 
-    /* Do not request redraw during viewport animation to lock the frame-rate to the animation
-     * playback rate. This is in order to preserve motion blur aspect and also to avoid TAA reset
-     * that can show flickering. */
-    if (!sampling.finished_viewport() && !is_playback)
-    {
-      DRW_viewport_request_redraw();
+  render_sample();
+  velocity.step_swap();
+
+  if (is_viewport_compositor_used) {
+    this->film.write_viewport_compositor_passes();
+  }
+
+  /* Do not request redraw during viewport animation to lock the frame-rate to the animation
+   * playback rate. This is in order to preserve motion blur aspect and also to avoid TAA reset
+   * that can show flickering. */
+  if (!sampling.finished_viewport() && !is_playback) {
+    DRW_viewport_request_redraw();
+  }
+
+  if (materials.queued_shaders_count > 0 || materials.queued_textures_count > 0) {
+    if (materials.queued_textures_count > 0) {
+      info_append_i18n("Loading textures ({} remaining)", materials.queued_textures_count);
     }
-
-    if (materials.queued_shaders_count > 0 || materials.queued_textures_count > 0)
-    {
-      if (materials.queued_textures_count > 0)
-      {
-        info_append_i18n("Loading textures ({} remaining)", materials.queued_textures_count);
-      }
-      if (materials.queued_shaders_count > 0)
-      {
-        info_append_i18n("Compiling shaders ({} remaining)", materials.queued_shaders_count);
-        if (GPU_backend_get_type() == GPU_BACKEND_OPENGL && !GPU_use_subprocess_compilation() &&
+    if (materials.queued_shaders_count > 0) {
+      info_append_i18n("Compiling shaders ({} remaining)", materials.queued_shaders_count);
+      if (GPU_backend_get_type() == GPU_BACKEND_OPENGL && !GPU_use_subprocess_compilation() &&
           /* Only recommend subprocesses when there is known gain. */
           (GPU_type_matches(GPU_DEVICE_NVIDIA, GPU_OS_ANY, GPU_DRIVER_ANY) ||
-            GPU_type_matches(GPU_DEVICE_INTEL, GPU_OS_WIN, GPU_DRIVER_ANY) ||
-            GPU_type_matches(GPU_DEVICE_ATI, GPU_OS_ANY, GPU_DRIVER_OFFICIAL)))
-        {
-          info_append_i18n(
+           GPU_type_matches(GPU_DEVICE_INTEL, GPU_OS_WIN, GPU_DRIVER_ANY) ||
+           GPU_type_matches(GPU_DEVICE_ATI, GPU_OS_ANY, GPU_DRIVER_OFFICIAL)))
+      {
+        info_append_i18n(
             "Setting Preferences > System > Shader Compilation Method to Subprocess might improve "
             "compilation time.");
-        }
       }
-      DRW_viewport_request_redraw();
     }
-    else if (materials.queued_optimize_shaders_count > 0)
-    {
-      info_append_i18n("Optimizing shaders ({} remaining)", materials.queued_optimize_shaders_count);
-    }
-    else if (telemetry.enabled())
-    {
-      const bool include_stage_list = scene != nullptr &&
-        (scene->eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER_STAGE_LIST) != 0;
-      for (const std::string& line : telemetry.viewport_overlay_lines(include_stage_list)) {
-        if (!line.empty()) {
-          info_append("{}", line);
-        }
+    DRW_viewport_request_redraw();
+  }
+  else if (materials.queued_optimize_shaders_count > 0) {
+    info_append_i18n("Optimizing shaders ({} remaining)", materials.queued_optimize_shaders_count);
+  }
+  else if (telemetry.enabled()) {
+    const bool include_stage_list = scene != nullptr &&
+                                    (scene->eevee.flag &
+                                     SCE_EEVEE_PERFORMANCE_PROFILER_STAGE_LIST) != 0;
+    for (const std::string &line : telemetry.viewport_overlay_lines(include_stage_list)) {
+      if (!line.empty()) {
+        info_append("{}", line);
       }
     }
   }
+}
 
-  void Instance::draw_viewport_image_render()
-  {
-    if (skip_render_)
-    {
-      return;
-    }
-
-    do
-    {
-      /* Render at least once to blit the finished image. */
-      this->render_sample();
-    } while (!sampling.finished_viewport());
-    velocity.step_swap();
-
-    if (is_viewport_compositor_enabled)
-    {
-      this->film.write_viewport_compositor_passes();
-    }
+void Instance::draw_viewport_image_render()
+{
+  if (skip_render_) {
+    return;
   }
 
-  void Instance::draw(Manager& /*manager*/)
-  {
-    if (is_viewport_image_render)
-    {
-      draw_viewport_image_render();
-    }
-    else
-    {
-      draw_viewport();
-    }
-    STRNCPY(info, info_get());
-    DefaultFramebufferList* dfbl = draw_ctx->viewport_framebuffer_list_get();
-    GPU_framebuffer_viewport_reset(dfbl->default_fb);
-  }
+  do {
+    /* Render at least once to blit the finished image. */
+    samples_in_flight->begin_work();
+    this->render_sample();
+    samples_in_flight->end_work();
+    sampling.update_time();
+  } while (!sampling.finished_viewport());
+  velocity.step_swap();
 
-  void Instance::store_metadata(RenderResult* render_result)
-  {
-    if (skip_render_)
-    {
-      return;
-    }
-    cryptomatte.store_metadata(render_result);
+  if (is_viewport_compositor_used) {
+    this->film.write_viewport_compositor_passes();
   }
+}
 
-  void Instance::update_passes(RenderEngine* engine, Scene* scene, ViewLayer* view_layer)
-  {
-    RE_engine_register_pass(engine, scene, view_layer, RE_PASSNAME_COMBINED, 4, "RGBA", SOCK_RGBA);
+void Instance::draw(Manager & /*manager*/)
+{
+  if (is_viewport_image_render) {
+    draw_viewport_image_render();
+  }
+  else {
+    draw_viewport();
+  }
+  STRNCPY(info, info_get());
+  DefaultFramebufferList *dfbl = draw_ctx->viewport_framebuffer_list_get();
+  GPU_framebuffer_viewport_reset(dfbl->default_fb);
+}
+
+void Instance::store_metadata(RenderResult *render_result)
+{
+  if (skip_render_) {
+    return;
+  }
+  cryptomatte.store_metadata(render_result);
+}
+
+void Instance::update_passes(RenderEngine *engine, Scene *scene, ViewLayer *view_layer)
+{
+  RE_engine_register_pass(engine, scene, view_layer, RE_PASSNAME_COMBINED, 4, "RGBA", SOCK_RGBA);
 
 #define CHECK_PASS_LEGACY(name, type, channels, chanid) \
   if (view_layer->passflag & (SCE_PASS_##name)) { \
@@ -1264,37 +1217,42 @@ namespace blender::eevee
         engine, scene, view_layer, RE_PASSNAME_##name, channels, chanid, type); \
   } \
   ((void)0)
+#define CHECK_PASS_DENOISING(name, type, channels, chanid) \
+  if (view_layer->eevee.denoising_pass_flags & (EEVEE_DENOISING_PASS_STORE)) { \
+    RE_engine_register_pass( \
+        engine, scene, view_layer, RE_PASSNAME_##name, channels, chanid, type); \
+  } \
+  ((void)0)
 
-    CHECK_PASS_LEGACY(DEPTH, SOCK_FLOAT, 1, "Z");
-    CHECK_PASS_LEGACY(MIST, SOCK_FLOAT, 1, "Z");
-    CHECK_PASS_LEGACY(NORMAL, SOCK_VECTOR, 3, "XYZ");
-    CHECK_PASS_LEGACY(POSITION, SOCK_VECTOR, 3, "XYZ");
-    CHECK_PASS_LEGACY(VECTOR, SOCK_VECTOR, 4, "XYZW");
-    CHECK_PASS_LEGACY(DIFFUSE_DIRECT, SOCK_RGBA, 3, "RGB");
-    CHECK_PASS_LEGACY(DIFFUSE_COLOR, SOCK_RGBA, 3, "RGB");
-    CHECK_PASS_LEGACY(GLOSSY_DIRECT, SOCK_RGBA, 3, "RGB");
-    CHECK_PASS_LEGACY(GLOSSY_COLOR, SOCK_RGBA, 3, "RGB");
-    CHECK_PASS_EEVEE(VOLUME_LIGHT, SOCK_RGBA, 3, "RGB");
-    CHECK_PASS_LEGACY(EMIT, SOCK_RGBA, 3, "RGB");
-    CHECK_PASS_LEGACY(ENVIRONMENT, SOCK_RGBA, 3, "RGB");
-    CHECK_PASS_LEGACY(SHADOW, SOCK_RGBA, 3, "RGB");
-    CHECK_PASS_LEGACY(AO, SOCK_RGBA, 3, "RGB");
-    CHECK_PASS_EEVEE(TRANSPARENT, SOCK_RGBA, 4, "RGBA");
-    if (scene->eevee.use_outline &&
-        (view_layer->eevee.render_passes & EEVEE_RENDER_PASS_OUTLINE))
-    {
-      RE_engine_register_pass(
-          engine, scene, view_layer, RE_PASSNAME_OUTLINE, 4, "RGBA", SOCK_RGBA);
+  CHECK_PASS_LEGACY(DEPTH, SOCK_FLOAT, 1, "Z");
+  CHECK_PASS_LEGACY(MIST, SOCK_FLOAT, 1, "Z");
+  CHECK_PASS_LEGACY(NORMAL, SOCK_VECTOR, 3, "XYZ");
+  CHECK_PASS_LEGACY(POSITION, SOCK_VECTOR, 3, "XYZ");
+  CHECK_PASS_LEGACY(VECTOR, SOCK_VECTOR, 4, "XYZW");
+  CHECK_PASS_LEGACY(DIFFUSE_DIRECT, SOCK_RGBA, 3, "RGB");
+  CHECK_PASS_LEGACY(DIFFUSE_COLOR, SOCK_RGBA, 3, "RGB");
+  CHECK_PASS_LEGACY(GLOSSY_DIRECT, SOCK_RGBA, 3, "RGB");
+  CHECK_PASS_LEGACY(GLOSSY_COLOR, SOCK_RGBA, 3, "RGB");
+  CHECK_PASS_EEVEE(VOLUME_LIGHT, SOCK_RGBA, 3, "RGB");
+  CHECK_PASS_LEGACY(EMIT, SOCK_RGBA, 3, "RGB");
+  CHECK_PASS_LEGACY(ENVIRONMENT, SOCK_RGBA, 3, "RGB");
+  CHECK_PASS_LEGACY(SHADOW, SOCK_RGBA, 3, "RGB");
+  CHECK_PASS_LEGACY(AO, SOCK_RGBA, 3, "RGB");
+  CHECK_PASS_EEVEE(TRANSPARENT, SOCK_RGBA, 4, "RGBA");
+  if (scene->eevee.use_outline && (view_layer->eevee.render_passes & EEVEE_RENDER_PASS_OUTLINE)) {
+    RE_engine_register_pass(engine, scene, view_layer, RE_PASSNAME_OUTLINE, 4, "RGBA", SOCK_RGBA);
+  }
+  CHECK_PASS_DENOISING(DENOISING_DEPTH, SOCK_FLOAT, 1, "X");
+  CHECK_PASS_DENOISING(DENOISING_NORMAL, SOCK_VECTOR, 3, "XYZ");
+  CHECK_PASS_DENOISING(DENOISING_ROUGHNESS, SOCK_FLOAT, 1, "X");
+  CHECK_PASS_DENOISING(DENOISING_DIFFUSE_ALBEDO, SOCK_RGBA, 3, "RGB");
+  CHECK_PASS_DENOISING(DENOISING_SPECULAR_ALBEDO, SOCK_RGBA, 3, "RGB");
+
+  for (ViewLayerAOV &aov : view_layer->aovs) {
+    if ((aov.flag & AOV_CONFLICT) != 0) {
+      continue;
     }
-
-    for (ViewLayerAOV& aov : view_layer->aovs)
-    {
-      if ((aov.flag & AOV_CONFLICT) != 0)
-      {
-        continue;
-      }
-      switch (aov.type)
-      {
+    switch (aov.type) {
       case AOV_TYPE_COLOR:
         RE_engine_register_pass(engine, scene, view_layer, aov.name, 4, "RGBA", SOCK_RGBA);
         break;
@@ -1303,198 +1261,183 @@ namespace blender::eevee
         break;
       default:
         break;
-      }
     }
-
-    for (ViewLayerNativePostFXOutput& output : view_layer->native_postfx_outputs)
-    {
-      if ((output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED) == 0 ||
-          (output.flag & (VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT |
-                          VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID)) != 0)
-      {
-        continue;
-      }
-
-      int channels = 4;
-      const char* chan_id = "RGBA";
-      eNodeSocketDatatype socket_type = SOCK_RGBA;
-      NativePostFXOutputModule::output_render_pass_info(
-        output, view_layer, channels, chan_id, socket_type);
-      RE_engine_register_pass(engine, scene, view_layer, output.name, channels, chan_id, socket_type);
-    }
-
-    /* NOTE: Name channels lowercase `rgba` so that compression rules check in OpenEXR DWA code uses
-     * lossless compression. Reportedly this naming is the only one which works good from the
-     * interoperability point of view. Using `xyzw` naming is not portable. */
-    auto register_cryptomatte_passes = [&](eViewLayerCryptomatteFlags cryptomatte_layer,
-      eViewLayerEEVEEPassType eevee_pass)
-      {
-        if (view_layer->cryptomatte_flag & cryptomatte_layer)
-        {
-          for (const std::string& pass_name : Film::pass_to_render_pass_names(eevee_pass, view_layer))
-          {
-            RE_engine_register_pass(
-              engine, scene, view_layer, pass_name.c_str(), 4, "rgba", SOCK_RGBA);
-          }
-        }
-      };
-    register_cryptomatte_passes(VIEW_LAYER_CRYPTOMATTE_OBJECT, EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT);
-    register_cryptomatte_passes(VIEW_LAYER_CRYPTOMATTE_ASSET, EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET);
-    register_cryptomatte_passes(VIEW_LAYER_CRYPTOMATTE_MATERIAL,
-      EEVEE_RENDER_PASS_CRYPTOMATTE_MATERIAL);
   }
 
-  void Instance::light_bake_irradiance(
-    Object& probe,
+  for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs) {
+    if ((output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED) == 0 ||
+        (output.flag & (VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT |
+                        VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID)) != 0)
+    {
+      continue;
+    }
+
+    int channels = 4;
+    const char *chan_id = "RGBA";
+    eNodeSocketDatatype socket_type = SOCK_RGBA;
+    NativePostFXOutputModule::output_render_pass_info(
+        output, view_layer, channels, chan_id, socket_type);
+    RE_engine_register_pass(
+        engine, scene, view_layer, output.name, channels, chan_id, socket_type);
+  }
+
+  /* NOTE: Name channels lowercase `rgba` so that compression rules check in OpenEXR DWA code uses
+   * lossless compression. Reportedly this naming is the only one which works good from the
+   * interoperability point of view. Using `xyzw` naming is not portable. */
+  auto register_cryptomatte_passes = [&](eViewLayerCryptomatteFlags cryptomatte_layer,
+                                         eViewLayerEEVEEPassType eevee_pass) {
+    if (view_layer->cryptomatte_flag & cryptomatte_layer) {
+      for (const std::string &pass_name : Film::pass_to_render_pass_names(eevee_pass, view_layer))
+      {
+        RE_engine_register_pass(
+            engine, scene, view_layer, pass_name.c_str(), 4, "rgba", SOCK_RGBA);
+      }
+    }
+  };
+  register_cryptomatte_passes(VIEW_LAYER_CRYPTOMATTE_OBJECT, EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT);
+  register_cryptomatte_passes(VIEW_LAYER_CRYPTOMATTE_ASSET, EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET);
+  register_cryptomatte_passes(VIEW_LAYER_CRYPTOMATTE_MATERIAL,
+                              EEVEE_RENDER_PASS_CRYPTOMATTE_MATERIAL);
+}
+
+void Instance::light_bake_irradiance(
+    Object &probe,
     FunctionRef<void()> context_enable,
     FunctionRef<void()> context_disable,
     FunctionRef<bool()> stop,
-    FunctionRef<void(LightProbeGridCacheFrame*, float progress)> result_update)
-  {
-    BLI_assert(is_baking());
+    FunctionRef<void(LightProbeGridCacheFrame *, float progress)> result_update)
+{
+  BLI_assert(is_baking());
 
-    DRWContext draw_ctx(DRWContext::CUSTOM, depsgraph);
-    this->draw_ctx = &draw_ctx;
+  DRWContext draw_ctx(DRWContext::CUSTOM, depsgraph);
+  this->draw_ctx = &draw_ctx;
 
-    auto custom_pipeline_wrapper = [&](FunctionRef<void()> callback)
-      {
-        context_enable();
-        DRW_custom_pipeline_begin(draw_ctx, depsgraph);
-        callback();
-        DRW_custom_pipeline_end(draw_ctx);
-        context_disable();
-      };
+  auto custom_pipeline_wrapper = [&](FunctionRef<void()> callback) {
+    context_enable();
+    DRW_custom_pipeline_begin(draw_ctx, depsgraph);
+    callback();
+    DRW_custom_pipeline_end(draw_ctx);
+    context_disable();
+  };
 
-    auto context_wrapper = [&](FunctionRef<void()> callback)
-      {
-        context_enable();
-        callback();
-        context_disable();
-      };
+  auto context_wrapper = [&](FunctionRef<void()> callback) {
+    context_enable();
+    callback();
+    context_disable();
+  };
 
-    volume_probes.bake.init(probe);
+  volume_probes.bake.init(probe);
 
-    custom_pipeline_wrapper([&]()
-      {
-        drw_debug_clear();
-        this->render_sync();
-        while ((materials.queued_shaders_count > 0) || (materials.queued_textures_count > 0))
-        {
-          wait_for_material_passes();
-          /** WORKAROUND: Re-sync now that all shaders are compiled. */
-          /* This may need to happen more than once, since actual materials may require more passes
-           * (eg. volume ones) than the fallback material used for queued passes. */
-           /* TODO(@pragma37): There seems to be an issue where multiple `step_object_sync` calls on the
-            * same step can cause mismatching `has_motion` values between sync. */
-          render_sync();
-        }
-        /* Sampling module needs to be initialized to computing lighting. */
-        sampling.init(probe);
+  custom_pipeline_wrapper([&]() {
+    drw_debug_clear();
+    this->render_sync();
+    while ((materials.queued_shaders_count > 0) || (materials.queued_textures_count > 0)) {
+      wait_for_material_passes();
+      /** WORKAROUND: Re-sync now that all shaders are compiled. */
+      /* This may need to happen more than once, since actual materials may require more passes
+       * (eg. volume ones) than the fallback material used for queued passes. */
+      /* TODO(@pragma37): There seems to be an issue where multiple `step_object_sync` calls on the
+       * same step can cause mismatching `has_motion` values between sync. */
+      render_sync();
+    }
+    /* Sampling module needs to be initialized to computing lighting. */
+    sampling.init(probe);
+    sampling.step();
+
+    {
+      /* Critical section. Potential gpu::Shader concurrent usage. */
+      DRW_submission_start();
+
+      DebugScope debug_scope(debug_scope_irradiance_setup, "EEVEE.irradiance_setup");
+
+      capture_view.render_world();
+
+      volume_probes.bake.surfels_create(probe);
+
+      if (volume_probes.bake.should_break()) {
+        DRW_submission_end();
+        return;
+      }
+
+      volume_probes.bake.surfels_lights_eval();
+
+      volume_probes.bake.clusters_build();
+      volume_probes.bake.irradiance_offset();
+
+      DRW_submission_end();
+    }
+
+    /* Avoid big setup job to be queued with the sampling commands. */
+    GPU_flush();
+  });
+
+  if (volume_probes.bake.should_break()) {
+    return;
+  }
+
+  sampling.init(probe);
+
+  /* Start with 1 sample and progressively ramp up. */
+  float time_per_sample_ms_smooth = 16.0f;
+  double last_update_timestamp = BLI_time_now_seconds();
+  while (!sampling.finished()) {
+    context_wrapper([&]() {
+      DebugScope debug_scope(debug_scope_irradiance_sample, "EEVEE.irradiance_sample");
+
+      int remaining_samples = sampling.sample_count() - sampling.sample_index();
+      /* In background mode, assume we don't need as much interactivity. */
+      int time_budget_ms = G.background ? 32 : 16;
+      /* Batch ray cast. Avoids too much overhead of the context switch. */
+      int sample_count_in_batch = ceilf(time_budget_ms / max(0.1f, time_per_sample_ms_smooth));
+      /* Avoid batching too many rays, keep system responsive in case of bad values. */
+      sample_count_in_batch = std::min({32, sample_count_in_batch, remaining_samples});
+
+      CLOG_INFO(&Instance::log, "IrradianceBake: Casting %d rays.", sample_count_in_batch);
+
+      double time_it_begin_ms = BLI_time_now_seconds() * 1000.0;
+      for (int i = 0; i < sample_count_in_batch && !sampling.finished(); i++) {
         sampling.step();
-
         {
           /* Critical section. Potential gpu::Shader concurrent usage. */
           DRW_submission_start();
 
-          DebugScope debug_scope(debug_scope_irradiance_setup, "EEVEE.irradiance_setup");
-
-          capture_view.render_world();
-
-          volume_probes.bake.surfels_create(probe);
-
-          if (volume_probes.bake.should_break())
-          {
-            DRW_submission_end();
-            return;
-          }
-
-          volume_probes.bake.surfels_lights_eval();
-
-          volume_probes.bake.clusters_build();
-          volume_probes.bake.irradiance_offset();
+          volume_probes.bake.raylists_build();
+          volume_probes.bake.propagate_light();
+          volume_probes.bake.irradiance_capture();
 
           DRW_submission_end();
         }
+      };
+      /* We use GPU_finish to take into account the GPU processing time. */
+      /* TODO(fclem): Could use timer queries to keep pipelining of GPU commands if that become a
+       * real bottleneck. */
+      GPU_finish();
+      double time_it_end_ms = BLI_time_now_seconds() * 1000.0;
 
-        /* Avoid big setup job to be queued with the sampling commands. */
-        GPU_flush();
-      });
+      float time_per_sample_ms = float(time_it_end_ms - time_it_begin_ms) / sample_count_in_batch;
+      /* Exponential average. */
+      time_per_sample_ms_smooth = interpolate(time_per_sample_ms_smooth, time_per_sample_ms, 0.7f);
 
-    if (volume_probes.bake.should_break())
-    {
+      if (sampling.finished()) {
+        result_update(volume_probes.bake.read_result_packed(), 1.0f);
+      }
+      else {
+        double time_since_last_update_ms = BLI_time_now_seconds() - last_update_timestamp;
+        /* Only readback every 1 second. This readback is relatively expensive. */
+        if (time_since_last_update_ms > 1.0) {
+          float progress = sampling.sample_index() / float(sampling.sample_count());
+          result_update(volume_probes.bake.read_result_unpacked(), progress);
+          last_update_timestamp = BLI_time_now_seconds();
+        }
+      }
+    });
+
+    if (stop()) {
       return;
     }
-
-    sampling.init(probe);
-
-    /* Start with 1 sample and progressively ramp up. */
-    float time_per_sample_ms_smooth = 16.0f;
-    double last_update_timestamp = BLI_time_now_seconds();
-    while (!sampling.finished())
-    {
-      context_wrapper([&]()
-        {
-          DebugScope debug_scope(debug_scope_irradiance_sample, "EEVEE.irradiance_sample");
-
-          int remaining_samples = sampling.sample_count() - sampling.sample_index();
-          /* In background mode, assume we don't need as much interactivity. */
-          int time_budget_ms = G.background ? 32 : 16;
-          /* Batch ray cast. Avoids too much overhead of the context switch. */
-          int sample_count_in_batch = ceilf(time_budget_ms / max(0.1f, time_per_sample_ms_smooth));
-          /* Avoid batching too many rays, keep system responsive in case of bad values. */
-          sample_count_in_batch = std::min({32, sample_count_in_batch, remaining_samples});
-
-          CLOG_INFO(&Instance::log, "IrradianceBake: Casting %d rays.", sample_count_in_batch);
-
-          double time_it_begin_ms = BLI_time_now_seconds() * 1000.0;
-          for (int i = 0; i < sample_count_in_batch && !sampling.finished(); i++)
-          {
-            sampling.step();
-            {
-              /* Critical section. Potential gpu::Shader concurrent usage. */
-              DRW_submission_start();
-
-              volume_probes.bake.raylists_build();
-              volume_probes.bake.propagate_light();
-              volume_probes.bake.irradiance_capture();
-
-              DRW_submission_end();
-            }
-          };
-          /* We use GPU_finish to take into account the GPU processing time. */
-          /* TODO(fclem): Could use timer queries to keep pipelining of GPU commands if that become a
-           * real bottleneck. */
-          GPU_finish();
-          double time_it_end_ms = BLI_time_now_seconds() * 1000.0;
-
-          float time_per_sample_ms = float(time_it_end_ms - time_it_begin_ms) / sample_count_in_batch;
-          /* Exponential average. */
-          time_per_sample_ms_smooth = interpolate(time_per_sample_ms_smooth, time_per_sample_ms, 0.7f);
-
-          if (sampling.finished())
-          {
-            result_update(volume_probes.bake.read_result_packed(), 1.0f);
-          }
-          else
-          {
-            double time_since_last_update_ms = BLI_time_now_seconds() - last_update_timestamp;
-            /* Only readback every 1 second. This readback is relatively expensive. */
-            if (time_since_last_update_ms > 1.0)
-            {
-              float progress = sampling.sample_index() / float(sampling.sample_count());
-              result_update(volume_probes.bake.read_result_unpacked(), progress);
-              last_update_timestamp = BLI_time_now_seconds();
-            }
-          }
-        });
-
-      if (stop())
-      {
-        return;
-      }
-    }
   }
+}
 
-  /** \} */
+/** \} */
 
 }  // namespace blender::eevee

@@ -14,6 +14,8 @@
 #include <string.h> /* memcpy */
 #include <sys/types.h>
 
+#include "PRF_profile.hh"
+
 #include "MEM_guardedalloc.h"
 #include "MEM_safe_multiply.h"
 
@@ -24,7 +26,7 @@
 #endif
 
 /* to ensure strict conversions */
-#include "../../source/blender/blenlib/BLI_strict_flags.h"
+#include "../../source/blender/blenlib/BLI_strict_flags.hh"
 
 #include "atomic_ops.h"
 #include "mallocn_intern.hh"
@@ -81,8 +83,7 @@ enum {
 #ifdef __GNUC__
 __attribute__((format(printf, 1, 0)))
 #endif
-static void
-print_error(const char *message, va_list str_format_args)
+static void print_error(const char *message, va_list str_format_args)
 {
   char buf[512];
   vsnprintf(buf, sizeof(buf), message, str_format_args);
@@ -96,8 +97,7 @@ print_error(const char *message, va_list str_format_args)
 #ifdef __GNUC__
 __attribute__((format(printf, 1, 2)))
 #endif
-static void
-print_error(const char *message, ...)
+static void print_error(const char *message, ...)
 {
   va_list str_format_args;
   va_start(str_format_args, message);
@@ -108,8 +108,7 @@ print_error(const char *message, ...)
 #ifdef __GNUC__
 __attribute__((format(printf, 2, 3)))
 #endif
-static void
-report_error_on_address(const void *vmemh, const char *message, ...)
+static void report_error_on_address(const void *vmemh, const char *message, ...)
 {
   va_list str_format_args;
 
@@ -127,7 +126,7 @@ report_error_on_address(const void *vmemh, const char *message, ...)
 
   const void *address = memh;
   size_t size = len + sizeof(*memh);
-  if (UNLIKELY(MEMHEAD_IS_ALIGNED(memh))) {
+  if (MEMHEAD_IS_ALIGNED(memh)) [[unlikely]] {
     const MemHeadAligned *memh_aligned = MEMHEAD_ALIGNED_FROM_PTR(vmemh);
     address = MEMHEAD_REAL_PTR(memh_aligned);
     size = len + sizeof(*memh_aligned) + MEMHEAD_ALIGN_PADDING(memh_aligned->alignment);
@@ -137,7 +136,7 @@ report_error_on_address(const void *vmemh, const char *message, ...)
 
 size_t MEM_lockfree_allocN_len(const void *vmemh)
 {
-  if (LIKELY(vmemh)) {
+  if (vmemh) [[likely]] {
     return MEMHEAD_LEN(MEMHEAD_FROM_PTR(vmemh));
   }
 
@@ -146,11 +145,12 @@ size_t MEM_lockfree_allocN_len(const void *vmemh)
 
 void MEM_lockfree_freeN(void *vmemh, DestructorType destructor_type)
 {
-  if (UNLIKELY(leak_detector_has_run)) {
+  PRF_scope(blender::ProfileCategory::Core);
+  if (leak_detector_has_run) [[unlikely]] {
     print_error("%s\n", free_after_leak_detection_message);
   }
 
-  if (UNLIKELY(vmemh == nullptr)) {
+  if (vmemh == nullptr) [[unlikely]] {
     report_error_on_address(vmemh, "Attempt to free nullptr pointer\n");
     return;
   }
@@ -166,20 +166,22 @@ void MEM_lockfree_freeN(void *vmemh, DestructorType destructor_type)
 
   memory_usage_block_free(len);
 
-  if (UNLIKELY(malloc_debug_memset && len)) {
+  if (malloc_debug_memset && len) [[unlikely]] {
     memset(memh + 1, 255, len);
   }
-  if (UNLIKELY(MEMHEAD_IS_ALIGNED(memh))) {
+  if (MEMHEAD_IS_ALIGNED(memh)) [[unlikely]] {
     MemHeadAligned *memh_aligned = MEMHEAD_ALIGNED_FROM_PTR(vmemh);
     aligned_free(MEMHEAD_REAL_PTR(memh_aligned));
   }
   else {
+    PRF_memory_free(memh);
     free(memh);
   }
 }
 
 void *MEM_lockfree_dupallocN(const void *vmemh)
 {
+  PRF_scope(blender::ProfileCategory::Core);
   void *newp = nullptr;
   if (vmemh) {
     const MemHead *memh = MEMHEAD_FROM_PTR(vmemh);
@@ -191,7 +193,7 @@ void *MEM_lockfree_dupallocN(const void *vmemh)
                               "CPP-style MEM_new or new\n");
     }
 
-    if (UNLIKELY(MEMHEAD_IS_ALIGNED(memh))) {
+    if (MEMHEAD_IS_ALIGNED(memh)) [[unlikely]] {
       const MemHeadAligned *memh_aligned = MEMHEAD_ALIGNED_FROM_PTR(vmemh);
       newp = MEM_lockfree_mallocN_aligned(
           prev_size, size_t(memh_aligned->alignment), "dupli_malloc", DestructorType::Trivial);
@@ -206,6 +208,7 @@ void *MEM_lockfree_dupallocN(const void *vmemh)
 
 void *MEM_lockfree_reallocN_id(void *vmemh, size_t len, const char *str)
 {
+  PRF_scope(blender::ProfileCategory::Core);
   void *newp = nullptr;
 
   if (vmemh) {
@@ -219,7 +222,7 @@ void *MEM_lockfree_reallocN_id(void *vmemh, size_t len, const char *str)
           "CPP-style MEM_new or new\n");
     }
 
-    if (LIKELY(!MEMHEAD_IS_ALIGNED(memh))) {
+    if (!MEMHEAD_IS_ALIGNED(memh)) [[likely]] {
       newp = MEM_lockfree_mallocN(len, "realloc");
     }
     else {
@@ -250,6 +253,7 @@ void *MEM_lockfree_reallocN_id(void *vmemh, size_t len, const char *str)
 
 void *MEM_lockfree_recallocN_id(void *vmemh, size_t len, const char *str)
 {
+  PRF_scope(blender::ProfileCategory::Core);
   void *newp = nullptr;
 
   if (vmemh) {
@@ -263,7 +267,7 @@ void *MEM_lockfree_recallocN_id(void *vmemh, size_t len, const char *str)
           "CPP-style MEM_new or new\n");
     }
 
-    if (LIKELY(!MEMHEAD_IS_ALIGNED(memh))) {
+    if (!MEMHEAD_IS_ALIGNED(memh)) [[likely]] {
       newp = MEM_lockfree_mallocN(len, "recalloc");
     }
     else {
@@ -299,13 +303,15 @@ void *MEM_lockfree_recallocN_id(void *vmemh, size_t len, const char *str)
 
 void *MEM_lockfree_callocN(size_t len, const char *str)
 {
+  PRF_scope(blender::ProfileCategory::Core);
   MemHead *memh;
 
   len = SIZET_ALIGN_4(len);
 
   memh = (MemHead *)calloc(1, len + sizeof(MemHead));
+  PRF_memory_alloc(memh, len + sizeof(MemHead));
 
-  if (LIKELY(memh)) {
+  if (memh) [[likely]] {
     memh->len = len;
     memory_usage_block_alloc(len);
 
@@ -320,8 +326,9 @@ void *MEM_lockfree_callocN(size_t len, const char *str)
 
 void *MEM_lockfree_calloc_arrayN(size_t len, size_t size, const char *str)
 {
+  PRF_scope(blender::ProfileCategory::Core);
   size_t total_size;
-  if (UNLIKELY(!MEM_size_safe_multiply(len, size, &total_size))) {
+  if (!MEM_size_safe_multiply(len, size, &total_size)) [[unlikely]] {
     print_error(
         "Calloc array aborted due to integer overflow: "
         "len=" SIZET_FORMAT "x" SIZET_FORMAT " in %s, total " SIZET_FORMAT "\n",
@@ -338,6 +345,7 @@ void *MEM_lockfree_calloc_arrayN(size_t len, size_t size, const char *str)
 
 void *MEM_lockfree_mallocN(size_t len, const char *str)
 {
+  PRF_scope(blender::ProfileCategory::Core);
   MemHead *memh;
 
 #ifdef WITH_MEM_VALGRIND
@@ -346,11 +354,12 @@ void *MEM_lockfree_mallocN(size_t len, const char *str)
   len = SIZET_ALIGN_4(len);
 
   memh = (MemHead *)malloc(len + sizeof(MemHead));
+  PRF_memory_alloc(memh, len + sizeof(MemHead));
 
-  if (LIKELY(memh)) {
+  if (memh) [[likely]] {
 
-    if (LIKELY(len)) {
-      if (UNLIKELY(malloc_debug_memset)) {
+    if (len) [[likely]] {
+      if (malloc_debug_memset) [[unlikely]] {
         memset(memh + 1, 255, len);
       }
 #ifdef WITH_MEM_VALGRIND
@@ -377,8 +386,9 @@ void *MEM_lockfree_mallocN(size_t len, const char *str)
 
 void *MEM_lockfree_malloc_arrayN(size_t len, size_t size, const char *str)
 {
+  PRF_scope(blender::ProfileCategory::Core);
   size_t total_size;
-  if (UNLIKELY(!MEM_size_safe_multiply(len, size, &total_size))) {
+  if (!MEM_size_safe_multiply(len, size, &total_size)) [[unlikely]] {
     print_error(
         "Malloc array aborted due to integer overflow: "
         "len=" SIZET_FORMAT "x" SIZET_FORMAT " in %s, total " SIZET_FORMAT "\n",
@@ -398,6 +408,7 @@ void *MEM_lockfree_mallocN_aligned(size_t len,
                                    const char *str,
                                    const DestructorType destructor_type)
 {
+  PRF_scope(blender::ProfileCategory::Core);
   /* Huge alignment values doesn't make sense and they wouldn't fit into 'short' used in the
    * MemHead. */
   assert(alignment < 1024);
@@ -425,16 +436,17 @@ void *MEM_lockfree_mallocN_aligned(size_t len,
 
   MemHeadAligned *memh = (MemHeadAligned *)aligned_malloc(
       len + extra_padding + sizeof(MemHeadAligned), alignment);
+  PRF_memory_alloc(memh, len + extra_padding + sizeof(MemHeadAligned));
 
-  if (LIKELY(memh)) {
+  if (memh) [[likely]] {
     /* We keep padding in the beginning of MemHead,
      * this way it's always possible to get MemHead
      * from the data pointer.
      */
     memh = (MemHeadAligned *)((char *)memh + extra_padding);
 
-    if (LIKELY(len)) {
-      if (UNLIKELY(malloc_debug_memset)) {
+    if (len) [[likely]] {
+      if (malloc_debug_memset) [[unlikely]] {
         memset(memh + 1, 255, len);
       }
 #ifdef WITH_MEM_VALGRIND
@@ -469,7 +481,7 @@ static void *mem_lockfree_malloc_arrayN_aligned(const size_t len,
                                                 const char *str,
                                                 size_t &r_bytes_num)
 {
-  if (UNLIKELY(!MEM_size_safe_multiply(len, size, &r_bytes_num))) {
+  if (!MEM_size_safe_multiply(len, size, &r_bytes_num)) [[unlikely]] {
     print_error(
         "Calloc array aborted due to integer overflow: "
         "len=" SIZET_FORMAT "x" SIZET_FORMAT " in %s, total " SIZET_FORMAT "\n",
@@ -492,6 +504,7 @@ void *MEM_lockfree_malloc_arrayN_aligned(const size_t len,
                                          const size_t alignment,
                                          const char *str)
 {
+  PRF_scope(blender::ProfileCategory::Core);
   size_t bytes_num;
   return mem_lockfree_malloc_arrayN_aligned(len, size, alignment, str, bytes_num);
 }
@@ -501,6 +514,7 @@ void *MEM_lockfree_calloc_arrayN_aligned(const size_t len,
                                          const size_t alignment,
                                          const char *str)
 {
+  PRF_scope(blender::ProfileCategory::Core);
   /* There is no lower level #calloc with an alignment parameter, so unless the alignment is less
    * than or equal to what we'd get by default, we have to fall back to #memset unfortunately. */
   if (alignment <= MEM_MIN_CPP_ALIGNMENT) {

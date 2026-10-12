@@ -16,7 +16,7 @@
 #include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BKE_action.hh"
 #include "BKE_collection.hh"
@@ -207,6 +207,9 @@ void deg_graph_build_finalize(Main *bmain, Depsgraph *graph)
       }
       if (id_type == ID_NT) {
         flag |= ID_RECALC_NTREE_OUTPUT;
+      }
+      if (id_type == ID_SCE) {
+        flag |= ID_RECALC_COMPOSITOR;
       }
     }
     else {

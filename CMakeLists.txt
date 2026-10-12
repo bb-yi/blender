@@ -34,9 +34,7 @@ else()
   set(FIRST_RUN FALSE)
 endif()
 
-# this starts out unset
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/build_files/cmake/Modules")
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/build_files/cmake/platform")
 
 # Avoid having an empty `CMAKE_BUILD_TYPE`.
 if(NOT DEFINED CMAKE_BUILD_TYPE_INIT)
@@ -69,20 +67,16 @@ if(POLICY CMP0177)
 endif()
 
 # -----------------------------------------------------------------------------
-# Load Blender's Local Macros
-
-include(build_files/cmake/macros.cmake)
-
-# -----------------------------------------------------------------------------
 # Initialize Project
-
-blender_project_hack_pre()
 
 project(Blender)
 
-blender_project_hack_post()
-
 enable_testing()
+
+# -----------------------------------------------------------------------------
+# Load Blender's Local Macros
+
+include(build_files/cmake/macros.cmake)
 
 # There are some circumstances where the git checkout doesn't grab
 # the files from LFS but produces small pointer files. The build system
@@ -93,7 +87,10 @@ enable_testing()
 if(EXISTS ${CMAKE_SOURCE_DIR}/release/datafiles/startup.blend)
   file(SIZE ${CMAKE_SOURCE_DIR}/release/datafiles/startup.blend startup_size)
   if(${startup_size} LESS 1024)
-    message(FATAL_ERROR "Detected incomplete startup blend, likely due to missing Git LFS checkout.\nRunning \"make update\" or \"git lfs pull\" may resolve the issue.")
+    message(FATAL_ERROR
+      "Detected incomplete startup blend, likely due to missing Git LFS checkout.\n"
+      "Running \"make update\" or \"git lfs pull\" may resolve the issue."
+    )
   endif()
   unset(startup_size)
 endif()
@@ -314,6 +311,8 @@ option(WITH_MANIFOLD "Enable features depending on Manifold (Fast Robust Boolean
 
 option(WITH_OPENIMAGEDENOISE "Enable the OpenImageDenoise compositing node" ON)
 
+option(WITH_DLSS "Enable NVIDIA DLSS Ray Reconstruction support" OFF)
+
 option(WITH_OPENSUBDIV "Enable OpenSubdiv for surface subdivision" ON)
 
 option(WITH_POTRACE "Enable features relying on Potrace" ON)
@@ -346,6 +345,21 @@ if(UNIX AND NOT (APPLE OR HAIKU))
 
   option(WITH_GHOST_WAYLAND "Enable building Blender against Wayland for windowing" ON)
   mark_as_advanced(WITH_GHOST_WAYLAND)
+
+  if(WITH_GHOST_WAYLAND)
+    option(WITH_GHOST_DBUS "\
+Enable reading desktop settings over DBUS, such as the light/dark theme preference. \
+Requires the `dbus-1` headers at build time."
+      ON
+    )
+    mark_as_advanced(WITH_GHOST_DBUS)
+  endif()
+
+  option(WITH_GHOST_DBUS_DYNLOAD "\
+Enable runtime dynamic loading of `libdbus` (avoids a link time dependency)"
+    ON
+  )
+  mark_as_advanced(WITH_GHOST_DBUS_DYNLOAD)
 
   if(WITH_GHOST_WAYLAND)
     option(WITH_GHOST_CSD "Enable client side decorations with Wayland" ON)
@@ -461,6 +475,7 @@ option(WITH_IO_PLY "Enable PLY 3D file format support (*.ply)" ON)
 option(WITH_IO_STL "Enable STL 3D file format support (*.stl)" ON)
 option(WITH_IO_FBX "Enable FBX 3D file format support (*.fbx)" ON)
 option(WITH_IO_GREASE_PENCIL "Enable Grease Pencil file format IO (*.svg, *.pdf)" ON)
+option(WITH_IO_SPZ "Enable SPZ compressed 3D gaussian splats file format support (*.spz)" ON)
 
 # Sound output
 option(WITH_SDL_AUDIO "Enable SDL audio support" OFF)
@@ -514,6 +529,12 @@ mark_as_advanced(WITH_SYSTEM_GLOG)
 # Freestyle
 option(WITH_FREESTYLE "Enable Freestyle (advanced edges rendering)" ON)
 
+# Jolt Physics
+option(WITH_JOLT "Enable the Jolt Physics library" ON)
+
+# OpenTimelineIO
+option(WITH_OPENTIMELINEIO "Enable Video Sequencer OpenTimelineIO support" ON)
+
 # Libraries.
 if(UNIX AND NOT APPLE)
   # Optionally build without pre-compiled libraries.
@@ -548,6 +569,8 @@ if(UNIX AND (NOT APPLE OR WITH_PYTHON_MODULE))
 Install redistributable runtime, otherwise install into CMAKE_INSTALL_PREFIX"
     ON
   )
+else()
+  set(WITH_INSTALL_PORTABLE ON)
 endif()
 
 option(WITH_PYTHON_INSTALL "Copy system Python into the Blender install directory" ON)
@@ -593,14 +616,20 @@ Path to python site-packages or dist-packages containing 'zstandard' module"
   mark_as_advanced(PYTHON_ZSTANDARD_PATH)
 endif()
 
-option(WITH_COMPILER_SIMD "Add the recommended Blender default SIMD flags to the compiler's C_FLAGS/CXX_FLAGS" ON)
+option(WITH_COMPILER_SIMD "\
+Add the recommended Blender default SIMD flags to the compiler's C_FLAGS/CXX_FLAGS"
+  ON
+)
 mark_as_advanced(WITH_COMPILER_SIMD)
+
+
+option(WITH_EMBREE "Build Cycles with Embree support, and use Embree BVH in Blender" ON)
+
 
 # Cycles
 option(WITH_CYCLES "Enable Cycles Render Engine" ON)
 option(WITH_CYCLES_OSL "Build Cycles with OpenShadingLanguage support" ON)
 option(WITH_CYCLES_PATH_GUIDING "Build Cycles with path guiding support" ON)
-option(WITH_CYCLES_EMBREE "Build Cycles with Embree support" ON)
 option(WITH_CYCLES_DEBUG "Build Cycles with options useful for debugging (e.g., MIS)" OFF)
 
 option(WITH_CYCLES_STANDALONE "Build Cycles standalone application" OFF)
@@ -641,7 +670,7 @@ mark_as_advanced(CYCLES_TEST_DEVICES)
 mark_as_advanced(WITH_CYCLES_TEST_OSL)
 
 # NVIDIA CUDA & OptiX
-if(NOT APPLE AND NOT (WIN32 AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64"))
+if(NOT APPLE)
   option(WITH_CYCLES_DEVICE_CUDA "Enable Cycles NVIDIA CUDA compute support" ON)
   option(WITH_CYCLES_DEVICE_OPTIX "Enable Cycles NVIDIA OptiX support" ON)
   mark_as_advanced(WITH_CYCLES_DEVICE_CUDA)
@@ -684,7 +713,8 @@ if(NOT APPLE AND NOT (WIN32 AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64"))
   set(CYCLES_HIP_BINARIES_ARCH
     gfx1010 gfx1011 gfx1012
     gfx1030 gfx1031 gfx1032 gfx1034 gfx1035 gfx1036
-    gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152
+    gfx1100 gfx1101 gfx1102 gfx1103
+    gfx1150 gfx1151 gfx1152 gfx1153
     gfx1200 gfx1201
     CACHE STRING "AMD HIP architectures to build binaries for"
   )
@@ -707,6 +737,10 @@ if(NOT APPLE AND NOT (WIN32 AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64"))
 Enable Ahead-Of-Time compilation for Cycles oneAPI device"
     OFF
   )
+  option(WITH_CYCLES_ONEAPI_SOFTWARE_TEXTURING "\
+Use software texture lookup and interpolation instead of GPU hardware samplers"
+    OFF
+  )
 
   # https://www.intel.com/content/www/us/en/develop/documentation/oneapi-dpcpp-cpp-compiler-dev-guide-and-reference/top/compilation/ahead-of-time-compilation.html
   # The supported devices can be retrieved from `ocloc` output when running
@@ -720,6 +754,7 @@ oneAPI Intel GPU architectures to build binaries for"
 oneAPI targets to build AOT binaries for"
   )
 
+  mark_as_advanced(WITH_CYCLES_ONEAPI_SOFTWARE_TEXTURING)
   mark_as_advanced(CYCLES_ONEAPI_INTEL_BINARIES_ARCH)
   mark_as_advanced(CYCLES_ONEAPI_SYCL_TARGETS)
 endif()
@@ -1270,7 +1305,7 @@ endif()
 
 # Apple
 if(APPLE)
-  include(platform_apple_xcode)
+  include(build_files/cmake/platform/platform_apple_xcode.cmake)
 
   option(WITH_LEGACY_MACOS_X64_LINKER "\
 Use legacy macOS linker on x64 platform. Minutes slower, but emits fewer warnings."
@@ -1343,12 +1378,20 @@ endif()
 
 # don't store paths to libs for portable distribution
 if(WITH_INSTALL_PORTABLE)
-  set(CMAKE_SKIP_BUILD_RPATH TRUE)
+  # TODO: match the CMake option, this check is historic.
+  if(UNIX AND (NOT APPLE OR WITH_PYTHON_MODULE))
+    set(CMAKE_SKIP_BUILD_RPATH TRUE)
+  endif()
 endif()
 
 if(UNIX AND NOT (APPLE OR HAIKU))
   set_and_warn_incompatible(WITH_HEADLESS WITH_GHOST_WAYLAND OFF)
   set_and_warn_incompatible(WITH_HEADLESS WITH_GHOST_X11 OFF)
+  # Only the WAYLAND back-end currently reads desktop settings over DBUS.
+  if (DEFINED WITH_GHOST_DBUS)
+    set_and_warn_dependency(WITH_GHOST_WAYLAND WITH_GHOST_DBUS OFF)
+    set_and_warn_incompatible(WITH_HEADLESS WITH_GHOST_DBUS OFF)
+  endif()
 endif()
 set_and_warn_incompatible(WITH_HEADLESS WITH_GHOST_SDL OFF)
 
@@ -1431,7 +1474,8 @@ set(WITH_BINRELOC OFF)
 # MACOSX only, set to avoid uninitialized
 set(EXETYPE "")
 
-# WITH_SDL is uncached, depends on either WITH_SDL_AUDIO, WITH_GHOST_SDL or WITH_CYCLES_STANDALONE_GUI being set.
+# WITH_SDL is uncached, depends on either WITH_SDL_AUDIO, WITH_GHOST_SDL
+# or WITH_CYCLES_STANDALONE_GUI being set.
 set(WITH_SDL OFF)
 if(WITH_SDL_AUDIO OR WITH_GHOST_SDL OR WITH_CYCLES_STANDALONE_GUI)
   set(WITH_SDL ON)
@@ -1539,11 +1583,11 @@ endif()
 # - APPLE
 
 if(UNIX AND NOT APPLE)
-  include(platform_unix)
+  include(build_files/cmake/platform/platform_unix.cmake)
 elseif(WIN32)
-  include(platform_win32)
+  include(build_files/cmake/platform/platform_win32.cmake)
 elseif(APPLE)
-  include(platform_apple)
+  include(build_files/cmake/platform/platform_apple.cmake)
 endif()
 
 
@@ -1567,14 +1611,11 @@ if(SUPPORTS_NEON_BUILD AND SSE2NEON_FOUND)
 endif()
 
 # Test endianness and set the endian define.
-include(TestBigEndian)
-test_big_endian(_SYSTEM_BIG_ENDIAN)
-if(_SYSTEM_BIG_ENDIAN)
+if(CMAKE_CXX_BYTE_ORDER STREQUAL "BIG_ENDIAN")
   message(FATAL_ERROR "Blender does not support building on Big Endian systems" )
 else()
   add_definitions(-D__LITTLE_ENDIAN__)
 endif()
-unset(_SYSTEM_BIG_ENDIAN)
 
 if(WITH_IMAGE_OPENJPEG)
   # Special handling of Windows platform where openjpeg is always static.
@@ -1678,7 +1719,7 @@ endif()
 # -----------------------------------------------------------------------------
 # Common dependency targets
 
-include(dependency_targets)
+include(build_files/cmake/platform/dependency_targets.cmake)
 
 # -----------------------------------------------------------------------------
 # Ninja Job Limiting
@@ -2529,16 +2570,18 @@ if(FIRST_RUN)
   info_cfg_option(WITH_INPUT_NDOF)
   info_cfg_option(WITH_INPUT_IME)
   info_cfg_option(WITH_INTERNATIONAL)
+  info_cfg_option(WITH_JOLT)
   info_cfg_option(WITH_MANIFOLD)
+  info_cfg_option(WITH_MATERIALX)
   info_cfg_option(WITH_OPENIMAGEDENOISE)
   info_cfg_option(WITH_OPENSUBDIV)
+  info_cfg_option(WITH_OPENTIMELINEIO)
   info_cfg_option(WITH_OPENVDB)
   info_cfg_option(WITH_POTRACE)
   info_cfg_option(WITH_PUGIXML)
   info_cfg_option(WITH_QUADRIFLOW)
   info_cfg_option(WITH_TBB)
   info_cfg_option(WITH_USD)
-  info_cfg_option(WITH_MATERIALX)
   info_cfg_option(WITH_XR_OPENXR)
 
   info_cfg_text("Compiler Options:")
@@ -2563,6 +2606,10 @@ if(FIRST_RUN)
     endif()
     if(WITH_GHOST_WAYLAND)
       info_cfg_option(WITH_GHOST_WAYLAND_DYNLOAD)
+    endif()
+    info_cfg_option(WITH_GHOST_DBUS)
+    if(WITH_GHOST_DBUS)
+      info_cfg_option(WITH_GHOST_DBUS_DYNLOAD)
     endif()
   endif()
 
@@ -2609,7 +2656,7 @@ if(FIRST_RUN)
   if(WITH_CYCLES)
     info_cfg_text("Rendering (Cycles):")
     info_cfg_option(WITH_CYCLES_OSL)
-    info_cfg_option(WITH_CYCLES_EMBREE)
+    info_cfg_option(WITH_EMBREE)
     info_cfg_option(WITH_CYCLES_PATH_GUIDING)
     if(NOT APPLE)
       info_cfg_option(WITH_CYCLES_DEVICE_OPTIX)

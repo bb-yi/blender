@@ -13,14 +13,14 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_ghash.h"
+#include "BLI_ghash.hh"
 #include "BLI_kdopbvh.hh"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
-#include "BLI_memarena.h"
-#include "BLI_polyfill_2d.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_memarena.hh"
+#include "BLI_polyfill_2d.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_bvhutils.hh"
 
@@ -47,7 +47,7 @@
 #  include "../bmesh/bmesh_py_types.hh"
 #endif /* MATH_STANDALONE */
 
-#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
+#include "BLI_strict_flags.hh" /* IWYU pragma: keep. Keep last. */
 
 namespace blender {
 
@@ -341,7 +341,16 @@ static PyObject *py_bvhtree_ray_cast(PyBVHTree *self, PyObject *args)
   {
     PyObject *py_co, *py_direction;
 
-    if (!PyArg_ParseTuple(args, "OO|f:ray_cast", &py_co, &py_direction, &max_dist)) {
+    if (!PyArg_ParseTuple(args,
+                          "O" /* `origin` */
+                          "O" /* `direction` */
+                          "|" /* Optional arguments. */
+                          "f" /* `distance` */
+                          ":ray_cast",
+                          &py_co,
+                          &py_direction,
+                          &max_dist))
+    {
       return nullptr;
     }
 
@@ -392,7 +401,14 @@ static PyObject *py_bvhtree_find_nearest(PyBVHTree *self, PyObject *args)
   {
     PyObject *py_co;
 
-    if (!PyArg_ParseTuple(args, "O|f:find_nearest", &py_co, &max_dist)) {
+    if (!PyArg_ParseTuple(args,
+                          "O" /* `origin` */
+                          "|" /* Optional arguments. */
+                          "f" /* `distance` */
+                          ":find_nearest",
+                          &py_co,
+                          &max_dist))
+    {
       return nullptr;
     }
 
@@ -475,7 +491,14 @@ static PyObject *py_bvhtree_find_nearest_range(PyBVHTree *self, PyObject *args)
   {
     PyObject *py_co;
 
-    if (!PyArg_ParseTuple(args, "O|f:find_nearest_range", &py_co, &max_dist)) {
+    if (!PyArg_ParseTuple(args,
+                          "O" /* `origin` */
+                          "|" /* Optional arguments. */
+                          "f" /* `distance` */
+                          ":find_nearest_range",
+                          &py_co,
+                          &max_dist))
+    {
       return nullptr;
     }
 
@@ -531,7 +554,7 @@ static bool py_bvhtree_overlap_cb(void *userdata, int index_a, int index_b, int 
   int verts_shared = 0;
 
   if (tree_a == tree_b) {
-    if (UNLIKELY(index_a == index_b)) {
+    if (index_a == index_b) [[unlikely]] {
       return false;
     }
 
@@ -673,7 +696,12 @@ static PyObject *C_BVHTree_FromPolygons(PyObject * /*cls*/, PyObject *args, PyOb
 
   if (!PyArg_ParseTupleAndKeywords(args,
                                    kwargs,
-                                   "OO|$O&f:BVHTree.FromPolygons",
+                                   "O"  /* `vertices` */
+                                   "O"  /* `polygons` */
+                                   "|$" /* Optional, keyword only arguments. */
+                                   "O&" /* `all_triangles` */
+                                   "f"  /* `epsilon` */
+                                   ":BVHTree.FromPolygons",
                                    const_cast<char **>(keywords),
                                    &py_coords,
                                    &py_tris,
@@ -743,7 +771,7 @@ static PyObject *C_BVHTree_FromPolygons(PyObject * /*cls*/, PyObject *args, PyOb
 
       for (j = 0; j < 3; j++) {
         tri[j] = PyC_Long_AsU32(py_tricoords_fast_items[j]);
-        if (UNLIKELY(tri[j] >= uint(coords_len))) {
+        if (tri[j] >= uint(coords_len)) [[unlikely]] {
           PyErr_Format(PyExc_ValueError,
                        "%s: index %d must be less than %d",
                        error_prefix,
@@ -802,7 +830,7 @@ static PyObject *C_BVHTree_FromPolygons(PyObject * /*cls*/, PyObject *args, PyOb
 
       for (j = 0; j < py_tricoords_len; j++) {
         plink->poly[j] = PyC_Long_AsU32(py_tricoords_fast_items[j]);
-        if (UNLIKELY(plink->poly[j] >= uint(coords_len))) {
+        if (plink->poly[j] >= uint(coords_len)) [[unlikely]] {
           PyErr_Format(PyExc_ValueError,
                        "%s: index %d must be less than %d",
                        error_prefix,
@@ -964,7 +992,10 @@ static PyObject *C_BVHTree_FromBMesh(PyObject * /*cls*/, PyObject *args, PyObjec
 
   if (!PyArg_ParseTupleAndKeywords(args,
                                    kwargs,
-                                   "O!|$f:BVHTree.FromBMesh",
+                                   "O!" /* `bmesh` */
+                                   "|$" /* Optional, keyword only arguments. */
+                                   "f"  /* `epsilon` */
+                                   ":BVHTree.FromBMesh",
                                    const_cast<char **>(keywords),
                                    &BPy_BMesh_Type,
                                    &py_bm,
@@ -1049,7 +1080,7 @@ static const Mesh *bvh_get_mesh(const char *funcname,
   const CustomData_MeshMasks data_masks = CD_MASK_BAREMESH;
   const bool use_render = DEG_get_mode(depsgraph) == DAG_EVAL_RENDER;
   *r_free_mesh = false;
-  Mesh *mesh;
+  const Mesh *mesh;
 
   /* Write the display mesh into the dummy mesh */
   if (use_deform) {
@@ -1174,7 +1205,13 @@ static PyObject *C_BVHTree_FromObject(PyObject * /*cls*/, PyObject *args, PyObje
 
   if (!PyArg_ParseTupleAndKeywords(args,
                                    kwargs,
-                                   "OO|$O&O&f:BVHTree.FromObject",
+                                   "O"  /* `object` */
+                                   "O"  /* `depsgraph` */
+                                   "|$" /* Optional, keyword only arguments. */
+                                   "O&" /* `deform` */
+                                   "O&" /* `cage` */
+                                   "f"  /* `epsilon` */
+                                   ":BVHTree.FromObject",
                                    const_cast<char **>(keywords),
                                    &py_ob,
                                    &py_depsgraph,
@@ -1387,14 +1424,14 @@ static PyModuleDef bvhtree_moduledef = {
 
 PyMODINIT_FUNC PyInit_mathutils_bvhtree()
 {
-  PyObject *m = PyModule_Create(&bvhtree_moduledef);
-
-  if (m == nullptr) {
+  /* Register classes */
+  if (PyType_Ready(&PyBVHTree_Type) < 0) {
     return nullptr;
   }
 
-  /* Register classes */
-  if (PyType_Ready(&PyBVHTree_Type) < 0) {
+  PyObject *m = PyModule_Create(&bvhtree_moduledef);
+
+  if (m == nullptr) {
     return nullptr;
   }
 

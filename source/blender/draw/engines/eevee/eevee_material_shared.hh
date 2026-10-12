@@ -2,7 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/**
+/** \file
+ * \ingroup eevee
+ *
  * Shared code between host and client code-bases.
  */
 
@@ -58,13 +60,18 @@ enum eMaterialPipeline {
  * This affects attribute fetching and attribute interpolation.
  */
 enum eMaterialGeometry {
-  /* These maps directly to object types. */
+  /* These map directly to object types. */
   MAT_GEOM_MESH = 0,
   MAT_GEOM_POINTCLOUD,
   MAT_GEOM_CURVES,
   /* Mesh with material tessellation. Each triangle is subdivided inside the vertex shader using
    * primitive expansion. The mesh data is read from storage buffers. */
   MAT_GEOM_MESH_TESS,
+
+  /* GSplats are a type of point-clouds . */
+  MAT_GEOM_GSPLAT,
+
+  /* In this position to account for `geometry_type_has_surface`. */
   MAT_GEOM_VOLUME,
 
   /* Special case: The world background / HDRI environment shader. */

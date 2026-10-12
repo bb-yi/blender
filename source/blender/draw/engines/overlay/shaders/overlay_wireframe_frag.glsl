@@ -6,7 +6,6 @@
 
 FRAGMENT_SHADER_CREATE_INFO(overlay_wireframe_base)
 
-#include "gpu_shader_utildefines_lib.glsl"
 #include "overlay_common_lib.glsl"
 #include "select_lib.glsl"
 

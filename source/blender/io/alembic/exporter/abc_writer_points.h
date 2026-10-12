@@ -8,6 +8,7 @@
  */
 
 #include "abc_writer_abstract.h"
+#include "abc_writer_attribute.h"
 
 #include <Alembic/AbcGeom/OPoints.h>
 
@@ -29,6 +30,30 @@ class ABCPointsWriter : public ABCAbstractWriter {
  protected:
   bool check_is_animated(const HierarchyContext &context) const override;
   void do_write(HierarchyContext &context) override;
+};
+
+class ABCPointCloudWriter : public ABCAbstractWriter {
+  Alembic::AbcGeom::OPoints abc_points_;
+  Alembic::AbcGeom::OPointsSchema abc_points_schema_;
+
+  std::unique_ptr<AttributeParamMaps> attribute_maps_ = nullptr;
+
+ public:
+  explicit ABCPointCloudWriter(const ABCWriterConstructorArgs &args);
+
+  virtual void create_alembic_objects(const HierarchyContext *context) override;
+  virtual Alembic::Abc::OObject get_alembic_object() const override;
+  Alembic::Abc::OCompoundProperty abc_prop_for_custom_props() override;
+
+ protected:
+  virtual void do_write(HierarchyContext &context) override;
+
+ private:
+  void write_arb_geo_params(const PointCloud *pointcloud,
+                            const Object &object,
+                            const size_t num_geom_samples);
+
+  AttributeParamMaps &get_attribute_param_maps();
 };
 
 }  // namespace blender::io::alembic

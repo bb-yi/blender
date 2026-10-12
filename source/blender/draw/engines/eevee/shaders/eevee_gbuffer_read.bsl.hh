@@ -22,17 +22,6 @@
 
 #include "eevee_gbuffer_types.bsl.hh"
 
-/* NOTE: Only specialized for the gbuffer pass. */
-#ifndef GBUFFER_LAYER_MAX
-#  define GBUFFER_LAYER_MAX 3
-#endif
-
-/* TODO(fclem): This should save some compile time per material. */
-#define GBUFFER_HAS_REFLECTION
-#define GBUFFER_HAS_REFRACTION
-#define GBUFFER_HAS_SUBSURFACE
-#define GBUFFER_HAS_TRANSLUCENT
-
 namespace gbuffer::detail {
 
 /* -------------------------------------------------------------------- */
@@ -49,15 +38,12 @@ ClosureUndetermined unpack_closure(ClosurePacking cl_in)
   cl.N = cl_in.N;
   /* Some closures require additional unpacking. */
   switch (cl_in.mode) {
-#ifdef GBUFFER_HAS_REFLECTION
     case GBUF_REFLECTION:
       gbuffer::Reflection::unpack_additional(cl, cl_in.data1);
       break;
     case GBUF_REFLECTION_COLORLESS:
       gbuffer::ReflectionColorless::unpack_additional(cl, cl_in.data0);
       break;
-#endif
-#ifdef GBUFFER_HAS_REFRACTION
     case GBUF_REFRACTION:
       gbuffer::Refraction::unpack_additional(cl, cl_in.data1);
       break;
@@ -70,12 +56,9 @@ ClosureUndetermined unpack_closure(ClosurePacking cl_in)
     case GBUF_THIN_REFRACTION_COLORLESS:
       gbuffer::ThinRefractionColorless::unpack_additional(cl, cl_in.data0);
       break;
-#endif
-#ifdef GBUFFER_HAS_SUBSURFACE
     case GBUF_SUBSURFACE:
       gbuffer::Subsurface::unpack_additional(cl, cl_in.data1);
       break;
-#endif
     default:
       break;
   }
@@ -114,14 +97,10 @@ struct Layers {
     switch (i) {
       case 0:
         return this->layer[0];
-#if GBUFFER_LAYER_MAX > 1
       case 1:
         return this->layer[1];
-#endif
-#if GBUFFER_LAYER_MAX > 2
       case 2:
         return this->layer[2];
-#endif
     }
     assert(false);
     return this->layer[0];
@@ -143,7 +122,7 @@ struct Reader {
 #if defined(GPU_NVIDIA) && defined(GPU_OPENGL)
     /* WORKAROUND: Compiler bug where the loads are somehow invalid inside the ray tile
      * classification shader. */
-    layer = min(layer, 9999);
+    layer = min(layer, 9999u);
 #endif
     return texelFetch(gbuf_closure_tx, int3(texel, int(layer)), 0);
   }
@@ -153,7 +132,7 @@ struct Reader {
 #if defined(GPU_NVIDIA) && defined(GPU_OPENGL)
     /* WORKAROUND: Compiler bug where the loads are somehow invalid inside the ray tile
      * classification shader. */
-    layer = min(layer, 9999);
+    layer = min(layer, 9999u);
 #endif
     return texelFetch(gbuf_normal_tx, int3(texel, int(layer)), 0);
   }

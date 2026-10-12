@@ -189,7 +189,7 @@ static void node_extra_info(NodeExtraInfoParams &params)
     NodeExtraInfoRow row;
     row.text = RPT_("Equal Axes");
     row.tooltip = TIP_("The primary and secondary axis have to be different");
-    row.icon = ICON_ERROR;
+    row.icon = ICON_STATUS_ERROR;
     params.rows.append(std::move(row));
   }
 }
@@ -208,7 +208,8 @@ static void node_rna(StructRNA *srna)
                     "Primary Axis",
                     "Axis that is aligned exactly to the provided primary direction",
                     axis_items,
-                    NOD_inline_enum_accessors(custom1));
+                    NOD_inline_enum_accessors(custom1),
+                    int(math::Axis::Z));
   RNA_def_node_enum(
       srna,
       "secondary_axis",

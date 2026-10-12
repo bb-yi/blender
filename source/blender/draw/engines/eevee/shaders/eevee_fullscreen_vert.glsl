@@ -8,7 +8,7 @@ VERTEX_SHADER_CREATE_INFO(eevee_fullscreen)
 
 #include "draw_shader_shared.hh"
 #include "eevee_uniform_shared.hh"
-#include "gpu_shader_fullscreen_lib.glsl"
+#include "gpu_shader_fullscreen.bsl.hh"
 
 void main()
 {

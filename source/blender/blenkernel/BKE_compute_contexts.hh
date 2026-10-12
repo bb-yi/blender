@@ -27,6 +27,7 @@ namespace blender {
 struct bNode;
 struct bNodeTree;
 struct NodesModifierData;
+struct SceneCompositorEffect;
 struct ID;
 
 namespace nodes {
@@ -61,16 +62,16 @@ class DataBlockComputeContext : public ComputeContext {
   void print_current_in_line(std::ostream &stream) const override;
 };
 
-class ModifierComputeContext : public ComputeContext {
+class GeometryNodesModifierComputeContext : public ComputeContext {
  private:
   /** #ModifierData.persistent_uid. */
   int modifier_uid_;
-  /** The modifier data that this context is for. This may be null. */
+  /** The geometry nodes modifier data that this context is for. This may be null. */
   const NodesModifierData *nmd_ = nullptr;
 
  public:
-  ModifierComputeContext(const ComputeContext *parent, const NodesModifierData &nmd);
-  ModifierComputeContext(const ComputeContext *parent, int modifier_uid);
+  GeometryNodesModifierComputeContext(const ComputeContext *parent, const NodesModifierData &nmd);
+  GeometryNodesModifierComputeContext(const ComputeContext *parent, int modifier_uid);
 
   int modifier_uid() const
   {
@@ -80,6 +81,25 @@ class ModifierComputeContext : public ComputeContext {
   const NodesModifierData *nmd() const
   {
     return nmd_;
+  }
+
+ private:
+  ComputeContextHash compute_hash() const override;
+  void print_current_in_line(std::ostream &stream) const override;
+};
+
+class SceneCompositorEffectComputeContext : public ComputeContext {
+ private:
+  /** The effect data that this context is for. */
+  const SceneCompositorEffect &effect_;
+
+ public:
+  SceneCompositorEffectComputeContext(const ComputeContext *parent,
+                                      const SceneCompositorEffect &effect);
+
+  const SceneCompositorEffect &effect() const
+  {
+    return effect_;
   }
 
  private:

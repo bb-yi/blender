@@ -14,14 +14,14 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_listbase_wrapper.hh"
-#include "BLI_math_matrix.h"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_quaternion.hh"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_task.h"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_task.hh"
+#include "BLI_task_c.hh"
 
 #include "DNA_action_types.h"
 #include "DNA_armature_types.h"
@@ -89,20 +89,18 @@ float distfactor_to_bone(const float3 &position,
     const float distance_squared = math::distance_squared(position, head);
     return bone_envelope_falloff(distance_squared, radius_head, falloff_distance);
   }
-  else if (height > bone_length) {
+  if (height > bone_length) {
     /* After the end of the bone use the tail radius. */
     const float distance_squared = math::distance_squared(tail, position);
     return bone_envelope_falloff(distance_squared, radius_tail, falloff_distance);
   }
-  else {
-    /* Interpolate radius. */
-    const float distance_squared = math::distance_squared(position, head) - height * height;
-    const float closest_radius = bone_length != 0.0f ? math::interpolate(radius_head,
-                                                                         radius_tail,
-                                                                         height / bone_length) :
-                                                       radius_head;
-    return bone_envelope_falloff(distance_squared, closest_radius, falloff_distance);
-  }
+  /* Interpolate radius. */
+  const float distance_squared = math::distance_squared(position, head) - height * height;
+  const float closest_radius = bone_length != 0.0f ? math::interpolate(radius_head,
+                                                                       radius_tail,
+                                                                       height / bone_length) :
+                                                     radius_head;
+  return bone_envelope_falloff(distance_squared, closest_radius, falloff_distance);
 }
 
 namespace bke {
@@ -574,7 +572,7 @@ static void armature_deform_editmesh(const Object &ob_arm,
                                      const int deformflag,
                                      const std::optional<Span<float3>> vert_coords_prev,
                                      StringRefNull defgrp_name,
-                                     const BMEditMesh &em_target,
+                                     const BMesh &bm_target,
                                      const int cd_dvert_offset)
 {
   ArmatureDeformParams deform_params = get_armature_deform_params(ob_arm,
@@ -592,20 +590,20 @@ static void armature_deform_editmesh(const Object &ob_arm,
   data.cd_dvert_offset = cd_dvert_offset;
   data.deform_params = std::move(deform_params);
 
+  BMesh *bm = const_cast<BMesh *>(&bm_target);
+
   /* While this could cause an extra loop over mesh data, in most cases this will
    * have already been properly set. */
-  BM_mesh_elem_index_ensure(em_target.bm, BM_VERT);
+  BM_mesh_elem_index_ensure(bm, BM_VERT);
 
   TaskParallelSettings settings;
   BLI_parallel_mempool_settings_defaults(&settings);
 
   if (data.deform_params.use_dverts) {
-    BLI_task_parallel_mempool(
-        em_target.bm->vpool, &data, armature_vert_task_editmesh<true>, &settings);
+    BLI_task_parallel_mempool(bm->vpool, &data, armature_vert_task_editmesh<true>, &settings);
   }
   else {
-    BLI_task_parallel_mempool(
-        em_target.bm->vpool, &data, armature_vert_task_editmesh<false>, &settings);
+    BLI_task_parallel_mempool(bm->vpool, &data, armature_vert_task_editmesh<false>, &settings);
   }
 }
 
@@ -723,7 +721,7 @@ void BKE_armature_deform_coords_with_editmesh(
     std::optional<MutableSpan<float3x3>> vert_deform_mats,
     int deformflag,
     StringRefNull defgrp_name,
-    const BMEditMesh &em_target)
+    const BMesh &bm_target)
 {
   if (!bke::verify_armature_deform_valid(ob_arm)) {
     return;
@@ -731,7 +729,7 @@ void BKE_armature_deform_coords_with_editmesh(
 
   const ListBaseT<bDeformGroup> *defbase = BKE_id_defgroup_list_get(
       static_cast<const ID *>(ob_target.data));
-  const int cd_dvert_offset = CustomData_get_offset(&em_target.bm->vdata, CD_MDEFORMVERT);
+  const int cd_dvert_offset = CustomData_get_offset(&bm_target.vdata, CD_MDEFORMVERT);
   bke::armature_deform_editmesh(ob_arm,
                                 ob_target,
                                 defbase,
@@ -740,7 +738,7 @@ void BKE_armature_deform_coords_with_editmesh(
                                 deformflag,
                                 vert_coords_prev,
                                 defgrp_name,
-                                em_target,
+                                bm_target,
                                 cd_dvert_offset);
 }
 

@@ -12,8 +12,8 @@
 
 #include "CLG_log.h"
 
-#include "BLI_array_utils.h"
-#include "BLI_listbase.h"
+#include "BLI_array_utils_c.hh"
+#include "BLI_listbase.hh"
 
 #include "DNA_layer_types.h"
 #include "DNA_meta_types.h"
@@ -70,9 +70,7 @@ static void undomball_to_editmball(UndoMBall *umb, MetaBall *mb)
 
   /* copy 'undo' MetaElems to 'edit' MetaElems */
   int index = 0;
-  for (MetaElem *ml_undo = static_cast<MetaElem *>(umb->editelems.first); ml_undo;
-       ml_undo = ml_undo->next, index += 1)
-  {
+  for (MetaElem *ml_undo = umb->editelems.first(); ml_undo; ml_undo = ml_undo->next, index += 1) {
     MetaElem *ml_edit = MEM_dupalloc(ml_undo);
     BLI_addtail(mb->editelems, ml_edit);
     if (index == umb->lastelem_index) {
@@ -90,9 +88,7 @@ static void *editmball_from_undomball(UndoMBall *umb, MetaBall *mb)
 
   /* copy contents of current ListBaseT to the undo ListBaseT */
   int index = 0;
-  for (MetaElem *ml_edit = static_cast<MetaElem *>(mb->editelems->first); ml_edit;
-       ml_edit = ml_edit->next, index += 1)
-  {
+  for (MetaElem *ml_edit = mb->editelems->first(); ml_edit; ml_edit = ml_edit->next, index += 1) {
     MetaElem *ml_undo = MEM_dupalloc(ml_edit);
     BLI_addtail(&umb->editelems, ml_undo);
     if (ml_edit == mb->lastelem) {
@@ -250,7 +246,7 @@ static void mball_undosys_foreach_ID_ref(UndoStep *us_p,
 
 void ED_mball_undosys_type(UndoType *ut)
 {
-  ut->name = "Edit MBall";
+  ut->identifier = "EDIT_MBALL";
   ut->poll = mball_undosys_poll;
   ut->step_encode = mball_undosys_step_encode;
   ut->step_decode = mball_undosys_step_decode;
@@ -258,7 +254,7 @@ void ED_mball_undosys_type(UndoType *ut)
 
   ut->step_foreach_ID_ref = mball_undosys_foreach_ID_ref;
 
-  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE;
+  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE | UNDOTYPE_FLAG_ENCODE_PRE_MEMFILE_SUPPORTED;
 
   ut->step_size = sizeof(MBallUndoStep);
 }

@@ -11,31 +11,26 @@
 #pragma once
 
 #include "infos/eevee_geom_infos.hh"
-#include "infos/eevee_nodetree_infos.hh"
 
-VERTEX_SHADER_CREATE_INFO(eevee_nodetree)
-VERTEX_SHADER_CREATE_INFO(eevee_clip_plane)
-VERTEX_SHADER_CREATE_INFO(eevee_geom_mesh_tess_data)
 
 #include "draw_model.bsl.hh"
-#include "eevee_attributes_mesh_lib.glsl"
+#include "eevee_attributes_mesh_lib.bsl.hh"
 #include "eevee_geom_mesh_tess_lib.glsl"
-#include "eevee_nodetree_vert_lib.glsl"
+#include "eevee_nodetree_vert_lib.bsl.hh"
 #include "eevee_pipeline.bsl.hh"
 #include "eevee_reverse_z_lib.bsl.hh"
 #include "eevee_surf_common.bsl.hh"
 #include "eevee_velocity.bsl.hh"
+#include "gpu_shader_math_matrix_transform.bsl.hh"
 
 namespace eevee {
 
 struct GeomMeshTess {
-  [[legacy_info]] ShaderCreateInfo eevee_geom_iface_info;
   [[legacy_info]] ShaderCreateInfo eevee_geom_mesh_tess_data;
-  /* WORKAROUND: Until we get condition support for interfaces. */
-  [[legacy_info]] ShaderCreateInfo eevee_geom_disp_iface_info;
 };
 
 [[vertex]] [[clip_control]] void geom_mesh_tess(
+    [[resource_table]] KernelGlobals &kg,
     [[resource_table]] const PipelineConstants &pipe,
     [[resource_table]] const GeomMeshTess & /*srt*/,
     [[resource_table]] const Uniform &uni,
@@ -45,12 +40,16 @@ struct GeomMeshTess {
     [[resource_table]] const draw::Infos &infos,
     [[resource_table]] const draw::Resource &res_id,
     [[resource_table, condition(is_shadow_pipe)]] const GeomShadow &shadow,
-    [[instance_id]] const int /*inst_id*/,     /* Used by model_lib. */
-    [[base_instance]] const int /*base_inst*/, /* Used by model_lib. */
+    [[resource_table, condition(use_clip_plane)]] const ClipPlane &clip_srt,
+    [[resource_table, condition(use_velocity)]] const GeometryVelocity &geo_vel,
+    [[out]] VertOutCommon &interp,
+    [[out, condition(is_shadow_pipe)]] VertOutShadow &shadow_iface,
+    [[out, condition(is_shadow_pipe)]] VertOutShadowClipping &shadow_clip,
+    [[out, condition(use_clip_plane)]] VertOutClipPlane &clip_interp,
+    [[out, condition(use_velocity)]] VertOutVelocity &motion,
     [[vertex_id]] const int vert_id,
     [[position]] float4 &out_position,
-    /* Note: Removed manually if not needed. Otherwise, can generate geometry shader fallback. */
-    [[viewport_index]] int &out_viewport)
+    [[viewport_index, condition(is_shadow_pipe &&use_multi_viewport)]] int &out_viewport)
 {
   draw::ID id = res_id.get(inst_index);
   uint view_id = 0;
@@ -63,28 +62,32 @@ struct GeomMeshTess {
   const ViewMatrices view = views.get(view_id);
   const ObjectMatrices obj = models.get(resource_id);
 
-  auto &interp = interface_get(eevee_geom_iface_info, interp);
-
   if (pipe.is_shadow_pipe) [[static_branch]] {
-    auto &shadow_iface = interface_get(eevee_shadow_iface_info, shadow_iface);
-
     shadow_iface.shadow_view_id = int(view_id);
-    out_viewport = int(shadow.render_view_buf[view_id].viewport_index);
+    if (pipe.use_multi_viewport) [[static_branch]] {
+      out_viewport = int(shadow.render_view_buf[view_id].viewport_index);
+    }
   }
 
-  init_interface(id.raw_id);
+  init_interface(interp, id.raw_id);
+  ShadingData sd = init_globals(pipe, uni, interp, view, true, float4(0.0f));
 
   /* The subdivision levels only depend on the main camera, so that every view (including shadows
    * and light-probes) renders the same surface. The culling uses the view being rendered. */
-  const TessSettings settings = tess_settings_unpack(nodetree_tessellation());
+  const TessSettings settings = tess_settings_unpack(nodetree_tessellation(kg, sd));
   const CameraData camera = uni.uniform_buf.camera;
+  /* BSL currently accepts matrix-vector products but not matrix-matrix products. */
+  const float4x4 view_projection = float4x4(view.winmat * view.viewmat[0],
+                                          view.winmat * view.viewmat[1],
+                                          view.winmat * view.viewmat[2],
+                                          view.winmat * view.viewmat[3]);
   const TessVertex tv = tess_vertex_get(settings,
                                         vert_id,
                                         obj.model,
                                         camera.viewinv[3].xyz,
                                         camera.persmat,
                                         float2(uni.uniform_buf.film.render_extent),
-                                        view.winmat * view.viewmat,
+                                        view_projection,
                                         view.position(),
                                         view.forward(),
                                         !view.is_perspective(),
@@ -101,23 +104,19 @@ struct GeomMeshTess {
   interp.P = obj.point_object_to_world(lP);
   interp.N = safe_normalize(obj.normal_object_to_world(tess_normal_interpolate(tv, tv.weights)));
   /* Used by #MAT_DISPLACEMENT_GEOM_NORMAL to evaluate the displacement in the fragment shader. */
-  auto &disp_interp = interface_get(eevee_geom_disp_iface_info, disp_interp);
-  disp_interp.P_base = interp.P;
+  interp.P_base = interp.P;
 
   /* Compute Original Coordinate (ORCO). */
   float3 lP_orco = lP * ob_infos.orco_mul + ob_infos.orco_add;
 
-  init_globals(uni, view, true);
+  sd = init_globals(pipe, uni, interp, view, true, float4(0.0f));
+  init_globals_mesh(interp, sd, float3(0.0f));
   tess_attr_interp(tv.indices, tv.weights);
   attrib_load(MeshVertex{lP, to_float3x3(obj.model_inverse), lP_orco});
 
-  interp.P += nodetree_displacement();
+  interp.P += nodetree_displacement(kg, sd);
 
   if (pipe.use_velocity) [[static_branch]] {
-    /* clang-format off */ /* Multi-line define messes up line index. */
-    [[resource_table]] const GeometryVelocity &geo_vel = resource_table_get(eevee::GeometryVelocity);
-    /* clang-format on */
-    auto &motion = interface_get(eevee_velocity_iface_info, motion);
     float3 prv0, nxt0, prv1, nxt1, prv2, nxt2;
     geo_vel.local_position_deltas(tv.P0, int(tv.indices.x), prv0, nxt0, resource_id);
     geo_vel.local_position_deltas(tv.P1, int(tv.indices.y), prv1, nxt1, resource_id);
@@ -132,15 +131,12 @@ struct GeomMeshTess {
   }
 
   if (pipe.use_clip_plane) [[static_branch]] {
-    auto &clip_interp = interface_get(eevee_clip_plane, clip_interp);
-    const auto &clip_plane = buffer_get(eevee_clip_plane, clip_plane);
-    clip_interp.clip_distance = dot(clip_plane.plane, float4(interp.P, 1.0f));
+    clip_interp.clip_distance = dot(clip_srt.clip_plane.plane, float4(interp.P, 1.0f));
   }
 
   float3 vs_P = view.point_world_to_view(interp.P);
 
   if (pipe.is_shadow_pipe) [[static_branch]] {
-    auto &shadow_clip = interface_get(eevee_shadow_iface_info, shadow_clip);
     ShadowRenderView view = shadow.render_view_buf[view_id];
     shadow_clip.position = shadow_position_vector_get(vs_P, view);
     shadow_clip.vector = shadow_clip_vector_get(vs_P, view.clip_distance_inv);

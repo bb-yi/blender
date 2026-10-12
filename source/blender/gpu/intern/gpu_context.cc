@@ -15,8 +15,8 @@
 
 #include "BKE_global.hh"
 
-#include "BLI_assert.h"
-#include "BLI_threads.h"
+#include "BLI_assert.hh"
+#include "BLI_threads.hh"
 #include "BLI_vector_set.hh"
 
 #include "DNA_userdef_types.h"
@@ -84,8 +84,7 @@ Context::Context()
   matrix_state = GPU_matrix_state_create();
   texture_pool = GPUBackend::get()->texturepool_alloc();
 
-  context_id = Context::context_counter;
-  Context::context_counter++;
+  context_id = Context::context_counter++;
 }
 
 Context::~Context()
@@ -97,9 +96,10 @@ Context::~Context()
   BLI_assert(back_right == nullptr);
   BLI_assert(texture_pool == nullptr);
 
-  /** IMPORTANT: Do not free resources (texture, batch, buffers) in this function. These objects
-   * are likely to reference the GL/VK/MTLContext which is already destroyed at this point. */
-
+  /**
+   * IMPORTANT: Do not free resources (texture, batch, buffers) in this function. These objects
+   * are likely to reference the GL/VK/MTLContext which is already destroyed at this point.
+   */
   GPU_matrix_state_discard(matrix_state);
   delete state_manager;
   delete imm;
@@ -208,6 +208,10 @@ GPUContext *GPU_context_create(GHOST_IWindow *ghost_window, GHOST_IContext *ghos
     num_backend_users++;
   }
 
+  BLI_assert(ghost_context);
+  if (ghost_window) {
+    BLI_assert(ghost_context == ghost_window->getDrawingContext());
+  }
   Context *ctx = GPUBackend::get()->context_alloc(ghost_window, ghost_context);
 
   GPU_context_active_set(wrap(ctx));
@@ -291,8 +295,7 @@ GPUVulkanExternalSemaphore *GPU_vulkan_external_semaphore_create_from_d3d12_fenc
   gpu::VKDevice &device = gpu::VKBackend::get().device;
   if (!device.is_initialized() ||
       !device.supports_extension(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME) ||
-      !device.supports_extension(VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME) ||
-      device.physical_device_vulkan_12_features_get().timelineSemaphore == VK_FALSE)
+      !device.supports_extension(VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME))
   {
     return nullptr;
   }
@@ -302,14 +305,16 @@ GPUVulkanExternalSemaphore *GPU_vulkan_external_semaphore_create_from_d3d12_fenc
   VkSemaphoreCreateInfo semaphore_info = {
       VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, &semaphore_type, 0};
   VkSemaphore semaphore = VK_NULL_HANDLE;
-  if (vkCreateSemaphore(device.vk_handle(), &semaphore_info, nullptr, &semaphore) != VK_SUCCESS) {
+  if (device.functions.vkCreateSemaphore(
+          device.vk_handle(), &semaphore_info, nullptr, &semaphore) != VK_SUCCESS)
+  {
     return nullptr;
   }
 
   const auto import_fn = reinterpret_cast<PFN_vkImportSemaphoreWin32HandleKHR>(
       vkGetDeviceProcAddr(device.vk_handle(), "vkImportSemaphoreWin32HandleKHR"));
   if (import_fn == nullptr) {
-    vkDestroySemaphore(device.vk_handle(), semaphore, nullptr);
+    device.functions.vkDestroySemaphore(device.vk_handle(), semaphore, nullptr);
     return nullptr;
   }
 
@@ -319,7 +324,7 @@ GPUVulkanExternalSemaphore *GPU_vulkan_external_semaphore_create_from_d3d12_fenc
   import_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT;
   import_info.handle = reinterpret_cast<HANDLE>(handle);
   if (import_fn(device.vk_handle(), &import_info) != VK_SUCCESS) {
-    vkDestroySemaphore(device.vk_handle(), semaphore, nullptr);
+    device.functions.vkDestroySemaphore(device.vk_handle(), semaphore, nullptr);
     return nullptr;
   }
 
@@ -431,7 +436,7 @@ void GPU_vulkan_external_semaphores_free(GPUVulkanExternalSemaphore **semaphores
     gpu::VKBackend::get().device.wait_queue_idle();
     for (int i = 0; i < count; i++) {
       if (semaphores[i]) {
-        vkDestroySemaphore(
+        gpu::VKBackend::get().device.functions.vkDestroySemaphore(
             gpu::VKBackend::get().device.vk_handle(), semaphores[i]->vk_semaphore, nullptr);
       }
     }
@@ -654,6 +659,13 @@ void GPU_vulkan_supported_devices_print(FILE *fp)
 
 bool GPU_backend_type_selection_detect()
 {
+  /* Only detect once, can't switch backend until Blender restart. */
+  static bool backend_type_detected = false;
+  if (backend_type_detected) {
+    return GPU_backend_type_selection_get() != GPU_BACKEND_NONE;
+  }
+  backend_type_detected = true;
+
   VectorSet<GPUBackendType> backends_to_check;
   if (g_backend_type_override.has_value()) {
     backends_to_check.add(*g_backend_type_override);
@@ -690,6 +702,11 @@ bool GPU_backend_type_selection_detect()
 
 static bool gpu_backend_supported()
 {
+  /* Skip the support check if "--debug-gpu-backend-no-fallback" is used. */
+  if (G.debug & G_DEBUG_GPU_BACKEND_NO_FALLBACK) {
+    return true;
+  }
+
   switch (g_backend_type) {
     case GPU_BACKEND_OPENGL:
 #ifdef WITH_OPENGL_BACKEND

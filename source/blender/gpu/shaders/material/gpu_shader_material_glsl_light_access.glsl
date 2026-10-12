@@ -10,7 +10,7 @@ bool glsl_light_is_zero(float3 value)
 float glsl_light_power_get(LightData light, LightingType type)
 {
   /* Mask anything above 3. See LIGHT_TRANSLUCENT_WITH_THICKNESS. */
-  return light.power[type & 3u];
+  return eevee::light::power_get(light, type);
 }
 
 bool glsl_light_linking_affects_receiver(uint2 light_set_membership, uchar receiver_light_set)
@@ -21,7 +21,7 @@ bool glsl_light_linking_affects_receiver(uint2 light_set_membership, uchar recei
 float glsl_light_shape_radiance(LightData light)
 {
   if (light.type == LIGHT_RECT || light.type == LIGHT_ELLIPSE) {
-    float area = light.area().size.x * light.area().size.y * 4.0f;
+    float area = light_area_data_get(light).size.x * light_area_data_get(light).size.y * 4.0f;
     if (light.type == LIGHT_ELLIPSE) {
       area *= M_PI / 4.0f;
     }
@@ -31,12 +31,12 @@ float glsl_light_shape_radiance(LightData light)
   if (light.type == LIGHT_OMNI_SPHERE || light.type == LIGHT_OMNI_DISK ||
       light.type == LIGHT_SPOT_SPHERE || light.type == LIGHT_SPOT_DISK)
   {
-    float area = float(4.0f * M_PI) * square(light.local().local.shape_radius);
+    float area = float(4.0f * M_PI) * square(light_local_data_get(light).local.shape_radius);
     return 1.0f / (area * float(M_PI));
   }
 
   if (is_sun_light(light.type)) {
-    float inv_sin_sq = 1.0f + 1.0f / square(light.sun().shape_radius);
+    float inv_sin_sq = 1.0f + 1.0f / square(light_sun_data_get(light).shape_radius);
     return float(M_1_PI) * inv_sin_sq;
   }
 
@@ -46,7 +46,7 @@ float glsl_light_shape_radiance(LightData light)
 float glsl_light_point_radiance(LightData light)
 {
   if (light.type == LIGHT_RECT || light.type == LIGHT_ELLIPSE) {
-    float area = light.area().size.x * light.area().size.y * 4.0f;
+    float area = light_area_data_get(light).size.x * light_area_data_get(light).size.y * 4.0f;
     float tmp = M_PI_2 / (M_PI_2 + sqrt(area));
     float mrp_scaling = tmp + (1.0f - tmp) * M_1_PI;
     return float(M_1_PI) * mrp_scaling;
@@ -75,16 +75,16 @@ float glsl_light_friendly_power(LightData light, LightingType type)
   return glsl_light_power_get(light, type) * (point_power / shape_power);
 }
 
-float3 glsl_light_resolve_normal(float3 normal_value)
+float3 glsl_light_resolve_normal(KernelGlobals &kg, ShadingData &sd, float3 normal_value)
 {
   float normal_len_squared = dot(normal_value, normal_value);
   if (normal_len_squared > 1e-16f) {
     return normal_value * inversesqrt(normal_len_squared);
   }
 
-  float geom_len_squared = dot(g_data.Ng, g_data.Ng);
+  float geom_len_squared = dot(sd.Ng, sd.Ng);
   if (geom_len_squared > 1e-16f) {
-    return g_data.Ng * inversesqrt(geom_len_squared);
+    return sd.Ng * inversesqrt(geom_len_squared);
   }
 
   return float3(0.0f, 0.0f, 1.0f);
@@ -202,7 +202,7 @@ bool glsl_light_index_matches_locality(uint light_index, bool is_local)
   return expected_is_local == is_local;
 }
 
-bool glsl_light_lookup(uint light_index,
+bool glsl_light_lookup(KernelGlobals &kg, ShadingData &sd, uint light_index,
                        bool is_local,
                        out LightData light,
                        out LightVector light_vector,
@@ -219,23 +219,23 @@ bool glsl_light_lookup(uint light_index,
     return false;
   }
 
-  ObjectInfos object_infos = object_infos_get();
+  ObjectInfos object_infos = kg.object_infos_get(sd);
   uchar receiver_light_set = receiver_light_set_get(object_infos);
   if (!glsl_light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
     return false;
   }
 
   is_directional = !is_local;
-  light_vector = light_vector_get(light, is_directional, g_data.P);
+  light_vector = light_vector_get(light, is_directional, sd.P);
   return true;
 }
 
-bool glsl_light_loop_accept(uint light_index, bool is_local)
+bool glsl_light_loop_accept(KernelGlobals &kg, ShadingData &sd, uint light_index, bool is_local)
 {
   LightData light;
   LightVector light_vector;
   bool is_directional;
-  if (!glsl_light_lookup(light_index, is_local, light, light_vector, is_directional)) {
+  if (!glsl_light_lookup(kg, sd, light_index, is_local, light, light_vector, is_directional)) {
     return false;
   }
 
@@ -244,7 +244,7 @@ bool glsl_light_loop_accept(uint light_index, bool is_local)
   return max(diffuse_power, specular_power) >= LIGHT_ATTENUATION_THRESHOLD;
 }
 
-bool glsl_light_find_ordinal(int light_ordinal, out uint r_light_index, out bool r_is_local)
+bool glsl_light_find_ordinal(KernelGlobals &kg, ShadingData &sd, int light_ordinal, out uint r_light_index, out bool r_is_local)
 {
   if (light_ordinal < 0) {
     return false;
@@ -253,7 +253,7 @@ bool glsl_light_find_ordinal(int light_ordinal, out uint r_light_index, out bool
   int current = 0;
   for (uint light_index = 0u; light_index < light_cull_buf.visible_count; light_index++) {
     bool is_local = true;
-    if (!glsl_light_loop_accept(light_index, is_local)) {
+    if (!glsl_light_loop_accept(kg, sd, light_index, is_local)) {
       continue;
     }
     if (current == light_ordinal) {
@@ -267,7 +267,7 @@ bool glsl_light_find_ordinal(int light_ordinal, out uint r_light_index, out bool
        light_index++)
   {
     bool is_local = false;
-    if (!glsl_light_loop_accept(light_index, is_local)) {
+    if (!glsl_light_loop_accept(kg, sd, light_index, is_local)) {
       continue;
     }
     if (current == light_ordinal) {
@@ -325,7 +325,7 @@ bool glsl_light_shader_eval(uint light_index,
                        light_shader.a;
   if (!is_directional) {
     result.attenuation *= light_influence_cutoff(
-        light_vector.dist, light.local().local.influence_radius_invsqr_surface);
+        light_vector.dist, light_local_data_get(light).local.influence_radius_invsqr_surface);
   }
   return true;
 #else
@@ -338,13 +338,13 @@ bool glsl_light_shader_eval(uint light_index,
 #endif
 }
 
-GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
+GLSLLight glsl_light_build(KernelGlobals &kg, ShadingData &sd, uint light_index, bool is_local, uint public_index)
 {
   GLSLLight result = glsl_light_default();
   LightData light;
   LightVector light_vector;
   bool is_directional;
-  if (!glsl_light_lookup(light_index, is_local, light, light_vector, is_directional)) {
+  if (!glsl_light_lookup(kg, sd, light_index, is_local, light, light_vector, is_directional)) {
     return result;
   }
 
@@ -356,7 +356,7 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
   result.vector = light_vector.L;
   result.position = is_directional ? float3(0.0f) : light.position();
   if (is_directional) {
-    result.direction = light.sun().direction;
+    result.direction = light_sun_data_get(light).direction;
   }
   else if (is_spot_light(light.type) || is_area_light(light.type)) {
     result.direction = light.z_axis();
@@ -366,7 +366,7 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
   }
   result.distance = light_vector.dist;
   if (!is_directional) {
-    float inverse_radius_squared = light.local().local.influence_radius_invsqr_surface;
+    float inverse_radius_squared = light_local_data_get(light).local.influence_radius_invsqr_surface;
     result.influence_radius = inverse_radius_squared > 0.0f ?
                                   inversesqrt(inverse_radius_squared) : 0.0f;
   }
@@ -378,12 +378,12 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
   return result;
 }
 
-int glsl_light_count()
+int glsl_light_count(KernelGlobals &kg, ShadingData &sd)
 {
   int count = 0;
   for (uint light_index = 0u; light_index < light_cull_buf.visible_count; light_index++) {
     bool is_local = true;
-    if (!glsl_light_loop_accept(light_index, is_local)) {
+    if (!glsl_light_loop_accept(kg, sd, light_index, is_local)) {
       continue;
     }
     count += 1;
@@ -392,7 +392,7 @@ int glsl_light_count()
        light_index++)
   {
     bool is_local = false;
-    if (!glsl_light_loop_accept(light_index, is_local)) {
+    if (!glsl_light_loop_accept(kg, sd, light_index, is_local)) {
       continue;
     }
     count += 1;
@@ -409,16 +409,16 @@ GLSLLightIterator glsl_light_iterator_init()
   return iterator;
 }
 
-bool glsl_light_iterator_next(GLSLLightIterator &iterator, out GLSLLightIteratorSample light_sample)
+bool glsl_light_iterator_next(KernelGlobals &kg, ShadingData &sd, GLSLLightIterator &iterator, out GLSLLightIteratorSample light_sample)
 {
   while (iterator.phase < 2u) {
     if (iterator.phase == 0u) {
       while (iterator.light_index < light_cull_buf.visible_count) {
         uint light_index = iterator.light_index++;
-        if (!glsl_light_loop_accept(light_index, true)) {
+        if (!glsl_light_loop_accept(kg, sd, light_index, true)) {
           continue;
         }
-        light_sample.light = glsl_light_build(light_index, true, iterator.public_index++);
+        light_sample.light = glsl_light_build(kg, sd, light_index, true, iterator.public_index++);
         light_sample.light_index = light_index;
         light_sample.is_local = true;
         return true;
@@ -430,10 +430,10 @@ bool glsl_light_iterator_next(GLSLLightIterator &iterator, out GLSLLightIterator
 
     while (iterator.light_index < light_cull_buf.items_count) {
       uint light_index = iterator.light_index++;
-      if (!glsl_light_loop_accept(light_index, false)) {
+      if (!glsl_light_loop_accept(kg, sd, light_index, false)) {
         continue;
       }
-      light_sample.light = glsl_light_build(light_index, false, iterator.public_index++);
+      light_sample.light = glsl_light_build(kg, sd, light_index, false, iterator.public_index++);
       light_sample.light_index = light_index;
       light_sample.is_local = false;
       return true;
@@ -447,84 +447,84 @@ bool glsl_light_iterator_next(GLSLLightIterator &iterator, out GLSLLightIterator
   return false;
 }
 
-GLSLLight glsl_light_get(int light_ordinal)
+GLSLLight glsl_light_get(KernelGlobals &kg, ShadingData &sd, int light_ordinal)
 {
   uint light_index = 0u;
   bool is_local = false;
-  if (!glsl_light_find_ordinal(light_ordinal, light_index, is_local)) {
+  if (!glsl_light_find_ordinal(kg, sd, light_ordinal, light_index, is_local)) {
     return glsl_light_default();
   }
-  return glsl_light_build(light_index, is_local, uint(light_ordinal));
+  return glsl_light_build(kg, sd, light_index, is_local, uint(light_ordinal));
 }
 
-float glsl_light_shadow_raw(uint light_index, bool is_local, float3 shading_normal)
+float glsl_light_shadow_raw(KernelGlobals &kg, ShadingData &sd, uint light_index, bool is_local, float3 shading_normal)
 {
 #  if defined(MAT_GLSL_LIGHT_SHADOW_ACCESS)
   LightData light;
   LightVector light_vector;
   bool is_directional;
-  if (!glsl_light_lookup(light_index, is_local, light, light_vector, is_directional)) {
+  if (!glsl_light_lookup(kg, sd, light_index, is_local, light, light_vector, is_directional)) {
     return 0.0f;
   }
 
-  ObjectInfos object_infos = object_infos_get();
-  float3 geometry_normal = glsl_light_resolve_normal(g_data.Ng);
-  float3 resolved_shading_normal = glsl_light_resolve_normal(shading_normal);
+  ObjectInfos object_infos = kg.object_infos_get(sd);
+  float3 geometry_normal = glsl_light_resolve_normal(kg, sd, sd.Ng);
+  float3 resolved_shading_normal = glsl_light_resolve_normal(kg, sd, shading_normal);
 
   if (light.tilemap_index == LIGHT_NO_SHADOW) {
     return 1.0f;
   }
 
-  return eevee_shadow_eval(light,
+  return eevee_shadow_eval(sd.frag_co.xy, light,
                            is_directional,
                            false,
                            false,
                            0.0f,
-                           g_data.P,
+                           sd.P,
                            geometry_normal,
                            resolved_shading_normal,
                            object_infos.shadow_terminator_normal_offset,
                            object_infos.shadow_terminator_geometry_offset,
-                           uniform_buf.shadow.ray_count,
-                           uniform_buf.shadow.step_count);
+                           eevee_uniform_data_get().shadow.ray_count,
+                           eevee_uniform_data_get().shadow.step_count);
 #  else
   return 0.0f;
 #  endif
 }
 
-float glsl_light_shadow(int light_ordinal, float3 shading_normal)
+float glsl_light_shadow(KernelGlobals &kg, ShadingData &sd, int light_ordinal, float3 shading_normal)
 {
   uint light_index = 0u;
   bool is_local = false;
-  if (!glsl_light_find_ordinal(light_ordinal, light_index, is_local)) {
+  if (!glsl_light_find_ordinal(kg, sd, light_ordinal, light_index, is_local)) {
     return 0.0f;
   }
-  return glsl_light_shadow_raw(light_index, is_local, shading_normal);
+  return glsl_light_shadow_raw(kg, sd, light_index, is_local, shading_normal);
 }
 
-float glsl_light_cast_shadow_raw(uint light_index, bool is_local, float3 shading_normal)
+float glsl_light_cast_shadow_raw(KernelGlobals &kg, ShadingData &sd, uint light_index, bool is_local, float3 shading_normal)
 {
 #  if defined(SHADOW_CASTER_CLASSIFY)
   LightData light;
   LightVector light_vector;
   bool is_directional;
-  if (!glsl_light_lookup(light_index, is_local, light, light_vector, is_directional)) {
+  if (!glsl_light_lookup(kg, sd, light_index, is_local, light, light_vector, is_directional)) {
     return 1.0f;
   }
   if (light.tilemap_index == LIGHT_NO_SHADOW) {
     return 1.0f;
   }
 
-  ObjectInfos object_infos = object_infos_get();
-  float3 geometry_normal = glsl_light_resolve_normal(g_data.Ng);
-  float3 resolved_shading_normal = glsl_light_resolve_normal(shading_normal);
+  ObjectInfos object_infos = kg.object_infos_get(sd);
+  float3 geometry_normal = glsl_light_resolve_normal(kg, sd, sd.Ng);
+  float3 resolved_shading_normal = glsl_light_resolve_normal(kg, sd, shading_normal);
   /* Single-sample classification: harder than All + shadow_random. Do not
    * pull in gpu_shader_material_shader_info.glsl ([[node]] overloads). */
   float3 classification = eevee_shadow_caster_classification_seeded(
       light,
       is_directional,
-      resource_id_get() & 0xFFFFu,
-      g_data.P,
+      kg.resource_id_get(sd) & 0xFFFFu,
+      sd.P,
       geometry_normal,
       resolved_shading_normal,
       object_infos.shadow_terminator_normal_offset,
@@ -544,7 +544,7 @@ float glsl_light_cast_shadow_raw(uint light_index, bool is_local, float3 shading
 
 #else
 
-int glsl_light_count()
+int glsl_light_count(KernelGlobals &kg, ShadingData &sd)
 {
   return 0;
 }
@@ -558,7 +558,7 @@ GLSLLightIterator glsl_light_iterator_init()
   return iterator;
 }
 
-bool glsl_light_iterator_next(GLSLLightIterator &iterator,
+bool glsl_light_iterator_next(KernelGlobals &kg, ShadingData &sd, GLSLLightIterator &iterator,
                               out GLSLLightIteratorSample light_sample)
 {
   UNUSED_VARS(iterator);
@@ -568,20 +568,20 @@ bool glsl_light_iterator_next(GLSLLightIterator &iterator,
   return false;
 }
 
-GLSLLight glsl_light_get(int light_ordinal)
+GLSLLight glsl_light_get(KernelGlobals &kg, ShadingData &sd, int light_ordinal)
 {
   UNUSED_VARS(light_ordinal);
   return glsl_light_default();
 }
 
-float glsl_light_shadow(int light_ordinal, float3 shading_normal)
+float glsl_light_shadow(KernelGlobals &kg, ShadingData &sd, int light_ordinal, float3 shading_normal)
 {
   UNUSED_VARS(light_ordinal);
   UNUSED_VARS(shading_normal);
   return 0.0f;
 }
 
-float glsl_light_shadow_raw(uint light_index, bool is_local, float3 shading_normal)
+float glsl_light_shadow_raw(KernelGlobals &kg, ShadingData &sd, uint light_index, bool is_local, float3 shading_normal)
 {
   UNUSED_VARS(light_index);
   UNUSED_VARS(is_local);
@@ -589,7 +589,7 @@ float glsl_light_shadow_raw(uint light_index, bool is_local, float3 shading_norm
   return 0.0f;
 }
 
-float glsl_light_cast_shadow_raw(uint light_index, bool is_local, float3 shading_normal)
+float glsl_light_cast_shadow_raw(KernelGlobals &kg, ShadingData &sd, uint light_index, bool is_local, float3 shading_normal)
 {
   UNUSED_VARS(light_index);
   UNUSED_VARS(is_local);

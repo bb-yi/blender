@@ -9,9 +9,10 @@
 #pragma once
 
 #include "BLI_array.hh"
+#include "BLI_function_ref.hh"
 #include "BLI_map.hh"
-#include "BLI_math_vector.hh"
-#include "BLI_rect.h"
+#include "BLI_math_matrix_types.hh"
+#include "BLI_rect.hh"
 #include "BLI_vector.hh"
 
 #include "DNA_image_types.h"
@@ -21,20 +22,14 @@
 #include "BKE_paint_bvh.hh"
 
 #include "IMB_imbuf_types.hh"
+#include "IMB_partial_update.hh"
 
 namespace blender::bke::pbvh::pixels {
 
 /**
  * Encode sequential pixels to reduce memory footprint.
- * TODO: Can we pack an associated Bounds<float3> to improve coarse filtering?
- * TODO: Experiment with adding an initial float3 and delta so calculating positions doesn't need
- * to happen as frequently
  */
 struct PackedPixelRow {
-  /** Barycentric coordinate of the first pixel. */
-  float2 start_barycentric_coord;
-  /** Image coordinate starting of the first pixel. */
-  ushort2 start_image_coordinate;
   /** Number of sequential pixels encoded in this package. */
   ushort num_pixels;
   /** Reference to the pbvh triangle index. */
@@ -57,6 +52,12 @@ struct UDIMTilePixels {
 
   Vector<PackedPixelRow> pixel_rows;
 
+  /** Offsets into #pixel_rows grouping it into contiguous runs for batch processing. */
+  Vector<int> pixel_row_run_starts;
+
+  /** Image coordinate of the first pixel of each run. */
+  Vector<ushort2> pixel_row_run_start_coords;
+
   UDIMTilePixels()
   {
     flags.dirty = false;
@@ -77,13 +78,6 @@ struct UDIMTilePixels {
   }
 };
 
-struct UDIMTileUndo {
-  short tile_number;
-  rcti region;
-
-  UDIMTileUndo(short tile_number, rcti &region) : tile_number(tile_number), region(region) {}
-};
-
 /**
  * Contains triangle/pixel data used during texture painting.
  */
@@ -97,18 +91,16 @@ struct PixelNode {
   } flags;
 
   Vector<UDIMTilePixels, 0> tiles;
-  Vector<UDIMTileUndo, 0> undo_regions;
 
   struct {
     /** Corresponding index into triangles */
-    Vector<int, 0> tri_indices;
+    Array<int, 0> tri_indices;
 
     /**
-     * Delta barycentric coordinates between 2 neighboring UVs in the U direction.
-     *
-     * Only the first two coordinates are stored. The third should be recalculated
+     * Per primitive affine map from image pixel coordinate to object space position:
+     * P = pixel_to_position * (pixel_x, pixel_y, 1)
      */
-    Vector<float2, 0> delta_barycentric_coords;
+    Array<float3x3, 0> pixel_to_position;
   } uv_primitives;
 
   PixelNode()
@@ -127,41 +119,17 @@ struct PixelNode {
     return nullptr;
   }
 
-  void rebuild_undo_regions()
-  {
-    undo_regions.clear();
-    for (UDIMTilePixels &tile : tiles) {
-      if (tile.pixel_rows.is_empty()) {
-        continue;
-      }
-
-      rcti region;
-      BLI_rcti_init_minmax(&region);
-      for (PackedPixelRow &pixel_row : tile.pixel_rows) {
-        BLI_rcti_do_minmax_v(
-            &region, int2(pixel_row.start_image_coordinate.x, pixel_row.start_image_coordinate.y));
-        BLI_rcti_do_minmax_v(&region,
-                             int2(pixel_row.start_image_coordinate.x + pixel_row.num_pixels + 1,
-                                  pixel_row.start_image_coordinate.y + 1));
-      }
-      undo_regions.append(UDIMTileUndo(tile.tile_number, region));
-    }
-  }
-
-  void mark_region(UDIMTilePixels &tile,
-                   Image &image,
-                   const image::ImageTileWrapper &image_tile,
-                   ImBuf &image_buffer)
+  void mark_region(UDIMTilePixels &tile, ImBuf &image_buffer)
   {
     if (tile.flags.dirty) {
       if (image_buffer.color_mode == ImColorMode::BW) {
         image_buffer.color_mode = ImColorMode::RGBA;
-        BKE_image_partial_update_mark_full_update(&image);
+        IMB_partial_update_mark_full(&image_buffer);
       }
       else {
-        BKE_image_partial_update_mark_region(
-            &image, image_tile.image_tile, &image_buffer, &tile.dirty_region);
+        IMB_partial_update_mark_region(&image_buffer, tile.dirty_region);
       }
+      IMB_mark_dirty(&image_buffer);
       tile.clear_dirty();
     }
   }
@@ -178,15 +146,22 @@ struct PixelNode {
   void clear_data()
   {
     tiles.clear();
-    uv_primitives.tri_indices.clear();
-    uv_primitives.delta_barycentric_coords.clear();
-    undo_regions.clear();
+    uv_primitives.tri_indices.reinitialize(0);
+    uv_primitives.pixel_to_position.reinitialize(0);
   }
 };
 
 /* -------------------------------------------------------------------- */
 /** \name Fix non-manifold edge bleeding.
  * \{ */
+
+/**
+ * Each UDIM tile is split into smaller (64x64) seam tiles for which we can
+ * do seam bleeding. These are tagged as modified during painting, and only
+ * the modified subset will be processed.
+ */
+constexpr int SEAM_TILE_BITS = 6;
+constexpr int SEAM_TILE_SIZE = 1 << SEAM_TILE_BITS;
 
 struct DeltaCopyPixelCommand {
   char2 delta_source_1;
@@ -206,112 +181,29 @@ struct CopyPixelGroup {
   int num_deltas;
 };
 
-/** Pixel copy command to mix 2 source pixels and write to a destination pixel. */
-struct CopyPixelCommand {
-  /** Pixel coordinate to write to. */
-  int2 destination;
-  /** Pixel coordinate to read first source from. */
-  int2 source_1;
-  /** Pixel coordinate to read second source from. */
-  int2 source_2;
-  /** Factor to mix between first and second source. */
-  float mix_factor;
-
-  CopyPixelCommand() = default;
-  CopyPixelCommand(const CopyPixelGroup &group)
-      : destination(group.start_destination),
-        source_1(group.start_source_1),
-        source_2(),
-        mix_factor(0.0f)
-  {
-  }
-
-  template<typename T>
-  void mix_source_and_write_destination(image::ImageBufferAccessor<T> &tile_buffer) const
-  {
-    float4 source_color_1 = tile_buffer.read_pixel(source_1);
-    float4 source_color_2 = tile_buffer.read_pixel(source_2);
-    float4 destination_color = source_color_1 * (1.0f - mix_factor) + source_color_2 * mix_factor;
-    tile_buffer.write_pixel(destination, destination_color);
-  }
-
-  void apply(const DeltaCopyPixelCommand &item)
-  {
-    destination.x += 1;
-    source_1 += int2(item.delta_source_1);
-    source_2 = source_1 + int2(item.delta_source_2);
-    mix_factor = float(item.mix_factor) / 255.0f;
-  }
-
-  DeltaCopyPixelCommand encode_delta(const CopyPixelCommand &next_command) const
-  {
-    return DeltaCopyPixelCommand(char2(next_command.source_1 - source_1),
-                                 char2(next_command.source_2 - next_command.source_1),
-                                 uint8_t(next_command.mix_factor * 255));
-  }
-
-  bool can_be_extended(const CopyPixelCommand &command) const
-  {
-    /* Can only extend sequential pixels. */
-    if (destination.x != command.destination.x - 1 || destination.y != command.destination.y) {
-      return false;
-    }
-
-    /* Can only extend when the delta between with the previous source fits in a single byte. */
-    int2 delta_source_1 = source_1 - command.source_1;
-    if (max_ii(UNPACK2(math::abs(delta_source_1))) > 127) {
-      return false;
-    }
-    return true;
-  }
-};
-
 struct CopyPixelTile {
   image::TileNumber tile_number;
   Vector<CopyPixelGroup> groups;
   Vector<DeltaCopyPixelCommand> command_deltas;
 
+  /**
+   * The groups used by each seam tile, as an index range into #groups which is
+   * sorted by seam tile.
+   */
+  Map<int, IndexRange> seam_tile_to_groups;
+
   CopyPixelTile(image::TileNumber tile_number) : tile_number(tile_number) {}
 
-  void copy_pixels(ImBuf &tile_buffer, IndexRange group_range) const
+  static int seam_tile_index(const int2 source, const int seam_tiles_x)
   {
-    if (tile_buffer.float_data()) {
-      image::ImageBufferAccessor<float4> accessor(tile_buffer);
-      copy_pixels<float4>(accessor, group_range);
-    }
-    else {
-      image::ImageBufferAccessor<int> accessor(tile_buffer);
-      copy_pixels<int>(accessor, group_range);
-    }
+    return (source.x >> SEAM_TILE_BITS) + (source.y >> SEAM_TILE_BITS) * seam_tiles_x;
   }
 
-  void print_compression_rate()
-  {
-    int decoded_size = command_deltas.size() * sizeof(CopyPixelCommand);
-    int encoded_size = groups.size() * sizeof(CopyPixelGroup) +
-                       command_deltas.size() * sizeof(DeltaCopyPixelCommand);
-    printf("Tile %d compression rate: %d->%d = %d%%\n",
-           tile_number,
-           decoded_size,
-           encoded_size,
-           int(100.0 * float(encoded_size) / float(decoded_size)));
-  }
+  void build_seam_tile_map(const int2 resolution);
 
- private:
-  template<typename T>
-  void copy_pixels(image::ImageBufferAccessor<T> &image_buffer, IndexRange group_range) const
-  {
-    for (const int64_t group_index : group_range) {
-      const CopyPixelGroup &group = groups[group_index];
-      CopyPixelCommand copy_command(group);
-      for (const DeltaCopyPixelCommand &item : Span<const DeltaCopyPixelCommand>(
-               &command_deltas[group.start_delta_index], group.num_deltas))
-      {
-        copy_command.apply(item);
-        copy_command.mix_source_and_write_destination<T>(image_buffer);
-      }
-    }
-  }
+  void copy_pixels(ImBuf &tile_buffer, IndexRange group_range) const;
+
+  void print_compression_rate() const;
 };
 
 struct CopyPixelTiles {
@@ -343,9 +235,6 @@ struct PixelData {
     bool dirty : 1;
   } flags;
 
-  /* Per UVPRimitive contains the paint data. */
-  Array<int3> vert_tris;
-
   /** Per ImageTile the pixels to copy to fix non-manifold bleeding. */
   CopyPixelTiles tiles_copy_pixels;
 
@@ -354,13 +243,14 @@ struct PixelData {
 
 void mark_image_dirty(bke::pbvh::Node &node,
                       PixelNode &pixel_node,
-                      Image &image,
                       Map<image::TileNumber, ImBuf *> &buffers);
 PixelData &data_get(bke::pbvh::Tree &pbvh);
 void collect_dirty_tiles(PixelNode &pixel_node, Vector<image::TileNumber> &r_dirty_tiles);
 
 void copy_pixels(bke::pbvh::Tree &pbvh,
                  Map<image::TileNumber, ImBuf *> &buffers,
-                 image::TileNumber tile_number);
+                 image::TileNumber tile_number,
+                 Span<uint8_t> seam_tiles_modified,
+                 FunctionRef<void(int x_start, int x_end, int y)> push_undo_tiles);
 
 }  // namespace blender::bke::pbvh::pixels

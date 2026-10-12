@@ -30,12 +30,6 @@ void node_tree_shader_default(const bContext *C, Main *bmain, ID *id);
 bool node_tree_light_shader_default_ensure(bNodeTree &ntree);
 
 /**
- * Assumes nothing being done in ntree yet, sets the default in/out node.
- * Called from compositing buttons or header.
- */
-void node_tree_composit_default(const bContext *C, Scene *sce);
-
-/**
  * Initializes an empty compositing node tree with default nodes.
  */
 void node_tree_composit_default_init(const bContext *C, bNodeTree *ntree);

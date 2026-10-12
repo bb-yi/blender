@@ -162,40 +162,44 @@ static void pen_find_closest_handle(const PenToolOperation &ptd,
                                     ClosestElement &r_closest_element)
 {
   const Array<int> point_to_curve_map = curves.point_to_curve_map();
-  const Span<float3> handle_left = *curves.handle_positions_left();
-  const Span<float3> handle_right = *curves.handle_positions_right();
 
-  bezier_points.foreach_index([&](const int point_i) {
-    const float2 pos_proj = ptd.layer_to_screen(layer_to_object, handle_left[point_i]);
-    const float distance_squared = math::distance_squared(pos_proj, mouse_co);
+  if (const std::optional<Span<float3>> handle_left = curves.handle_positions_left()) {
+    const Span<float3> handle_left_span = *handle_left;
+    bezier_points.foreach_index([&](const int point_i) {
+      const float2 pos_proj = ptd.layer_to_screen(layer_to_object, handle_left_span[point_i]);
+      const float distance_squared = math::distance_squared(pos_proj, mouse_co);
 
-    /* Save the closest point. */
-    if (r_closest_element.is_closer(
-            distance_squared, ElementMode::HandleLeft, ptd.threshold_distance))
-    {
-      r_closest_element.curve_index = point_to_curve_map[point_i];
-      r_closest_element.point_index = point_i;
-      r_closest_element.element_mode = ElementMode::HandleLeft;
-      r_closest_element.distance_squared = distance_squared;
-      r_closest_element.drawing_index = drawing_index;
-    }
-  });
+      /* Save the closest point. */
+      if (r_closest_element.is_closer(
+              distance_squared, ElementMode::HandleLeft, ptd.threshold_distance))
+      {
+        r_closest_element.curve_index = point_to_curve_map[point_i];
+        r_closest_element.point_index = point_i;
+        r_closest_element.element_mode = ElementMode::HandleLeft;
+        r_closest_element.distance_squared = distance_squared;
+        r_closest_element.drawing_index = drawing_index;
+      }
+    });
+  }
 
-  bezier_points.foreach_index([&](const int point_i) {
-    const float2 pos_proj = ptd.layer_to_screen(layer_to_object, handle_right[point_i]);
-    const float distance_squared = math::distance_squared(pos_proj, mouse_co);
+  if (const std::optional<Span<float3>> handle_right = curves.handle_positions_right()) {
+    const Span<float3> handle_right_span = *handle_right;
+    bezier_points.foreach_index([&](const int point_i) {
+      const float2 pos_proj = ptd.layer_to_screen(layer_to_object, handle_right_span[point_i]);
+      const float distance_squared = math::distance_squared(pos_proj, mouse_co);
 
-    /* Save the closest point. */
-    if (r_closest_element.is_closer(
-            distance_squared, ElementMode::HandleRight, ptd.threshold_distance))
-    {
-      r_closest_element.curve_index = point_to_curve_map[point_i];
-      r_closest_element.point_index = point_i;
-      r_closest_element.element_mode = ElementMode::HandleRight;
-      r_closest_element.distance_squared = distance_squared;
-      r_closest_element.drawing_index = drawing_index;
-    }
-  });
+      /* Save the closest point. */
+      if (r_closest_element.is_closer(
+              distance_squared, ElementMode::HandleRight, ptd.threshold_distance))
+      {
+        r_closest_element.curve_index = point_to_curve_map[point_i];
+        r_closest_element.point_index = point_i;
+        r_closest_element.element_mode = ElementMode::HandleRight;
+        r_closest_element.distance_squared = distance_squared;
+        r_closest_element.drawing_index = drawing_index;
+      }
+    });
+  }
 }
 
 static float2 line_segment_closest_point(const float2 &pos_1,
@@ -428,7 +432,6 @@ static bool move_handles_in_curve(const PenToolOperation &ptd,
 
   MutableSpan<float3> positions = curves.positions_for_write();
   const bke::AttributeAccessor attributes = curves.attributes();
-  const Array<int> point_to_curve_map = curves.point_to_curve_map();
 
   MutableSpan<int8_t> handle_types_left = curves.handle_types_left_for_write();
   MutableSpan<int8_t> handle_types_right = curves.handle_types_right_for_write();
@@ -1111,7 +1114,7 @@ static IndexMask retrieve_visible_bezier_handle_points(const bke::CurvesGeometry
   if (handle_display == CURVE_HANDLE_NONE) {
     return IndexMask(0);
   }
-  else if (handle_display == CURVE_HANDLE_ALL) {
+  if (handle_display == CURVE_HANDLE_ALL) {
     return curves.points_range();
   }
   /* else handle_display == CURVE_HANDLE_SELECTED */
@@ -1334,7 +1337,6 @@ class CurvesPenToolOperation : public PenToolOperation {
   void single_point_attributes(bke::CurvesGeometry & /*curves*/,
                                const int /*curves_index*/) const override
   {
-    return;
   }
 
   bool can_create_new_curve(wmOperator *op) const override

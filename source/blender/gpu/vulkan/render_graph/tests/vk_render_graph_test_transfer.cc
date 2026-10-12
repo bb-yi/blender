@@ -15,9 +15,9 @@ class VKRenderGraphTestTransfer : public VKRenderGraphTest {};
  */
 TEST_F(VKRenderGraphTestTransfer, fill_and_read_back)
 {
-  VkHandle<VkBuffer> buffer(1u);
+  VKTrackedHandle<VkBuffer> buffer(1u);
 
-  resources.add_buffer(buffer);
+  buffer.set_resource_handle(resources.add_buffer(buffer));
   VKFillBufferNode::CreateInfo fill_buffer = {buffer, 1024, 42};
   render_graph->add_node(fill_buffer);
   submit(render_graph, command_buffer);
@@ -31,13 +31,13 @@ TEST_F(VKRenderGraphTestTransfer, fill_and_read_back)
  */
 TEST_F(VKRenderGraphTestTransfer, fill_transfer_and_read_back)
 {
-  VkHandle<VkBuffer> buffer(1u);
-  VkHandle<VkBuffer> staging_buffer(2u);
+  VKTrackedHandle<VkBuffer> buffer(1u);
+  VKTrackedHandle<VkBuffer> staging_buffer(2u);
 
-  resources.add_buffer(buffer);
+  buffer.set_resource_handle(resources.add_buffer(buffer));
   VKFillBufferNode::CreateInfo fill_buffer = {buffer, 1024, 42};
   render_graph->add_node(fill_buffer);
-  resources.add_buffer(staging_buffer);
+  staging_buffer.set_resource_handle(resources.add_buffer(staging_buffer));
 
   VKCopyBufferNode::CreateInfo copy_buffer = {};
   copy_buffer.src_buffer = buffer;
@@ -72,9 +72,9 @@ TEST_F(VKRenderGraphTestTransfer, fill_transfer_and_read_back)
  */
 TEST_F(VKRenderGraphTestTransfer, fill_fill_read_back)
 {
-  VkHandle<VkBuffer> buffer(1u);
+  VKTrackedHandle<VkBuffer> buffer(1u);
 
-  resources.add_buffer(buffer);
+  buffer.set_resource_handle(resources.add_buffer(buffer));
   VKFillBufferNode::CreateInfo fill_buffer_1 = {buffer, 1024, 0};
   render_graph->add_node(fill_buffer_1);
   VKFillBufferNode::CreateInfo fill_buffer_2 = {buffer, 1024, 42};
@@ -102,11 +102,11 @@ TEST_F(VKRenderGraphTestTransfer, clear_clear_copy_and_read_back)
 {
   VkHandle<VkImage> src_image(1u);
   VkHandle<VkImage> dst_image(2u);
-  VkHandle<VkBuffer> staging_buffer(3u);
+  VKTrackedHandle<VkBuffer> staging_buffer(3u);
 
   resources.add_image(src_image, false);
   resources.add_image(dst_image, false);
-  resources.add_buffer(staging_buffer);
+  staging_buffer.set_resource_handle(resources.add_buffer(staging_buffer));
   VkClearColorValue color_white = {};
   color_white.float32[0] = 1.0f;
   color_white.float32[1] = 1.0f;
@@ -244,11 +244,11 @@ TEST_F(VKRenderGraphTestTransfer, clear_blit_copy_and_read_back)
 {
   VkHandle<VkImage> src_image(1u);
   VkHandle<VkImage> dst_image(2u);
-  VkHandle<VkBuffer> staging_buffer(3u);
+  VKTrackedHandle<VkBuffer> staging_buffer(3u);
 
   resources.add_image(src_image, false);
   resources.add_image(dst_image, false);
-  resources.add_buffer(staging_buffer);
+  staging_buffer.set_resource_handle(resources.add_buffer(staging_buffer));
   VkClearColorValue color_black = {};
   color_black.float32[0] = 0.0f;
   color_black.float32[1] = 0.0f;
@@ -347,11 +347,11 @@ TEST_F(VKRenderGraphTestTransfer, clear_blit_copy_and_read_back)
  */
 TEST_F(VKRenderGraphTestTransfer, copy_buffer_modify_data)
 {
-  VkHandle<VkBuffer> buffer_src(1u);
-  VkHandle<VkBuffer> buffer_dst(2u);
+  VKTrackedHandle<VkBuffer> buffer_src(1u);
+  VKTrackedHandle<VkBuffer> buffer_dst(2u);
 
-  resources.add_buffer(buffer_src);
-  resources.add_buffer(buffer_dst);
+  buffer_src.set_resource_handle(resources.add_buffer(buffer_src));
+  buffer_dst.set_resource_handle(resources.add_buffer(buffer_dst));
   VKCopyBufferNode::CreateInfo copy_buffer = {buffer_src, buffer_dst, {0, 0, 32}};
   NodeHandle copy_buffer_handle = render_graph->add_node(copy_buffer);
   VKCopyBufferNode::Data &copy_buffer_data = render_graph->get_node_data(copy_buffer_handle);
@@ -376,13 +376,13 @@ TEST_F(VKRenderGraphTestTransfer, copy_buffer_modify_data)
  */
 TEST_F(VKRenderGraphTestTransfer, copy_buffer_to_image_dispatch_read_aliased_image)
 {
-  VkHandle<VkBuffer> buffer(1u);
+  VKTrackedHandle<VkBuffer> buffer(1u);
   VkHandle<VkImage> image(2u);
   VkHandle<VkPipeline> pipeline(3u);
   VkHandle<VkPipelineLayout> pipeline_layout(4u);
   VkHandle<VkDescriptorSet> descriptor_set(5u);
 
-  resources.add_buffer(buffer);
+  buffer.set_resource_handle(resources.add_buffer(buffer));
   resources.add_aliased_image(image, false);
 
   VKCopyBufferToImageNode::CreateInfo copy_buffer_to_image = {};
@@ -461,6 +461,124 @@ TEST_F(VKRenderGraphTestTransfer, copy_buffer_to_image_dispatch_read_aliased_ima
       "p_descriptor_sets=0x5)",
       log[4]);
   EXPECT_EQ("dispatch(group_count_x=1, group_count_y=1, group_count_z=1)", log[5]);
+}
+
+/**
+ * Model the VKTexturePool release/re-acquire cycle with a synchronization node.
+ *
+ * When a pooled texture is released, `VKTexturePool::release_texture()` adds a synchronization
+ * node that re-arms the aliased initial state ({MEMORY_READ|MEMORY_WRITE, ALL_COMMANDS}) for its
+ * VkImage. The backing memory may be reused by another image before the texture is re-acquired.
+ * The re-armed state ensures the next write to the reused memory synchronizes against every prior
+ * access to the aliased memory, avoiding WRITE_AFTER_READ/WRITE_AFTER_WRITE hazards (#161990).
+ */
+TEST_F(VKRenderGraphTestTransfer, copy_buffer_to_image_synchronization_aliased_image_reuse)
+{
+  VKTrackedHandle<VkBuffer> buffer(1u);
+  VkHandle<VkImage> image(2u);
+
+  buffer.set_resource_handle(resources.add_buffer(buffer));
+  resources.add_aliased_image(image, false);
+
+  VKCopyBufferToImageNode::CreateInfo copy_buffer_to_image = {};
+  copy_buffer_to_image.node_data.src_buffer = buffer;
+  copy_buffer_to_image.node_data.dst_image = image;
+  copy_buffer_to_image.node_data.region.imageExtent.width = 64;
+  copy_buffer_to_image.node_data.region.imageExtent.height = 64;
+  copy_buffer_to_image.node_data.region.imageExtent.depth = 1;
+  copy_buffer_to_image.node_data.region.imageOffset.x = 0;
+  copy_buffer_to_image.node_data.region.imageOffset.y = 0;
+  copy_buffer_to_image.node_data.region.imageOffset.z = 0;
+  copy_buffer_to_image.node_data.region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  copy_buffer_to_image.node_data.region.imageSubresource.mipLevel = 0;
+  copy_buffer_to_image.node_data.region.imageSubresource.baseArrayLayer = 0;
+  copy_buffer_to_image.node_data.region.imageSubresource.layerCount = 1;
+  copy_buffer_to_image.vk_image_aspects = VK_IMAGE_ASPECT_COLOR_BIT;
+  render_graph->add_node(copy_buffer_to_image);
+
+  /* Synchronization node added by VKTexturePool::release_texture(). */
+  VKSynchronizationNode::CreateInfo synchronization = {};
+  synchronization.vk_image = image;
+  synchronization.vk_image_layout = VK_IMAGE_LAYOUT_GENERAL;
+  synchronization.vk_image_aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+  synchronization.vk_access_flags = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+  render_graph->add_node(synchronization);
+
+  /* Second write after the texture has been released and re-acquired. */
+  render_graph->add_node(copy_buffer_to_image);
+
+  submit(render_graph, command_buffer);
+
+  EXPECT_EQ(5, log.size());
+  /* First write: synchronizes against the aliased initial state. */
+  EXPECT_EQ(
+      "pipeline_barrier(src_stage_mask=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, "
+      "dst_stage_mask=VK_PIPELINE_STAGE_TRANSFER_BIT" +
+          endl() +
+          " - image_barrier(src_access_mask=VK_ACCESS_MEMORY_READ_BIT, "
+          "VK_ACCESS_MEMORY_WRITE_BIT, "
+          "dst_access_mask=VK_ACCESS_TRANSFER_WRITE_BIT, "
+          "old_layout=VK_IMAGE_LAYOUT_UNDEFINED, new_layout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, "
+          "image=0x2, subresource_range=" +
+          endl() +
+          "    aspect_mask=VK_IMAGE_ASPECT_COLOR_BIT, base_mip_level=0, level_count=4294967295, "
+          "base_array_layer=0, layer_count=4294967295  )" +
+          endl() + ")",
+      log[0]);
+  EXPECT_EQ(
+      "copy_buffer_to_image(src_buffer=0x1, dst_image=0x2, "
+      "src_image_layout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL" +
+          endl() +
+          " - region(buffer_offset=0, buffer_row_length=0, buffer_image_height=0, "
+          "image_subresource=" +
+          endl() +
+          "    aspect_mask=VK_IMAGE_ASPECT_COLOR_BIT, mip_level=0, base_array_layer=0, "
+          "layer_count=1  , image_offset=" +
+          endl() + "    x=0, y=0, z=0  , image_extent=" + endl() +
+          "    width=64, height=64, depth=1  )" + endl() + ")",
+      log[1]);
+  /* Synchronization node at release: waits for the first write and re-arms the aliased state. */
+  EXPECT_EQ(
+      "pipeline_barrier(src_stage_mask=VK_PIPELINE_STAGE_TRANSFER_BIT, "
+      "dst_stage_mask=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT" +
+          endl() +
+          " - image_barrier(src_access_mask=VK_ACCESS_TRANSFER_WRITE_BIT, "
+          "dst_access_mask=VK_ACCESS_MEMORY_READ_BIT, "
+          "VK_ACCESS_MEMORY_WRITE_BIT, "
+          "old_layout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, "
+          "new_layout=VK_IMAGE_LAYOUT_GENERAL, image=0x2, subresource_range=" +
+          endl() +
+          "    aspect_mask=VK_IMAGE_ASPECT_COLOR_BIT, base_mip_level=0, level_count=4294967295, "
+          "base_array_layer=0, layer_count=4294967295  )" +
+          endl() + ")",
+      log[2]);
+  /* Second write: must synchronize against all prior accesses to the aliased memory. */
+  EXPECT_EQ(
+      "pipeline_barrier(src_stage_mask=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, "
+      "dst_stage_mask=VK_PIPELINE_STAGE_TRANSFER_BIT" +
+          endl() +
+          " - image_barrier(src_access_mask=VK_ACCESS_MEMORY_READ_BIT, "
+          "VK_ACCESS_MEMORY_WRITE_BIT, "
+          "dst_access_mask=VK_ACCESS_TRANSFER_WRITE_BIT, "
+          "old_layout=VK_IMAGE_LAYOUT_GENERAL, new_layout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, "
+          "image=0x2, subresource_range=" +
+          endl() +
+          "    aspect_mask=VK_IMAGE_ASPECT_COLOR_BIT, base_mip_level=0, level_count=4294967295, "
+          "base_array_layer=0, layer_count=4294967295  )" +
+          endl() + ")",
+      log[3]);
+  EXPECT_EQ(
+      "copy_buffer_to_image(src_buffer=0x1, dst_image=0x2, "
+      "src_image_layout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL" +
+          endl() +
+          " - region(buffer_offset=0, buffer_row_length=0, buffer_image_height=0, "
+          "image_subresource=" +
+          endl() +
+          "    aspect_mask=VK_IMAGE_ASPECT_COLOR_BIT, mip_level=0, base_array_layer=0, "
+          "layer_count=1  , image_offset=" +
+          endl() + "    x=0, y=0, z=0  , image_extent=" + endl() +
+          "    width=64, height=64, depth=1  )" + endl() + ")",
+      log[4]);
 }
 
 }  // namespace blender::gpu::render_graph

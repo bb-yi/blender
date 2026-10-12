@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include <fmt/format.h>
 
 #include "BLT_translation.hh"
@@ -10,7 +14,9 @@
 #include "BLI_path_utils.hh"
 #include "BLI_span.hh"
 
+#include "BKE_blender_project.hh"
 #include "BKE_context.hh"
+#include "BKE_idprop.hh"
 #include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_path_templates.hh"
@@ -143,14 +149,12 @@ bool VariableMap::add_filename_only(StringRef var_name,
     /* If there is no file name, default to the fallback. */
     return this->add_filepath(var_name, fallback);
   }
-  else if (file_name_end == file_name) {
+  if (file_name_end == file_name) {
     /* When the filename has no extension, but starts with a period. */
     return this->add_filepath(var_name, StringRef(file_name));
   }
-  else {
-    /* Normal case. */
-    return this->add_filepath(var_name, StringRef(file_name, file_name_end));
-  }
+  /* Normal case. */
+  return this->add_filepath(var_name, StringRef(file_name, file_name_end));
 }
 
 bool VariableMap::add_path_up_to_file(StringRef var_name,
@@ -201,8 +205,8 @@ std::optional<VariableMap> BKE_build_template_variables_for_prop(const bContext 
    * should produce variables consistent with that for the same render path
    * properties here.
    *
-   * This function is organized into three sections: one for "general"
-   * variables, one for "purpose-specific" variables, and one for
+   * This function is organized into two sections: a `switch` giving each
+   * purpose its "general" and "purpose-specific" variables, and one for
    * "type-specific" variables. (See the top-level documentation in
    * BKE_path_templates.hh for details on what that means).
    *
@@ -233,19 +237,23 @@ std::optional<VariableMap> BKE_build_template_variables_for_prop(const bContext 
   }
 
   VariableMap variables;
+  const Main *bmain = CTX_data_main(C);
 
-  /* General variables. */
-  BKE_add_template_variables_general(variables, ptr->owner_id);
-
-  /* Purpose-specific variables. */
+  /* General and purpose-specific variables. */
   switch (RNA_property_path_template_type(prop)) {
     case PROP_VARIABLES_NONE: {
-      /* Do nothing: no purpose-specific variables. */
+      BKE_blender_project_read_callback(bmain, [&](const bke::BlenderProject *project) {
+        BKE_add_template_variables_general(variables, ptr->owner_id, project);
+      });
       break;
     }
 
     /* Scene render output path, the compositor's File Output node's paths, etc. */
     case PROP_VARIABLES_RENDER_OUTPUT: {
+      BKE_blender_project_read_callback(bmain, [&](const bke::BlenderProject *project) {
+        BKE_add_template_variables_general(variables, ptr->owner_id, project);
+      });
+
       const Scene *scene;
       if (GS(ptr->owner_id->name) == ID_SCE) {
         scene = reinterpret_cast<const Scene *>(ptr->owner_id);
@@ -255,6 +263,16 @@ std::optional<VariableMap> BKE_build_template_variables_for_prop(const bContext 
       }
 
       BKE_add_template_variables_for_render_path(variables, *scene);
+      break;
+    }
+
+    /* Project settings. */
+    case PROP_VARIABLES_PROJECT: {
+      BKE_blender_project_read_callback(bmain, [&](const bke::BlenderProject *project) {
+        if (project) {
+          BKE_add_template_variables_for_project(variables, *project);
+        }
+      });
       break;
     }
   }
@@ -272,8 +290,45 @@ std::optional<VariableMap> BKE_build_template_variables_for_prop(const bContext 
   return variables;
 }
 
-void BKE_add_template_variables_general(VariableMap &variables, const ID *path_owner_id)
+void BKE_add_template_variables_for_project(VariableMap &variables,
+                                            const bke::BlenderProject &project)
 {
+  variables.add_string("project_name", project.get_name());
+
+  variables.add_filepath("project_root", project.get_root_path());
+
+  for (const std::unique_ptr<bke::ProjectVariable> &var : project.variables) {
+    switch (var->type_get()) {
+      case bke::ProjectVariableType::STRING: {
+        if (var->string_subtype_get() == bke::ProjectVariableStringSubtype::FILEPATH) {
+          variables.add_filepath(var->name_get(), var->value_string_get());
+        }
+        else {
+          variables.add_string(var->name_get(), var->value_string_get());
+        }
+        break;
+      }
+
+      case bke::ProjectVariableType::INT:
+        variables.add_integer(var->name_get(), var->value_int_get());
+        break;
+
+      case bke::ProjectVariableType::FLOAT:
+        variables.add_float(var->name_get(), var->value_float_get());
+        break;
+    }
+  }
+}
+
+void BKE_add_template_variables_general(bke::path_templates::VariableMap &variables,
+                                        const ID *path_owner_id,
+                                        const bke::BlenderProject *project)
+{
+  /* Project variables. */
+  if (project) {
+    BKE_add_template_variables_for_project(variables, *project);
+  }
+
   /* Global blend filepath (a.k.a. path to the blend file that's currently
    * open). */
   {
@@ -757,6 +812,38 @@ static std::optional<Token> next_token(StringRef path, const int from_char)
   return token;
 }
 
+namespace bke::path_templates {
+
+std::optional<ExpressionInfo> next_template_variable_expression(StringRef text,
+                                                                size_t starting_offset)
+{
+  while (const std::optional<Token> token = next_token(text, starting_offset)) {
+    switch (token->type) {
+      case TokenType::LEFT_CURLY_BRACE:
+      case TokenType::RIGHT_CURLY_BRACE: {
+        starting_offset = token->byte_range.one_after_last();
+        continue;
+      }
+
+      case TokenType::VARIABLE_EXPRESSION: {
+        ExpressionInfo info;
+        info.byte_range = token->byte_range;
+        info.variable_name = token->variable_name;
+        return info;
+      }
+
+      case TokenType::VARIABLE_SYNTAX_ERROR:
+      case TokenType::UNESCAPED_CURLY_BRACE_ERROR: {
+        return std::nullopt;
+      }
+    }
+  }
+
+  return std::nullopt;
+}
+
+}  // namespace bke::path_templates
+
 /* Parse the given template and return the list of tokens found, in the same
  * order as they appear in the template. */
 static Vector<Token> parse_template(StringRef path)
@@ -786,9 +873,7 @@ static std::optional<Error> token_to_syntax_error(const Token &token)
       if (token.format.type == FormatSpecifierType::SYNTAX_ERROR) {
         return {{ErrorType::FORMAT_SPECIFIER, token.byte_range}};
       }
-      else {
-        return {{ErrorType::VARIABLE_SYNTAX, token.byte_range}};
-      }
+      return {{ErrorType::VARIABLE_SYNTAX, token.byte_range}};
     }
 
     case TokenType::UNESCAPED_CURLY_BRACE_ERROR: {
@@ -809,6 +894,21 @@ static std::optional<Error> token_to_syntax_error(const Token &token)
 bool BKE_path_contains_template_syntax(StringRef path)
 {
   return path.find_first_of("{}") != std::string_view::npos;
+}
+
+std::string BKE_path_template_escape(const StringRef text)
+{
+  std::string escaped;
+  escaped.reserve(text.size());
+
+  for (const char c : text) {
+    escaped.push_back(c);
+    if (c == '{' || c == '}') {
+      escaped.push_back(c);
+    }
+  }
+
+  return escaped;
 }
 
 /**

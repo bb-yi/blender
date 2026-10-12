@@ -1,10 +1,10 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.2.0 LTS Release Candidate (b'3d8c46ac31f4')\n"
+"Project-Id-Version: Blender 5.3.0 Beta (b'8f7aae950179')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-07-13 07:34+0000\n"
-"PO-Revision-Date: 2026-06-29 10:51+0000\n"
+"POT-Creation-Date: 2026-10-12 07:32+0000\n"
+"PO-Revision-Date: 2026-10-04 17:12+0000\n"
 "Last-Translator: Dominic Iastrebschi <domjotebit@gmail.com>\n"
 "Language-Team: Romanian <https://translate.blender.org/projects/blender-ui/ui/ro/>\n"
 "Language: ro\n"
@@ -12,7 +12,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=n==1 ? 0 : (n==0 || (n%100 > 0 && n%100 < 20)) ? 1 : 2;\n"
-"X-Generator: Weblate 5.16.2"
+"X-Generator: Weblate 2026.6.1"
 
 
 msgid "Shader AOV"
@@ -309,6 +309,18 @@ msgstr "Indexul marcatorului de poziție activ"
 
 msgid "Index of active pose marker"
 msgstr "Indexul marcatorului de poziție activ"
+
+
+msgid "Action slot"
+msgstr "Acțiuni"
+
+
+msgid "Identifier for a set of channels in this Action, that can be used by a data-block to specify what it gets animated by"
+msgstr "Identificator pentru un set de canale din această acțiune, care poate fi utilizat de un bloc de date pentru a specifica elementul care îi generează animația"
+
+
+msgid "Active"
+msgstr "Activ"
 
 
 msgctxt "ID"
@@ -1230,16 +1242,8 @@ msgid "Point"
 msgstr "Punct"
 
 
-msgid "Attribute on point"
-msgstr "Atribut pe punct"
-
-
 msgid "Edge"
 msgstr "Margine"
-
-
-msgid "Attribute on mesh edge"
-msgstr "Atributul pe marginea mesh-ului"
 
 
 msgid "Name of the Attribute"
@@ -1774,6 +1778,14 @@ msgid "Shape Key data-blocks"
 msgstr "Blocurile de date ale Cheilor de Formă"
 
 
+msgid "Blender"
+msgstr "Blender"
+
+
+msgid "Path"
+msgstr "Cale"
+
+
 msgid "Deflectors"
 msgstr "Deflectoare"
 
@@ -1884,10 +1896,6 @@ msgid "Gamma"
 msgstr "Gamma"
 
 
-msgid "View"
-msgstr "Vedere"
-
-
 msgid "Contrast"
 msgstr "Contrast"
 
@@ -1926,6 +1934,10 @@ msgstr "Manipulator Vector"
 
 msgid "Depth"
 msgstr "Adâncime"
+
+
+msgid "View"
+msgstr "Vedere"
 
 
 msgid "Radius"
@@ -2043,10 +2055,6 @@ msgstr "Secvența"
 
 msgid "Up"
 msgstr "Sus"
-
-
-msgid "Path"
-msgstr "Cale"
 
 
 msgid "Min"
@@ -2168,28 +2176,28 @@ msgid "Sampling"
 msgstr "Eșantionare"
 
 
-msgid "UV"
-msgstr "UV"
-
-
 msgid "Light"
 msgstr "Lumină"
 
 
-msgid "Add Image"
-msgstr "Adăugare Imagine"
-
-
-msgid "Apply"
-msgstr "Aplicare"
+msgid "Convert"
+msgstr "Convertire"
 
 
 msgid "Layout"
 msgstr "Aspect"
 
 
-msgid "Convert"
-msgstr "Convertire"
+msgid "UV"
+msgstr "UV"
+
+
+msgid "Apply"
+msgstr "Aplicare"
+
+
+msgid "Add Image"
+msgstr "Adăugare Imagine"
 
 
 msgid "Tracking"
@@ -2214,10 +2222,6 @@ msgstr "Generare"
 
 msgid "Physics"
 msgstr "Fizică"
-
-
-msgid "Blender"
-msgstr "Blender"
 
 
 msgid "System"
@@ -2540,6 +2544,10 @@ msgid "Paste"
 msgstr "Lipire"
 
 
+msgid "Movie"
+msgstr "Film"
+
+
 msgid "File format"
 msgstr "Format fișier"
 
@@ -2782,11 +2790,6 @@ msgstr "Mod Obiect"
 
 
 msgctxt "WindowManager"
-msgid "Generic Tool: Annotate"
-msgstr "Unealtă Generică: Adnotare"
-
-
-msgctxt "WindowManager"
 msgid "Grease Pencil"
 msgstr "Creion de Grăsime"
 
@@ -2821,17 +2824,17 @@ msgid "In"
 msgstr "Intrare"
 
 
+msgctxt "WindowManager"
+msgid "Generic Tool: Annotate"
+msgstr "Unealtă Generică: Adnotare"
+
+
 msgid "Description:"
 msgstr "Descriere:"
 
 
 msgid "File:"
 msgstr "Fișier:"
-
-
-msgctxt "Operator"
-msgid "Apply"
-msgstr "Aplicare"
 
 
 msgctxt "WindowManager"
@@ -3086,8 +3089,8 @@ msgstr "Multi-Pictură"
 
 
 msgctxt "Operator"
-msgid "Quick Edit"
-msgstr "Editare Rapidă"
+msgid "Apply"
+msgstr "Aplicare"
 
 
 msgctxt "Operator"
@@ -3233,10 +3236,6 @@ msgstr "Hex"
 
 msgid "OK"
 msgstr "OK"
-
-
-msgid "Movie"
-msgstr "Film"
 
 
 msgid "Delete the active position"

@@ -2,15 +2,20 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup draw_engine
+ */
+
 #include "../eevee/eevee_lut.hh" /* TODO: find somewhere to share blue noise Table. */
 
 #include "BKE_studiolight.h"
 
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "GPU_batch_utils.hh"
+#include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
 
 #include "draw_common_c.hh"
@@ -113,6 +118,7 @@ void SceneResources::init(const SceneState &scene_state, const DRWContext *ctx)
 
   world_buf.viewport_size = ctx->viewport_size_get();
   world_buf.viewport_size_inv = 1.0f / world_buf.viewport_size;
+  world_buf.xray_mode = scene_state.xray_mode;
   world_buf.xray_alpha = shading.xray_alpha;
   world_buf.background_color = scene_state.background_color;
   world_buf.object_outline_color = float4(float3(shading.object_outline_color), 1.0f);
@@ -187,12 +193,10 @@ void SceneResources::init(const SceneState &scene_state, const DRWContext *ctx)
 
   clip_planes_buf.push_update();
 
-  missing_tx.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8,
-                       int2(1),
-                       GPU_TEXTURE_USAGE_SHADER_READ,
-                       float4(1.0f, 0.0f, 1.0f, 1.0f));
-  missing_texture.gpu.texture = &missing_tx;
-  missing_texture.name = "Missing Texture";
+  if (missing_texture.gpu.texture == nullptr) {
+    missing_texture.gpu.texture = GPU_texture_create_error(2, false);
+    missing_texture.name = "Missing Texture";
+  }
 
   dummy_texture_tx.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8,
                              int2(1),

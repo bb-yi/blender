@@ -14,16 +14,15 @@
 #include "AS_asset_library.hh"
 #include "AS_asset_representation.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
-
 #include "BLT_translation.hh"
 
 #include "BKE_blender_user_menu.hh"
 #include "BKE_context.hh"
 #include "BKE_idprop.hh"
 #include "BKE_screen.hh"
+
+#include "BLI_listbase.hh"
+#include "BLI_string_utf8.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -236,7 +235,7 @@ static void handle_operator_asset_reference_props(const bContext &C,
   if (ed::asset::operator_asset_reference_props_is_set(opptr)) {
     const bool loading_finished = all_loading_finished();
     if (!loading_finished) {
-      row.label(IFACE_("Loading Asset Libraries"), ICON_INFO);
+      row.label(IFACE_("Loading Asset Libraries"), ICON_STATUS_INFO);
       r_add_operator = false;
     }
     else {
@@ -336,7 +335,7 @@ static void screen_user_menu_draw(const bContext *C, Menu *menu)
           *data_path = '\0';
         }
         PointerRNA ptr = CTX_data_pointer_get(C, umi_pr->context_data_path);
-        if (ptr.type == nullptr) {
+        if (!ptr.has_type()) {
           PointerRNA ctx_ptr = RNA_pointer_create_discrete(nullptr, RNA_Context, (void *)C);
           if (!RNA_path_resolve_full(&ctx_ptr, umi_pr->context_data_path, &ptr, nullptr, nullptr))
           {
@@ -349,7 +348,7 @@ static void screen_user_menu_draw(const bContext *C, Menu *menu)
         }
 
         bool ok = false;
-        if (ptr.type != nullptr) {
+        if (ptr.has_type()) {
           PropertyRNA *prop = nullptr;
           PointerRNA prop_ptr = ptr;
           if ((data_path == nullptr) ||

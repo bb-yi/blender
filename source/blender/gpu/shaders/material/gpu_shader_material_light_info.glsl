@@ -14,6 +14,28 @@ void node_light_parameter_float(float fallback, float uid, float lo, float hi, f
 }
 
 [[node]]
+void node_light_parameter_int(int fallback, float uid, float lo, float hi, float type,
+                              out int value, out float valid)
+{
+  float4 data;
+  bool found = light_shader_parameter_read(floatBitsToUint(uid), floatBitsToUint(lo),
+                                           floatBitsToUint(hi), uint(type), data);
+  valid = found ? 1.0f : 0.0f;
+  value = found ? int(data.x) : fallback;
+}
+
+[[node]]
+void node_light_parameter_bool(bool fallback, float uid, float lo, float hi, float type,
+                               out bool value, out float valid)
+{
+  float4 data;
+  bool found = light_shader_parameter_read(floatBitsToUint(uid), floatBitsToUint(lo),
+                                           floatBitsToUint(hi), uint(type), data);
+  valid = found ? 1.0f : 0.0f;
+  value = found ? (data.x != 0.0f) : fallback;
+}
+
+[[node]]
 void node_light_parameter_vec2(float2 fallback, float uid, float lo, float hi, float type,
                                out float2 value, out float valid)
 {
@@ -47,7 +69,7 @@ void node_light_parameter_vec4(float4 fallback, float uid, float lo, float hi, f
 }
 
 [[node]]
-void node_light_info(float light_uid,
+void node_npr_light_info(float light_uid,
                      out float4 color,
                      out float power,
                      out float type,

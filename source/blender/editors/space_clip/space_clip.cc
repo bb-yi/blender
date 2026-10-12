@@ -16,11 +16,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 #include "BKE_lib_query.hh"
@@ -120,7 +120,7 @@ static void init_preview_region(const Scene *scene,
 
 static void clip_scopes_tag_refresh(ScrArea *area)
 {
-  SpaceClip *sc = static_cast<SpaceClip *>(area->spacedata.first);
+  SpaceClip *sc = area->spacedata.first_as<SpaceClip>();
 
   if (sc->mode != SC_MODE_TRACKING) {
     return;
@@ -138,7 +138,7 @@ static void clip_scopes_tag_refresh(ScrArea *area)
 
 static void clip_scopes_check_gpencil_change(ScrArea *area)
 {
-  SpaceClip *sc = static_cast<SpaceClip *>(area->spacedata.first);
+  SpaceClip *sc = area->spacedata.first_as<SpaceClip>();
 
   if (sc->gpencil_src == SC_GPENCIL_SRC_TRACK) {
     clip_scopes_tag_refresh(area);
@@ -147,7 +147,7 @@ static void clip_scopes_check_gpencil_change(ScrArea *area)
 
 static void clip_area_sync_frame_from_scene(ScrArea *area, const Scene *scene)
 {
-  SpaceClip *space_clip = static_cast<SpaceClip *>(area->spacedata.first);
+  SpaceClip *space_clip = area->spacedata.first_as<SpaceClip>();
   BKE_movieclip_user_set_frame(&space_clip->user, scene->r.cfra);
 }
 
@@ -556,7 +556,7 @@ static void clip_dropboxes()
 static void clip_refresh(const bContext *C, ScrArea *area)
 {
   Scene *scene = CTX_data_scene(C);
-  SpaceClip *sc = static_cast<SpaceClip *>(area->spacedata.first);
+  SpaceClip *sc = area->spacedata.first_as<SpaceClip>();
 
   ARegion *region_preview = BKE_area_find_region_type(area, RGN_TYPE_PREVIEW);
   if (!(region_preview->v2d.flag & V2D_IS_INIT)) {
@@ -648,7 +648,7 @@ static void movieclip_main_area_set_view2d(const bContext *C, ARegion *region)
 
 static bool clip_main_region_poll(const RegionPollParams *params)
 {
-  const SpaceClip *sclip = static_cast<SpaceClip *>(params->area->spacedata.first);
+  const SpaceClip *sclip = params->area->spacedata.first_as<SpaceClip>();
   return ELEM(sclip->view, SC_VIEW_CLIP);
 }
 
@@ -678,6 +678,7 @@ static void clip_main_region_draw(const bContext *C, ARegion *region)
   /* draw entirely, view changes should be handled here */
   SpaceClip *sc = CTX_wm_space_clip(C);
   MovieClip *clip = ED_space_clip_get_clip(sc);
+  ScrArea *area = CTX_wm_area(C);
   float aspx, aspy, zoomx, zoomy, x, y;
   int width, height;
   bool show_cursor = false;
@@ -788,6 +789,8 @@ static void clip_main_region_draw(const bContext *C, ARegion *region)
   if ((sc->gizmo_flag & SCLIP_GIZMO_HIDE) == 0) {
     WM_gizmomap_draw(region->runtime->gizmo_map, C, WM_GIZMOMAP_DRAWSTEP_2D);
   }
+
+  ED_area_hud_region_set_padding_flag(area, region, true);
 }
 
 static void clip_main_region_listener(const wmRegionListenerParams *params)
@@ -816,7 +819,7 @@ static void clip_main_region_listener(const wmRegionListenerParams *params)
 
 static bool clip_preview_region_poll(const RegionPollParams *params)
 {
-  const SpaceClip *sclip = static_cast<SpaceClip *>(params->area->spacedata.first);
+  const SpaceClip *sclip = params->area->spacedata.first_as<SpaceClip>();
   return ELEM(sclip->view, SC_VIEW_GRAPH, SC_VIEW_DOPESHEET);
 }
 
@@ -974,7 +977,7 @@ static void clip_preview_region_listener(const wmRegionListenerParams * /*params
 
 static bool clip_channels_region_poll(const RegionPollParams *params)
 {
-  const SpaceClip *sclip = static_cast<SpaceClip *>(params->area->spacedata.first);
+  const SpaceClip *sclip = params->area->spacedata.first_as<SpaceClip>();
   return ELEM(sclip->view, SC_VIEW_DOPESHEET);
 }
 
@@ -1063,7 +1066,7 @@ static void clip_header_region_listener(const wmRegionListenerParams *params)
 
 static bool clip_tools_region_poll(const RegionPollParams *params)
 {
-  const SpaceClip *sclip = static_cast<SpaceClip *>(params->area->spacedata.first);
+  const SpaceClip *sclip = params->area->spacedata.first_as<SpaceClip>();
   return ELEM(sclip->view, SC_VIEW_CLIP);
 }
 
@@ -1127,7 +1130,7 @@ static void clip_props_region_listener(const wmRegionListenerParams *params)
 
 static bool clip_properties_region_poll(const RegionPollParams *params)
 {
-  const SpaceClip *sclip = static_cast<SpaceClip *>(params->area->spacedata.first);
+  const SpaceClip *sclip = params->area->spacedata.first_as<SpaceClip>();
   return ELEM(sclip->view, SC_VIEW_CLIP);
 }
 
@@ -1278,6 +1281,7 @@ void ED_spacetype_clip()
   /* regions: properties */
   art = MEM_new_zeroed<ARegionType>("spacetype clip region properties");
   art->regionid = RGN_TYPE_UI;
+  art->flag = ARegionTypeFlag::UsePanelCategoriesSearch;
   art->prefsizex = UI_SIDEBAR_PANEL_WIDTH;
   art->keymapflag = ED_KEYMAP_FRAMES | ED_KEYMAP_UI;
   art->poll = clip_properties_region_poll;

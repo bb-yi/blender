@@ -2,7 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/**
+/** \file
+ * \ingroup eevee
+ *
  * Shared code between host and client code-bases.
  */
 
@@ -17,7 +19,7 @@ namespace blender::eevee {
 /* Theoretical max is 256 across color and value AOVS with texture array restrictions.
  * However, the `output_aov()` function performs a linear search inside all the hashes.
  * If we can find a way to avoid this we can bump this number up. */
-#define AOV_MAX 128
+static constexpr int AOV_MAX = 128;
 
 struct [[host_shared]] AOVsInfoData {
   /* Pack 4 hashes per uint4, using std140 packing rules.
@@ -49,11 +51,15 @@ struct [[host_shared]] RenderBuffersInfoData {
   int environment_id;
   int transparent_id;
   int outline_id;
+  int denoising_normal_id;
+  int denoising_diffuse_albedo_id;
+  int denoising_specular_albedo_id;
   /* Value */
   int value_len;
   int shadow_id;
   int ambient_occlusion_id;
-  int _pad0;
+  int denoising_depth_id;
+  int denoising_roughness_id;
 };
 
 #ifndef GPU_SHADER

@@ -14,6 +14,7 @@
 #include "BKE_deform.hh"
 #include "BKE_grease_pencil.hh"
 #include "BKE_lib_id.hh"
+#include "BKE_library.hh"
 #include "BKE_material.hh"
 #include "BKE_paint.hh"
 #include "BKE_report.hh"
@@ -21,11 +22,12 @@
 
 #include "BLI_array_utils.hh"
 #include "BLI_bounds.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_vector_set.hh"
 
+#include "DNA_ID.h"
 #include "DNA_brush_types.h"
 #include "DNA_material_types.h"
 #include "DNA_object_types.h"
@@ -1631,26 +1633,28 @@ static float pixel_radius_to_world_space_radius(const RegionView3D *rv3d,
 
 static float brush_radius_at_location(const RegionView3D *rv3d,
                                       const ARegion *region,
+                                      const Paint *paint,
                                       const Brush *brush,
                                       const float3 location,
                                       const float4x4 to_world)
 {
   if ((brush->flag & BRUSH_LOCK_SIZE) == 0) {
     return pixel_radius_to_world_space_radius(
-        rv3d, region, location, to_world, float(brush->size) / 2.0f);
+        rv3d, region, location, to_world, BKE_brush_radius_get(paint, brush));
   }
-  return brush->unprojected_size / 2.0f;
+  return BKE_brush_unprojected_radius_get(paint, brush);
 }
 
 float radius_from_input_sample(const RegionView3D *rv3d,
                                const ARegion *region,
+                               const Paint &paint,
                                const Brush *brush,
                                const float pressure,
                                const float3 &location,
                                const float4x4 &to_world,
                                const BrushGpencilSettings *settings)
 {
-  float radius = brush_radius_at_location(rv3d, region, brush, location, to_world);
+  float radius = brush_radius_at_location(rv3d, region, &paint, brush, location, to_world);
   if (BKE_brush_use_size_pressure(brush)) {
     radius *= BKE_curvemapping_evaluateF(settings->curve_sensitivity, 0, pressure);
   }
@@ -1658,10 +1662,11 @@ float radius_from_input_sample(const RegionView3D *rv3d,
 }
 
 float opacity_from_input_sample(const float pressure,
+                                const Paint &paint,
                                 const Brush *brush,
                                 const BrushGpencilSettings *settings)
 {
-  float opacity = brush->alpha;
+  float opacity = BKE_brush_alpha_get(&paint, brush);
   if (BKE_brush_use_alpha_pressure(brush)) {
     opacity *= BKE_curvemapping_evaluateF(settings->curve_strength, 0, pressure);
   }
@@ -1701,33 +1706,40 @@ static StrokeVisibilityStatus get_visibility_status_for_draw_operator(Object *ob
   return StrokeVisibilityStatus::Visible;
 }
 
-wmOperatorStatus grease_pencil_draw_operator_invoke(bContext *C,
-                                                    wmOperator *op,
-                                                    const bool use_duplicate_previous_key)
+bool grease_pencil_draw_operator_begin(bContext *C,
+                                       wmOperator *op,
+                                       const bool use_duplicate_previous_key)
 {
   const Scene *scene = CTX_data_scene(C);
   Object *object = CTX_data_active_object(C);
   if (!object || object->type != OB_GREASE_PENCIL) {
-    return OPERATOR_CANCELLED;
+    return false;
   }
 
   GreasePencil &grease_pencil = *id_cast<GreasePencil *>(object->data);
   if (!grease_pencil.has_active_layer()) {
     BKE_report(op->reports, RPT_ERROR, "No active Grease Pencil layer");
-    return OPERATOR_CANCELLED;
+    return false;
   }
 
   const Paint *paint = BKE_paint_get_active_from_context(C);
   const Brush *brush = BKE_paint_brush_for_read(paint);
   if (brush == nullptr) {
-    return OPERATOR_CANCELLED;
+    return false;
   }
 
   bke::greasepencil::Layer &active_layer = *grease_pencil.get_active_layer();
 
   if (!active_layer.is_editable()) {
     BKE_report(op->reports, RPT_ERROR, "Active layer is locked or hidden");
-    return OPERATOR_CANCELLED;
+    return false;
+  }
+
+  if (ed::greasepencil::check_brush_needs_new_material(object, brush) &&
+      (!ID_IS_EDITABLE(&object->id) || ID_IS_OVERRIDE_LIBRARY(&object->id)))
+  {
+    BKE_report(op->reports, RPT_ERROR, "Cannot create new material on linked object");
+    return false;
   }
 
   /* Ensure a drawing at the current keyframe. */
@@ -1736,7 +1748,7 @@ wmOperatorStatus grease_pencil_draw_operator_invoke(bContext *C,
           *scene, grease_pencil, active_layer, use_duplicate_previous_key, inserted_keyframe))
   {
     BKE_report(op->reports, RPT_ERROR, "No Grease Pencil frame to draw on");
-    return OPERATOR_CANCELLED;
+    return false;
   }
 
   if (inserted_keyframe) {
@@ -1766,7 +1778,7 @@ wmOperatorStatus grease_pencil_draw_operator_invoke(bContext *C,
         break;
     }
   }
-  return OPERATOR_RUNNING_MODAL;
+  return true;
 }
 
 float4x2 calculate_texture_space(const Scene *scene,
@@ -2131,12 +2143,26 @@ void apply_eval_grease_pencil_data(const GreasePencil &eval_grease_pencil,
     }
   }
 
-  bke::gather_attributes(merged_layers_grease_pencil.attributes(),
-                         AttrDomain::Layer,
-                         AttrDomain::Layer,
-                         {},
-                         eval_to_orig_layer_indices_map,
-                         orig_grease_pencil.attributes_for_write());
+  IndexMaskMemory memory;
+  const IndexMask mapped_orig_layers = array_utils::indices_non_negative(
+      eval_to_orig_layer_indices_map.index_range(), eval_to_orig_layer_indices_map, memory);
+
+  AttributeAccessor src_attributes = merged_layers_grease_pencil.attributes();
+  MutableAttributeAccessor dst_attributes = orig_grease_pencil.attributes_for_write();
+  src_attributes.foreach_attribute([&](const bke::AttributeIter &iter) {
+    if (iter.domain != AttrDomain::Layer || iter.data_type == bke::AttrType::String) {
+      return;
+    }
+    const GAttributeReader src = iter.get(AttrDomain::Layer);
+    GSpanAttributeWriter dst = dst_attributes.lookup_or_add_for_write_span(
+        iter.name, AttrDomain::Layer, iter.data_type);
+    if (!dst) {
+      return;
+    }
+    attribute_math::gather(
+        src.varray, eval_to_orig_layer_indices_map, mapped_orig_layers, dst.span);
+    dst.finish();
+  });
 
   /* Free temporary grease pencil struct. */
   BKE_id_free(nullptr, &merged_layers_grease_pencil);

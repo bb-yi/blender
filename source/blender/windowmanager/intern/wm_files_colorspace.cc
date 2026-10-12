@@ -9,8 +9,8 @@
  */
 
 #include "BLI_colorspace.hh"
-#include "BLI_listbase.h"
-#include "BLI_string.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
 
 #include "BKE_context.hh"
 #include "BKE_image.hh"
@@ -70,7 +70,7 @@ static bool wm_set_working_space_check_safe(bContext *C, wmOperator *op)
   const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
 
-  if (WM_jobs_test(wm, scene, WM_JOB_TYPE_ANY)) {
+  if (WM_jobs_has_running(wm, scene, WM_JOB_TYPE_ANY, WM_JOB_BACKGROUND)) {
     BKE_report(
         op->reports, RPT_WARNING, RPT_("Can't change working space while jobs are running"));
     return false;
@@ -132,7 +132,6 @@ static wmOperatorStatus wm_set_working_color_space_exec(bContext *C, wmOperator 
   for (Image &image : bmain->images) {
     DEG_id_tag_update(&image.id, ID_RECALC_SOURCE);
     BKE_image_signal(bmain, &image, nullptr, IMA_SIGNAL_COLORMANAGE);
-    BKE_image_partial_update_mark_full_update(&image);
   }
   for (MovieClip &clip : bmain->movieclips) {
     BKE_movieclip_clear_cache(&clip);
@@ -206,6 +205,7 @@ void WM_OT_set_working_color_space(wmOperatorType *ot)
                                    "Working Space",
                                    "Color space to set");
   RNA_def_enum_funcs(prop, working_space_itemf);
+  RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_COLOR_MANAGEMENT);
 
   ot->prop = prop;
 }

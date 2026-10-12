@@ -360,4 +360,80 @@ def keyconfig_update(keyconfig_data, keyconfig_version):
                     if index_to_fix != -1:
                         item_prop["properties"][index_to_fix] = ("brush_toggle", value_to_copy)
 
+    if keyconfig_version < (5, 3, 16):
+        if not has_copy:
+            keyconfig_data = copy.deepcopy(keyconfig_data)
+            has_copy = True
+
+        # The `use_unified_*` toggle for radial controls was moved from the paint mode's
+        # `unified_paint_settings` to brushes.
+        #
+        # The following conversion maps from the old values of
+        # `tool_settings.<paint_mode>.unified_paint_settings.use_unified_<property_name>`
+        # to
+        # `tool_settings.<paint_mode>.brush.use_unified_<property_name>`
+        #
+        # It also updates the color override test path:
+        # `tool_settings.<paint_mode>.unified_paint_settings.use_unified_color`
+        # becomes
+        # `tool_settings.<paint_mode>.brush.use_unified_color`
+
+        re_unified_paint_settings = re.compile(r"^(tool_settings)\.([a-z_]+)\.(unified_paint_settings)\.(.*)")
+
+        for _km_name, _km_parms, km_items_data in keyconfig_data:
+            for item_op, _item_event, item_prop in km_items_data["items"]:
+
+                if item_op == "wm.radial_control":
+                    use_secondary_path_index = -1
+                    new_use_secondary_path = ""
+                    fill_color_override_test_path_index = -1
+                    new_fill_color_override_test_path = ""
+
+                    for prop_index, (prop_id, prop_path) in enumerate(item_prop["properties"]):
+                        if (prop_id == "use_secondary" and re_unified_paint_settings.fullmatch(prop_path)):
+
+                            use_secondary_path_index = prop_index
+                            new_use_secondary_path = prop_path.replace("unified_paint_settings", "brush")
+                        elif (prop_id == "fill_color_override_test_path" and re_unified_paint_settings.fullmatch(prop_path)):
+
+                            fill_color_override_test_path_index = prop_index
+                            new_fill_color_override_test_path = prop_path.replace("unified_paint_settings", "brush")
+
+                    if (use_secondary_path_index != -1 and new_use_secondary_path):
+                        item_prop["properties"][use_secondary_path_index] = (
+                            "use_secondary", new_use_secondary_path)
+                    if (fill_color_override_test_path_index != -1 and new_fill_color_override_test_path):
+                        item_prop["properties"][fill_color_override_test_path_index] = (
+                            "fill_color_override_test_path", new_fill_color_override_test_path)
+
+    if keyconfig_version < (5, 3, 29):
+        if not has_copy:
+            keyconfig_data = copy.deepcopy(keyconfig_data)
+            has_copy = True
+
+        for _km_name, _km_parms, km_items_data in keyconfig_data:
+            km_items = km_items_data["items"]
+            for item_index, (item_op, item_event, item_prop) in enumerate(km_items):
+                if item_op not in {"sequencer.split", "sequencer.box_blade"}:
+                    continue
+                properties = item_prop.get("properties", []) if item_prop else []
+                ignore_selection = dict(properties).get("ignore_selection")
+
+                # Previously `ignore_selection` was off by default for split, now make it on.
+                # Rationale: we want blade tool to have it on, but if we just set it on that click keymap item,
+                # it would override tool settings and make it impossible to change the behavior from the N-panel.
+                # Instead, keep tool at the new default of "on", making sure to convert keymap items
+                # with the old default into an explicit "off".
+                if ignore_selection is None and item_op == "sequencer.split":
+                    ignore_selection = False
+
+                # Box blade already had `ignore_selection` on by default, continue.
+                if ignore_selection is None:
+                    continue
+
+                # Then, replace `ignore_selection` with a more intuitive `only_selected` property which is its inverse.
+                properties = [prop for prop in properties if prop[0] != "ignore_selection"]
+                properties.append(("only_selected", not ignore_selection))
+                km_items[item_index] = (item_op, item_event, {**(item_prop or {}), "properties": properties})
+
     return keyconfig_data

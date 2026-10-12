@@ -39,7 +39,74 @@ using blender::Attribute;
 
 CCL_NAMESPACE_BEGIN
 
+/* Compute corner normals for motion blur with the velocity attribute, */
+static void attr_create_motion_corner_normals(const blender::Mesh &b_mesh,
+                                              const blender::Span<blender::float3> positions,
+                                              packed_normal *N)
+{
+  const blender::Span<int> corner_verts = b_mesh.corner_verts();
+  blender::Array<blender::float3> motion_corner_normals(corner_verts.size());
+
+  const blender::bke::AttributeAccessor b_attributes = b_mesh.attributes();
+  const blender::bke::GAttributeReader custom_normal = b_attributes.lookup("custom_normal");
+
+  if (custom_normal && custom_normal.varray.type().is<blender::float3>()) {
+    /* Existing custom normals take priority, no motion then. */
+    const blender::Span<blender::float3> corner_normals = b_mesh.corner_normals();
+    std::copy_n(corner_normals.data(), corner_normals.size(), motion_corner_normals.data());
+  }
+  else {
+    const blender::OffsetIndices faces = b_mesh.faces();
+    blender::Array<blender::float3> face_normals(faces.size());
+    blender::bke::mesh::normals_calc_faces(positions, faces, corner_verts, face_normals);
+
+    const blender::VArraySpan sharp_edges = *b_attributes.lookup<bool>(
+        "sharp_edge", blender::bke::AttrDomain::Edge);
+    const blender::VArraySpan sharp_faces = *b_attributes.lookup<bool>(
+        "sharp_face", blender::bke::AttrDomain::Face);
+
+    blender::bke::mesh::normals_calc_corners(
+        positions,
+        faces,
+        corner_verts,
+        b_mesh.corner_edges(),
+        b_mesh.vert_to_face_map(),
+        face_normals,
+        sharp_edges,
+        sharp_faces,
+        blender::VArraySpan<blender::short2>(custom_normal.varray.typed<blender::short2>()),
+        nullptr,
+        motion_corner_normals);
+  }
+
+  const blender::Span<blender::int3> corner_tris = b_mesh.corner_tris();
+
+  for (const int i : corner_tris.index_range()) {
+    const blender::int3 &tri = corner_tris[i];
+    for (int j = 0; j < 3; j++) {
+      const blender::float3 &normal = motion_corner_normals[tri[j]];
+      N[i * 3 + j] = packed_normal(make_float3(normal[0], normal[1], normal[2]));
+    }
+  }
+}
+
+static bool attr_need_motion_vertex_normals(const blender::Mesh &b_mesh)
+{
+  const blender::bke::GAttributeReader custom_normal = b_mesh.attributes().lookup("custom_normal");
+  return custom_normal && custom_normal.varray.type().is<blender::float3>() &&
+         custom_normal.domain == blender::bke::AttrDomain::Point;
+}
+
+static void attr_create_motion_vertex_normals(const blender::Mesh &b_mesh, packed_normal *N)
+{
+  const blender::Span<blender::float3> vert_normals = b_mesh.vert_normals();
+  for (const int i : vert_normals.index_range()) {
+    N[i] = packed_normal(make_float3(vert_normals[i][0], vert_normals[i][1], vert_normals[i][2]));
+  }
+}
+
 static void attr_create_motion_from_velocity(Mesh *mesh,
+                                             const blender::Mesh &b_mesh,
                                              const blender::Span<blender::float3> b_attr,
                                              const float motion_scale)
 {
@@ -57,6 +124,18 @@ static void attr_create_motion_from_velocity(Mesh *mesh,
   attr_P->add_motion(mesh);
   const packed_float3 *P = mesh->get_position();
 
+  Attribute *attr_cN = attributes.find(ATTR_STD_CORNER_NORMAL);
+  if (attr_cN) {
+    attr_cN->add_motion(mesh);
+  }
+
+  Attribute *attr_N = attr_need_motion_vertex_normals(b_mesh) ?
+                          attributes.find(ATTR_STD_VERTEX_NORMAL) :
+                          nullptr;
+  if (attr_N) {
+    attr_N->add_motion(mesh);
+  }
+
   /* Only export previous and next frame, we don't have any in between data. */
   const float motion_times[2] = {-1.0f, 1.0f};
   for (int step = 1; step <= 2; step++) {
@@ -65,6 +144,16 @@ static void attr_create_motion_from_velocity(Mesh *mesh,
 
     for (int i = 0; i < numverts; i++) {
       mP[i] = float3(P[i]) + make_float3(b_attr[i][0], b_attr[i][1], b_attr[i][2]) * relative_time;
+    }
+
+    if (attr_cN) {
+      const blender::Span<blender::float3> motion_positions(
+          reinterpret_cast<const blender::float3 *>(mP), numverts);
+      attr_create_motion_corner_normals(
+          b_mesh, motion_positions, attr_cN->data_for_write<packed_normal>(step));
+    }
+    if (attr_N) {
+      attr_create_motion_vertex_normals(b_mesh, attr_N->data_for_write<packed_normal>(step));
     }
   }
 }
@@ -113,7 +202,7 @@ static void attr_create_generic(Scene *scene,
     if (need_motion && name == u_velocity) {
       const blender::VArraySpan b_attribute = *iter.get<blender::float3>(
           blender::bke::AttrDomain::Point);
-      attr_create_motion_from_velocity(mesh, b_attribute, motion_scale);
+      attr_create_motion_from_velocity(mesh, b_mesh, b_attribute, motion_scale);
     }
 
     if (!(mesh->need_attribute(scene, name) ||
@@ -424,24 +513,24 @@ static void attr_create_pointiness(Mesh *mesh,
   /* STEP 1: Find out duplicated vertices and point duplicates to a single
    *         original vertex.
    */
-  vector<int> sorted_vert_indeices(num_verts);
+  vector<int> sorted_vert_indices(num_verts);
   for (int vert_index = 0; vert_index < num_verts; ++vert_index) {
-    sorted_vert_indeices[vert_index] = vert_index;
+    sorted_vert_indices[vert_index] = vert_index;
   }
   const VertexAverageComparator compare(mesh->get_position(), mesh->num_verts());
-  sort(sorted_vert_indeices.begin(), sorted_vert_indeices.end(), compare);
+  sort(sorted_vert_indices.begin(), sorted_vert_indices.end(), compare);
   /* This array stores index of the original vertex for the given vertex
    * index.
    */
   vector<int> vert_orig_index(num_verts);
   for (int sorted_vert_index = 0; sorted_vert_index < num_verts; ++sorted_vert_index) {
-    const int vert_index = sorted_vert_indeices[sorted_vert_index];
+    const int vert_index = sorted_vert_indices[sorted_vert_index];
     const float3 &vert_co = mesh->get_position()[vert_index];
     bool found = false;
     for (int other_sorted_vert_index = sorted_vert_index + 1; other_sorted_vert_index < num_verts;
          ++other_sorted_vert_index)
     {
-      const int other_vert_index = sorted_vert_indeices[other_sorted_vert_index];
+      const int other_vert_index = sorted_vert_indices[other_sorted_vert_index];
       const float3 &other_vert_co = mesh->get_position()[other_vert_index];
       /* We are too far away now, we wouldn't have duplicate. */
       if ((other_vert_co.x + other_vert_co.y + other_vert_co.z) -
@@ -469,7 +558,7 @@ static void attr_create_pointiness(Mesh *mesh,
     }
     vert_orig_index[vert_index] = orig_index;
   }
-  sorted_vert_indeices.free_memory();
+  sorted_vert_indices.free_memory();
   /* STEP 2: Calculate vertex normals taking into account their possible
    *         duplicates which gets "welded" together.
    */
@@ -720,12 +809,10 @@ static void create_mesh(Scene *scene,
     int *shader = mesh->get_shader().data();
 
     const blender::Span<blender::int3> b_corner_tris = b_mesh.corner_tris();
-    for (const int i : b_corner_tris.index_range()) {
-      const blender::int3 &tri = b_corner_tris[i];
-      triangles[i * 3 + 0] = corner_verts[tri[0]];
-      triangles[i * 3 + 1] = corner_verts[tri[1]];
-      triangles[i * 3 + 2] = corner_verts[tri[2]];
-    }
+    blender::bke::mesh::vert_tris_from_corner_tris(
+        corner_verts,
+        b_corner_tris,
+        blender::MutableSpan<int>(triangles, numtris * 3).cast<blender::int3>());
 
     if (!material_indices.is_empty()) {
       for (const int face : faces.index_range()) {
@@ -779,13 +866,16 @@ static void create_mesh(Scene *scene,
     int *subd_ptex_offset = mesh->get_subd_ptex_offset().data();
     int *subd_face_corners = mesh->get_subd_face_corners().data();
 
-    if (!sharp_faces.is_empty() && !use_corner_normals) {
+    if (!sharp_faces.is_empty()) {
       for (int i = 0; i < numfaces; i++) {
         subd_smooth[i] = !sharp_faces[i];
       }
     }
     else {
-      std::fill(subd_smooth, subd_smooth + numfaces, true);
+      /* All faces are sharp or smooth. */
+      std::fill(subd_smooth,
+                subd_smooth + numfaces,
+                normals_domain != blender::bke::MeshNormalDomain::Face);
     }
 
     if (!material_indices.is_empty()) {
@@ -862,8 +952,7 @@ static void create_subd_mesh(Scene *scene,
 {
   const blender::Object *b_ob = b_ob_info.real_object;
 
-  const auto &subsurf_mod = *reinterpret_cast<const blender::SubsurfModifierData *>(
-      b_ob->modifiers.last);
+  const auto &subsurf_mod = *b_ob->modifiers.last_as<const blender::SubsurfModifierData>();
 
   const bool use_creases = (subsurf_mod.flags & blender::eSubsurfModifierFlag_UseCrease) != 0;
 

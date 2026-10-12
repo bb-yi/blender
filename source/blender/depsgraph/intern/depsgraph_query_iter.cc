@@ -19,10 +19,10 @@
 #include "BKE_object.hh"
 #include "BKE_object_types.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
@@ -294,7 +294,7 @@ static Object *find_object_with_preview_geometry(const ViewerPath &viewer_path)
   if (viewer_path.path.is_empty()) {
     return nullptr;
   }
-  const ViewerPathElem *elem = static_cast<const ViewerPathElem *>(viewer_path.path.first);
+  const ViewerPathElem *elem = viewer_path.path.first();
   if (elem->type != VIEWER_PATH_ELEM_TYPE_ID) {
     return nullptr;
   }
@@ -306,7 +306,7 @@ static Object *find_object_with_preview_geometry(const ViewerPath &viewer_path)
     return nullptr;
   }
   Object *object = reinterpret_cast<Object *>(id_elem->id);
-  if (elem->next->type != VIEWER_PATH_ELEM_TYPE_MODIFIER) {
+  if (elem->next == nullptr || elem->next->type != VIEWER_PATH_ELEM_TYPE_MODIFIER) {
     return nullptr;
   }
   const ModifierViewerPathElem *modifier_elem = reinterpret_cast<const ModifierViewerPathElem *>(

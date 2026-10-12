@@ -18,10 +18,10 @@
 #include "DNA_scene_types.h"
 
 #include "BLI_index_range.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_span.hh"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -402,15 +402,14 @@ void BKE_mesh_to_curve_nurblist(const Mesh *mesh,
   }
   MEM_delete(edge_users);
 
-  if (edges.first) {
-    while (edges.first) {
+  if (edges.first()) {
+    while (edges.first()) {
       /* each iteration find a polyline and add this as a nurbs poly spline */
 
       ListBaseT<VertLink> polyline = {nullptr, nullptr}; /* store a list of VertLink's */
       bool closed = false;
       int faces_num = 0;
-      int2 &edge_current = *static_cast<int2 *>(
-          const_cast<void *>((static_cast<EdgeLink *>(edges.last))->edge));
+      int2 &edge_current = *static_cast<int2 *>(const_cast<void *>((edges.last())->edge));
       uint startVert = edge_current[0];
       uint endVert = edge_current[1];
       bool ok = true;
@@ -419,10 +418,10 @@ void BKE_mesh_to_curve_nurblist(const Mesh *mesh,
       faces_num++;
       appendPolyLineVert(&polyline, endVert);
       faces_num++;
-      BLI_freelinkN(&edges, edges.last);
+      BLI_freelinkN(&edges, edges.last());
 
       while (ok) { /* while connected edges are found... */
-        EdgeLink *edl = static_cast<EdgeLink *>(edges.last);
+        EdgeLink *edl = edges.last();
         ok = false;
         while (edl) {
           EdgeLink *edl_prev = edl->prev;
@@ -464,7 +463,7 @@ void BKE_mesh_to_curve_nurblist(const Mesh *mesh,
 
       /* Now we have a polyline, make into a curve */
       if (startVert == endVert) {
-        BLI_freelinkN(&polyline, polyline.last);
+        BLI_freelinkN(&polyline, polyline.last());
         faces_num--;
         closed = true;
       }
@@ -487,7 +486,7 @@ void BKE_mesh_to_curve_nurblist(const Mesh *mesh,
         nu->bp = MEM_new_array_zeroed<BPoint>(faces_num, "bpoints");
 
         /* add points */
-        vl = static_cast<VertLink *>(polyline.first);
+        vl = polyline.first();
         int i;
         for (i = 0, bp = nu->bp; i < faces_num;
              i++, bp++, vl = reinterpret_cast<VertLink *>(vl->next))
@@ -523,7 +522,7 @@ void BKE_mesh_to_curve(Main *bmain, Depsgraph *depsgraph, Scene * /*scene*/, Obj
   BKE_mesh_to_curve_nurblist(mesh_eval, &nurblist, 0);
   BKE_mesh_to_curve_nurblist(mesh_eval, &nurblist, 1);
 
-  if (nurblist.first) {
+  if (nurblist.first()) {
     Curve *cu = BKE_curve_add(bmain, ob->id.name + 2, OB_CURVES_LEGACY);
     cu->flag |= CU_3D;
 

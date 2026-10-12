@@ -7,17 +7,15 @@
  */
 
 #include "infos/eevee_geom_infos.hh"
-#include "infos/eevee_nodetree_infos.hh"
 #include "infos/eevee_surf_deferred_infos.hh"
 
-FRAGMENT_SHADER_CREATE_INFO(eevee_nodetree)
 FRAGMENT_SHADER_CREATE_INFO(eevee_geom_mesh)
 FRAGMENT_SHADER_CREATE_INFO(eevee_surf_npr)
 
 #include "draw_view_lib.glsl"
 #include "eevee_deferred_combine_lib.glsl"
 #include "eevee_gbuffer_read_lib.glsl"
-#include "eevee_nodetree_frag_lib.glsl"
+#include "eevee_nodetree_lib.bsl.hh"
 #include "eevee_renderpass_lib.glsl"
 #include "eevee_sampling_lib.glsl"
 #include "eevee_surf_lib.glsl"
@@ -40,6 +38,9 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_surf_npr)
 #define TEX_HANDLE_NORMAL 18u
 #define TEX_HANDLE_BACK_COMBINED_COLOR 19u
 #define TEX_HANDLE_BACK_POSITION 20u
+
+Closure nodetree_surface(KernelGlobals kg, ShadingData &sd, float closure_rand);
+
 
 void npr_input_impl(out TextureHandle combined_color,
                     out TextureHandle diffuse_color,
@@ -302,7 +303,7 @@ float4 npr_volume_compose_back_color(float4 back_color,
 }
 #endif
 
-float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offset)
+float4 TextureHandle_eval_impl(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
 {
   if (tex.type == TEX_HANDLE_NULL) {
     return float4(0.0f);
@@ -340,7 +341,7 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
         return float4(drw_point_screen_to_world(float3(screen_uv, depth)), 0.0f);
       }
 #else
-        return float4(g_data.P, 0.0f);
+        return float4(sd.P, 0.0f);
 #endif
       case TEX_HANDLE_NORMAL:
         return float4(g_average_normal, 0.0f);
@@ -355,7 +356,7 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
     texel += int2(offset);
   }
   else {
-    float3 vP = drw_point_world_to_view(g_data.P);
+    float3 vP = drw_point_world_to_view(sd.P);
     float2 uv = drw_point_view_to_screen(vP + float3(offset, 0.0f)).xy;
     texel = int2(uv * float2(extent));
   }
@@ -443,17 +444,17 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
   }
 }
 
-float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
+float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
 {
-  return swap_alpha(TextureHandle_eval_impl(tex, offset, texel_offset));
+  return swap_alpha(TextureHandle_eval_impl(kg, sd, tex, offset, texel_offset));
 }
 
-float4 TextureHandle_eval(TextureHandle tex)
+float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex)
 {
-  return TextureHandle_eval(tex, float2(0.0f), true);
+  return TextureHandle_eval(kg, sd, tex, float2(0.0f), true);
 }
 
-float4 TextureHandle_eval_uv_impl(TextureHandle tex, float2 uv)
+float4 TextureHandle_eval_uv_impl(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 uv)
 {
   if (tex.type == TEX_HANDLE_NULL) {
     return float4(0.0f);
@@ -536,49 +537,49 @@ float4 TextureHandle_eval_uv_impl(TextureHandle tex, float2 uv)
   }
 }
 
-float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
+float4 TextureHandle_eval_uv(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 uv)
 {
-  return swap_alpha(TextureHandle_eval_uv_impl(tex, uv));
+  return swap_alpha(TextureHandle_eval_uv_impl(kg, sd, tex, uv));
 }
 
 #ifdef MAT_DEPTH_OFFSET
-bool depth_offset_fragment_matches_prepass(float depth_offset)
+bool depth_offset_fragment_matches_prepass(KernelGlobals kg, ShadingData &sd, float depth_offset)
 {
-  float fragment_depth = reverse_z::read(material_depth_offset_frag_depth(depth_offset));
+  float fragment_depth = reverse_z::read(material_depth_offset_frag_depth(kg, sd, depth_offset));
   float prepass_depth = texelFetch(hiz_tx, int2(gl_FragCoord.xy), 0).r;
   return abs(fragment_depth - prepass_depth) <= 1.0e-6f;
 }
 #endif
 
-float4 closure_to_rgba(Closure cl)
+float4 closure_to_rgba(KernelGlobals kg, ShadingData &sd, Closure cl)
 {
   UNUSED_VARS(cl);
 
   float4 out_color;
-  out_color.rgb = g_emission;
-  out_color.a = saturate(1.0f - average(g_transmittance));
+  out_color.rgb = sd.emission;
+  out_color.a = saturate(1.0f - average(sd.transmittance));
 
   /* Reset for the next closure tree, matching the regular deferred path. */
-  float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
-  float closure_rand = fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
-  closure_weights_reset(closure_rand);
+  float noise = texelFetch(utility_tx, int3(int2(sd.frag_co.xy) % UTIL_TEX_SIZE,
+                                          UTIL_BLUE_NOISE_LAYER), 0).r;
+  float closure_rand = fract(noise + eevee_sampling_rng_1D_get(SAMPLING_CLOSURE));
+  closure_weights_reset(kg, sd, closure_rand);
 
   return out_color;
 }
 
-void main()
+void npr_evaluate(KernelGlobals kg, ShadingData &sd, out float out_depth)
 {
-  material_surface_cull_discard();
-  init_globals();
+  material_surface_cull_discard(sd.front_facing);
 
 #ifdef MAT_DEPTH_OFFSET
-  float depth_offset = nodetree_depth_offset();
-  if (!depth_offset_fragment_matches_prepass(depth_offset)) {
+  float depth_offset = nodetree_depth_offset(kg, sd);
+  if (!depth_offset_fragment_matches_prepass(kg, sd, depth_offset)) {
     gpu_discard_fragment();
     return;
   }
-  material_depth_offset_write(depth_offset);
-  material_depth_offset_apply_nodetree_position(depth_offset);
+  material_depth_offset_write(kg, sd, depth_offset, out_depth);
+  material_depth_offset_apply_nodetree_position(kg, sd, depth_offset);
 #endif
 
   int2 texel = int2(gl_FragCoord.xy);
@@ -595,6 +596,7 @@ void main()
   g_specular_direct = float4(dc.specular_direct, 1.0f);
   g_specular_indirect = float4(dc.specular_indirect, 1.0f);
 
-  out_radiance = swap_alpha(nodetree_npr());
-  nodetree_surface(0.0f);
+  out_radiance = swap_alpha(nodetree_npr(kg, sd));
+  nodetree_surface(kg, sd, 0.0f);
 }
+

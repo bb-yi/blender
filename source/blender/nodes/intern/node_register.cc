@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #include "NOD_composite.hh"
 #include "NOD_geometry.hh"
 #include "NOD_register.hh"
@@ -140,6 +144,24 @@ class ShaderForeachLightZoneType : public bke::bNodeZoneType {
   }
 };
 
+class LightIterInternalZoneType : public bke::bNodeZoneType {
+ public:
+  LightIterInternalZoneType()
+  {
+    this->input_idname = "ShaderNodeLightIterInternalInput"_ustr;
+    this->output_idname = "ShaderNodeLightIterInternalOutput"_ustr;
+    this->input_type = SH_NODE_LIGHT_ITER_INTERNAL_INPUT;
+    this->output_type = SH_NODE_LIGHT_ITER_INTERNAL_OUTPUT;
+    this->theme_id = TH_NODE_ZONE_REPEAT;
+  }
+
+  const int &get_corresponding_output_id(const bNode &input_bnode) const override
+  {
+    BLI_assert(input_bnode.type_legacy == this->input_type);
+    return *reinterpret_cast<const int *>(&input_bnode.custom3);
+  }
+};
+
 static void register_zone_types()
 {
   static SimulationZoneType simulation_zone_type;
@@ -147,11 +169,13 @@ static void register_zone_types()
   static ForeachGeometryElementZoneType foreach_geometry_element_zone_type;
   static ClosureZoneType closure_zone_type;
   static ShaderForeachLightZoneType shader_foreach_light_zone_type;
+  static LightIterInternalZoneType light_iter_internal_zone_type;
   bke::register_node_zone_type(simulation_zone_type);
   bke::register_node_zone_type(repeat_zone_type);
   bke::register_node_zone_type(foreach_geometry_element_zone_type);
   bke::register_node_zone_type(closure_zone_type);
   bke::register_node_zone_type(shader_foreach_light_zone_type);
+  bke::register_node_zone_type(light_iter_internal_zone_type);
 }
 
 void register_nodes()
@@ -168,6 +192,7 @@ void register_nodes()
   register_node_type_frame();
   register_node_type_reroute();
   register_node_type_implicit_conversion();
+  register_node_type_comment();
   register_node_type_group_input();
   register_node_type_group_output();
 

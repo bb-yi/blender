@@ -10,7 +10,7 @@
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_uniform.bsl.hh"
 #include "gpu_shader_codegen_lib.glsl"
-#include "gpu_shader_math_matrix_construct_lib.glsl"
+#include "gpu_shader_math_matrix_construct.bsl.hh"
 
 namespace eevee {
 
@@ -122,7 +122,7 @@ void generate_rays([[resource_table]] RayGenerate &srt,
                    [[work_group_id]] const uint3 group_id,
                    [[local_invocation_id]] const uint3 local_id)
 {
-  constexpr uint tile_size = RAYTRACE_GROUP_SIZE;
+  constexpr uint tile_size = uint(RAYTRACE_GROUP_SIZE);
   uint2 tile_coord = unpackUvec2x16(srt.tiles_coord_buf[group_id.x]);
   int2 texel = int2(local_id.xy + tile_coord * tile_size);
 

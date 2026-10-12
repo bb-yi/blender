@@ -149,9 +149,9 @@ bool GPU_use_hq_normals_workaround()
   return GCaps.use_hq_normals_workaround;
 }
 
-bool GPU_stencil_clasify_buffer_workaround()
+bool GPU_stencil_classify_buffer_workaround()
 {
-  return GCaps.stencil_clasify_buffer_workaround;
+  return GCaps.stencil_classify_buffer_workaround;
 }
 
 bool GPU_geometry_shader_support()
@@ -164,9 +164,24 @@ bool GPU_hdr_support()
   return GCaps.hdr_viewport_support;
 }
 
+bool GPU_multi_viewport_support()
+{
+  return GCaps.multi_viewport_support;
+}
+
 bool GPU_stencil_export_support()
 {
   return GCaps.stencil_export_support;
+}
+
+bool GPU_ray_query_support()
+{
+  return GCaps.ray_query_support;
+}
+
+bool GPU_vertex_pipeline_stores_and_atomics_support()
+{
+  return GCaps.vertex_pipeline_stores_and_atomics_support;
 }
 
 int GPU_max_shader_storage_buffer_bindings()

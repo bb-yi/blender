@@ -6,7 +6,9 @@
 
 #include "eevee_bxdf_types.bsl.hh"
 #include "eevee_ltc_lut_lib.bsl.hh"
-#include "gpu_shader_ray_lib.glsl"
+#include "gpu_shader_ray.bsl.hh"
+
+#if 0 /* Unfinished. */
 
 /* -------------------------------------------------------------------- */
 /** \name Oren Nayar BSDF
@@ -70,14 +72,16 @@ LightProbeRay bxdf_oren_nayar_lightprobe(float3 N)
   return probe;
 }
 
-ClosureLight bxdf_oren_nayar_light(ClosureUndetermined cl)
+ClosureLight bxdf_oren_nayar_light(ClosureUndetermined cl, float3 V)
 {
   ClosureLight light;
   /* TODO(fclem): LTC fit. */
-  light.ltc_mat = eevee::lut::ltc::identity(); /* No transform, just plain cosine distribution. */
   light.N = cl.N;
   light.type = LIGHT_DIFFUSE;
+  eevee::LTCData::pack_identity(light, light.N, V);
   return light;
 }
 
 /** \} */
+
+#endif

@@ -11,6 +11,7 @@
 #include "mtl_immediate.hh"
 #include "mtl_memory.hh"
 #include "mtl_primitive.hh"
+#include "mtl_ray_tracing.hh"
 #include "mtl_shader.hh"
 #include "mtl_shader_generate.hh"
 #include "mtl_shader_interface.hh"
@@ -30,7 +31,7 @@
 #include "GPU_vertex_buffer.hh"
 #include "intern/gpu_matrix_private.hh"
 
-#include "BLI_time.h"
+#include "BLI_time.hh"
 
 #include <fstream>
 #include <string>
@@ -62,6 +63,8 @@ using namespace blender::gpu;
 #endif
 
 namespace blender::gpu {
+
+static CLG_LogRef LOG = {"gpu.metal"};
 
 /* Global memory manager. */
 std::mutex MTLContext::global_memory_manager_reflock;
@@ -204,17 +207,9 @@ MTLContext::MTLContext(GHOST_IWindow *ghost_window, GHOST_IContext *ghost_contex
   default_fbo_mtltexture_ = nil;
   default_fbo_gputexture_ = nullptr;
 
-  /** Fetch GHOSTContext and fetch Metal device/queue. */
   ghost_window_ = ghost_window;
-  if (ghost_window_ && ghost_context == nullptr) {
-    /* NOTE(Metal): Fetch ghost_context from ghost_window if it is not provided.
-     * Regardless of whether windowed or not, we need access to the GhostContext
-     * for presentation, and device/queue access. */
-    GHOST_Window *ghostWin = reinterpret_cast<GHOST_Window *>(ghost_window_);
-    ghost_context = (ghostWin ? ghostWin->getContext() : nullptr);
-  }
-  BLI_assert(ghost_context);
   this->ghost_context_ = static_cast<GHOST_ContextMTL *>(ghost_context);
+  /** Fetch Metal device/queue. */
   this->queue = (id<MTLCommandQueue>)this->ghost_context_->metalCommandQueue();
   this->device = (id<MTLDevice>)this->ghost_context_->metalDevice();
   BLI_assert(this->queue);
@@ -407,6 +402,9 @@ void MTLContext::activate()
 {
   /* Make sure no other context is already bound to this thread. */
   BLI_assert(is_active_ == false);
+  /* Make sure the active GHOST context matches the one this GPU Context was created for. */
+  BLI_assert(ghost_context_ == GHOST_IContext::getActiveDrawingContext());
+
   is_active_ = true;
   thread_ = pthread_self();
 
@@ -952,6 +950,22 @@ static void ensure_buffer_bindings(MTLContext &ctx,
       MTL_LOG_ERROR("Shader %s: Missing SSBO bind: %s slot(%d).",
                     shader.name_get().c_str(),
                     shader_interface.name_at_offset(name_ofs),
+                    slot);
+    }
+  }
+
+  /* Bind acceleration structures for any shader stage that declares one. */
+  for (const uint slot : bits::iter_1_indices(shader_interface.enabled_accel_mask())) {
+    MTLAccelerationStructureBinding &bind =
+        ctx.pipeline_state.acceleration_structure_bindings[slot];
+    if (bind.tlas) {
+      enc.set_acceleration_structure(bind.tlas->acceleration_structure(),
+                                     MTL_ACCELERATION_STRUCTURE_SLOT + slot);
+      bind.tlas->make_resident(enc);
+    }
+    else {
+      MTL_LOG_ERROR("Shader %s: Missing acceleration structure bind at slot(%d).",
+                    shader.name_get().c_str(),
                     slot);
     }
   }
@@ -1945,7 +1959,9 @@ id<MTLComputePipelineState> MTLContextComputeUtils::get_buffer_clear_pso()
       if ([[error localizedDescription] rangeOfString:@"Compilation succeeded"].location ==
           NSNotFound)
       {
-        NSLog(@"Compile Error - Metal Shader Library error %@ ", error);
+        CLOG_ERROR(&LOG,
+                   "Compile Error - Metal Shader Library error %s",
+                   [[error localizedDescription] UTF8String]);
         BLI_assert(false);
         return nil;
       }
@@ -1961,7 +1977,9 @@ id<MTLComputePipelineState> MTLContextComputeUtils::get_buffer_clear_pso()
     buffer_clear_pso_ = [ctx->device newComputePipelineStateWithFunction:temp_compute_function
                                                                    error:&error];
     if (error || buffer_clear_pso_ == nil) {
-      NSLog(@"Failed to prepare compute_buffer_clear MTLComputePipelineState %@", error);
+      CLOG_ERROR(&LOG,
+                 "Failed to prepare compute_buffer_clear MTLComputePipelineState %s",
+                 [[error localizedDescription] UTF8String]);
       BLI_assert(false);
       return nil;
     }
@@ -2071,7 +2089,7 @@ void present(MTLRenderPassDescriptor *blit_descriptor,
     [cmdbuf waitUntilCompleted];
     NSError *error = [cmdbuf error];
     if (error != nil) {
-      NSLog(@"%@", error);
+      CLOG_ERROR(&LOG, "Command buffer error: %s", [[error localizedDescription] UTF8String]);
       BLI_assert(false);
     }
   }

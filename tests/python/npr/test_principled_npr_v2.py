@@ -51,7 +51,7 @@ def check_shared_principled_math(h):
     # upstream #162728. A render alone can hide NaNs when radiance is packed/clamped.
     shaders = Path(__file__).resolve().parents[3] / "source/blender/gpu/shaders"
     shared = (shaders / "material/gpu_shader_material_principled_shared.glsl").read_text()
-    fast = (shaders / "common/gpu_shader_math_fast_lib.glsl").read_text()
+    fast = (shaders / "common/gpu_shader_math_fast.bsl.hh").read_text()
     slab = re.search(r"float3 slab_transmittance_at_angle\([^}]+\}", shared).group()
     sqrt = re.search(r"float sqrt_fast\([^}]+\}", fast).group()
     code = (sqrt + "\n" + slab).replace("float3", "vec3")

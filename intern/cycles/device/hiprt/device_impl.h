@@ -27,16 +27,16 @@ class HIPRTDevice : public HIPDevice {
  public:
   static bool is_supported();
 
-  BVHLayoutMask get_bvh_layout_mask(const uint kernel_features) const override;
+  BVHLayoutMask get_bvh_layout_mask(uint64_t kernel_features) const override;
 
   HIPRTDevice(const DeviceInfo &info, Stats &stats, Profiler &profiler, bool headless);
 
   ~HIPRTDevice() override;
   unique_ptr<DeviceQueue> gpu_queue_create() override;
-  string compile_kernel_get_common_cflags(const uint kernel_features);
-  string compile_kernel(const uint kernel_features, const char *name, const char *base = "hiprt");
+  string compile_kernel_get_common_cflags(uint64_t kernel_features);
+  string compile_kernel(uint64_t kernel_features, const char *name, const char *base = "hiprt");
 
-  bool load_kernels(const uint kernel_features) override;
+  bool load_kernels(uint64_t kernel_features) override;
 
   void const_copy_to(const char *name, void *host, const size_t size) override;
 
@@ -58,14 +58,8 @@ class HIPRTDevice : public HIPDevice {
   hiprtGeometryBuildInput prepare_triangle_blas(BVHHIPRT *bvh, Mesh *mesh);
   hiprtGeometryBuildInput prepare_curve_blas(BVHHIPRT *bvh, Hair *hair);
   hiprtGeometryBuildInput prepare_point_blas(BVHHIPRT *bvh, PointCloud *pointcloud);
-  void build_blas(BVHHIPRT *bvh, Geometry *geom, hiprtBuildOptions options);
-  hiprtBuildFlags select_blas_build_flags(BVHHIPRT *bvh,
-                                          Geometry *geom,
-                                          const hiprtGeometryBuildInput &geom_input);
-  hiprtScene build_tlas(BVHHIPRT *bvh,
-                        const vector<Object *> &objects,
-                        hiprtBuildOptions options,
-                        bool refit);
+  void build_blas(BVHHIPRT *bvh, Geometry *geom);
+  hiprtScene build_tlas(BVHHIPRT *bvh, const vector<Object *> &objects, bool refit);
   void free_bvh_memory_delayed();
 
   hiprtContext hiprt_context;
@@ -126,18 +120,6 @@ class HIPRTDevice : public HIPDevice {
   device_vector<int> user_instance_id;
   device_vector<hiprtInstance> hiprt_blas_ptr;
   device_vector<uint64_t> blas_ptr;
-
-  /* custom_prim_info stores custom information for custom primitives for all the primitives in a
-   * scene. Primitive id that HIP RT returns is local to the geometry that was hit.
-   * custom_prim_info_offset returns the offset required to add to the primitive id to retrieve
-   * primitive info from custom_prim_info. */
-  device_vector<int2> custom_prim_info;
-  device_vector<int2> custom_prim_info_offset;
-
-  /* prims_time stores primitive time for geometries with motion blur.
-   * prim_time_offset returns the offset to add to primitive id to retrieve primitive time. */
-  device_vector<float2> prims_time;
-  device_vector<int> prim_time_offset;
 };
 CCL_NAMESPACE_END
 

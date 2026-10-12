@@ -11,9 +11,9 @@
 #include "BKE_library.hh"
 
 #include "BLI_bounds.hh"
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_rect.h"
+#include "BLI_rect.hh"
 #include "BLI_string_ref.hh"
 
 #include "BLT_translation.hh"
@@ -32,10 +32,12 @@ namespace blender::ui {
 
 using blender::Vector;
 
+namespace {
 struct CurveRuntimeProperties {
   CurveMapPoint *last_pt = nullptr;
   float2 last_pos;
 };
+}  // namespace
 
 static bool curvemap_can_zoom_out(CurveMapping *cumap)
 {
@@ -456,7 +458,7 @@ static void curvemap_buttons_layout(Layout *layout,
     if (cumap->cm[0].curve) {
       bt = uiDefButV(block,
                      ButtonType::Row,
-                     IFACE_("H"),
+                     CTX_IFACE_(BLT_I18NCONTEXT_COLOR, "H"),
                      0,
                      0,
                      dx,
@@ -470,7 +472,7 @@ static void curvemap_buttons_layout(Layout *layout,
     if (cumap->cm[1].curve) {
       bt = uiDefButV(block,
                      ButtonType::Row,
-                     IFACE_("S"),
+                     CTX_IFACE_(BLT_I18NCONTEXT_COLOR, "S"),
                      0,
                      0,
                      dx,
@@ -484,7 +486,7 @@ static void curvemap_buttons_layout(Layout *layout,
     if (cumap->cm[2].curve) {
       bt = uiDefButV(block,
                      ButtonType::Row,
-                     IFACE_("V"),
+                     CTX_IFACE_(BLT_I18NCONTEXT_COLOR, "V"),
                      0,
                      0,
                      dx,
@@ -884,7 +886,7 @@ void template_curve_mapping(Layout *layout,
   }
 
   PointerRNA cptr = RNA_property_pointer_get(ptr, prop);
-  if (!cptr.data || !RNA_struct_is_a(cptr.type, RNA_CurveMapping)) {
+  if (!cptr || !RNA_struct_is_a(cptr.type, RNA_CurveMapping)) {
     return;
   }
 

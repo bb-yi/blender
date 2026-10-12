@@ -13,8 +13,20 @@ class GlobalTransformPanelMixin:
     bl_category = "Animation"
 
 
+class VIEW3D_PT_copy_world_space_animation(GlobalTransformPanelMixin, Panel):
+    bl_label = "World Space Animation"
+
+    def draw(self, context: Context) -> None:
+        layout = self.layout
+
+        layout.operator("anim.world_space_copy", icon='COPYDOWN', text="Copy Playback Range").range_mode = 'PLAYBACK'
+        row = layout.row(align=True)
+        row.operator("anim.world_space_paste", icon='PASTEDOWN', text="Paste")
+        row.operator("anim.world_space_paste", icon='PASTEDOWN', text="At Playhead").offset = 'START'
+
+
 class VIEW3D_PT_copy_global_transform(GlobalTransformPanelMixin, Panel):
-    bl_label = "Global Transform"
+    bl_label = "World Space Transform"
 
     def draw(self, context: Context) -> None:
         layout = self.layout
@@ -77,8 +89,10 @@ class VIEW3D_PT_copy_global_transform_fix_to_camera(GlobalTransformPanelMixin, P
             # case because it also has options for selecting what to key. The
             # logical AND of the settings is used, so a property is only keyed
             # when the keying set AND the above check-boxes say it's OK.
-            props_box.label(text="Keying set is active, which may")
-            props_box.label(text="reduce the effect of the above options")
+            props_box.label_multiline(
+                text="A keying set is active, which may reduce the effect of the options above.",
+                icon="STATUS_WARNING",
+                max_lines=3)
 
         row = layout.row(align=True)
         props = row.operator("object.fix_to_camera")
@@ -171,6 +185,7 @@ class VIEW3D_PT_copy_global_transform_relative(GlobalTransformPanelMixin, Panel)
 
 
 classes = (
+    VIEW3D_PT_copy_world_space_animation,
     VIEW3D_PT_copy_global_transform,
     VIEW3D_PT_copy_global_transform_mirror,
     VIEW3D_PT_copy_global_transform_relative,

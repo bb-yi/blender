@@ -8,7 +8,7 @@
 
 #include "BLO_read_write.hh"
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BKE_context.hh"
 

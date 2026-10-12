@@ -40,7 +40,8 @@ static int node_shader_gpu_light_probe_color(GPUMaterial *mat,
                                              GPUNodeStack *out)
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_LIGHTPROBE_ACCESS);
-  return GPU_stack_link(mat, node, "node_light_probe_color", in, out);
+  return GPU_stack_link(mat, node, "node_light_probe_color", in, out,
+                        GPU_kernel_globals(), GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_light_probe_color_cc

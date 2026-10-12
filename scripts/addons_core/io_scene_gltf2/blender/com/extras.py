@@ -5,6 +5,7 @@
 
 import bpy
 from .json_util import is_json_convertible
+from .gltf2_blender_utils import find_unused_name
 
 
 # Custom properties, which are in most cases present and should not be imported/exported.
@@ -12,24 +13,34 @@ BLACK_LIST = [
     'cycles',
     'cycles_visibility',
     'cycles_curves',
-    'glTF2ExportSettings',
-    'gltf2_mesh_applied',
-    'gltf2_KHR_materials_variants_variants',
-    'gltf2_active_variant',
-    'gltf2_variant_default_materials',
-    'gltf2_variant_mesh_data']
+    'glTF2ExportSettings']
 
 
-def generate_extras(blender_element):
+def generate_extras(blender_element, blender_data_type, export_settings):
     """Filter and create a custom property, which is stored in the glTF extra field."""
     if not blender_element:
         return None
 
+    # Warning for devs: there is another dict in anim_extra_utils.py
+    # Please keep them in sync for new entries
+    gltf_data_type = {
+        'objects': 'nodes',
+        'bones': 'nodes',
+        'meshes': 'meshes',
+        'materials': 'materials',
+        'lights': 'extensions/KHR_lights_punctual/lights'}.get(
+        blender_data_type,
+        blender_data_type)
+
     extras = {}
+
+    if export_settings['gltf_export_anim_pointer'] is True:
+        export_settings['KHR_animation_pointer']['extras'][blender_data_type][id(blender_element)] = {}
+        export_settings['KHR_animation_pointer']['extras'][blender_data_type][id(blender_element)]['paths'] = {}
 
     # Custom properties
     for custom_property in blender_element.keys():
-        if custom_property in BLACK_LIST:
+        if custom_property in BLACK_LIST or custom_property.startswith("gltf"):
             continue
 
         value = __to_json_compatible(blender_element[custom_property])
@@ -37,16 +48,37 @@ def generate_extras(blender_element):
         if value is not None:
             extras[custom_property] = value
 
+            if export_settings['gltf_export_anim_pointer'] is True:
+                # We are supporting only 1 item custom properties for now
+                if not isinstance(value, (int, float, bool)):
+                    continue
+
+                # Store the path of the custom property for KHR_animation_pointer
+                path_ = {}
+                path_['length'] = 1
+                path_['path'] = "/" + gltf_data_type + "/XXX/extras/" + custom_property
+
+                export_settings['KHR_animation_pointer']['extras'][blender_data_type][id(
+                    blender_element)]['paths']["[\"" + custom_property + "\"]"] = path_
+
     # System Custom Properties (ID properties)
-    properties = blender_element.bl_system_properties_get() or {}
-    for custom_property in properties.keys():
-        if custom_property in BLACK_LIST:
+    blender_element_reference = blender_element['gltf2_original_mesh'] \
+        if 'gltf2_original_mesh' in blender_element.keys() else blender_element
+    properties = blender_element_reference.bl_system_properties_get() or {}
+    for sys_property in properties.keys():
+        if sys_property in BLACK_LIST or sys_property.startswith("gltf"):
             continue
 
-        value = __to_json_compatible(properties[custom_property])
+        value = __to_json_compatible(properties[sys_property])
 
         if value is not None:
-            extras[custom_property] = value
+            if sys_property in extras.keys():
+                # If already present in extras, it means a custom property with the same name exists
+                # We are going to make the name unique
+                unique_name = find_unused_name(extras, sys_property)
+            else:
+                unique_name = sys_property
+            extras[unique_name] = value
 
     if not extras:
         return None
@@ -93,7 +125,7 @@ def set_extras(blender_element, extras, exclude=[]):
         return
 
     for custom_property, value in extras.items():
-        if custom_property in BLACK_LIST:
+        if custom_property in BLACK_LIST + ["gltf_tmp_data_animations"]:
             continue
         if custom_property in exclude:
             continue

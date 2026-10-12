@@ -12,10 +12,10 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_matrix.hh"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_scene_types.h"
 #include "DNA_volume_types.h"
@@ -179,7 +179,7 @@ static void drw_volume_wireframe_cb(
   GPU_vertbuf_attr_fill(cache->face_wire.pos_nor_in_order, pos_id, verts);
   const float3 normal(1.0f, 0.0f, 0.0f);
   if (do_hq_normals) {
-    const gpu::PackedNormal packed_normal = gpu::convert_normal<gpu::PackedNormal>(normal);
+    const int1010102_norm packed_normal = gpu::convert_normal<int1010102_norm>(normal);
     GPU_vertbuf_attr_fill_stride(cache->face_wire.pos_nor_in_order, nor_id, 0, &packed_normal);
   }
   else {

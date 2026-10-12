@@ -2,7 +2,11 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_rect.h"
+/** \file
+ * \ingroup eevee
+ */
+
+#include "BLI_rect.hh"
 #include "GPU_framebuffer.hh"
 
 #include "BKE_scene_runtime.hh"
@@ -101,6 +105,8 @@ RenderEngineType DRW_engine_viewport_eevee_type = {
     /*bake*/ &eevee_bake,
     /*view_update*/ nullptr,
     /*view_draw*/ nullptr,
+    /*view_pause*/ nullptr,
+    /*view_resume*/ nullptr,
     /*update_script_node*/ nullptr,
     /*update_render_passes*/ &eevee_render_update_passes,
     /*update_custom_camera*/ nullptr,

@@ -13,11 +13,11 @@
 #include <cmath>
 #include <cstring>
 
-#include "BLI_hash.h"
-#include "BLI_listbase.h"
+#include "BLI_hash_c.hh"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
 #include "BLI_set.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_vector.hh"
 
 #include "BKE_collection.hh"
@@ -211,9 +211,9 @@ static const bNodeLink *filter_graph_socket_used_link(const bNodeSocket &socket)
 static const bNodeSocket *filter_graph_internal_input_for_output(const bNode &node,
                                                                  const bNodeSocket &output_socket)
 {
-  for (const bNodeLink &internal_link : node.internal_links()) {
-    if (internal_link.tosock == &output_socket && internal_link.fromsock != nullptr) {
-      return internal_link.fromsock;
+  for (const bNodeInternalLink &internal_link : node.internal_links()) {
+    if (internal_link.out == &output_socket && internal_link.in != nullptr) {
+      return internal_link.in;
     }
   }
   return nullptr;
@@ -256,14 +256,14 @@ static bool filter_graph_collect_dependencies(const bNode &node,
   };
 
   if (node.is_muted()) {
-    for (const bNodeLink &internal_link : node.internal_links()) {
-      if (!collect_input_socket(internal_link.fromsock)) {
+    for (const bNodeInternalLink &internal_link : node.internal_links()) {
+      if (!collect_input_socket(internal_link.in)) {
         return false;
       }
     }
   }
   else if (node.is_reroute()) {
-    if (!collect_input_socket(static_cast<const bNodeSocket *>(node.inputs.first))) {
+    if (!collect_input_socket(node.inputs.first())) {
       return false;
     }
   }
@@ -494,7 +494,7 @@ static bool filter_mask_update_collection_signatures(bNodeTree &ntree,
   visited.add(&ntree);
 
   bool changed = false;
-  for (bNode *node = static_cast<bNode *>(ntree.nodes.first); node != nullptr; node = node->next) {
+  for (bNode *node = static_cast<bNode *>(ntree.nodes.first()); node != nullptr; node = node->next) {
     if (node->type_legacy == SH_NODE_FILTER_OBJECT_MASK &&
         NodeFilterMaskMode(node->custom1) == SHD_FILTER_MASK_COLLECTION)
     {
@@ -551,7 +551,7 @@ static void filter_material_collect_aov_usage(const bNodeTree &ntree,
   }
   visited.add(&ntree);
 
-  for (const bNode *node = static_cast<const bNode *>(ntree.nodes.first); node != nullptr;
+  for (const bNode *node = static_cast<const bNode *>(ntree.nodes.first()); node != nullptr;
        node = node->next)
   {
     if (node->type_legacy == SH_NODE_INPUT_AOV) {
@@ -1130,8 +1130,6 @@ bool FilterMaterialModule::sync_pass_entry(blender::Material *material, FilterPa
     return false;
   }
 
-  inst_.materials.queue_texture_loading(gpumat);
-
   const GPUMaterialStatus status = GPU_material_status(gpumat);
   switch (status) {
     case GPU_MAT_SUCCESS: {
@@ -1483,7 +1481,8 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(pass_tx_));
 
     PassSimple pass = {"FilterMaterial.Pass"};
-    pass.state_set(DRW_STATE_WRITE_COLOR);
+    /* The 5.3 world vertex entry uses zero-to-one clip coordinates. */
+    pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE);
     pass.framebuffer_set(&framebuffer_);
     if (entry.uses_filter_object_mask) {
       update_filter_object_mask_buffer(entry.gpumat);
@@ -1740,7 +1739,7 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
         }
       }
       else if (node->is_reroute()) {
-        const bNodeSocket *input_socket = static_cast<const bNodeSocket *>(node->inputs.first);
+        const bNodeSocket *input_socket = node->inputs.first();
         const bNodeLink *input_link = (input_socket != nullptr) ?
                                           filter_graph_socket_used_link(*input_socket) :
                                           nullptr;

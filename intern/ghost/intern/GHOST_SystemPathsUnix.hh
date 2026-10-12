@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <array>
+#include <atomic>
 #include <optional>
 #include <string>
 
@@ -51,7 +53,7 @@ class GHOST_SystemPathsUnix : public GHOST_SystemPaths {
 
   /**
    * Determine a special ("well known") and easy to reach user directory.
-   * \return If successfull, a string containing the user directory path (eg `~/Documents/`).
+   * \return If successful, a string containing the user directory path (eg `~/Documents/`).
    */
   std::optional<std::string> getUserSpecialDir(GHOST_TUserSpecialDirTypes type) const override;
 
@@ -65,4 +67,16 @@ class GHOST_SystemPathsUnix : public GHOST_SystemPaths {
    * Add the file to the operating system most recently used files
    */
   void addToSystemRecentFiles(const char *filepath) const override;
+
+ private:
+  struct UserSpecialDirCache {
+    /** Atomic so the resolved case can be checked without locking. */
+    std::atomic<bool> resolved = false;
+    /** Resolved path, or `nullopt` when the look-up failed. */
+    std::optional<std::string> path;
+  };
+  /**
+   * Cache to store the result of #getUserSpecialDir.
+   */
+  mutable std::array<UserSpecialDirCache, GHOST_kUserSpecialDirType_Num> user_special_dir_cache_;
 };

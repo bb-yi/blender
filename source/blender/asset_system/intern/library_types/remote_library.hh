@@ -41,6 +41,8 @@ class PreferencesRemoteAssetLibrary : public RemoteAssetLibrary {
  public:
   PreferencesRemoteAssetLibrary(const bUserAssetLibrary &custom_library);
   std::optional<AssetLibraryReference> library_reference() const override;
+  const bUserAssetLibrary *user_asset_library() const override;
+  std::optional<StringRefNull> auth_token() const override;
   bool is_enabled() const;
 };
 

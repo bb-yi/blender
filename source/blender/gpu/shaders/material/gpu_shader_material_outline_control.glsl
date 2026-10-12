@@ -13,10 +13,12 @@ void node_output_outline(
     float normal_threshold,
     float normal_threshold_range,
     float normal_edge_width,
-    float outline_id,
-    float id_edge,
+    int outline_id,
+    bool id_edge,
     float id_edge_width,
-    float freestyle_edge,
+    bool freestyle_edge,
+    [[resource_table]] KernelGlobals &kg,
+    ShadingData &sd,
     Closure &dummy)
 {
   dummy = Closure(0);
@@ -29,8 +31,10 @@ void node_output_outline(
                  normal_threshold,
                  normal_threshold_range,
                  normal_edge_width,
-                 outline_id,
-                 id_edge > 0.5f,
+                 float(outline_id),
+                 id_edge,
                  id_edge_width,
-                 freestyle_edge > 0.5f);
+                 freestyle_edge,
+                 kg.object_infos_get(sd),
+                 kg.resource_id_get(sd));
 }

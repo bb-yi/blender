@@ -116,6 +116,8 @@ void VKContext::activate()
 {
   /* Make sure no other context is already bound to this thread. */
   BLI_assert(is_active_ == false);
+  /* Make sure the active GHOST context matches the one this GPU Context was created for. */
+  BLI_assert(ghost_context_ == GHOST_IContext::getActiveDrawingContext());
 
   VKDevice &device = VKBackend::get().device;
   VKThreadData &thread_data = device.current_thread_data();
@@ -325,7 +327,7 @@ void VKContext::rendering_end()
 
 void VKContext::update_pipeline_data(const VKFrameBuffer &framebuffer,
                                      GPUPrimType primitive,
-                                     VKVertexAttributeObject &vao,
+                                     VKVertexInputDescriptionPool::Key vertex_input_key,
                                      render_graph::VKPipelineDataGraphics &r_pipeline_data)
 {
   VKShader &vk_shader = unwrap(*shader);
@@ -380,16 +382,14 @@ void VKContext::update_pipeline_data(const VKFrameBuffer &framebuffer,
                                      VK_FRONT_FACE_CLOCKWISE;
   }
 
-  VKVertexInputDescriptionPool::Key vertex_input_description_key =
-      device.vertex_input_descriptions.get_or_insert(vao.vertex_input);
   if (extensions.vertex_input_dynamic_state) {
-    r_pipeline_data.vertex_input_description = vertex_input_description_key;
+    r_pipeline_data.vertex_input_description = vertex_input_key;
   }
 
   update_pipeline_data(
       vk_shader,
       vk_shader.ensure_and_get_graphics_pipeline(
-          primitive, vertex_input_description_key, state_manager, framebuffer, constants_state_),
+          primitive, vertex_input_key, state_manager, framebuffer, constants_state_),
       r_pipeline_data.pipeline_data);
 }
 
@@ -521,6 +521,7 @@ void VKContext::swap_buffer_draw_handler(const GHOST_VulkanSwapChainData &swap_c
   synchronization.vk_image = swap_chain_data.image;
   synchronization.vk_image_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
   synchronization.vk_image_aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+  synchronization.vk_access_flags = VK_ACCESS_NONE;
   render_graph.add_node(synchronization);
   GPU_debug_group_end();
 

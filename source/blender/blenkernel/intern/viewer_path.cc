@@ -2,13 +2,17 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include "BKE_lib_query.hh"
 #include "BKE_lib_remap.hh"
 #include "BKE_viewer_path.hh"
 
 #include "BLI_index_range.hh"
-#include "BLI_listbase.h"
-#include "BLI_string.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
 #include "BLI_string_ref.hh"
 
 #include "MEM_guardedalloc.h"
@@ -43,8 +47,8 @@ bool BKE_viewer_path_equal(const ViewerPath *a,
                            const ViewerPath *b,
                            const ViewerPathEqualFlag flag)
 {
-  const ViewerPathElem *elem_a = static_cast<const ViewerPathElem *>(a->path.first);
-  const ViewerPathElem *elem_b = static_cast<const ViewerPathElem *>(b->path.first);
+  const ViewerPathElem *elem_a = a->path.first();
+  const ViewerPathElem *elem_b = b->path.first();
 
   while (elem_a != nullptr && elem_b != nullptr) {
     if (!BKE_viewer_path_elem_equal(elem_a, elem_b, flag)) {

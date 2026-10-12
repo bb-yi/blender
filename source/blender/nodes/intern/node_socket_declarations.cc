@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #include "NOD_bundle_type.hh"
 #include "NOD_geometry_nodes_closure_signature.hh"
 #include "NOD_socket_declarations.hh"
@@ -10,9 +14,9 @@
 #include "BKE_lib_id.hh"
 #include "BKE_node_runtime.hh"
 
-#include "BLI_math_vector.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 
 namespace blender::nodes::decl {
 

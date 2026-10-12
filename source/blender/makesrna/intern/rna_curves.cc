@@ -82,7 +82,7 @@ const EnumPropertyItem rna_enum_curve_normal_mode_items[] = {
 
 #  include <fmt/format.h>
 
-#  include "BLI_math_vector.h"
+#  include "BLI_math_vector_c.hh"
 #  include "BLI_offset_indices.hh"
 
 #  include "BKE_attribute.hh"
@@ -570,7 +570,7 @@ static void rna_def_curves(BlenderRNA *brna)
   RNA_def_property_range(prop, FLT_EPSILON, FLT_MAX);
   RNA_def_property_ui_range(prop, 0.0, 10.0f, 0.001, 3);
   RNA_def_property_ui_text(
-      prop, "Collision distance", "Distance to keep the curves away from the surface");
+      prop, "Collision Distance", "Distance to keep the curves away from the surface");
   RNA_def_property_update(prop, 0, "rna_Curves_update_draw");
 
   /* attributes */

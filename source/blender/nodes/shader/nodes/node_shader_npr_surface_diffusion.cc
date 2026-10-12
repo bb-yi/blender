@@ -68,29 +68,30 @@ static int node_gpu(GPUMaterial *mat, bNode *node, bNodeExecData *,
   GPUNodeLink *branch = nullptr;
   GPU_link(mat, "npr_surface_diffusion_capture", in[0].link, &branch);
   const char *function = GPU_material_split_sub_function(
-      mat, GPU_FLOAT, &branch, "gpu_shader_material_npr_surface_diffusion.glsl");
+      mat, GPU_FLOAT, &branch, "gpu_shader_material_npr_surface_diffusion.glsl", true);
   const std::string wrapper = std::string("npr_diffusion_") + function;
   const std::string filename = wrapper + ".glsl";
   std::stringstream source;
-  source << "float " << function << "();\nvoid " << wrapper
-         << "(float strength, float3 radius, float scale, float weight, out Closure result) {\n"
-         << "float4 saved = g_npr_diffusion;\n"
-         << "float saved_weight = g_npr_diffusion_weight;\n"
-         << "bool saved_scope = g_npr_diffusion_scope;\n"
-         << "g_npr_diffusion_scope = true;\n"
-         << "g_npr_diffusion = float4(max(radius, float3(0.0f)) * max(scale, 0.0f) * "
+  source << "float " << function << "(KernelGlobals kg, _ref(ShadingData, sd));\nvoid " << wrapper
+         << "(float strength, float3 radius, float scale, float weight, "
+            "KernelGlobals kg, _ref(ShadingData, sd), out Closure result) {\n"
+         << "float4 saved = sd.npr_diffusion;\n"
+         << "float saved_weight = sd.npr_diffusion_weight;\n"
+         << "bool saved_scope = sd.npr_diffusion_scope;\n"
+         << "sd.npr_diffusion_scope = true;\n"
+         << "sd.npr_diffusion = float4(max(radius, float3(0.0f)) * max(scale, 0.0f) * "
             "12.566370614359172f, clamp(strength, 0.0f, 1.0f));\n"
-         << "g_npr_diffusion_weight *= weight;\n"
-         << "result = " << function << "();\n"
-         << "g_npr_diffusion = saved;\n"
-         << "g_npr_diffusion_scope = saved_scope;\n"
-         << "g_npr_diffusion_weight = saved_weight;\n}\n";
+         << "sd.npr_diffusion_weight *= weight;\n"
+         << "result = " << function << "(kg, sd);\n"
+         << "sd.npr_diffusion = saved;\n"
+         << "sd.npr_diffusion_scope = saved_scope;\n"
+         << "sd.npr_diffusion_weight = saved_weight;\n}\n";
   GPU_material_generated_source_add(mat, filename.c_str(),
       {"gpu_shader_material_npr_surface_diffusion.glsl"}, source.str().c_str());
   in[0].type = GPU_NONE;
   in[0].link = nullptr;
   return GPU_stack_link_custom(mat, node, wrapper.c_str(), filename.c_str(),
-                               GPU_CUSTOM_NODE_DEPENDENCY_NONE, in, out);
+                               GPU_CUSTOM_NODE_DEPENDENCY_SHADING_CONTEXT, in, out);
 }
 
 }  // namespace nodes::node_shader_npr_surface_diffusion_cc

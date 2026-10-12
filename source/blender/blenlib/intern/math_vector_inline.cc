@@ -8,8 +8,8 @@
 
 #pragma once
 
-#include "BLI_math_base.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_base_c.hh"
+#include "BLI_utildefines.hh"
 
 namespace blender {
 
@@ -554,6 +554,12 @@ MINLINE void mul_v2_v2v2(float r[2], const float a[2], const float b[2])
 {
   r[0] = a[0] * b[0];
   r[1] = a[1] * b[1];
+}
+
+MINLINE void negate_v2(float r[2])
+{
+  r[0] = -r[0];
+  r[1] = -r[1];
 }
 
 MINLINE void negate_v2_v2(float r[2], const float a[2])

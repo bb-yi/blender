@@ -13,12 +13,12 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_ghash.h"
-#include "BLI_linklist.h"
+#include "BLI_ghash.hh"
+#include "BLI_linklist.hh"
 #include "BLI_path_utils.hh" /* Only for assertions. */
 #include "BLI_set.hh"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_genfile.h"
 
@@ -31,12 +31,12 @@
 
 #include "readfile.hh"
 
-#include "BLI_sys_types.h" /* Needed for `intptr_t`. */
+#include "BLI_sys_types.hh" /* Needed for `intptr_t`. */
 
 namespace blender {
 
 #ifdef WIN32
-#  include "BLI_winstuff.h"
+#  include "BLI_winstuff.hh"
 #endif
 
 /* Access routines used by file-selector. */
@@ -162,7 +162,7 @@ LinkNode *BLO_blendhandle_get_datablock_info(BlendHandle *bh,
 
   const bool is_library = (ofblocktype == ID_LI);
 
-  const int sdna_nr_preview_image = DNA_struct_find_with_alias(fd->filesdna, "PreviewImage");
+  const int sdna_nr_preview_image = DNA_struct_find_with_alias(fd->filesdna.get(), "PreviewImage");
 
   for (bhead = blo_bhead_first(fd); bhead; bhead = blo_bhead_next(fd, bhead)) {
     if (bhead->code == BLO_CODE_ENDB) {
@@ -276,7 +276,7 @@ PreviewImage *BLO_blendhandle_get_preview_for_id(BlendHandle *bh,
 {
   FileData *fd = reinterpret_cast<FileData *>(bh);
   bool looking = false;
-  const int sdna_preview_image = DNA_struct_find_with_alias(fd->filesdna, "PreviewImage");
+  const int sdna_preview_image = DNA_struct_find_with_alias(fd->filesdna.get(), "PreviewImage");
 
   for (BHead *bhead = blo_bhead_first(fd); bhead; bhead = blo_bhead_next(fd, bhead)) {
     if (bhead->code == BLO_CODE_DATA) {

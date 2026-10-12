@@ -8,10 +8,10 @@
 
 #include "BLI_array.hh"
 #include "BLI_hash.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_rand.hh"
 #include "BLI_set.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
 #include "BLI_task.hh"
 
@@ -483,7 +483,7 @@ void modifier_clear(Strip *strip)
 {
   StripModifierData *smd, *smd_next;
 
-  for (smd = static_cast<StripModifierData *>(strip->modifiers.first); smd; smd = smd_next) {
+  for (smd = strip->modifiers.first(); smd; smd = smd_next) {
     smd_next = smd->next;
     modifier_free(smd);
   }
@@ -545,7 +545,7 @@ static bool skip_modifier(Scene *scene, const StripModifierData *smd, int timeli
 
 void modifier_apply_stack(ModifierApplyContext &context)
 {
-  if (context.strip.modifiers.first == nullptr) {
+  if (context.strip.modifiers.first() == nullptr) {
     return;
   }
 

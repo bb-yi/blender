@@ -5,7 +5,6 @@
 #include "usd_reader_material.hh"
 #include "usd_asset_utils.hh"
 #include "usd_colorspace_utils.hh"
-#include "usd_hash_types.hh"
 #include "usd_reader_utils.hh"
 
 #include "BKE_image.hh"
@@ -19,17 +18,16 @@
 #include "BKE_node_tree_update.hh"
 #include "BKE_report.hh"
 
-#include "BLI_fileops.h"
-#include "BLI_listbase.h"
+#include "BLI_fileops.hh"
+#include "BLI_listbase_iterator.hh"
 #include "BLI_map.hh"
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_c.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_path_utils.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_string_ref.hh"
-#include "BLI_string_utf8.h"
 #include "BLI_vector.hh"
 
+#include "DNA_listBase.h"
 #include "DNA_material_types.h"
 #include "DNA_node_types.h"
 
@@ -1377,13 +1375,18 @@ void USDMaterialReader::load_tex_image(const pxr::UsdShadeShader &usd_shader,
   /* If this is a UDIM texture, this will store the
    * UDIM tile indices. */
   Vector<int> udim_tiles;
+  bool check_open = true;
 
   if (is_udim_path(file_path)) {
     udim_tiles = get_udim_tiles(file_path);
+    /* We can skip the additional check for file existence if we've successfully found tiles. */
+    if (!udim_tiles.is_empty()) {
+      check_open = false;
+    }
   }
 
   const char *im_file = file_path.c_str();
-  Image *image = BKE_image_load_exists(&bmain_, im_file);
+  Image *image = BKE_image_load_exists(&bmain_, im_file, check_open);
   if (!image) {
     CLOG_WARN(&LOG, "Couldn't open image file '%s' for Texture Image node", im_file);
     return;

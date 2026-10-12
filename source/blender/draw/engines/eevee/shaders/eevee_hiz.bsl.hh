@@ -37,3 +37,22 @@ struct PreviousLayerRadiance {
 };
 
 }  // namespace eevee
+
+/* Keep legacy material GLSL independent of BSL resource-table field encoding. */
+int2 eevee_hiz_extent_get()
+{
+  [[resource_table]] const eevee::HiZ &hiz = resource_table_get(eevee::HiZ);
+  return textureSize(hiz.hiz_tx, 0);
+}
+
+float eevee_hiz_sample(float2 uv)
+{
+  [[resource_table]] const eevee::HiZ &hiz = resource_table_get(eevee::HiZ);
+  return textureLod(hiz.hiz_tx, uv, 0.0f).r;
+}
+
+float eevee_hiz_fetch(int2 pixel)
+{
+  [[resource_table]] const eevee::HiZ &hiz = resource_table_get(eevee::HiZ);
+  return texelFetch(hiz.hiz_tx, pixel, 0).r;
+}

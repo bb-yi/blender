@@ -2,8 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 
 #include "../../../blenloader/BLO_read_write.hh"
 
@@ -145,7 +145,7 @@ static int node_shader_fn(GPUMaterial *mat,
                           GPUNodeStack *out)
 {
   if (!in[0].link) {
-    GPU_link(mat, "world_normals_get", &in[0].link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &in[0].link);
   }
   GPU_material_flag_set(mat, GPU_MATFLAG_NPR_FOREACH_LIGHT);
   const int zone_id = node_storage(*node).output_node_id;

@@ -21,8 +21,8 @@
 #include "RNA_types.hh"
 
 #include "BLI_array.hh"
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_utildefines.hh"
 
 #include "bpy_capi_utils.hh"
 #include "bpy_props.hh"
@@ -423,7 +423,7 @@ static PyObject *pyrna_struct_as_instance(PointerRNA *ptr)
   PyObject *self = nullptr;
   /* first get self */
   /* operators can store their own instance for later use */
-  if (ptr->data) {
+  if (*ptr) {
     void **instance = RNA_struct_instance(ptr);
 
     if (instance) {
@@ -2085,7 +2085,7 @@ static bool bpy_prop_string_visit_fn_call(
   }
   else {
     text = PyUnicode_AsUTF8(item);
-    if (UNLIKELY(text == nullptr)) {
+    if (text == nullptr) [[unlikely]] {
       PyErr_Clear();
       PyErr_Format(PyExc_TypeError,
                    "expected sequence of strings or tuple pairs of strings, not %.200s",
@@ -3312,14 +3312,14 @@ static int bpy_prop_arg_parse_id(PyObject *o, void *p)
   const char *id;
 
   id = PyUnicode_AsUTF8AndSize(o, &id_len);
-  if (UNLIKELY(id_len >= MAX_IDPROP_NAME)) {
+  if (id_len >= MAX_IDPROP_NAME) [[unlikely]] {
     PyErr_Format(PyExc_TypeError, "'%.200s' too long, max length is %d", id, MAX_IDPROP_NAME - 1);
     return 0;
   }
 
   parse_data->prop_free_handle = nullptr;
-  if (UNLIKELY(RNA_def_property_free_identifier_deferred_prepare(
-                   srna, id, &parse_data->prop_free_handle) == -1))
+  if (RNA_def_property_free_identifier_deferred_prepare(srna, id, &parse_data->prop_free_handle) ==
+      -1) [[unlikely]]
   {
     PyErr_Format(PyExc_TypeError,
                  "'%s' is defined as a non-dynamic type for '%s'",
@@ -5730,17 +5730,23 @@ static PyObject *BPy_RemoveProperty(PyObject *self, PyObject *args, PyObject *kw
     Py_DECREF(args);
     return ret;
   }
+
+  const PyMethodDef *method_def =
+      (reinterpret_cast<const PyCFunctionObject *>(pymeth_RemoveProperty))->m_ml;
+  const char *error_prefix = method_def->ml_name;
+
   if (PyTuple_GET_SIZE(args) > 1) {
-    PyErr_SetString(PyExc_ValueError, "expected one positional arg, one keyword arg");
+    PyErr_Format(
+        PyExc_ValueError, "%s: expected one positional arg, one keyword arg", error_prefix);
     return nullptr;
   }
 
-  srna = srna_from_self(self, "RemoveProperty(...):");
+  srna = srna_from_self(self, error_prefix);
   if (srna == nullptr && PyErr_Occurred()) {
     return nullptr; /* self's type was compatible but error getting the srna */
   }
   if (srna == nullptr) {
-    PyErr_SetString(PyExc_TypeError, "RemoveProperty(): struct rna not available for this type");
+    PyErr_Format(PyExc_TypeError, "%s: struct rna not available for this type", error_prefix);
     return nullptr;
   }
 
@@ -5761,7 +5767,7 @@ static PyObject *BPy_RemoveProperty(PyObject *self, PyObject *args, PyObject *kw
   }
 
   if (RNA_def_property_free_identifier(srna, id) != 1) {
-    PyErr_Format(PyExc_TypeError, "RemoveProperty(): '%s' not a defined dynamic property", id);
+    PyErr_Format(PyExc_TypeError, "%s: '%s' not a defined dynamic property", error_prefix, id);
     return nullptr;
   }
 
@@ -5889,6 +5895,10 @@ PyObject *BPY_rna_props()
   PyObject *submodule;
   PyObject *submodule_dict;
 
+  if (PyType_Ready(&bpy_prop_deferred_Type) < 0) {
+    return nullptr;
+  }
+
   submodule = PyModule_Create(&props_module);
   PyDict_SetItemString(PyImport_GetModuleDict(), props_module.m_name, submodule);
 
@@ -5909,9 +5919,6 @@ PyObject *BPY_rna_props()
   ASSIGN_STATIC(CollectionProperty);
   ASSIGN_STATIC(RemoveProperty);
 
-  if (PyType_Ready(&bpy_prop_deferred_Type) < 0) {
-    return nullptr;
-  }
   PyModule_AddType(submodule, &bpy_prop_deferred_Type);
 
   /* Run this when properties are freed. */

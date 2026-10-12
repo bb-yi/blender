@@ -15,6 +15,7 @@
 #include <numeric>
 #include <optional>
 #include <thread>
+#include <utility>
 
 #ifdef WITH_FFTW3
 #  include <fftw3.h>
@@ -22,14 +23,14 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_build_config.h"
+#include "BLI_build_config.hh"
 #include "BLI_enum_flags.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
-#include "BLI_math_rotation.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
+#include "BLI_math_rotation_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_threads.h"
+#include "BLI_string.hh"
+#include "BLI_threads.hh"
 
 #include "BLT_translation.hh"
 
@@ -48,6 +49,7 @@
 
 #ifdef WITH_AUDASPACE
 #  include "BLI_set.hh"
+#  include "BLI_vector.hh"
 
 #  include <Exception.h>
 #  include <IReader.h>
@@ -91,6 +93,8 @@
 #include "BKE_sound.hh"
 #include "BKE_sound_sample.hh"
 
+#include "sound_reader_cache.hh"
+
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 
@@ -119,6 +123,14 @@ ENUM_OPERATORS(SoundTags);
 using bSoundFrequencySamplerMap =
     ConcurrentMap<bSoundFrequencySampler::Key, std::shared_ptr<bSoundFrequencySampler>>;
 
+#ifdef WITH_AUDASPACE
+struct SoundRuntimeGeneration {
+  AUD_Sound handle;
+  bSoundFrequencySamplerMap samplers;
+  std::shared_ptr<SoundReaderCache> reader_cache;
+};
+#endif
+
 struct SoundRuntime {
   AUD_Sound handle;
   AUD_Sound cache;
@@ -133,8 +145,10 @@ struct SoundRuntime {
   Vector<float> *waveform = nullptr;
   SoundTags tags = SoundTags::None;
 
-  /** Caches frequency samplers for this sound. */
-  bSoundFrequencySamplerMap samplers;
+#ifdef WITH_AUDASPACE
+  std::mutex generation_mutex;
+  std::shared_ptr<SoundRuntimeGeneration> generation;
+#endif
 };
 
 }  // namespace bke
@@ -146,6 +160,28 @@ static void sound_init_runtime(bSound *sound)
   sound->runtime = MEM_new<bke::SoundRuntime>(__func__);
   BLI_spin_init(&sound->runtime->spinlock);
 }
+
+#ifdef WITH_AUDASPACE
+static void sound_runtime_generation_replace(
+    bSound *sound, std::shared_ptr<bke::SoundRuntimeGeneration> generation)
+{
+  bke::SoundRuntime *runtime = sound->runtime;
+  std::shared_ptr<bke::SoundRuntimeGeneration> old_generation;
+  {
+    std::lock_guard lock{runtime->generation_mutex};
+    old_generation = std::move(runtime->generation);
+    runtime->generation = std::move(generation);
+  }
+}
+
+static std::shared_ptr<bke::SoundRuntimeGeneration> sound_runtime_generation_get(
+    const bSound &sound)
+{
+  bke::SoundRuntime *runtime = sound.runtime;
+  std::lock_guard lock{runtime->generation_mutex};
+  return runtime->generation;
+}
+#endif
 
 static void sound_free_waveform(bSound *sound)
 {
@@ -217,7 +253,7 @@ static void sound_foreach_path(ID *id, BPathForeachPathData *bpath_data)
 static void sound_blend_write(BlendWriter *writer, ID *id, const void *id_address)
 {
   bSound *sound = id_cast<bSound *>(id);
-  const bool is_undo = BLO_write_is_undo(writer);
+  const bool is_undo = writer->is_undo();
 
   /* Clean up, important in undo case to reduce false detection of changed datablocks. */
   sound->runtime = nullptr;
@@ -267,6 +303,7 @@ IDTypeInfo IDType_ID_SO = {
     .foreach_cache = sound_foreach_cache,
     .foreach_path = sound_foreach_path,
     .foreach_working_space_color = nullptr,
+    .foreach_asset_weak_reference = nullptr,
     .owner_pointer_get = nullptr,
 
     .blend_write = sound_blend_write,
@@ -292,18 +329,14 @@ BLI_INLINE void sound_verify_evaluated_id(const ID *id)
    * them to be allocated on a data-blocks which are result of dependency graph evaluation.
    *
    * Data-blocks which are covered by a copy-on-evaluation system of dependency graph will have
-   * ID_TAG_COPIED_ON_EVAL tag set on them. But if some of data-blocks during its evaluation
-   * decides to re-allocate its nested one (for example, object evaluation could re-allocate mesh
-   * when evaluating modifier stack). Such data-blocks will have
-   * ID_TAG_COPIED_ON_EVAL_FINAL_RESULT tag set on them.
+   * ID_TAG_COPIED_ON_EVAL tag set on them.
    *
    * Additionally, we also allow data-blocks outside of main database. Those can not be "original"
    * and could be used as a temporary evaluated result during operations like baking.
    *
    * NOTE: We consider ID evaluated if ANY of those flags is set. We do NOT require ALL of them.
    */
-  BLI_assert(id->tag &
-             (ID_TAG_COPIED_ON_EVAL | ID_TAG_COPIED_ON_EVAL_FINAL_RESULT | ID_TAG_NO_MAIN));
+  BLI_assert(id->tag & (ID_TAG_COPIED_ON_EVAL | ID_TAG_NO_MAIN));
 }
 
 bSound *BKE_sound_new_file(Main *bmain, const char *filepath, short stream_index)
@@ -340,9 +373,7 @@ static bSound *sound_new_file_exists_ex(Main *bmain, const char *filepath, short
   BLI_path_abs(filepath_abs, BKE_main_blendfile_path(bmain));
 
   /* Search for an existing sound matching both filepath and stream index. */
-  for (sound = static_cast<bSound *>(bmain->sounds.first); sound;
-       sound = static_cast<bSound *>(sound->id.next))
-  {
+  for (sound = bmain->sounds.first(); sound; sound = static_cast<bSound *>(sound->id.next)) {
     if (sound->stream_index != stream_index) {
       continue;
     }
@@ -367,6 +398,7 @@ static void sound_free_audio(bSound *sound)
 {
 #ifdef WITH_AUDASPACE
   bke::SoundRuntime *runtime = sound->runtime;
+  sound_runtime_generation_replace(sound, nullptr);
   runtime->handle.reset();
   runtime->playback_handle.reset();
   runtime->cache.reset();
@@ -693,6 +725,7 @@ void BKE_sound_refresh_callback_bmain(Main *bmain)
 static void sound_load_audio(Main *bmain, bSound *sound, bool free_waveform)
 {
   bke::SoundRuntime *runtime = sound->runtime;
+  sound_runtime_generation_replace(sound, nullptr);
   runtime->cache.reset();
   runtime->handle.reset();
   runtime->playback_handle.reset();
@@ -731,7 +764,8 @@ static void sound_load_audio(Main *bmain, bSound *sound, bool free_waveform)
     try {
       runtime->cache = AUD_Sound(new aud::StreamBuffer(runtime->handle));
     }
-    catch (aud::Exception &) {
+    catch (aud::Exception &ex) {
+      (void)ex;
     }
   }
 
@@ -741,6 +775,11 @@ static void sound_load_audio(Main *bmain, bSound *sound, bool free_waveform)
   else {
     runtime->playback_handle = runtime->handle;
   }
+
+  auto generation = std::make_shared<bke::SoundRuntimeGeneration>();
+  generation->handle = runtime->handle;
+  generation->reader_cache = std::make_shared<bke::SoundReaderCache>(generation->handle);
+  sound_runtime_generation_replace(sound, std::move(generation));
 }
 
 void BKE_sound_load(Main *bmain, bSound *sound)
@@ -804,8 +843,8 @@ void BKE_sound_create_scene(Scene *scene)
   aud::Specs specs;
   specs.channels = aud::CHANNELS_STEREO;
   specs.rate = aud::RATE_48000;
-  audio.sound_scene = AUD_Sequence(
-      new aud::Sequence(specs, scene->frames_per_second(), scene->audio.flag & AUDIO_MUTE));
+  audio.sound_scene = std::make_shared<aud::Sequence>(
+      specs, scene->frames_per_second(), scene->audio.flag & AUDIO_MUTE);
   audio.sound_scene->setSpeedOfSound(scene->audio.speed_of_sound);
   audio.sound_scene->setDopplerFactor(scene->audio.doppler_factor);
   audio.sound_scene->setDistanceModel(aud::DistanceModel(scene->audio.distance_model));
@@ -1063,9 +1102,7 @@ void BKE_sound_update_sequencer(Main *main, bSound *sound)
 
   Scene *scene;
 
-  for (scene = static_cast<Scene *>(main->scenes.first); scene;
-       scene = static_cast<Scene *>(scene->id.next))
-  {
+  for (scene = main->scenes.first(); scene; scene = static_cast<Scene *>(scene->id.next)) {
     seq::sound_update(scene, sound);
   }
 }
@@ -1155,7 +1192,7 @@ void BKE_sound_seek_scene(Main *bmain, Scene *scene)
 {
   std::lock_guard lock(g_state.sound_device_mutex);
   bool animation_playing = false;
-  for (bScreen *screen = static_cast<bScreen *>(bmain->screens.first); screen;
+  for (bScreen *screen = bmain->screens.first(); screen;
        screen = static_cast<bScreen *>(screen->id.next))
   {
     if (screen->animtimer) {
@@ -1246,7 +1283,7 @@ double BKE_sound_sync_scene(Scene *scene)
 }
 
 static int sound_read(
-    AUD_Sound sound, float *buffer, int length, int samples_per_second, bool *interrupt)
+    AUD_Sound sound, float *buffer, int length, int samples_per_second, const bool *interrupt)
 {
   using namespace aud;
   DeviceSpecs specs;
@@ -1319,6 +1356,11 @@ static int sound_read(
 
 void BKE_sound_read_waveform(Main *bmain, bSound *sound, bool *stop)
 {
+  if (*stop) {
+    BKE_sound_runtime_clear_waveform_loading_tag(sound);
+    return;
+  }
+
   bool need_close_audio_handles = false;
   bke::SoundRuntime *runtime = sound->runtime;
   if (runtime->playback_handle == nullptr) {
@@ -1340,10 +1382,14 @@ void BKE_sound_read_waveform(Main *bmain, bSound *sound, bool *stop)
   }
 
   if (*stop) {
+    MEM_delete(waveform);
     MEM_SAFE_DELETE(runtime->waveform);
     BLI_spin_lock(&runtime->spinlock);
     runtime->tags &= ~bke::SoundTags::WaveformLoading;
     BLI_spin_unlock(&runtime->spinlock);
+    if (need_close_audio_handles) {
+      sound_free_audio(sound);
+    }
     return;
   }
 
@@ -1632,14 +1678,15 @@ SoundInfo bke::sound_info_get(AUD_Sound sound)
 
   try {
     std::shared_ptr<aud::IReader> reader = sound->createReader();
-    if (reader.get()) {
+    if (reader) {
       aud::Specs specs = reader->getSpecs();
       res.specs.channels = eSoundChannels(specs.channels);
       res.specs.samplerate = specs.rate;
       res.length = reader->getLength() / float(specs.rate);
     }
   }
-  catch (aud::Exception &) {
+  catch (aud::Exception &ex) {
+    (void)ex;
   }
   return res;
 }
@@ -1670,7 +1717,8 @@ AUD_Device bke::sound_device_init(const char *device,
       return AUD_Device(device);
     }
   }
-  catch (Exception &) {
+  catch (Exception &ex) {
+    (void)ex;
   }
   return nullptr;
 }
@@ -1688,7 +1736,8 @@ AUD_Handle bke::sound_device_play(AUD_Device device, AUD_Sound sound)
   try {
     return device->play(sound, true);
   }
-  catch (aud::Exception &) {
+  catch (aud::Exception &ex) {
+    (void)ex;
   }
   return nullptr;
 }
@@ -1731,7 +1780,8 @@ AUD_Handle bke::sound_pause_after(AUD_Handle handle, double seconds)
       return handle2;
     }
   }
-  catch (aud::Exception &) {
+  catch (aud::Exception &ex) {
+    (void)ex;
   }
   return nullptr;
 }
@@ -1790,7 +1840,7 @@ float *bke::sound_read_file_buffer(const char *filename,
 
     reader = sound->createReader();
 
-    if (!reader.get()) {
+    if (!reader) {
       return nullptr;
     }
 
@@ -1876,7 +1926,7 @@ bool bke::sound_mixdown(AUD_Sequence sequence,
 
 #else /* WITH_AUDASPACE */
 
-#  include "BLI_utildefines.h"
+#  include "BLI_utildefines.hh"
 
 void BKE_sound_force_device(const char * /*device*/) {}
 void BKE_sound_init_once() {}
@@ -2140,25 +2190,29 @@ const Vector<float> *BKE_sound_runtime_get_waveform(const bSound *sound)
 
 namespace bke {
 
-const bSoundFrequencySampler *bSoundFrequencySampler::get_cached(const bSound &sound,
-                                                                 const Key &key)
+std::shared_ptr<const bSoundFrequencySampler> bSoundFrequencySampler::get_cached(
+    const bSound &sound, const Key &key)
 {
 #ifdef WITH_AUDASPACE
+  const std::shared_ptr<SoundRuntimeGeneration> generation = sound_runtime_generation_get(sound);
+  if (!generation) {
+    return nullptr;
+  }
   {
     /* Fast common case when the sampler has been created already. */
     bSoundFrequencySamplerMap::ConstAccessor accessor;
-    if (sound.runtime->samplers.lookup(accessor, key)) {
-      return accessor->second.get();
+    if (generation->samplers.lookup(accessor, key)) {
+      return accessor->second;
     }
   }
-  AUD_Sound sound_handle = sound.runtime->handle;
+  AUD_Sound sound_handle = generation->handle;
   if (!sound_handle) {
     /* Maybe try to load the sound in this case instead of relying on cache. */
     return nullptr;
   }
   /* Slower case when the sampler is newly created. */
   bSoundFrequencySamplerMap::MutableAccessor accessor;
-  if (sound.runtime->samplers.add(accessor, key)) {
+  if (generation->samplers.add(accessor, key)) {
     if (key.channel.has_value()) {
       const SoundInfo info = sound_info_get(sound_handle);
       const int channel = *key.channel;
@@ -2166,15 +2220,17 @@ const bSoundFrequencySampler *bSoundFrequencySampler::get_cached(const bSound &s
         return nullptr;
       }
     }
-    accessor->second = std::make_shared<bSoundFrequencySampler>(sound_handle, key);
+    accessor->second = std::shared_ptr<bSoundFrequencySampler>(
+        new bSoundFrequencySampler(sound_handle, generation->reader_cache, key));
   }
-  return accessor->second.get();
+  return accessor->second;
 #else
   UNUSED_VARS(sound, key);
   return nullptr;
 #endif
 }
 
+#ifdef WITH_AUDASPACE
 static bSoundFrequencySampler::WindowWeights compute_window_function_weights(
     const bSoundFrequencySampler::WindowFunction window, const int size)
 {
@@ -2222,14 +2278,17 @@ static const bSoundFrequencySampler::WindowWeights &get_window_function_weights(
         compute_window_function_weights(window, size));
   });
 }
+#endif
 
-bSoundFrequencySampler::bSoundFrequencySampler(AUD_Sound sound, const Key &key)
-    : sound_(sound),
-      key_(key),
+#ifdef WITH_AUDASPACE
+bSoundFrequencySampler::bSoundFrequencySampler(AUD_Sound sound,
+                                               std::shared_ptr<SoundReaderCache> reader_cache,
+                                               const Key &key)
+    : key_(key),
+      reader_cache_(std::move(reader_cache)),
       window_weights_(get_window_function_weights(key.window_function, key.fft_size))
 {
-#ifdef WITH_AUDASPACE
-  const SoundInfo info = bke::sound_info_get(sound_);
+  const SoundInfo info = bke::sound_info_get(sound);
   samples_per_second_ = info.specs.samplerate;
   /* This could be a parameter but a single fixed value seems fine for now and makes caching much
    * simpler. */
@@ -2237,11 +2296,8 @@ bSoundFrequencySampler::bSoundFrequencySampler(AUD_Sound sound, const Key &key)
   const int window_caches_num = std::ceil(info.length * info.specs.samplerate /
                                           window_cache_stride_);
   window_caches_.reinitialize(window_caches_num);
-#else
-  UNUSED_VARS(sound, key);
-  BLI_assert_unreachable();
-#endif
 }
+#endif
 
 std::optional<Array<float>> bSoundFrequencySampler::compute_fft(const int start_sample) const
 {
@@ -2254,17 +2310,26 @@ std::optional<Array<float>> bSoundFrequencySampler::compute_fft(const int start_
    * because the #read function may sometimes give invalid data for the first samples. */
   const int warmup_samples = std::min(2000, start_sample);
 
-  /* Prepare the reader. */
-  std::shared_ptr<aud::IReader> reader = sound_->createReader();
-  const aud::Specs specs = reader->getSpecs();
-  const int channels_num = specs.channels;
-
-  /* Read the raw samples from the audio stream. */
-  Array<float> read_buffer_extra((key_.fft_size + warmup_samples) * channels_num);
+  int channels_num;
+  Array<float> read_buffer_extra;
   bool is_end_of_stream = false;
   int length = key_.fft_size + warmup_samples;
-  reader->seek(std::max(start_sample - warmup_samples, 0));
-  reader->read(length, is_end_of_stream, read_buffer_extra.data());
+  {
+    SoundReaderLease reader = reader_cache_->acquire();
+    if (!reader) {
+      return std::nullopt;
+    }
+    channels_num = reader->getSpecs().channels;
+    read_buffer_extra.reinitialize((key_.fft_size + warmup_samples) * channels_num);
+    try {
+      reader->seek(std::max(start_sample - warmup_samples, 0));
+      reader->read(length, is_end_of_stream, read_buffer_extra.data());
+    }
+    catch (...) {
+      reader.discard();
+      throw;
+    }
+  }
   const Span<float> read_buffer = read_buffer_extra.as_span().drop_front(warmup_samples *
                                                                          channels_num);
   const int read_length = read_buffer.size() / channels_num;

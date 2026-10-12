@@ -22,8 +22,8 @@
 
 #  include "DNA_screen_types.h"
 
-#  include "BLI_math_matrix.h"
-#  include "BLI_math_vector.h"
+#  include "BLI_math_matrix_c.hh"
+#  include "BLI_math_vector_c.hh"
 
 #  include "BKE_editmesh.hh"
 #  include "BKE_global.hh"
@@ -64,8 +64,7 @@ static void rna_Scene_frame_set(Scene *scene, Main *bmain, int frame, float subf
   BPy_BEGIN_ALLOW_THREADS;
 #  endif
 
-  for (ViewLayer *view_layer = static_cast<ViewLayer *>(scene->view_layers.first);
-       view_layer != nullptr;
+  for (ViewLayer *view_layer = scene->view_layers.first(); view_layer != nullptr;
        view_layer = view_layer->next)
   {
     Depsgraph *depsgraph = BKE_scene_ensure_depsgraph(bmain, scene, view_layer);
@@ -77,7 +76,7 @@ static void rna_Scene_frame_set(Scene *scene, Main *bmain, int frame, float subf
 #  endif
 
   if (BKE_scene_camera_switch_update(scene)) {
-    for (bScreen *screen = static_cast<bScreen *>(bmain->screens.first); screen;
+    for (bScreen *screen = bmain->screens.first(); screen;
          screen = static_cast<bScreen *>(screen->id.next))
     {
       BKE_screen_view3d_scene_sync(screen, scene);
@@ -99,9 +98,8 @@ static void rna_Scene_frame_set(Scene *scene, Main *bmain, int frame, float subf
 static void rna_Scene_uvedit_aspect(Scene * /*scene*/, Object *ob, float aspect[2])
 {
   if ((ob->type == OB_MESH) && (ob->mode == OB_MODE_EDIT)) {
-    BMEditMesh *em;
-    em = BKE_editmesh_from_object(ob);
-    if (EDBM_uv_check(em)) {
+    Mesh *mesh = id_cast<Mesh *>(ob->data);
+    if (EDBM_uv_check(mesh)) {
       ED_uvedit_get_aspect(ob, aspect, aspect + 1);
       return;
     }
@@ -128,11 +126,15 @@ static void rna_SceneRender_get_frame_path(ID *id,
   }
 
   if (BKE_imtype_is_movie(rd->im_format.imtype)) {
-    MOV_filepath_from_settings(filepath, scene, rd, preview != 0, suffix, reports);
+    BKE_blender_project_read_callback(bmain, [&](const bke::BlenderProject *project) {
+      MOV_filepath_from_settings(filepath, scene, project, rd, preview != 0, suffix, reports);
+    });
   }
   else {
     bke::path_templates::VariableMap template_variables;
-    BKE_add_template_variables_general(template_variables, &scene->id);
+    BKE_blender_project_read_callback(bmain, [&](const bke::BlenderProject *project) {
+      BKE_add_template_variables_general(template_variables, &scene->id, project);
+    });
     BKE_add_template_variables_for_render_path(template_variables, *scene);
 
     const char *relbase = BKE_main_blendfile_path(bmain);
@@ -306,6 +308,7 @@ void RNA_api_scene(StructRNA *srna)
   RNA_def_function_ui_description(func, "Ensure sequence editor is valid in this scene");
   parm = RNA_def_pointer(
       func, "sequence_editor", "SequenceEditor", "", "New sequence editor data or None");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 
   func = RNA_def_function(srna, "sequence_editor_clear", "rna_Scene_sequencer_editing_free");

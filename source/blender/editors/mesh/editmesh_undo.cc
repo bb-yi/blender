@@ -19,12 +19,12 @@
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_array_utils.h"
+#include "BLI_array_utils_c.hh"
 #include "BLI_implicit_sharing.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
 #include "BLI_multi_value_map.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_task.hh"
 #include "BLI_vector.hh"
 
@@ -57,11 +57,11 @@
 // #  define DEBUG_PRINT
 // #  define DEBUG_TIME
 #  ifdef DEBUG_TIME
-#    include "BLI_time_utildefines.h"
+#    include "BLI_time_utildefines.hh"
 #  endif
 
-#  include "BLI_array_store.h"
-#  include "BLI_array_store_utils.h"
+#  include "BLI_array_store.hh"
+#  include "BLI_array_store_utils.hh"
 /**
  * This used to be much smaller (256), but this caused too much overhead
  * when selection moved to boolean arrays. Especially with high-poly meshes
@@ -100,7 +100,7 @@
 #endif
 
 #ifdef USE_ARRAY_STORE_THREAD
-#  include "BLI_task.h"
+#  include "BLI_task_c.hh"
 #endif
 
 namespace blender {
@@ -381,9 +381,10 @@ static void um_arraystore_cd_clear(CustomData *cdata)
   }
 }
 
-static void *get_arraystore_data(const BArrayState *state,
-                                 const size_t data_len,
-                                 const eCustomDataType type)
+/** Get a copy of the layer's data as raw bytes. */
+static uint8_t *get_arraystore_data(const BArrayState *state,
+                                    const size_t data_len,
+                                    const eCustomDataType type)
 {
   size_t state_len;
   void *data = BLI_array_store_state_data_get_alloc(state, &state_len);
@@ -411,7 +412,7 @@ static void *get_arraystore_data(const BArrayState *state,
   BLI_assert(stride * data_len == state_len);
   UNUSED_VARS_NDEBUG(stride, data_len);
 
-  return data;
+  return static_cast<uint8_t *>(data);
 }
 
 /**
@@ -457,7 +458,7 @@ static void um_arraystore_cd_expand(const BArrayCustomData *bcd,
       continue;
     }
 
-    void *data = get_arraystore_data(state, data_len, type);
+    uint8_t *data = get_arraystore_data(state, data_len, type);
     layer.data = data;
     layer.sharing_info = implicit_sharing::info_for_mem_free(data);
   }
@@ -482,10 +483,10 @@ static void um_arraystore_cd_expand(const BArrayCustomData *bcd,
     }
     else {
       const BArrayState *state = bcd->trivial_arrays.lookup(type)[i];
-      array_data.data = get_arraystore_data(state, data_len, type);
+      uint8_t *data = get_arraystore_data(state, data_len, type);
+      array_data.data = data;
       array_data.size = data_len;
-      array_data.sharing_info = ImplicitSharingPtr<>(
-          implicit_sharing::info_for_mem_free(array_data.data));
+      array_data.sharing_info = ImplicitSharingPtr<>(implicit_sharing::info_for_mem_free(data));
     }
 
     attribute->assign_data(std::move(array_data));
@@ -607,10 +608,10 @@ static void um_arraystore_compact(UndoMesh *um, const UndoMesh *um_ref)
               &um_arraystore.bs_stride[ARRAY_STORE_INDEX_SHAPE],
               stride,
               array_chunk_size_calc(stride));
-          um->store.keyblocks = MEM_new_array_uninitialized<BArrayState *>(mesh->key->totkey,
-                                                                           __func__);
+          um->store.keyblocks = MEM_new_array_uninitialized<BArrayState *>(
+              mesh->key->totkey, "um_arraystore_compact keyblocks");
 
-          KeyBlock *keyblock = static_cast<KeyBlock *>(mesh->key->block.first);
+          KeyBlock *keyblock = mesh->key->block.first();
           for (int i = 0; i < mesh->key->totkey; i++, keyblock = keyblock->next) {
             const BArrayState *state_reference = (um_ref && um_ref->mesh->key &&
                                                   (i < um_ref->mesh->key->totkey)) ?
@@ -667,7 +668,7 @@ static void um_arraystore_expand_clear(UndoMesh *um)
                                        &mesh->runtime->face_offsets_sharing_info);
   }
   if (mesh->key && mesh->key->totkey) {
-    KeyBlock *keyblock = static_cast<KeyBlock *>(mesh->key->block.first);
+    KeyBlock *keyblock = mesh->key->block.first();
     for (int i = 0; i < mesh->key->totkey; i++, keyblock = keyblock->next) {
       if (keyblock->data) {
         MEM_delete_void(keyblock->data);
@@ -774,7 +775,7 @@ static void um_arraystore_expand(UndoMesh *um)
 
   if (um->store.keyblocks) {
     const size_t stride = mesh->key->elemsize;
-    KeyBlock *keyblock = static_cast<KeyBlock *>(mesh->key->block.first);
+    KeyBlock *keyblock = mesh->key->block.first();
     for (int i = 0; i < mesh->key->totkey; i++, keyblock = keyblock->next) {
       const BArrayState *state = um->store.keyblocks[i];
       size_t state_len;
@@ -894,7 +895,7 @@ static UndoMesh **mesh_undostep_reference_elems_from_objects(Object **object, in
   /* Loop backwards over all previous mesh undo data until either:
    * - All elements have been found (where `um_references` we'll have every element set).
    * - There are no undo steps left to look for. */
-  UndoMesh *um_iter = static_cast<UndoMesh *>(um_arraystore.local_links.last);
+  UndoMesh *um_iter = um_arraystore.local_links.last();
   while (um_iter && (uuid_map_len != 0)) {
     if (UndoMesh **um_p = uuid_map.pop_default(um_iter->mesh->id.session_uid, nullptr)) {
       *um_p = um_iter;
@@ -943,6 +944,8 @@ static void *undomesh_from_editmesh(UndoMesh *um,
   }
 #endif
 
+  BMesh *bm = em->bm;
+
   um->mesh = bke::mesh_new_no_attributes(0, 0, 0, 0);
 
   /* make sure shape keys work */
@@ -957,18 +960,18 @@ static void *undomesh_from_editmesh(UndoMesh *um,
   /* Uncomment for troubleshooting. */
   if (false) {
 #ifndef NDEBUG
-    BM_mesh_is_valid(em->bm);
+    BM_mesh_is_valid(bm);
 #endif
 
     /* Ensure UV's are in a valid state. */
-    if (em->bm->uv_select_sync_valid) {
-      const int cd_loop_uv_offset = CustomData_get_offset(&em->bm->ldata, CD_PROP_FLOAT2);
+    if (bm->uv_select_sync_valid) {
+      const int cd_loop_uv_offset = CustomData_get_offset(&bm->ldata, CD_PROP_FLOAT2);
       bool check_flush = true;
       /* This should check the sticky mode too (currently the scene isn't available). */
       bool check_contiguous = (cd_loop_uv_offset != -1);
       UVSelectValidateInfo info;
       bool is_valid = BM_mesh_uvselect_is_valid(
-          em->bm, cd_loop_uv_offset, true, check_flush, check_contiguous, &info);
+          bm, cd_loop_uv_offset, true, check_flush, check_contiguous, &info);
       if (is_valid == false) {
         fprintf(stderr, "ERROR: UV sync check failed!\n");
       }
@@ -984,12 +987,12 @@ static void *undomesh_from_editmesh(UndoMesh *um,
   params.update_shapekey_indices = false;
   params.cd_mask_extra = cd_mask_extra;
   params.active_shapekey_to_mvert = true;
-  BM_mesh_bm_to_me(nullptr, em->bm, um->mesh, &params);
+  BM_mesh_bm_to_me(nullptr, bm, um->mesh, &params);
   BKE_defgroup_copy_list(&um->mesh->vertex_group_names, vertex_group_names);
   um->mesh->vertex_group_active_index = vertex_group_active_index;
 
   um->selectmode = em->selectmode;
-  um->shapenr = em->bm->shapenr;
+  um->shapenr = bm->shapenr;
 
 #ifdef USE_ARRAY_STORE
   {
@@ -1031,7 +1034,6 @@ static void undomesh_to_editmesh(UndoMesh *um,
                                  int *vertex_group_active_index)
 {
   BMEditMesh *em_tmp;
-  BMesh *bm;
 
 #ifdef USE_ARRAY_STORE
 #  ifdef USE_ARRAY_STORE_THREAD
@@ -1058,7 +1060,7 @@ static void undomesh_to_editmesh(UndoMesh *um,
 
   BMeshCreateParams create_params{};
   create_params.use_toolflags = true;
-  bm = BM_mesh_create(&allocsize, &create_params);
+  BMesh *bm = BM_mesh_create(&allocsize, &create_params);
 
   BMeshFromMeshParams convert_params{};
   /* Handled with tessellation. */
@@ -1074,7 +1076,7 @@ static void undomesh_to_editmesh(UndoMesh *um,
   *em = *em_tmp;
 
   /* Calculate face normals and tessellation at once since it's multi-threaded. */
-  BKE_editmesh_looptris_and_normals_calc(em);
+  BKE_editmesh_looptris_and_normals_calc(em, bm);
 
   em->selectmode = um->selectmode;
   bm->selectmode = um->selectmode;
@@ -1267,9 +1269,6 @@ static void mesh_undosys_step_decode(
 
     em->needs_flush_to_id = 1;
     DEG_id_tag_update(&mesh->id, ID_RECALC_GEOMETRY);
-    /* The object update tag is necessary to cause modifiers to reevaluate after vertex group
-     * changes. */
-    DEG_id_tag_update(&obedit->id, ID_RECALC_GEOMETRY);
   }
 
   /* The first element is always active */
@@ -1279,6 +1278,12 @@ static void mesh_undosys_step_decode(
   /* Check after setting active (unless undoing into another scene). */
   BLI_assert(mesh_undosys_poll(C) || (scene != CTX_data_scene(C)));
 
+  /* NOTE: Changes here must be accounted for:
+   * - With properties flags, since tool-settings disables undo for all members by default,
+   *   #PROP_FORCE_UNDO needs to be enabled for these settings.
+   * - #ED_undo_is_legacy_compatible_for_property
+   *   which disables undo for all non-mesh ID's in edit-mode.
+   */
   {
     /* Follow settings related to selection.
      * While other flags could be included too: it's important the user doesn't
@@ -1325,7 +1330,7 @@ static void mesh_undosys_foreach_ID_ref(UndoStep *us_p,
 
 void ED_mesh_undosys_type(UndoType *ut)
 {
-  ut->name = "Edit Mesh";
+  ut->identifier = "EDIT_MESH";
   ut->poll = mesh_undosys_poll;
   ut->step_encode = mesh_undosys_step_encode;
   ut->step_decode = mesh_undosys_step_decode;
@@ -1333,7 +1338,7 @@ void ED_mesh_undosys_type(UndoType *ut)
 
   ut->step_foreach_ID_ref = mesh_undosys_foreach_ID_ref;
 
-  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE;
+  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE | UNDOTYPE_FLAG_ENCODE_PRE_MEMFILE_SUPPORTED;
 
   ut->step_size = sizeof(MeshUndoStep);
 }

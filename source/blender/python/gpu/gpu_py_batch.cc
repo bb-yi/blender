@@ -14,7 +14,7 @@
 
 #include <Python.h>
 
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "GPU_batch.hh"
 #include "GPU_state.hh"
@@ -63,7 +63,7 @@ static PyObject *pygpu_batch__tp_new(PyTypeObject * /*type*/, PyObject *args, Py
 
   static const char *_keywords[] = {"type", "buf", "elem", nullptr};
   static _PyArg_Parser _parser = {
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "O&" /* `type` */
       "O!" /* `buf` */
       "O&" /* `elem` */
@@ -431,8 +431,8 @@ PyDoc_STRVAR(
     ".. method:: draw_instanced(program, *, instance_start=0, instance_count=0)\n"
     "\n"
     "   Draw multiple instances of the drawing program with the parameters assigned\n"
-    "   to the batch. In the vertex shader, ``gl_InstanceID`` will contain the instance\n"
-    "   number being drawn.\n"
+    "   to the batch. In the vertex shader, ``gpu_InstanceIndex`` will contain the instance\n"
+    "   number being drawn including the ``instance_start``.\n"
     "\n"
     "   :param program: Program that performs the drawing operations.\n"
     "   :type program: :class:`gpu.types.GPUShader`\n"
@@ -451,7 +451,7 @@ static PyObject *pygpu_batch_draw_instanced(BPyGPUBatch *self, PyObject *args, P
   static const char *_keywords[] = {"program", "instance_start", "instance_count", nullptr};
   static _PyArg_Parser _parser = {
       "O!" /* `program` */
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "i"  /* `instance_start` */
       "i"  /* `instance_count` */
       ":GPUBatch.draw_instanced",
@@ -495,7 +495,7 @@ static PyObject *pygpu_batch_draw_range(BPyGPUBatch *self, PyObject *args, PyObj
   static const char *_keywords[] = {"program", "elem_start", "elem_count", nullptr};
   static _PyArg_Parser _parser = {
       "O!" /* `program` */
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "i"  /* `elem_start` */
       "i"  /* `elem_count` */
       ":GPUBatch.draw_range",

@@ -4,8 +4,8 @@
 
 #include "testing/testing.h"
 
-#include "BLI_math_vector.h"
 #include "BLI_math_vector.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_vector.hh"
 
 namespace blender::tests {
@@ -196,6 +196,15 @@ TEST(math_vector, exp)
   EXPECT_NEAR(result.x, 2.718281828459045f, 1e-6f);
   EXPECT_NEAR(result.y, 7.38905609893065f, 1e-6f);
   EXPECT_NEAR(result.z, 20.085536923187668f, 1e-6f);
+}
+
+TEST(math_vector, log)
+{
+  const float3 a(1.0f, 2.0f, 3.0f);
+  const float3 result = math::log(a);
+  EXPECT_NEAR(result.x, 0.0f, 1e-6f);
+  EXPECT_NEAR(result.y, 0.69314718056f, 1e-6f);
+  EXPECT_NEAR(result.z, 1.09861228867f, 1e-6f);
 }
 
 TEST(math_vector, square)

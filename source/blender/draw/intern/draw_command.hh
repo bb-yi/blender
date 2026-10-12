@@ -15,10 +15,11 @@
 
 #include "BKE_global.hh"
 #include "BLI_map.hh"
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 #include "DRW_gpu_wrapper.hh"
 
 #include "GPU_index_buffer.hh"
+#include "GPU_ray_tracing.hh"
 #include "draw_command_shared.hh"
 #include "draw_handle.hh"
 #include "draw_state.hh"
@@ -182,11 +183,14 @@ struct ResourceBind {
     UniformAsStorageBuf,
     VertexAsStorageBuf,
     IndexAsStorageBuf,
+    TopLevelAS,
   } type;
 
   union {
-    /** TODO: Use draw::Texture|StorageBuffer|UniformBuffer as resources as they will give more
-     * debug info. */
+    /**
+     * TODO: Use draw::Texture|StorageBuffer|UniformBuffer as resources as they will give more
+     * debug info.
+     */
     gpu::UniformBuf *uniform_buf;
     gpu::UniformBuf **uniform_buf_ref;
     gpu::StorageBuf *storage_buf;
@@ -198,6 +202,7 @@ struct ResourceBind {
     gpu::VertBuf **vertex_buf_ref;
     gpu::IndexBuf *index_buf;
     gpu::IndexBuf **index_buf_ref;
+    gpu::TopLevelAS *tlas;
   };
 
   ResourceBind() = default;
@@ -210,6 +215,8 @@ struct ResourceBind {
       : slot(slot_), is_reference(false), type(Type::StorageBuf), storage_buf(res) {};
   ResourceBind(int slot_, gpu::StorageBuf **res)
       : slot(slot_), is_reference(true), type(Type::StorageBuf), storage_buf_ref(res) {};
+  ResourceBind(int slot_, gpu::TopLevelAS *res)
+      : slot(slot_), is_reference(false), type(Type::TopLevelAS), tlas(res) {};
   ResourceBind(int slot_, gpu::UniformBuf *res, Type /*type*/)
       : slot(slot_), is_reference(false), type(Type::UniformAsStorageBuf), uniform_buf(res) {};
   ResourceBind(int slot_, gpu::UniformBuf **res, Type /*type*/)

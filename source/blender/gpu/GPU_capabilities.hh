@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 namespace blender {
 
@@ -56,14 +56,17 @@ bool GPU_is_safe_texture_size(int width, int height);
 bool GPU_use_subprocess_compilation();
 int GPU_max_parallel_compilations();
 
-bool GPU_stencil_clasify_buffer_workaround();
+bool GPU_stencil_classify_buffer_workaround();
 bool GPU_depth_blitting_workaround();
 bool GPU_use_main_context_workaround();
 bool GPU_use_hq_normals_workaround();
 
 bool GPU_geometry_shader_support();
 bool GPU_hdr_support();
+bool GPU_multi_viewport_support();
 bool GPU_stencil_export_support();
+bool GPU_ray_query_support();
+bool GPU_vertex_pipeline_stores_and_atomics_support();
 
 bool GPU_mem_stats_supported();
 void GPU_mem_stats_get(int *r_totalmem, int *r_freemem);

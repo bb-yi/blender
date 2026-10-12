@@ -2,10 +2,14 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #include <fmt/format.h>
 
-#include "BLI_listbase.h"
-#include "BLI_string.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
 
 #include "NOD_geometry_nodes_srna.hh"
 #include "NOD_socket.hh"
@@ -19,6 +23,8 @@
 #include "RNA_access.hh"
 #include "RNA_define.hh"
 #include "RNA_prototypes.hh"
+
+#include "PRF_profile.hh"
 
 namespace blender::nodes {
 
@@ -119,7 +125,7 @@ static StructRNA *create_inputs_srna(const bNodeTree &tree, GeneratedTreeSrnaDat
     }
     const StringRefNull identifier = r_generated.scope.allocator().copy_string(socket->identifier);
     PropertyRNA *prop = RNA_def_pointer_runtime(
-        srna, identifier.c_str(), socket_srna, socket->name, "");
+        srna, identifier.c_str(), socket_srna, socket->name().c_str(), "");
     RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   }
 
@@ -149,8 +155,8 @@ static StructRNA *create_outputs_srna(const bNodeTree &tree, GeneratedTreeSrnaDa
     }
 
     const StringRefNull identifier = allocator.copy_string(output->identifier);
-    const StringRefNull name = allocator.copy_string(output->name);
-    const StringRefNull description = allocator.copy_string(output->description);
+    const StringRefNull name = allocator.copy_string(output->name());
+    const StringRefNull description = allocator.copy_string(output->description());
     const StringRefNull default_value = allocator.copy_string(output->default_attribute_name);
 
     StructRNA *output_srna = RNA_def_struct_ptr(
@@ -200,6 +206,7 @@ static StructRNA *create_panels_srna(const bNodeTree &tree, GeneratedTreeSrnaDat
 std::shared_ptr<GeneratedTreeSrnaData> create_geometry_nodes_rna_for_modifier(
     const bNodeTree &tree)
 {
+  PRF_scope(ProfileCategory::Core);
   auto generated = std::make_unique<GeneratedTreeSrnaData>();
   tree.ensure_interface_cache();
 

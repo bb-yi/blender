@@ -9,7 +9,7 @@
  */
 
 #include "BLI_math_matrix.hh"
-#include "BLI_time.h"
+#include "BLI_time.hh"
 
 #include "DNA_light_types.h"
 #include "DNA_object_types.h"
@@ -320,7 +320,7 @@ void ShadowPunctual::end_sync(Light &light)
         light.type, object_to_world, near, far, face, light.shadow_set_membership);
   }
 
-  light.local().tilemaps_count = tilemaps_needed;
+  light.local.tilemaps_count = tilemaps_needed;
   light.tilemap_index = tilemap_pool.tilemaps_data.size();
   for (ShadowTileMap *tilemap : tilemaps_) {
     /* Add shadow tile-maps grouped by lights to the GPU buffer. */
@@ -351,7 +351,8 @@ void ShadowPunctual::end_sync(Light &light)
 eShadowProjectionType ShadowDirectional::directional_distribution_type_get(const Camera &camera)
 {
   /* TODO(fclem): Enable the cascade projection if the FOV is tiny in perspective mode. */
-  return camera.is_perspective() ? SHADOW_PROJECTION_CLIPMAP : SHADOW_PROJECTION_CASCADE;
+  return (camera.is_perspective() || camera.is_panoramic()) ? SHADOW_PROJECTION_CLIPMAP :
+                                                              SHADOW_PROJECTION_CASCADE;
 }
 
 static int clipmap_level_perspective_bias(const Camera &camera)
@@ -508,8 +509,8 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
   float4x4 object_mat = light.object_to_world;
   object_mat.location() = float3(0.0f);
   light.lod_bias = shadows_.global_lod_bias();
-  light.sun().focus_distance = 0.0f;
-  light.sun().focus_blend = 0.0f;
+  light.sun.focus_distance = 0.0f;
+  light.sun.focus_blend = 0.0f;
 
   /* All tile-maps use the first level size. */
   float half_size = ShadowDirectional::coverage_get(levels_.lod_min) / 2.0f;
@@ -531,9 +532,9 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
   /* Offset in tiles between the first and the last tile-maps. */
   int2 offset_vector = int2(round(farthest_tilemap_center / tile_size));
 
-  light.sun().clipmap_base_offset_neg = int2(0); /* Unused. */
-  light.sun().clipmap_base_offset_pos = (offset_vector * (1 << 16)) /
-                                        max_ii(levels_.size() - 1, 1);
+  light.sun.clipmap_base_offset_neg = int2(0); /* Unused. */
+  light.sun.clipmap_base_offset_pos = (offset_vector * (1 << 16)) /
+                                      max_ii(levels_.size() - 1, 1);
 
   /* \note cascade_level_range starts the range at the unique LOD to apply to all tile-maps. */
   int level = levels_.lod_min;
@@ -542,7 +543,7 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
 
     /* Equal spacing between cascades layers since we want uniform shadow density. */
     int2 level_offset = origin_offset +
-                        shadow_cascade_grid_offset(light.sun().clipmap_base_offset_pos, i);
+                        shadow_cascade_grid_offset(light.sun.clipmap_base_offset_pos, i);
     tilemap->sync_orthographic(object_mat,
                                level_offset,
                                level,
@@ -555,14 +556,14 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
     tilemap->set_updated();
   }
 
-  light.sun().clipmap_origin = float2(origin_offset) * tile_size;
+  light.sun.clipmap_origin = float2(origin_offset) * tile_size;
 
   light.type = LIGHT_SUN_ORTHO;
 
   /* Not really clip-maps, but this is in order to make #light_tilemap_max_get() work and determine
    * the scaling. */
-  light.sun().clipmap_lod_min = levels_.lod_min;
-  light.sun().clipmap_lod_max = levels_.lod_max;
+  light.sun.clipmap_lod_min = levels_.lod_min;
+  light.sun.clipmap_lod_max = levels_.lod_max;
 }
 
 /************************************************************************
@@ -609,8 +610,8 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
   float4x4 object_mat = light.object_to_world;
   object_mat.location() = float3(0.0f);
   light.lod_bias = shadows_.global_lod_bias();
-  light.sun().focus_distance = focus.distance;
-  light.sun().focus_blend = focus_blend;
+  light.sun.focus_distance = focus.distance;
+  light.sun.focus_blend = focus_blend;
 
   for (int lod : IndexRange(levels_.size())) {
     ShadowTileMap *tilemap = tilemaps_[lod];
@@ -652,8 +653,8 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
   }
 
   /* Number of levels is limited to 32 by `clipmap_level_range()` for this reason. */
-  light.sun().clipmap_base_offset_pos = pos_offset;
-  light.sun().clipmap_base_offset_neg = neg_offset;
+  light.sun.clipmap_base_offset_pos = pos_offset;
+  light.sun.clipmap_base_offset_neg = neg_offset;
 
   float tile_size_max = ShadowDirectional::tile_size_get(levels_.lod_max);
   int2 level_offset_max = tilemaps_[levels_.size() - 1]->grid_offset;
@@ -667,10 +668,10 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
   light.object_to_world.y.w = location.y;
   light.object_to_world.z.w = location.z;
   /* Used as origin for the clipmap_base_offset trick. */
-  light.sun().clipmap_origin = float2(level_offset_max * tile_size_max);
+  light.sun.clipmap_origin = float2(level_offset_max * tile_size_max);
 
-  light.sun().clipmap_lod_min = levels_.lod_min;
-  light.sun().clipmap_lod_max = levels_.lod_max;
+  light.sun.clipmap_lod_min = levels_.lod_min;
+  light.sun.clipmap_lod_max = levels_.lod_max;
 }
 
 void ShadowDirectional::release_excess_tilemaps(const Light &light, const Camera &camera)
@@ -991,7 +992,7 @@ void ShadowModule::init()
   /* Create different viewport to support different update region size. The most fitting viewport
    * is then selected during the tilemap finalize stage in `viewport_select`. */
   for (int i = 0; i < multi_viewports_.size(); i++) {
-    /** IMPORTANT: Reflect changes in TBDR tile vertex shader which assumes viewport index 15
+    /* IMPORTANT: Reflect changes in TBDR tile vertex shader which assumes viewport index 15
      * covers the whole framebuffer. */
     int size_in_tile = min_ii(1 << i, SHADOW_TILEMAP_RES);
     multi_viewports_[i][0] = 0;
@@ -1086,9 +1087,10 @@ void ShadowModule::sync_object(const ObjectHandle &ob_handle,
                                bool is_alpha_blend,
                                bool has_transparent_shadows,
                                bool has_time_dependent_shadows,
-                               bool has_view_dependent_shadows)
+                               bool has_view_dependent_shadows,
+                               bool has_offset_shadows)
 {
-  if (is_alpha_blend && !inst_.is_baking()) {
+  if ((is_alpha_blend && !inst_.is_baking()) || has_offset_shadows) {
     tilemap_usage_transparent_ps_->draw(box_batch_, ob_handle.res_handle);
   }
 
@@ -1297,6 +1299,7 @@ void ShadowModule::end_sync()
         /* Clear usage bits. Tag update from the tile-map for sun shadow clip-maps shifting. */
         PassSimple::Sub &sub = pass.sub("Init");
         sub.shader_set(inst_.shaders.static_shader_get(SHADOW_TILEMAP_INIT));
+        sub.push_constant("reset_used_flag", &run_tagging_);
         sub.bind_ssbo("tilemaps_buf", tilemap_pool.tilemaps_data);
         sub.bind_ssbo("tilemaps_clip_buf", tilemap_pool.tilemaps_clip);
         sub.bind_ssbo("tiles_buf", tilemap_pool.tiles_data);
@@ -1440,7 +1443,7 @@ void ShadowModule::end_sync()
         sub.bind_ssbo("pages_infos_buf", pages_infos_data_);
         sub.bind_ssbo("pages_free_buf", pages_free_data_);
         sub.bind_ssbo("pages_cached_buf", pages_cached_data_);
-        sub.bind_ssbo("statistics_buf", statistics_buf_.current());
+        sub.bind_ssbo("statistics_buf", &statistics_buf_.current());
         sub.bind_ssbo("clear_dispatch_buf", clear_dispatch_buf_);
         sub.bind_ssbo("tile_draw_buf", tile_draw_buf_);
         sub.dispatch(int3(1, 1, 1));
@@ -1452,7 +1455,7 @@ void ShadowModule::end_sync()
         sub.shader_set(inst_.shaders.static_shader_get(SHADOW_PAGE_ALLOCATE));
         sub.bind_ssbo("tilemaps_buf", tilemap_pool.tilemaps_data);
         sub.bind_ssbo("tiles_buf", tilemap_pool.tiles_data);
-        sub.bind_ssbo("statistics_buf", statistics_buf_.current());
+        sub.bind_ssbo("statistics_buf", &statistics_buf_.current());
         sub.bind_ssbo("pages_infos_buf", pages_infos_data_);
         sub.bind_ssbo("pages_free_buf", pages_free_data_);
         sub.bind_ssbo("pages_cached_buf", pages_cached_data_);
@@ -1471,6 +1474,7 @@ void ShadowModule::end_sync()
         sub.bind_ssbo("render_view_buf", &render_view_buf_);
         sub.bind_ssbo("tilemaps_clip_buf", &tilemap_pool.tilemaps_clip);
         sub.bind_image("tilemaps_img", &tilemap_pool.tilemap_tx);
+        sub.push_constant("use_multi_viewport", GPU_multi_viewport_support());
         sub.dispatch(int3(1, 1, tilemap_pool.tilemaps_data.size()));
         sub.barrier(GPU_BARRIER_SHADER_STORAGE | GPU_BARRIER_UNIFORM | GPU_BARRIER_TEXTURE_FETCH |
                     GPU_BARRIER_SHADER_IMAGE_ACCESS);
@@ -1667,23 +1671,6 @@ void ShadowModule::debug_end_sync()
   }
 }
 
-float ShadowModule::screen_pixel_radius(const float4x4 &wininv,
-                                        bool is_perspective,
-                                        const int2 &extent)
-{
-  float min_dim = float(min_ii(extent.x, extent.y));
-  float3 p0 = float3(-1.0f, -1.0f, 0.0f);
-  float3 p1 = float3(float2(min_dim / extent) * 2.0f - 1.0f, 0.0f);
-  p0 = math::project_point(wininv, p0);
-  p1 = math::project_point(wininv, p1);
-  /* Compute radius at unit plane from the camera. This is NOT the perspective division. */
-  if (is_perspective) {
-    p0 = p0 / p0.z;
-    p1 = p1 / p1.z;
-  }
-  return math::distance(p0, p1) / min_dim;
-}
-
 bool ShadowModule::shadow_update_finished(int loop_count)
 {
   if (loop_count >= (SHADOW_MAX_TILEMAP * SHADOW_TILEMAP_LOD) / SHADOW_VIEW_MAX) {
@@ -1700,27 +1687,40 @@ bool ShadowModule::shadow_update_finished(int loop_count)
   }
 
   int max_updated_view_count = tilemap_pool.tilemaps_data.size() * SHADOW_TILEMAP_LOD;
-  if (max_updated_view_count <= SHADOW_VIEW_MAX) {
+  if (max_updated_view_count <= SHADOW_VIEW_MAX * loop_count) {
     /* There is enough shadow views to cover all tile-map updates.
      * No read-back needed as it is guaranteed that all of them will be updated. */
     return true;
   }
 
-  /* Read back and check if there is still tile-map to update. */
-  statistics_buf_.current().async_flush_to_host();
-  statistics_buf_.current().read();
-  ShadowStatistics stats = statistics_buf_.current();
-
-  if (stats.page_used_count > shadow_page_len_) {
-    inst_.info_append_i18n(
-        "Error: Shadow buffer full, may result in missing shadows and lower "
-        "performance. ({} / {})",
-        stats.page_used_count,
-        shadow_page_len_);
+  if (loop_count == 1) {
+    /* Do not read-back for only 1 loop iter. It's cheaper to just resubmit. */
+    return false;
   }
 
-  /* Rendering is finished if we rendered all the remaining pages. */
-  return stats.view_needed_count <= SHADOW_VIEW_MAX;
+  if (loop_count == 2) {
+    /* Read back and check if there is still tile-map to update. */
+    /* TODO: Only the first loop should call `async_flush_to_host()`, but we need to fix the VK and
+     * Metal implementations first. */
+    statistics_buf_.current().async_flush_to_host();
+    statistics_buf_.current().read();
+    ShadowStatistics stats = statistics_buf_.current();
+
+    if (stats.page_used_count > shadow_page_len_) {
+      inst_.info_append_i18n(
+          "Error: Shadow buffer full, may result in missing shadows and lower "
+          "performance. ({} / {})",
+          stats.page_used_count,
+          shadow_page_len_);
+    }
+
+    needed_views_ = stats.view_needed_count;
+  }
+
+  /* Subtract the amount rendered during this iteration. */
+  needed_views_ -= SHADOW_VIEW_MAX;
+  /* We are finished if there is no view left to render. */
+  return needed_views_ <= 0;
 }
 
 int ShadowModule::max_view_per_tilemap()
@@ -1792,7 +1792,7 @@ void ShadowModule::ShadowView::compute_visibility(ObjectBoundsBuf &bounds,
 void ShadowModule::set_view(View &view, int2 extent, const TelemetryShadowContext context)
 {
   active_shadow_context_ = context;
-  data_.film_pixel_radius = screen_pixel_radius(view.wininv(), view.is_persp(), extent);
+  data_.film_pixel_radius = view.screen_pixel_radius(extent);
 }
 
 void ShadowModule::render(View &view, int2 extent)
@@ -1843,6 +1843,7 @@ void ShadowModule::render(View &view, int2 extent)
 
   inst_.hiz_buffer.update();
 
+  needed_views_ = 0;
   int loop_count = 0;
   do {
     GPU_debug_group_begin("Shadow");
@@ -1851,12 +1852,15 @@ void ShadowModule::render(View &view, int2 extent)
         ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                                TelemetryStageId::ShadowTilemapSetup);
         GPU_uniformbuf_clear_to_zero(shadow_multi_view_.matrices_ubo_get());
+      GPU_storagebuf_clear(render_map_buf_, 0xFFFFFFFFu);
+
+      run_tagging_ = (loop_count == 0);
         inst_.manager->submit(tilemap_setup_ps_, view);
       }
       if (loop_count == 0) {
         if (assign_if_different(update_casters_, false)) {
           /* Run caster update only once. */
-          /* TODO(fclem): There is an optimization opportunity here where we can
+          /* TODO(fclem): There is an  optimization opportunity here where we can
            * test casters only against the static tile-maps instead of all of them. */
           ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                                  TelemetryStageId::ShadowCasterUpdate);
@@ -1869,7 +1873,7 @@ void ShadowModule::render(View &view, int2 extent)
           inst_.manager->submit(update_propagate_ps_, view);
         }
       }
-      {
+      if (loop_count == 0) {
         ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                                TelemetryStageId::ShadowUsageMarking);
         if (inst_.is_color_bake) {
@@ -1924,8 +1928,18 @@ void ShadowModule::render(View &view, int2 extent)
           GPU_framebuffer_bind(render_fb_);
         }
 
-        GPU_framebuffer_multi_viewports_set(render_fb_,
-                                            reinterpret_cast<int (*)[4]>(multi_viewports_.data()));
+        if (GPU_multi_viewport_support()) {
+          GPU_framebuffer_multi_viewports_set(
+              render_fb_, reinterpret_cast<int (*)[4]>(multi_viewports_.data()));
+        }
+        else {
+          const int4 &largest_viewport = multi_viewports_[SHADOW_TILEMAP_LOD];
+          GPU_framebuffer_viewport_set(render_fb_,
+                                       largest_viewport.x,
+                                       largest_viewport.y,
+                                       largest_viewport.z,
+                                       largest_viewport.w);
+        }
 
         inst_.pipelines.shadow.render(shadow_multi_view_);
 

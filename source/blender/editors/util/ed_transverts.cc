@@ -18,8 +18,8 @@
 #include "DNA_pointcloud_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_armature.hh"
 #include "BKE_context.hh"
@@ -53,13 +53,13 @@ void ED_transverts_update_obedit(TransVertStore *tvs, Object *obedit)
   DEG_id_tag_update(obedit->data, ID_RECALC_GEOMETRY);
 
   if (obedit->type == OB_MESH) {
-    BMEditMesh *em = BKE_editmesh_from_object(obedit);
-    BM_mesh_normals_update(em->bm);
+    BMesh *bm = BKE_editmesh_bmesh_get_for_write(obedit);
+    BM_mesh_normals_update(bm);
   }
   else if (ELEM(obedit->type, OB_CURVES_LEGACY, OB_SURF)) {
     Curve *cu = id_cast<Curve *>(obedit->data);
     ListBaseT<Nurb> *nurbs = BKE_curve_editNurbs_get(cu);
-    Nurb *nu = static_cast<Nurb *>(nurbs->first);
+    Nurb *nu = nurbs->first();
 
     /* #ED_transverts_create_from_obedit fills a single contiguous array spanning all nurbs,
      * so advance over every nurb's verts instead of resetting per nurb. */
@@ -192,9 +192,9 @@ void ED_transverts_update_obedit(TransVertStore *tvs, Object *obedit)
 static void set_mapped_co(void *vuserdata, int index, const float co[3], const float /*no*/[3])
 {
   void **userdata = static_cast<void **>(vuserdata);
-  BMEditMesh *em = static_cast<BMEditMesh *>(userdata[0]);
+  BMesh *bm = static_cast<BMesh *>(userdata[0]);
   TransVert *tv = static_cast<TransVert *>(userdata[1]);
-  BMVert *eve = BM_vert_at_index(em->bm, index);
+  BMVert *eve = BM_vert_at_index(bm, index);
 
   if (BM_elem_index_get(eve) != TM_INDEX_SKIP) {
     tv = &tv[BM_elem_index_get(eve)];
@@ -246,9 +246,9 @@ void ED_transverts_create_from_obedit(TransVertStore *tvs, const Object *obedit,
     const Object *object_orig = DEG_get_original(obedit);
     const Mesh &mesh = *id_cast<Mesh *>(object_orig->data);
     BMEditMesh *em = mesh.runtime->edit_mesh.get();
-    BMesh *bm = em->bm;
+    BMesh *bm = const_cast<BMesh *>(BKE_editmesh_bmesh_get(obedit));
     BMIter iter;
-    void *userdata[2] = {em, nullptr};
+    void *userdata[2] = {bm, nullptr};
     // int proptrans = 0; /*UNUSED*/
 
     /* abuses vertex index all over, set, just set dirty here,
@@ -414,7 +414,7 @@ void ED_transverts_create_from_obedit(TransVertStore *tvs, const Object *obedit,
     }
     tv = tvs->transverts = MEM_new_array_zeroed<TransVert>(totmalloc, __func__);
 
-    nu = static_cast<Nurb *>(nurbs->first);
+    nu = nurbs->first();
     while (nu) {
       if (nu->type == CU_BEZIER) {
         a = nu->pntsu;
@@ -494,7 +494,7 @@ void ED_transverts_create_from_obedit(TransVertStore *tvs, const Object *obedit,
 
     tv = tvs->transverts = MEM_new_array_zeroed<TransVert>(totmalloc, __func__);
 
-    ml = static_cast<MetaElem *>(mb->editelems->first);
+    ml = mb->editelems->first();
     while (ml) {
       if (ml->flag & SELECT) {
         tv->loc = &ml->x;

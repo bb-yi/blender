@@ -21,14 +21,14 @@
 #include "DNA_userdef_types.h"
 #include "DNA_windowmanager_types.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_memory_cache.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_task.h"
-#include "BLI_threads.h"
-#include "BLI_timer.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_task_c.hh"
+#include "BLI_threads.hh"
+#include "BLI_timer.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLO_undofile.hh"
 #include "BLO_writefile.hh"
@@ -40,12 +40,14 @@
 #include "BKE_global.hh"
 #include "BKE_icons.hh"
 #include "BKE_image.hh"
+#include "BKE_image_gpu.hh"
 #include "BKE_keyconfig.h"
 #include "BKE_lib_remap.hh"
 #include "BKE_main.hh"
 #include "BKE_mball_tessellate.hh"
 #include "BKE_preferences.h"
 #include "BKE_preview_image.hh"
+#include "BKE_recents.hh"
 #include "BKE_scene.hh"
 #include "BKE_screen.hh"
 #include "BKE_sound.hh"
@@ -145,12 +147,20 @@ void WM_init_state_start_with_console_set(bool value)
  */
 static bool gpu_is_init = false;
 
-void WM_init_gpu()
+void WM_init_gpu_backend()
+{
+  GPU_backend_type_selection_detect();
+}
+
+void WM_init_gpu_offscreen()
 {
   /* Must be called only once. */
   BLI_assert(gpu_is_init == false);
 
   if (G.background) {
+    /* Init on demand for background mode, already done for foreground mode. */
+    WM_init_gpu_backend();
+
     /* Ghost is still not initialized elsewhere in background mode. */
     wm_ghost_init_background();
   }
@@ -181,7 +191,7 @@ static void sound_jack_sync_callback(Main *bmain, int mode, double time)
     return;
   }
 
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
 
   for (wmWindow &window : wm->windows) {
     Scene *scene = WM_window_get_active_scene(&window);
@@ -197,6 +207,28 @@ static void sound_jack_sync_callback(Main *bmain, int mode, double time)
     BKE_sound_jack_scene_update(scene_eval, mode, time);
   }
 }
+
+/* Reset the per-frame tracking of on-demand GPU pipeline compilation. Registered after Python is
+ * started so it runs after the `frame_change_post` Python handlers, letting a poll of
+ * `bpy.app.is_job_running("SHADER_COMPILATION")` reflect the pipelines compiled during a frame. */
+static void wm_frame_change_post_gpu_callback(Main * /*bmain*/,
+                                              PointerRNA ** /*pointers*/,
+                                              const int /*pointers_num*/,
+                                              void * /*arg*/)
+{
+  if (GPU_is_init()) {
+    GPU_shader_compiler_reset_frame_pipeline_tracking();
+  }
+}
+
+static bCallbackFuncStore wm_frame_change_post_gpu_callback_funcstore = {
+    /*next*/ nullptr,
+    /*prev*/ nullptr,
+    /*func*/ wm_frame_change_post_gpu_callback,
+    /*arg*/ nullptr,
+    /*alloc*/ 0,
+};
+static bool wm_frame_change_post_gpu_callback_registered = false;
 
 void WM_init(bContext *C, int argc, const char **argv)
 {
@@ -232,6 +264,10 @@ void WM_init(bContext *C, int argc, const char **argv)
   ED_node_init_butfuncs();
 
   BLF_init();
+
+  if (!G.background) {
+    recents::init_async();
+  }
 
   BLT_lang_init();
   /* Must call first before doing any `.blend` file reading,
@@ -311,7 +347,7 @@ void WM_init(bContext *C, int argc, const char **argv)
     /* Sets 3D mouse dead-zone. */
     WM_ndof_deadzone_set(U.ndof_deadzone);
 #endif
-    WM_init_gpu();
+    WM_init_gpu_offscreen();
 
     if (!WM_platform_support_perform_checks()) {
       WM_exit(C, -1);
@@ -333,6 +369,10 @@ void WM_init(bContext *C, int argc, const char **argv)
 #else
   UNUSED_VARS(argc, argv);
 #endif
+
+  /* Registered after Python so it runs after the `frame_change_post` Python handlers. */
+  BKE_callback_add(&wm_frame_change_post_gpu_callback_funcstore, BKE_CB_EVT_FRAME_CHANGE_POST);
+  wm_frame_change_post_gpu_callback_registered = true;
 
   if (!G.background) {
     GHOST_ISystem *ghost_system = GHOST_ISystem::getSystem();
@@ -367,7 +407,7 @@ void WM_init(bContext *C, int argc, const char **argv)
   wm_init_scripts_extensions_once(C);
 
   WM_keyconfig_update_postpone_end();
-  WM_keyconfig_update_on_startup(static_cast<wmWindowManager *>(G_MAIN->wm.first));
+  WM_keyconfig_update_on_startup(G_MAIN->wm.first());
 
   wm_homefile_read_post(C, params_file_read_post);
 }
@@ -407,12 +447,12 @@ void WM_init_splash(bContext *C)
 {
   wmWindowManager *wm = CTX_wm_manager(C);
   /* NOTE(@ideasman42): this should practically never happen. */
-  if (UNLIKELY(wm->windows.is_empty())) {
+  if (wm->windows.is_empty()) [[unlikely]] {
     return;
   }
 
   wmWindow *prevwin = CTX_wm_window(C);
-  CTX_wm_window_set(C, static_cast<wmWindow *>(wm->windows.first));
+  CTX_wm_window_set(C, wm->windows.first());
   WM_operator_name_call(C, "WM_OT_splash", wm::OpCallContext::InvokeDefault, nullptr, nullptr);
   CTX_wm_window_set(C, prevwin);
 }
@@ -465,7 +505,7 @@ void wm_exit_schedule_delayed(const bContext *C)
   }
   else {
     /* Unlikely but possible, in this case just ensure exit runs as it's not interactive. */
-    wmWindowManager *wm = static_cast<wmWindowManager *>(G_MAIN->wm.first);
+    wmWindowManager *wm = G_MAIN->wm.first();
     for (wmWindow &win : wm->windows) {
       wm_exit_schedule_delayed_for_window(C, win);
     }
@@ -487,6 +527,12 @@ void WM_exit_ex(bContext *C, const bool do_python_exit, const bool do_user_exit_
   if (C) {
     /* Run `exit_pre` Python handlers. */
     BKE_callback_exec_boolean(CTX_data_main(C), do_user_exit_actions, BKE_CB_EVT_EXIT_PRE);
+  }
+
+  if (wm_frame_change_post_gpu_callback_registered) {
+    BKE_callback_remove(&wm_frame_change_post_gpu_callback_funcstore,
+                        BKE_CB_EVT_FRAME_CHANGE_POST);
+    wm_frame_change_post_gpu_callback_registered = false;
   }
 
   /* First wrap up running stuff, we assume only the active WM is running. */
@@ -611,10 +657,6 @@ void WM_exit_ex(bContext *C, const bool do_python_exit, const bool do_user_exit_
 
   bke::subdiv::exit();
 
-  if (gpu_is_init) {
-    BKE_image_free_unused_gpu_textures();
-  }
-
   /* Frees the entire library (#G_MAIN) and space-types. */
   BKE_blender_free();
 
@@ -644,6 +686,10 @@ void WM_exit_ex(bContext *C, const bool do_python_exit, const bool do_user_exit_
   WM_uilisttype_free();
 
   BLF_exit();
+
+  if (!G.background && do_user_exit_actions) {
+    recents::save();
+  }
 
   BLT_lang_free();
 
@@ -675,6 +721,7 @@ void WM_exit_ex(bContext *C, const bool do_python_exit, const bool do_user_exit_
     DRW_gpu_context_enable_ex(false);
     ui::exit();
     GPU_shader_cache_dir_clear_old();
+    BKE_image_free_gpu_fallback();
     GPU_exit();
     DRW_gpu_context_disable_ex(false);
     DRW_gpu_context_destroy();
@@ -692,8 +739,6 @@ void WM_exit_ex(bContext *C, const bool do_python_exit, const bool do_user_exit_
   if (C) {
     CTX_free(C);
   }
-
-  DNA_sdna_current_free();
 
   BLI_threadapi_exit();
   BLI_task_scheduler_exit();

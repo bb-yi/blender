@@ -36,11 +36,6 @@ struct PackParameters {
   [[compilation_constant]] bool gbuffer_simple_layout;
 };
 
-/* WORKAROUND: Arrays cannot be sized using compilation_constant. */
-#ifdef SRT_CONSTANT_gbuffer_layer_max
-#  define GBUFFER_LAYER_MAX SRT_CONSTANT_gbuffer_layer_max
-#endif
-
 /* -------------------------------------------------------------------- */
 /** \name G-buffer Write
  * \{ */
@@ -48,14 +43,14 @@ struct PackParameters {
 using ClosurePacking = gbuffer::ClosurePacking;
 using Header = gbuffer::Header;
 
-ClosurePacking pack_closure([[resource_table]] const PackParameters &srt, ClosureUndetermined cl)
+ClosurePacking pack_closure(const PackParameters &srt, ClosureUndetermined cl)
 {
   ClosurePacking cl_packed;
   cl_packed.mode = gbuffer::closure_type_to_mode(
       cl.type, gbuffer::color_is_grayscale(cl.color) && !closure_is_anisotropic(cl) &&
                    !closure_is_npr_reflection(cl));
 
-  if (cl.weight <= CLOSURE_WEIGHT_CUTOFF) {
+  if (closure_is_empty(cl)) {
     cl_packed.mode = GBUF_NONE;
   }
   /* Common to all configs. */
@@ -124,8 +119,8 @@ ClosurePacking pack_closure([[resource_table]] const PackParameters &srt, Closur
 
 /* Data laid-out as stored in the gbuffer. */
 struct Packed {
-  float4 closure[GBUFFER_LAYER_MAX * 2];
-  float2 normal[GBUFFER_LAYER_MAX];
+  [[capacity(gbuffer_layer_max * 2)]] float4 closure[GBUFFER_LAYER_MAX * 2];
+  [[capacity(gbuffer_layer_max)]] float2 normal[GBUFFER_LAYER_MAX];
   float2 additional_info;
   uint header;
   uint object_id;
@@ -159,7 +154,7 @@ float4 closure_data_dither_flush_to_zero(float4 data, float3 noise)
 float3 closure_dither_noise(float2 texel, uint layer_id, float3 offset)
 {
   float seed = float(layer_id) * 3.0f;
-  return interleaved_gradient_noise(texel, float3(seed, seed + 1.0f, seed + 2.0f), offset);
+  return random::interleaved_gradient_3d(texel, float3(seed, seed + 1.0f, seed + 2.0f), offset);
 }
 
 float4 closure_data_layer_dither_round_to_nearest(float4 data,
@@ -181,14 +176,14 @@ float4 closure_data_layer_dither_flush_to_zero(float4 data,
 /* Transient data used during packing. */
 struct Packer {
   /* Packed GBuffer data in layer indexing. */
-  ClosurePacking closures[GBUFFER_LAYER_MAX];
+  [[capacity(gbuffer_layer_max)]] ClosurePacking closures[GBUFFER_LAYER_MAX];
   /* Additional info to be stored inside the normal stack. */
   float2 additional_info;
   /* Header containing which closures are encoded and which normals are used. */
   Header header;
 
   /* Swap closures to avoid gap in data. Closures are then in layer order. */
-  void closures_to_layer_order([[resource_table]] const PackParameters &srt)
+  void closures_to_layer_order(const PackParameters &srt)
   {
 #if 0 /* NOTE: 4 closures mode are not yet supported but might be in the future. */
     if (srt.gbuffer_layer_max > 3) [[static_branch]] {
@@ -229,7 +224,7 @@ struct Packer {
   }
 
   /* Needs to happen in layer order. */
-  void reuse_tangent_spaces([[resource_table]] const PackParameters &srt)
+  void reuse_tangent_spaces(const PackParameters &srt)
   {
     /* Assume that the header was cleared to 0 and all layers point to the 1st tangent (0 id). */
     /* Since this function runs in layer ordering (after compaction) each layer (if non-empty) can
@@ -276,7 +271,7 @@ struct Packer {
     return UsedLayerFlag(flag);
   }
 
-  Packed result_get([[resource_table]] const PackParameters &srt)
+  Packed result_get(const PackParameters &srt)
   {
     Packed data;
     /* Note: Normals are not interleaved or packed together.
@@ -343,7 +338,7 @@ struct Packer {
 };
 
 struct InputClosures {
-  ClosureUndetermined closure[GBUFFER_LAYER_MAX];
+  [[capacity(gbuffer_layer_max)]] ClosureUndetermined closure[GBUFFER_LAYER_MAX];
 };
 
 /**
@@ -354,7 +349,7 @@ struct InputClosures {
  * - use_object_id : if surface uses a dedicated object id layer. Should only be on if needed.
  * - use_surface_depth: true if the additional-data layer stores the original surface depth.
  */
-Packed pack([[resource_table]] const PackParameters &srt,
+Packed pack(const PackParameters &srt,
             InputClosures cl_data,
             float3 Ng,
             packed_float3 surface_N,

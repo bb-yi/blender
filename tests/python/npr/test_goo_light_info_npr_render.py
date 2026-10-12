@@ -63,7 +63,7 @@ def make_material(light_object):
     npr_nodes = npr_tree.nodes
     npr_links = npr_tree.links
 
-    light_info = npr_nodes.new("ShaderNodeLightInfo")
+    light_info = npr_nodes.new("ShaderNodeNPRLightInfo")
     light_info.light_object = light_object
 
     npr_output = npr_nodes.new("ShaderNodeNPR_Output")

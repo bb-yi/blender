@@ -25,7 +25,7 @@
 #include "BLI_map.hh"
 #include "BLI_offset_indices.hh"
 #include "BLI_set.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_vector.hh"
 #include "BLI_vector_set.hh"
 
@@ -1941,12 +1941,12 @@ void eevee_bake(RenderEngine *engine,
   SNPRINTF(layer_name, "Eevee Color Bake %d", engine->bake.image_id);
 
   RenderResult *result = RE_engine_begin_result(engine, 0, 0, width, height, layer_name, nullptr);
-  if (result == nullptr || result->layers.first == nullptr) {
+  if (result == nullptr || result->layers.is_empty()) {
     eevee_bake_report_error(engine, "Eevee Color Bake failed to allocate render result");
     return;
   }
 
-  RenderLayer *layer = static_cast<RenderLayer *>(result->layers.first);
+  RenderLayer *layer = result->layers.first();
   RenderPass *combined_pass = RE_pass_find_by_name(layer, RE_PASSNAME_COMBINED, "");
   if (combined_pass == nullptr || combined_pass->ibuf == nullptr ||
       combined_pass->ibuf->float_data_for_write() == nullptr)

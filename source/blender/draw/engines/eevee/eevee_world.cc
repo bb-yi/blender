@@ -68,11 +68,11 @@ void World::sunlight_clear()
   for (LightData &sun : sunlight) {
     sun = {};
     sun.object_to_world = float4x4::identity();
-    sun.power = float4(0.0f);
+    sun.power_factor = float4(0.0f);
     sun.color = float3(0.0f);
     sun.type = LIGHT_SUN;
     sun.tilemap_index = LIGHT_NO_SHADOW;
-    sun.sun().direction = float3(0.0f, 0.0f, 1.0f);
+    sun.sun.direction = float3(0.0f, 0.0f, 1.0f);
   }
   sunlight.push_update();
 }

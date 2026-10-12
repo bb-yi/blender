@@ -6,7 +6,7 @@
 #include <cstdlib>
 
 #include "BKE_scene_runtime.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "DEG_depsgraph_query.hh"
 #include "DNA_camera_types.h"
 #include "DNA_layer_types.h"

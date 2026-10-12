@@ -14,7 +14,7 @@
 
 #include "BLI_hash_mm2a.hh"
 #include "BLI_set.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_string_ref.hh"
 
 #include "BLO_read_write.hh"

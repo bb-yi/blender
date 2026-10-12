@@ -21,12 +21,12 @@
 #include "DNA_sdna_type_ids.hh"
 #include "DNA_texture_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_rotation.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -124,22 +124,16 @@ static void linestyle_free_data(ID *id)
     linestyle->nodetree = nullptr;
   }
 
-  while ((linestyle_modifier = static_cast<LineStyleModifier *>(linestyle->color_modifiers.first)))
-  {
+  while ((linestyle_modifier = linestyle->color_modifiers.first())) {
     BKE_linestyle_color_modifier_remove(linestyle, linestyle_modifier);
   }
-  while ((linestyle_modifier = static_cast<LineStyleModifier *>(linestyle->alpha_modifiers.first)))
-  {
+  while ((linestyle_modifier = linestyle->alpha_modifiers.first())) {
     BKE_linestyle_alpha_modifier_remove(linestyle, linestyle_modifier);
   }
-  while ((
-      linestyle_modifier = static_cast<LineStyleModifier *>(linestyle->thickness_modifiers.first)))
-  {
+  while ((linestyle_modifier = linestyle->thickness_modifiers.first())) {
     BKE_linestyle_thickness_modifier_remove(linestyle, linestyle_modifier);
   }
-  while (
-      (linestyle_modifier = static_cast<LineStyleModifier *>(linestyle->geometry_modifiers.first)))
-  {
+  while ((linestyle_modifier = linestyle->geometry_modifiers.first())) {
     BKE_linestyle_geometry_modifier_remove(linestyle, linestyle_modifier);
   }
 }
@@ -488,10 +482,9 @@ static void linestyle_blend_write(BlendWriter *writer, ID *id, const void *id_ad
   }
   if (linestyle->nodetree) {
     BLO_Write_IDBuffer temp_embedded_id_buffer{linestyle->nodetree->id, writer};
-    writer->write_struct_at_address_cast<bNodeTree>(linestyle->nodetree,
-                                                    temp_embedded_id_buffer.get());
-    bke::node_tree_blend_write(writer,
-                               reinterpret_cast<bNodeTree *>(temp_embedded_id_buffer.get()));
+    bNodeTree *temp_ntree = reinterpret_cast<bNodeTree *>(temp_embedded_id_buffer.get());
+    writer->write_embedded_id_struct(linestyle->nodetree, temp_ntree);
+    bke::node_tree_blend_write(writer, temp_ntree);
   }
 }
 
@@ -723,6 +716,7 @@ IDTypeInfo IDType_ID_LS = {
     .foreach_cache = nullptr,
     .foreach_path = nullptr,
     .foreach_working_space_color = linestyle_foreach_working_space_color,
+    .foreach_asset_weak_reference = nullptr,
     .owner_pointer_get = nullptr,
 
     .blend_write = linestyle_blend_write,
@@ -832,7 +826,7 @@ LineStyleModifier *BKE_linestyle_color_modifier_add(FreestyleLineStyle *linestyl
   LineStyleModifier *m;
 
   m = alloc_color_modifier(name, type);
-  if (UNLIKELY(m == nullptr)) {
+  if (m == nullptr) [[unlikely]] {
     return nullptr;
   }
   m->blend = LS_VALUE_BLEND;
@@ -898,7 +892,7 @@ LineStyleModifier *BKE_linestyle_color_modifier_copy(FreestyleLineStyle *linesty
   LineStyleModifier *new_m;
 
   new_m = alloc_color_modifier(m->name, m->type);
-  if (UNLIKELY(new_m == nullptr)) {
+  if (new_m == nullptr) [[unlikely]] {
     return nullptr;
   }
   new_m->influence = m->influence;

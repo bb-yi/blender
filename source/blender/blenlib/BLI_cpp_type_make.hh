@@ -13,7 +13,7 @@
 #include "BLI_cpp_type.hh"
 #include "BLI_index_mask.hh"
 #include "BLI_unique_hash.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 namespace blender {
 
@@ -471,12 +471,21 @@ CPPType::CPPType(TypeTag<T> /*type*/,
   this->is_copy_assignable = copy_assign_ != nullptr;
   this->is_move_assignable = move_assign_ != nullptr;
 
+  if constexpr (requires { typename T::base_type; }) {
+    this->base_type = CPPType::get_pre_register<typename T::base_type>();
+  }
+  if constexpr (requires { typename T::generic_type; }) {
+    this->generic_type = CPPType::get_pre_register<typename T::generic_type>();
+  }
   this->type_index = type_index_counter++;
 }
 
 namespace detail {
 template<typename T, CPPTypeFlags FLAGS> inline void register_cpp_type(const StringRef type_name)
 {
+  /* Check that it was not registered before already. */
+  BLI_assert(!is_cpp_type_registered<T>);
+  is_cpp_type_registered<T> = true;
   static CPPType *cpp_type = new (detail::cpp_type_impl<T>.ptr())
       CPPType(TypeTag<T>(), TypeForValue<CPPTypeFlags, FLAGS>(), type_name);
 

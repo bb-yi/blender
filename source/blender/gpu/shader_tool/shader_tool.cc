@@ -40,7 +40,7 @@ static metadata::Source scan_external_symbols(const std::vector<std::string> &fi
                                               const std::string &file_name)
 {
   Language language = language_from_filename(file_name);
-  SourceProcessor processor(file_buffer, file_name, language);
+  SourceProcessor processor(file_buffer, file_name, language, file_list);
 
   metadata::Source include_data = processor.parse_include_and_symbols();
 
@@ -181,6 +181,24 @@ int main(int argc, char **argv)
     language = Language::BLENDER_GLSL;
   }
 
+  if (language == Language::BSL) {
+    /* Until the new BSL compiler is fully working, use the legacy one. */
+    if (/* Add non-ported files here. */
+        filename.ends_with("gpu_shader_material_radial_tiling.bsl.hh") ||
+        filename.ends_with("gpu_shader_material_tex_voronoi.bsl.hh") ||
+        /* Need new compiler. */
+        (filename.find("gpu/shaders/") == std::string::npos &&
+         filename.find("draw/intern/shaders/") == std::string::npos &&
+         filename.find("workbench/shaders/") == std::string::npos &&
+         filename.find("overlay/shaders/") == std::string::npos &&
+         filename.find("select/shaders/") == std::string::npos &&
+         filename.find("eevee/shaders/") == std::string::npos &&
+         filename.find("gpencil/shaders/") == std::string::npos))
+    {
+      language = Language::BLENDER_GLSL;
+    }
+  }
+
   metadata::Source external_symbols;
   std::vector<std::string> visited_files{input_file_name};
   if (language == Language::BLENDER_GLSL) {
@@ -203,13 +221,12 @@ int main(int argc, char **argv)
   }
   dep_file << "\n";
 
-  SourceProcessor processor(buffer.str(), input_file_name, language);
+  SourceProcessor processor(buffer.str(), input_file_name, language, file_list);
 
   auto [result, metadata, error] = processor.convert(external_symbols);
 
   output_file << result;
 
-  /* TODO(fclem): Don't use regex for that. */
   size_t last_slash = filename.find_last_of('/');
   std::string name = (last_slash == std::string::npos) ? filename :
                                                          filename.substr(last_slash + 1);

@@ -6,7 +6,7 @@
  * \ingroup eevee
  */
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "DEG_depsgraph_query.hh"
 
@@ -110,7 +110,7 @@ void RenderTextureModule::begin_sync()
 
   int slot_index = 0;
   for (SceneRenderTexture *render_texture = static_cast<SceneRenderTexture *>(
-           inst_.scene->eevee.render_textures.first);
+           inst_.scene->eevee.render_textures.first_);
        render_texture != nullptr;
        render_texture = render_texture->next)
   {

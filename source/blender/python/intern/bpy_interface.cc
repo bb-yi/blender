@@ -22,12 +22,12 @@
 #include "CLG_log.h"
 
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_threads.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_threads.hh"
+#include "BLI_utildefines.hh"
 #ifdef WITH_PYTHON_MODULE
-#  include "BLI_string.h"
+#  include "BLI_string.hh"
 #endif
 
 #include "BLT_translation.hh"
@@ -93,7 +93,7 @@ static bool py_use_user_env = false;
 // #define TIME_PY_RUN /* Simple python tests. prints on exit. */
 
 #ifdef TIME_PY_RUN
-#  include "BLI_time.h"
+#  include "BLI_time.hh"
 static int bpy_timer_count = 0;
 /** Time since python starts. */
 static double bpy_timer;
@@ -204,7 +204,7 @@ void bpy_context_clear(bContext *C, const PyGILState_STATE *gilstate)
 
 static void bpy_context_end(bContext *C)
 {
-  if (UNLIKELY(C == nullptr)) {
+  if (C == nullptr) [[unlikely]] {
     return;
   }
   CTX_wm_operator_poll_msg_clear(C);
@@ -363,7 +363,7 @@ static _inittab bpy_internal_modules[] = {
  */
 static void pystatus_exit_on_error(const PyStatus &status)
 {
-  if (UNLIKELY(PyStatus_Exception(status))) {
+  if (PyStatus_Exception(status)) [[unlikely]] {
     fputs("Internal error initializing Python!\n", stderr);
     /* This calls `exit`. */
     Py_ExitStatusException(status);
@@ -826,9 +826,7 @@ void BPY_modules_load_user(bContext *C)
 
   bpy_context_set(C, &gilstate);
 
-  for (text = static_cast<Text *>(bmain->texts.first); text;
-       text = static_cast<Text *>(text->id.next))
-  {
+  for (text = bmain->texts.first(); text; text = static_cast<Text *>(text->id.next)) {
     if (text->flags & TXT_ISSCRIPT) {
       if (!(G.f & G_FLAG_SCRIPT_AUTOEXEC)) {
         if (!(G.f & G_FLAG_SCRIPT_AUTOEXEC_FAIL_QUIET)) {
@@ -1168,6 +1166,16 @@ PyMODINIT_FUNC PyInit_bpy()
     return nullptr; /* The error has been set. */
   }
 
+  /* Assign dummy type. */
+  dealloc_obj_Type.tp_name = "dealloc_obj";
+  dealloc_obj_Type.tp_basicsize = sizeof(dealloc_obj);
+  dealloc_obj_Type.tp_dealloc = dealloc_obj_dealloc;
+  dealloc_obj_Type.tp_flags = Py_TPFLAGS_DEFAULT;
+
+  if (PyType_Ready(&dealloc_obj_Type) < 0) {
+    return nullptr;
+  }
+
   PyObject *bpy_proxy = PyModule_Create(&bpy_proxy_def);
 
   /* Problem:
@@ -1186,16 +1194,6 @@ PyMODINIT_FUNC PyInit_bpy()
 
   /* Assign an object which is freed after `__file__` is assigned. */
   dealloc_obj *dob;
-
-  /* Assign dummy type. */
-  dealloc_obj_Type.tp_name = "dealloc_obj";
-  dealloc_obj_Type.tp_basicsize = sizeof(dealloc_obj);
-  dealloc_obj_Type.tp_dealloc = dealloc_obj_dealloc;
-  dealloc_obj_Type.tp_flags = Py_TPFLAGS_DEFAULT;
-
-  if (PyType_Ready(&dealloc_obj_Type) < 0) {
-    return nullptr;
-  }
 
   dob = (dealloc_obj *)dealloc_obj_Type.tp_alloc(&dealloc_obj_Type, 0);
   dob->mod = bpy_proxy;                                       /* borrow */

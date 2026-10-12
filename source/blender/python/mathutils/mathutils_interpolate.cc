@@ -11,7 +11,7 @@
 #include "mathutils.hh"
 #include "mathutils_interpolate.hh"
 
-#include "BLI_math_geom.h"
+#include "BLI_math_geom_c.hh"
 
 namespace blender {
 
@@ -45,7 +45,13 @@ static PyObject *M_Interpolate_poly_3d_calc(PyObject * /*self*/, PyObject *args)
   PyObject *point, *veclist, *ret;
   int i;
 
-  if (!PyArg_ParseTuple(args, "OO:poly_3d_calc", &veclist, &point)) {
+  if (!PyArg_ParseTuple(args,
+                        "O" /* `veclist` */
+                        "O" /* `pt` */
+                        ":poly_3d_calc",
+                        &veclist,
+                        &point))
+  {
     return nullptr;
   }
 

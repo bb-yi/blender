@@ -16,16 +16,16 @@
 #include "DNA_camera_types.h"
 #include "DNA_text_types.h"
 
-#include "BLI_fileops.h"
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
-#include "BLI_math_vector.h"
+#include "BLI_fileops.hh"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_rect.h"
-#include "BLI_string.h"
-#include "BLI_string_cursor_utf8.h"
-#include "BLI_string_utf8.h"
-#include "BLI_time.h"
+#include "BLI_rect.hh"
+#include "BLI_string.hh"
+#include "BLI_string_cursor_utf8.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_time.hh"
 #include "BLI_vector_set.hh"
 
 #include "BLT_translation.hh"
@@ -222,7 +222,7 @@ static char *buf_tabs_to_spaces(const char *in_buf, const int tab_size, int *r_o
 BLI_INLINE int space_text_pixel_x_to_column(const SpaceText *st, const int x)
 {
   /* Add half the char width so mouse cursor selection is in between letters. */
-  return (x + (st->runtime->cwidth_px / 2)) / st->runtime->cwidth_px;
+  return (x + (st->runtime->char_width_px / 2)) / st->runtime->char_width_px;
 }
 
 static void text_select_update_primary_clipboard(const Text *text)
@@ -2428,9 +2428,7 @@ static wmOperatorStatus text_jump_exec(bContext *C, wmOperator *op)
 {
   Text *text = CTX_data_edit_text(C);
   int line = RNA_int_get(op->ptr, "line");
-  short nlines = txt_get_span(static_cast<TextLine *>(text->lines.first),
-                              static_cast<TextLine *>(text->lines.last)) +
-                 1;
+  short nlines = txt_get_span(text->lines.first(), text->lines.last()) + 1;
 
   if (line < 1) {
     txt_move_toline(text, 1, false);
@@ -2699,7 +2697,7 @@ static void text_scroll_state_init(TextScroll *tsc, SpaceText *st, ARegion *regi
   tsc->state.ofs_max[1] = max_ii(
       0, space_text_get_total_lines(st, region) - (st->runtime->viewlines / 2));
 
-  tsc->state.size_px[0] = st->runtime->cwidth_px;
+  tsc->state.size_px[0] = st->runtime->char_width_px;
   tsc->state.size_px[1] = TXT_LINE_HEIGHT(st);
 }
 
@@ -2902,8 +2900,8 @@ static wmOperatorStatus text_scroll_invoke(bContext *C, wmOperator *op, const wm
 
     copy_v2_v2_int(tsc->mval_prev, event->xy);
     /* Sensitivity of scroll set to 4pix per line/char. */
-    tsc->mval_delta[0] = (event->xy[0] - event->prev_xy[0]) * st->runtime->cwidth_px / 4;
-    tsc->mval_delta[1] = (event->xy[1] - event->prev_xy[1]) * st->runtime->lheight_px / 4;
+    tsc->mval_delta[0] = (event->xy[0] - event->prev_xy[0]) * st->runtime->char_width_px / 4;
+    tsc->mval_delta[1] = (event->xy[1] - event->prev_xy[1]) * st->runtime->line_height_px / 4;
     tsc->is_first = false;
     tsc->is_scrollbar = false;
     text_scroll_apply(C, op, event);
@@ -3097,7 +3095,7 @@ static TextLine *space_text_get_line_pos_wrapped(const SpaceText *st,
                                                  const ARegion *region,
                                                  int *y)
 {
-  TextLine *linep = static_cast<TextLine *>(st->text->lines.first);
+  TextLine *linep = st->text->lines.first();
   int i, lines;
 
   if (*y < -st->top) {
@@ -3223,11 +3221,11 @@ static void space_text_cursor_set_to_pos_wrapped(
     }
   }
   else if (y < 0) { /* Before start of text. */
-    linep = static_cast<TextLine *>(st->text->lines.first);
+    linep = st->text->lines.first();
     charp = 0;
   }
   else { /* Beyond end of text. */
-    linep = static_cast<TextLine *>(st->text->lines.last);
+    linep = st->text->lines.last();
     charp = linep->len;
   }
 
@@ -3271,7 +3269,7 @@ static void text_cursor_set_to_pos(
       charp = &text->curc;
     }
 
-    y -= txt_get_span(static_cast<TextLine *>(text->lines.first), *linep) - st->top;
+    y -= txt_get_span(text->lines.first(), *linep) - st->top;
 
     if (y > 0) {
       while (y-- != 0) {
@@ -3392,7 +3390,7 @@ static wmOperatorStatus text_selection_set_invoke(bContext *C,
   ssel->mval_prev[0] = event->mval[0];
   ssel->mval_prev[1] = event->mval[1];
 
-  ssel->sell = txt_get_span(static_cast<TextLine *>(st->text->lines.first), st->text->sell);
+  ssel->sell = txt_get_span(st->text->lines.first(), st->text->sell);
   ssel->selc = st->text->selc;
 
   WM_event_add_modal_handler(C, op);
@@ -3518,7 +3516,7 @@ static wmOperatorStatus text_line_number_invoke(bContext *C,
   }
 
   if (!(mval[0] > 2 &&
-        mval[0] < (TXT_NUMCOL_WIDTH(st) + (TXT_BODY_LPAD * st->runtime->cwidth_px)) &&
+        mval[0] < (TXT_NUMCOL_WIDTH(st) + (TXT_BODY_LPAD * st->runtime->char_width_px)) &&
         mval[1] > 2 && mval[1] < region->winy - 2))
   {
     return OPERATOR_PASS_THROUGH;
@@ -3836,7 +3834,7 @@ static wmOperatorStatus text_find_and_replace(bContext *C, wmOperator *op, short
       text = st->text = static_cast<Text *>(text->id.next);
     }
     else {
-      text = st->text = static_cast<Text *>(bmain->texts.first);
+      text = st->text = bmain->texts.first();
     }
     txt_move_toline(text, 0, false);
     space_text_update_cursor_moved(C);
@@ -4142,7 +4140,7 @@ static wmOperatorStatus text_jump_to_file_at_point_exec(bContext *C, wmOperator 
 
   char filepath[FILE_MAX];
   RNA_property_string_get(op->ptr, prop_filepath, filepath);
-  if (UNLIKELY(BLI_path_is_rel(filepath))) {
+  if (BLI_path_is_rel(filepath)) [[unlikely]] {
     BLI_path_abs(filepath, BKE_main_blendfile_path(bmain));
   }
   const int line_index = RNA_property_int_get(op->ptr, prop_line);

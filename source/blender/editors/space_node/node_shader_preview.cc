@@ -22,9 +22,9 @@
  * the wanted viewlayer/pass for each previewed node.
  */
 
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
+#include "BLI_string_utf8.hh"
 
 #include "DNA_camera_types.h"
 #include "DNA_material_types.h"
@@ -66,30 +66,31 @@ namespace blender::ed::space_node {
 using NodeSocketPair = std::pair<bNode *, bNodeSocket *>;
 
 struct ShaderNodesPreviewJob {
-  NestedTreePreviews *tree_previews;
-  Scene *scene;
+  NestedTreePreviews *tree_previews = nullptr;
+  Scene *scene = nullptr;
   /* Pointer to the job's stop variable which is used to know when the job is asked for finishing.
    * The idea is that the renderer will read this value frequently and abort the render if it is
    * true. */
-  bool *stop;
+  bool *stop = nullptr;
   /* Pointer to the job's update variable which is set to true to refresh the UI when the renderer
    * is delivering a fresh result. It allows the job to give some UI refresh tags to the WM. */
-  bool *do_update;
+  bool *do_update = nullptr;
 
-  Material *mat_copy;
-  ePreviewType preview_type;
-  bNode *mat_output_copy;
-  NodeSocketPair mat_displacement_copy;
+  Material *mat_copy = nullptr;
+  World *world_simple = nullptr;
+  ePreviewType preview_type = MA_FLAT;
+  bNode *mat_output_copy = nullptr;
+  NodeSocketPair mat_displacement_copy = {};
   /* TreePath used to locate the nodetree.
    * bNodeTreePath elements have some listbase pointers which should not be used. */
   Vector<bNodeTreePath *> treepath_copy;
   Vector<NodeSocketPair> AOV_nodes;
   Vector<NodeSocketPair> shader_nodes;
 
-  bNode *rendering_node;
-  bool rendering_AOVs;
+  bNode *rendering_node = nullptr;
+  bool rendering_AOVs = false;
 
-  Main *bmain;
+  Main *bmain = nullptr;
 };
 
 /** \} */
@@ -173,12 +174,10 @@ static Material *duplicate_material(const Material &mat)
   return ma_copy;
 }
 
-static Scene *preview_prepare_scene(const Main *bmain,
-                                    const Scene *scene_orig,
-                                    Main *pr_main,
-                                    Material *mat_copy,
-                                    ePreviewType preview_type)
+static Scene *preview_prepare_scene(ShaderNodesPreviewJob &job_data, Main *pr_main)
 {
+  const Main *bmain = job_data.bmain;
+  const Scene *scene_orig = job_data.scene;
   Scene *scene_preview;
 
   memcpy(pr_main->filepath, BKE_main_blendfile_path(bmain), sizeof(pr_main->filepath));
@@ -186,12 +185,12 @@ static Scene *preview_prepare_scene(const Main *bmain,
   if (pr_main == nullptr) {
     return nullptr;
   }
-  scene_preview = static_cast<Scene *>(pr_main->scenes.first);
+  scene_preview = pr_main->scenes.first();
   if (scene_preview == nullptr) {
     return nullptr;
   }
 
-  ViewLayer *view_layer = static_cast<ViewLayer *>(scene_preview->view_layers.first);
+  ViewLayer *view_layer = scene_preview->view_layers.first();
 
   /* Only enable the combined render-pass. */
   view_layer->passflag = SCE_PASS_COMBINED;
@@ -214,12 +213,16 @@ static Scene *preview_prepare_scene(const Main *bmain,
   scene_preview->r.cfra = scene_orig->r.cfra;
 
   /* Setup the world. */
-  scene_preview->world = ED_preview_prepare_world_simple(pr_main);
+  if (job_data.world_simple == nullptr) {
+    job_data.world_simple = ED_preview_prepare_world_simple(pr_main);
+  }
+  scene_preview->world = job_data.world_simple;
   ED_preview_world_simple_set_rgb(scene_preview->world, float4{0.05f, 0.05f, 0.05f, 0.05f});
 
-  BLI_addtail(&pr_main->materials, mat_copy);
+  BLI_addtail(&pr_main->materials, job_data.mat_copy);
 
-  ED_preview_set_visibility(pr_main, scene_preview, view_layer, preview_type, PR_BUTS_RENDER);
+  ED_preview_set_visibility(
+      pr_main, scene_preview, view_layer, job_data.preview_type, PR_BUTS_RENDER);
 
   BKE_view_layer_synced_ensure(*pr_main, scene_preview, view_layer);
   for (Base &base : *BKE_view_layer_object_bases_get(view_layer)) {
@@ -230,7 +233,7 @@ static Scene *preview_prepare_scene(const Main *bmain,
         int actcol = max_ii(base.object->actcol - 1, 0);
 
         if (matar && actcol < base.object->totcol) {
-          (*matar)[actcol] = mat_copy;
+          (*matar)[actcol] = job_data.mat_copy;
         }
       }
       else if (base.object->type == OB_LAMP) {
@@ -289,7 +292,7 @@ static ImBuf *get_image_from_viewlayer_and_pass(RenderResult &rr,
     rl = RE_GetRenderLayer(&rr, layer_name);
   }
   else {
-    rl = static_cast<RenderLayer *>(rr.layers.first);
+    rl = rr.layers.first();
   }
   if (rl == nullptr) {
     return nullptr;
@@ -299,7 +302,7 @@ static ImBuf *get_image_from_viewlayer_and_pass(RenderResult &rr,
     rp = RE_pass_find_by_name(rl, pass_name, nullptr);
   }
   else {
-    rp = static_cast<RenderPass *>(rl->passes.first);
+    rp = rl->passes.first();
   }
   ImBuf *ibuf = rp ? rp->ibuf : nullptr;
   return ibuf;
@@ -548,7 +551,7 @@ static bool prepare_viewlayer_update(void *pvl_data, ViewLayer *vl, Depsgraph *d
 }
 
 /* Called by renderer, refresh the UI. */
-static void all_nodes_preview_update(void *npv, RenderResult *rr, rcti * /*rect*/)
+static void all_nodes_preview_update(void *npv, RenderResult *rr)
 {
   ShaderNodesPreviewJob *job_data = static_cast<ShaderNodesPreviewJob *>(npv);
   *job_data->do_update = true;
@@ -590,8 +593,7 @@ static void all_nodes_preview_update(void *npv, RenderResult *rr, rcti * /*rect*
 static void preview_render(ShaderNodesPreviewJob &job_data)
 {
   /* Get the stuff from the builtin preview dbase. */
-  Scene *scene = preview_prepare_scene(
-      job_data.bmain, job_data.scene, G.pr_main, job_data.mat_copy, job_data.preview_type);
+  Scene *scene = preview_prepare_scene(job_data, G.pr_main);
   if (scene == nullptr) {
     return;
   }
@@ -601,7 +603,7 @@ static void preview_render(ShaderNodesPreviewJob &job_data)
   connect_nodes_to_aovs(treepath, job_data.AOV_nodes);
 
   /* Create the AOV passes for the viewlayer. */
-  ViewLayer *AOV_layer = static_cast<ViewLayer *>(scene->view_layers.first);
+  ViewLayer *AOV_layer = scene->view_layers.first();
   for (const NodeSocketPair &nodesocket_iter : job_data.shader_nodes) {
     ViewLayer *vl = BKE_view_layer_add(
         job_data.bmain, scene, nodesocket_iter.first->name, AOV_layer, VIEWLAYER_ADD_COPY);
@@ -757,6 +759,9 @@ static void shader_preview_free(void *customdata)
     BKE_id_free(G.pr_main, &job_data->mat_copy->id);
     job_data->mat_copy = nullptr;
   }
+  if (job_data->world_simple != nullptr) {
+    BKE_id_free(G.pr_main, &job_data->world_simple->id);
+  }
   MEM_delete(job_data);
 }
 
@@ -770,7 +775,7 @@ static void ensure_nodetree_previews(const bContext &C,
     return;
   }
 
-  bNodeTree *displayed_nodetree = static_cast<bNodeTreePath *>(treepath.last)->nodetree;
+  bNodeTree *displayed_nodetree = treepath.last()->nodetree;
   ePreviewType preview_type = MA_FLAT;
   if (CTX_wm_space_node(&C)->overlay.preview_shape == SN_OVERLAY_PREVIEW_3D) {
     preview_type = ePreviewType(material.pr_type);
@@ -795,7 +800,7 @@ static void ensure_nodetree_previews(const bContext &C,
                               CTX_wm_window(&C),
                               CTX_wm_space_node(&C),
                               "Generating shader previews...",
-                              WM_JOB_EXCL_RENDER,
+                              WM_JOB_EXCL_RENDER | WM_JOB_BACKGROUND,
                               WM_JOB_TYPE_RENDER_PREVIEW);
   ShaderNodesPreviewJob *job_data = MEM_new<ShaderNodesPreviewJob>(__func__);
 
@@ -811,8 +816,7 @@ static void ensure_nodetree_previews(const bContext &C,
   bNodeTreePath *root_path = MEM_new<bNodeTreePath>(__func__);
   root_path->nodetree = job_data->mat_copy->nodetree;
   job_data->treepath_copy.append(root_path);
-  for (bNodeTreePath *original_path = static_cast<bNodeTreePath *>(treepath.first)->next;
-       original_path;
+  for (bNodeTreePath *original_path = treepath.first()->next; original_path;
        original_path = original_path->next)
   {
     bNode *parent = bke::node_find_node_by_name(*job_data->treepath_copy.last()->nodetree,

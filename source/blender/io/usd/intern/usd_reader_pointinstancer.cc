@@ -13,9 +13,9 @@
 #include "BKE_node_tree_update.hh"
 #include "BKE_object.hh"
 #include "BKE_pointcloud.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_quaternion_types.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "DNA_collection_types.h"
 #include "DNA_node_types.h"
@@ -66,7 +66,7 @@ void USDPointInstancerReader::read_geometry(bke::GeometrySet &geometry_set,
   PointCloud *pointcloud = geometry_set.get_pointcloud_for_write();
   if (pointcloud->totpoint != usd_positions.size()) {
     /* Size changed so we must reallocate. */
-    pointcloud = BKE_pointcloud_new_nomain(usd_positions.size());
+    pointcloud = BKE_pointcloud_new_nomain(PointCloudType::Points, usd_positions.size());
   }
 
   MutableSpan<float3> point_positions = pointcloud->positions_for_write();
@@ -231,7 +231,7 @@ void USDPointInstancerReader::read_object_data(Main *bmain, const pxr::UsdTimeCo
 
   bke::node_add_link(*ntree,
                      *group_input,
-                     *static_cast<bNodeSocket *>(group_input->outputs.first),
+                     *group_input->outputs.first(),
                      *instance_on_points_node,
                      *bke::node_find_socket(*instance_on_points_node, SOCK_IN, "Points"_ustr));
 
@@ -270,7 +270,7 @@ void USDPointInstancerReader::read_object_data(Main *bmain, const pxr::UsdTimeCo
                      *instance_on_points_node,
                      *bke::node_find_socket(*instance_on_points_node, SOCK_OUT, "Instances"_ustr),
                      *group_output,
-                     *static_cast<bNodeSocket *>(group_output->inputs.first));
+                     *group_output->inputs.first());
 
   BKE_ntree_update_after_single_tree_change(*bmain, *ntree);
 

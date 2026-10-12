@@ -6,12 +6,12 @@
 
 #include "eevee_bxdf_types.bsl.hh"
 #include "eevee_ltc_lut_lib.bsl.hh"
+#include "eevee_sampling_lib.bsl.hh"
 #include "eevee_thickness_lib.bsl.hh"
 #include "gpu_shader_codegen_lib.glsl"
-#include "gpu_shader_math_base_lib.glsl"
-#include "gpu_shader_math_safe_lib.glsl"
-#include "gpu_shader_ray_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_base.bsl.hh"
+#include "gpu_shader_math_safe.bsl.hh"
+#include "gpu_shader_ray.bsl.hh"
 
 /* -------------------------------------------------------------------- */
 /** \name Diffuse BSDF
@@ -24,19 +24,18 @@
  *              The Z component can be biased towards 1.
  * \return pdf: the pdf of sampling the reflected/refracted ray. 0 if ray is invalid.
  */
-BsdfSample bxdf_diffuse_sample(float3 rand)
+BsdfSample bxdf_diffuse_sample(const float3 rand_cylinder)
 {
-  float cos_theta = safe_sqrt(rand.x);
   BsdfSample samp;
-  samp.direction = float3(rand.yz * sin_from_cos(cos_theta), cos_theta);
-  samp.pdf = cos_theta * M_1_PI;
+  samp.direction = sample_cos_hemisphere(rand_cylinder);
+  samp.pdf = samp.direction.z * M_1_PI;
   return samp;
 }
 
 BsdfEval bxdf_diffuse_eval(float3 N, float3 L)
 {
   BsdfEval eval;
-  eval.throughput = eval.pdf = saturate(dot(N, L));
+  eval.throughput = eval.pdf = saturate(dot(N, L)) * M_1_PI;
   return eval;
 }
 
@@ -53,12 +52,12 @@ LightProbeRay bxdf_diffuse_lightprobe(float3 N)
   return probe;
 }
 
-ClosureLight bxdf_diffuse_light(ClosureUndetermined cl)
+ClosureLight bxdf_diffuse_light(ClosureUndetermined cl, float3 V)
 {
   ClosureLight light;
-  light.ltc_mat = eevee::lut::ltc::identity(); /* No transform, just plain cosine distribution. */
   light.N = cl.N;
   light.type = LIGHT_DIFFUSE;
+  eevee::LTCData::pack_identity(light, light.N, V);
   return light;
 }
 
@@ -133,21 +132,28 @@ Ray bxdf_translucent_ray_amend(ClosureUndetermined cl, float3 /*V*/, Ray ray, Th
   return ray;
 }
 
-ClosureLight bxdf_translucent_light(ClosureUndetermined cl, float3 /*V*/, Thickness thickness)
+ClosureLight bxdf_translucent_light(ClosureUndetermined cl, float3 V, Thickness thickness)
 {
   /* A translucent sphere lit by a light outside the sphere transmits the
-   * light uniformly over the sphere. To mimic this phenomenon, we use the light vector
-   * as normal. This is done inside `light_eval_single`.
+   * light uniformly over the sphere. To mimic this phenomenon, the LTC evaluation
+   * does not horizon-clip lights if we set `LTCFormFactorType::TwoSidedCosineSphere`.
    *
    * For slab model, the approximation has little to no impact on the lighting in practice,
    * only focusing the light a tiny bit. Using the flipped normal is good enough approximation.
    */
-  ClosureLight light;
-  light.ltc_mat = eevee::lut::ltc::identity(); /* No transform, just plain cosine distribution. */
-  light.N = -cl.N;
   const bool sphere_with_thickness = thickness.mode() == ThicknessMode::Sphere &&
                                      thickness.value() != 0.0f;
+
+  ClosureLight light;
+  light.N = -cl.N;
   light.type = sphere_with_thickness ? LIGHT_TRANSLUCENT_WITH_THICKNESS : LIGHT_DIFFUSE;
+
+  eevee::LTCData ltc_data = eevee::LTCData::identity(light.N, V);
+  if (sphere_with_thickness) {
+    ltc_data.form_factor_type = LTCFormFactorType::TwoSidedCosineSphere;
+  }
+  ltc_data.pack_to(light);
+
   return light;
 }
 

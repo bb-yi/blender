@@ -7,8 +7,8 @@
 VERTEX_SHADER_CREATE_INFO(overlay_grid_next)
 
 #include "draw_view_lib.glsl"
-#include "gpu_shader_math_base_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_base.bsl.hh"
+#include "gpu_shader_utildefines.bsl.hh"
 #include "overlay_grid_common_lib.glsl"
 
 struct LineData {
@@ -108,7 +108,7 @@ void main()
 
   float2 step_offs = grid_buf.offset;
   /* TODO(not_mark): remove all this horrible axis-swapping BS in BSL port. */
-  if (flag_test(grid_flag, SHOW_GRID)) {
+  if (flag_test(grid_flag, SHOW_GRID) && !flag_test(grid_flag, GRID_SIMA)) {
     /* Line moves with offset along its axis, but snaps to the rounded offset on the other axis. */
     if (line.axis == 0) {
       step_offs.y = round(grid_buf.offset.y / step_size) * step_size;

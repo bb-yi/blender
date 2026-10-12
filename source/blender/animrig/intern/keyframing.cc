@@ -21,7 +21,7 @@
 
 #include "BKE_action.hh"
 #include "BKE_anim_data.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_fcurve.hh"
 #include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
@@ -30,9 +30,9 @@
 
 #include "DNA_scene_types.h"
 
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 #include "BLI_task.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 #include "BLT_translation.hh"
 
 #include "DEG_depsgraph.hh"
@@ -435,7 +435,7 @@ SingleKeyingResult insert_keyframe_direct(PointerRNA &ptr,
                                           const eBezTriple_KeyframeType keytype,
                                           const eInsertKeyFlags flag)
 {
-  if ((ptr.owner_id == nullptr) && (ptr.data == nullptr)) {
+  if (!ptr) {
     BLI_assert_unreachable();
     return SingleKeyingResult::UNKNOWN_FAILURE;
   }
@@ -604,7 +604,7 @@ int clear_keyframe(Main *bmain, ReportList *reports, ID *id, const RNAPath &rna_
       if (rna_path.index.has_value() && rna_path.index.value() != fcurve.array_index) {
         return;
       }
-      if (rna_path.path != fcurve.rna_path) {
+      if (rna_path.path != fcurve.rna_path()) {
         return;
       }
       fcurves.append(&fcurve);
@@ -864,7 +864,7 @@ CombinedKeyingResult insert_keyframes(Main *bmain,
     CombinedKeyingResult result;
 
     const std::optional<StringRefNull> this_rna_path_channel_group =
-        channel_group.has_value() ? *channel_group :
+        channel_group.has_value() ? channel_group :
                                     default_channel_group_for_path(&ptr, *rna_path_id_to_prop);
 
     result = insert_key_layered_action(bmain,

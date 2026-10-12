@@ -24,9 +24,9 @@
 #include "DNA_modifier_types.h"
 #include "DNA_particle_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BKE_attribute.hh"
 #include "BKE_curves.hh"
@@ -1152,7 +1152,7 @@ void BlenderSync::sync_hair(BObjectInfo &b_ob_info, Hair *hair)
   new_hair.set_used_shaders(used_shaders);
 
   if (view_layer.use_hair) {
-    if (GS(b_ob_info.object_data->name) == blender::ID_CV) {
+    if (b_ob_info.object_data->id_type() == blender::ID_CV) {
       /* Hair object. */
       sync_hair(&new_hair, b_ob_info, false);
     }
@@ -1215,7 +1215,7 @@ void BlenderSync::sync_hair_motion(BObjectInfo &b_ob_info, Hair *hair, const int
 
   /* Export deformed coordinates. */
   if (ccl::BKE_object_is_deform_modified(b_ob_info, *b_scene, preview)) {
-    if (GS(b_ob_info.object_data->name) == blender::ID_CV) {
+    if (b_ob_info.object_data->id_type() == blender::ID_CV) {
       /* Hair object. */
       sync_hair(hair, b_ob_info, true, motion_step);
       return;

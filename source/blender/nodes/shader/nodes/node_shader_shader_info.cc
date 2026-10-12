@@ -62,10 +62,10 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                                        GPUNodeStack *out)
 {
   if (!in[0].link) {
-    GPU_link(mat, "world_position_get", &in[0].link);
+    GPU_link(mat, "world_position_get", GPU_shading_data(), &in[0].link);
   }
   if (!in[1].link) {
-    GPU_link(mat, "world_normals_get", &in[1].link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &in[1].link);
   }
 
   const float shadow_mode = float(node->custom1);
@@ -91,7 +91,7 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                         out,
                         GPU_constant(&shadow_mode),
                         GPU_constant(&stable_shadow_samples),
-                        GPU_constant(&lightgroup_id_value));
+                        GPU_constant(&lightgroup_id_value), GPU_kernel_globals(), GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_shader_info_cc

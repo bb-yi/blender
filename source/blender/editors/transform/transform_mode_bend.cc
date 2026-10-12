@@ -10,11 +10,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_string_utf8.h"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_task.hh"
 
 #include "BKE_unit.hh"
@@ -74,7 +74,7 @@ static void transdata_elem_bend(const TransInfo *t,
 
                                 bool is_clamp)
 {
-  if (UNLIKELY(angle == 0.0f)) {
+  if (angle == 0.0f) [[unlikely]] {
     copy_v3_v3(td->loc, td->iloc);
     return;
   }
@@ -305,7 +305,7 @@ static void initBend(TransInfo *t, wmOperator * /*op*/)
   copy_v3_v3(data->warp_sta, curs);
   if (t->spacetype == SPACE_VIEW3D) {
     ED_view3d_win_to_3d(
-        static_cast<View3D *>(t->area->spacedata.first), t->region, curs, t->mval, data->warp_end);
+        t->area->spacedata.first_as<View3D>(), t->region, curs, t->mval, data->warp_end);
   }
   else {
     copy_v3_v3(data->warp_end, curs); /* Dummy value. */
@@ -336,6 +336,7 @@ TransModeInfo TransMode_bend = {
     /*snap_distance_fn*/ nullptr,
     /*snap_apply_fn*/ nullptr,
     /*draw_fn*/ nullptr,
+    /*status_fn*/ nullptr,
 };
 
 }  // namespace blender::ed::transform

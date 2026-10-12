@@ -104,5 +104,12 @@ enum class GpuContextState {
 GpuContextState render_begin_gpu(const RenderData &rd);
 void render_end_gpu(const RenderData &rd, GpuContextState state);
 
+/**
+ * Render thumbnail for a scene strip. Thumbnail is rendered with "solid" draw mode for
+ * efficiency reasons. Needs to be called on the main thread, since it uses main GPU/DRW context.
+ */
+ImBuf *render_scene_strip_thumbnail(
+    Main *bmain, Scene *timeline_scene, const Strip *strip, float frame_index, int size);
+
 }  // namespace seq
 }  // namespace blender

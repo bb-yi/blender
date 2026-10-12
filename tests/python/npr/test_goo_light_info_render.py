@@ -98,7 +98,7 @@ def make_light_info_material(light_object=None, output_name="Color", scalar_bias
     emission.inputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
     emission.inputs["Strength"].default_value = 1.0
 
-    light_info = nodes.new("ShaderNodeLightInfo")
+    light_info = nodes.new("ShaderNodeNPRLightInfo")
     light_info.location = (0.0, 0.0)
     if light_object is not None:
         light_info.light_object = light_object

@@ -217,6 +217,13 @@ class ShadowModule {
   /* Used to call caster_update_ps_ only once per sync (Initialized on begin_sync). */
   bool update_casters_ = false;
 
+  /* When rendering shadows in a loop, we only tag for usage once and setup multiple times.
+   * In this case `run_tagging_` is set to false after the first iteration. */
+  bool32_t run_tagging_ = false;
+
+  /* Number of shadow view needed until we have finished the shadow updates. Render only. */
+  int needed_views_ = 0;
+
   /* -------------------------------------------------------------------- */
   /** \name Tile-map Management
    * \{ */
@@ -387,10 +394,11 @@ class ShadowModule {
    * \param has_view_dependent_shadows: The caster shape changes with the camera.
    */
   void sync_object(const ObjectHandle &ob_handle,
-                   bool is_alpha_blend,
+                   bool is_alpha_blend_or_has_offset_shadow,
                    bool has_transparent_shadows,
                    bool has_time_dependent_shadows,
-                   bool has_view_dependent_shadows);
+                   bool has_view_dependent_shadows,
+                   bool has_offset_shadows);
   /** Conservatively tag shadow pages needed by a color-bake receiver bounds. */
   void sync_bake_receiver_bounds(const ResourceHandleRange &resource_handle);
   void end_sync();
@@ -465,11 +473,6 @@ class ShadowModule {
   {
     do_full_update_ = true;
   }
-
-  /** Compute approximate screen pixel space radius (as world space radius). */
-  static float screen_pixel_radius(const float4x4 &wininv,
-                                   bool is_perspective,
-                                   const int2 &extent);
 
  private:
   void remove_unused();

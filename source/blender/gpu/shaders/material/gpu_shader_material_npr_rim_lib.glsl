@@ -5,13 +5,13 @@
 #include "gpu_shader_material_principled_npr_v2_math.glsl"
 #include "gpu_shader_material_principled_npr_depth_rim.glsl"
 
-float npr_v2_rim_shape(float3 N, float3 V, float4 shape, float falloff)
+float npr_v2_rim_shape(KernelGlobals &kg, ShadingData &sd, float3 N, float3 V, float4 shape, float falloff)
 {
   float3 camera_x = float3(1.0f, 0.0f, 0.0f);
   float3 camera_y = float3(0.0f, 1.0f, 0.0f);
 #if defined(GPU_FRAGMENT_SHADER)
-  camera_x = npr_v2_safe_normalize(drw_view().viewinv[0].xyz, camera_x);
-  camera_y = npr_v2_safe_normalize(drw_view().viewinv[1].xyz, camera_y);
+  camera_x = npr_v2_safe_normalize(kg.view_matrices_get(sd).viewinv[0].xyz, camera_x);
+  camera_y = npr_v2_safe_normalize(kg.view_matrices_get(sd).viewinv[1].xyz, camera_y);
 #endif
   float2 projected = float2(dot(N, camera_x), dot(N, camera_y));
   float len = length(projected);

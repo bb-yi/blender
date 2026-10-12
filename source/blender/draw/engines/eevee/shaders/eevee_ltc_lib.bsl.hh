@@ -11,17 +11,24 @@
 
 #pragma once
 
+#include "eevee_bxdf_types.bsl.hh"
 #include "eevee_defines.hh"
-#include "gpu_shader_math_constants_lib.glsl"
-#include "gpu_shader_math_base_lib.glsl"
-#include "gpu_shader_math_matrix_construct_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl" /* IWYU pragma: export. FLT_MAX */
+#include "gpu_shader_math_base.bsl.hh"
+#include "eevee_light_lib.bsl.hh"
+#include "eevee_ltc_lut_lib.bsl.hh"
+#include "gpu_shader_compat.hh"
+#include "gpu_shader_math_constants.bsl.hh"
+#include "gpu_shader_math_safe.bsl.hh"
 
 namespace eevee::ltc {
 
 namespace detail {
 
-/* Diffuse *clipped* sphere integral. */
+/**
+ * Diffuse *clipped* sphere integral. This should equal the irradiance (form factor) of a
+ * horizon-clipped sphere w.r.t. a single point. However, the form factor is divided out,
+ * resulting in a multiplier defining the clipped sphere only.
+ */
 float diffuse_sphere_integral(sampler2DArray util_tx, float avg_dir_z, float form_factor)
 {
 #if 1
@@ -127,8 +134,14 @@ float3 solve_cubic(float4 coefs)
   return root;
 }
 
-/* from Real-Time Area Lighting: a Journey from Research to Production
- * Stephen Hill and Eric Heitz */
+/**
+ * Approximate edge integral as part of a polygon area integral over a cosine (hemi)sphere.
+
+ * 1. This dates back to Lambert, see: [Geometric Derivation of the Irradiance of  Polygonal
+ *    Lights](https://hal.science/hal-01458129/document).
+ * 2. This is a fitting that avoids precision issues, see: [Real-Time Area Lighting: a Journey from
+ *    Research to Production](https://advances.realtimerendering.com/s2016/s2016_ltc_rnd.pdf)
+ */
 float3 edge_integral_vec(float3 v1, float3 v2)
 {
   float x = dot(v1, v2);
@@ -143,55 +156,97 @@ float3 edge_integral_vec(float3 v1, float3 v2)
   return cross(v1, v2) * theta_sintheta;
 }
 
-float3x3 tangent_basis(float3 N, float3 V)
+/**
+ * Upper parabolic curve of the form `x/(1+x)`, going through `y_1` at `x=1`,
+ * with `scale` determining the curve shape.
+ */
+float upper_parabole(float x, float scale, float y_1)
 {
-  float NV = dot(N, V);
-  if (NV > 0.999999f) {
-    /* Mostly for orthographic view and surfel light eval. */
-    return from_up_axis(N);
-  }
-  /* Construct orthonormal basis around N. */
-  float3 T1 = normalize(V - N * NV);
-  float3 T2 = cross(N, T1);
-
-  return float3x3(T1, T2, N);
+  x = saturate(x / y_1);
+  return saturate((x * scale + x) / (scale + x));
 }
 
+/**
+ * Get the 3rd column of the inverse of 3x3 matrix M^{-1}, normalized. We can avoid
+ * computing the reciprocal determinant as we need a unit vector.
+ */
+float3 dominant_bxdf_direction(float3x3 Minv)
+{
+  float3 adjoint_z = float3(+(Minv[1][0] * Minv[2][1] - Minv[2][0] * Minv[1][1]),
+                            -(Minv[0][0] * Minv[2][1] - Minv[2][0] * Minv[0][1]),
+                            +(Minv[0][0] * Minv[1][1] - Minv[1][0] * Minv[0][1]));
+  return normalize(adjoint_z);
+}
+
+/**
+ * Fitted function to attenuation light leakage caused by the sphere integral approximation.
+ */
+float form_factor_attenuation(LightShape shape, LTCData ltc_data, float3 L)
+{
+  /* First, find an approximate dominant BxDF direction D. Then, find a vector T on the light
+   * plane, coplanar with D and L, i.e. T = cross(cross(L, D), shape.N). */
+  float3 D = dominant_bxdf_direction(ltc_data.Minv);
+  float3 T = normalize(D * dot(L, shape.N) - L * dot(D, shape.N));
+
+  /* Find t where D intersects the line L + t*T. */
+  float TD = dot(T, D);
+  float t = safe_divide(dot(D, L) * TD - dot(T, L), 1.0f - square(TD));
+
+  if (t > 0.0 && t < shape.disk_radius_projected) {
+    /* If t lies within the disk radius on the positive side, we do not attenuate. */
+    return 1.0;
+  }
+  /* Otherwise, restrict t to within on the disk radius. */
+  t = min(abs(t), shape.disk_radius_projected);
+
+  /* Compute L + t*T and warp it into LTC space. This disk point bounds the light shape in LTC
+   * space, so we can use its z-component to safely fit an attenuation factor. */
+  float attenuation = saturate(normalize(ltc_data.Minv * (L + t * T)).z);
+  attenuation = upper_parabole(attenuation, 0.15f, 0.5f);
+  attenuation += (1.0f - attenuation) * ltc_data.attenuation_factor;
+
+  return attenuation;
+}
 }  // namespace detail
 
 /**
  * Evaluate contribution of rectangle light.
  */
-float evaluate_quad(sampler2DArray util_tx, float3 corners[4], float3 N, float3 V, float3x3 Minv)
+float evaluate_quad(sampler2DArray util_tx, LightShape shape, LightVector lv, LTCData ltc_data)
 {
-  /* Construct orthonormal basis around N. */
-  float3x3 T = detail::tangent_basis(N, V);
+  /* Transform the quad corners into LTC space, and project on to sphere. */
+  float3 V[4] = {normalize(ltc_data.Minv * shape.v[0]),
+                 normalize(ltc_data.Minv * shape.v[1]),
+                 normalize(ltc_data.Minv * shape.v[2]),
+                 normalize(ltc_data.Minv * shape.v[3])};
 
-  /* Rotate area light into basis. */
-  Minv = Minv * transpose(T);
-
-  /* Apply LTC inverse matrix. */
-  corners[0] = normalize(Minv * corners[0]);
-  corners[1] = normalize(Minv * corners[1]);
-  corners[2] = normalize(Minv * corners[2]);
-  corners[3] = normalize(Minv * corners[3]);
-
-  /* Approximation using a sphere of the same solid angle as the quad.
-   * Finding the clipped sphere diffuse integral is easier than clipping the quad. */
+  /* Approximation using a sphere with the same form factor as the unclipped quad.
+   * Finding a clipped sphere's form factor is easier than clipping the quad. */
   float3 avg_dir;
-  avg_dir = detail::edge_integral_vec(corners[0], corners[1]);
-  avg_dir += detail::edge_integral_vec(corners[1], corners[2]);
-  avg_dir += detail::edge_integral_vec(corners[2], corners[3]);
-  avg_dir += detail::edge_integral_vec(corners[3], corners[0]);
+  avg_dir = detail::edge_integral_vec(V[0], V[1]);
+  avg_dir += detail::edge_integral_vec(V[1], V[2]);
+  avg_dir += detail::edge_integral_vec(V[2], V[3]);
+  avg_dir += detail::edge_integral_vec(V[3], V[0]);
 
   float form_factor_inv = inversesqrt(dot(avg_dir, avg_dir));
   float avg_dir_z = (avg_dir * form_factor_inv).z;
-
   float form_factor = saturate(1.0f / form_factor_inv);
   /* The form factor should always be finite. Check that the previous saturate works as filter. */
   // assert(!isnan(form_factor) && !isinf(form_factor));
 
-  return form_factor * detail::diffuse_sphere_integral(util_tx, avg_dir_z, form_factor);
+  switch (ltc_data.form_factor_type) {
+    case LTCFormFactorType::OneSidedCosineSphereClipped:
+      /* The clipped sphere approximation causes light leakage for low roughness;
+       * we attenuate with a fitted function that removes some energy below the horizon. */
+      form_factor *= detail::form_factor_attenuation(shape, ltc_data, lv.L);
+      form_factor *= detail::diffuse_sphere_integral(util_tx, avg_dir_z, form_factor);
+      break;
+    default: /* LTCFormFactorType::TwoSidedCosineSphere */
+      form_factor *= M_1_PI;
+      break;
+  }
+
+  return form_factor;
 }
 
 /**
@@ -199,32 +254,19 @@ float evaluate_quad(sampler2DArray util_tx, float3 corners[4], float3 N, float3 
  *
  * disk_points are WS vectors from the shading point to the disk "bounding domain".
  */
-float evaluate_disk(
-    sampler2DArray util_tx, float3 N, float3 V, float3x3 Minv, float3 disk_points[4])
+float evaluate_disk(sampler2DArray util_tx, LightShape shape, LightVector lv, LTCData ltc_data)
 {
-  /* Construct orthonormal basis around N. */
-  float3x3 T = detail::tangent_basis(N, V);
-
-  /* Rotate area light in (T1, T2, R) basis. */
-  float3x3 R = transpose(T);
-
   /* Intermediate step: init ellipse. */
-  float3 L_[3];
-  L_[0] = R * disk_points[0];
-  L_[1] = R * disk_points[1];
-  L_[2] = R * disk_points[2];
+  float3 C = 0.5f * (shape.v[0] + shape.v[2]);
+  float3 V1 = 0.5f * (shape.v[1] - shape.v[2]);
+  float3 V2 = 0.5f * (shape.v[1] - shape.v[0]);
 
-  float3 C = 0.5f * (L_[0] + L_[2]);
-  float3 V1 = 0.5f * (L_[1] - L_[2]);
-  float3 V2 = 0.5f * (L_[1] - L_[0]);
-
-  /* Transform ellipse by Minv. */
-  C = Minv * C;
-  V1 = Minv * V1;
-  V2 = Minv * V2;
+  /* Transform ellipse into LTC space. */
+  C = ltc_data.Minv * C;
+  V1 = ltc_data.Minv * V1;
+  V2 = ltc_data.Minv * V2;
 
   /* Compute eigenvectors of new ellipse. */
-
   float d11 = dot(V1, V1);
   float d22 = dot(V2, V2);
   float d12 = dot(V1, V2);
@@ -265,7 +307,7 @@ float evaluate_disk(
     V2 *= inversesqrt(inv_b);
   }
 
-  /* Now find front facing ellipse with same solid angle. */
+  /* Now find a front facing ellipse with the same solid angle. */
 
   float3 V3 = normalize(cross(V1, V2));
   if (dot(C, V3) < 0.0f) {
@@ -299,21 +341,58 @@ float evaluate_disk(
    * `a * x0 / (a - b * e2)` simplifies to `a/b * x0 / (a/b - e2)`,
    * `b * y0 / (b - b * e2)` simplifies to `y0 / (1.0f - e2)`. */
   float3 avg_dir = float3(ab * x0 / (ab - e2), y0 / (1.0f - e2), 1.0f);
-
   float3x3 rotate = float3x3(V1, V2, V3);
-
   avg_dir = rotate * avg_dir;
   avg_dir = normalize(avg_dir);
 
-  /* L1, L2 are the extends of the front facing ellipse. */
+  /* L1, L2 are the extents of the front facing ellipse. From here, find the sphere form factor. */
   float L1 = inversesqrt(-e3 / e2);
   float L2 = inversesqrt(-e1 / e2);
-
-  /* Find the sphere and compute lighting. */
   float form_factor = saturate(L1 * L2 * inversesqrt((1.0f + L1 * L1) * (1.0f + L2 * L2)));
   /* The form factor should always be finite. Check that the previous saturate works as filter. */
   // assert(!isnan(form_factor) && !isinf(form_factor));
-  return form_factor * detail::diffuse_sphere_integral(util_tx, avg_dir.z, form_factor);
+
+  switch (ltc_data.form_factor_type) {
+    case LTCFormFactorType::OneSidedCosineSphereClipped:
+      /* The clipped sphere approximation causes light leakage for low roughness;
+       * we attenuate with a fitted function that removes some energy below the horizon. */
+      form_factor *= detail::form_factor_attenuation(shape, ltc_data, lv.L);
+      form_factor *= detail::diffuse_sphere_integral(util_tx, avg_dir.z, form_factor);
+      break;
+    default: /* LTCFormFactorType::TwoSidedCosineSphere */
+      form_factor *= M_1_PI;
+      break;
+  }
+
+  return form_factor;
+}
+
+/**
+ * Perform LTC evaluation, returning the form factor of the light's shape to the shading point.
+ * When multiplied by emission, this approximates the light's contributed irradiance.
+ */
+float evaluate(
+    sampler2DArray util_tx, LightData light, LightShape shape, LightVector lv, LTCData ltc_data)
+{
+  if (is_sphere_light(light.type) && lv.dist < light.local.local.shape_radius) {
+    /* Inside the sphere light, integrate over the hemisphere. */
+    return 1.0f;
+  }
+
+  if (light.type == LIGHT_RECT) {
+    return evaluate_quad(util_tx, shape, lv, ltc_data);
+  }
+  return evaluate_disk(util_tx, shape, lv, ltc_data);
 }
 
 }  // namespace eevee::ltc
+
+/* Value-only bridge for the legacy NPR and Shader Info material libraries. */
+float eevee_light_ltc(sampler2DArray util_tx, LightData light, float3 N, float3 V,
+                      LightVector lv, float4 ltc_mat)
+{
+  eevee::LTCData data = eevee::LTCData::identity(N, V);
+  data.Minv = eevee::detail::unpack_isotropic_matrix(ltc_mat) *
+              transpose(from_incident_vector(N, V));
+  return eevee::ltc::evaluate(util_tx, light, LightShape::get(light, lv), lv, data);
+}

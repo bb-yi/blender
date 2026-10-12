@@ -11,10 +11,10 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_curve_types.h"
 #include "DNA_meshdata_types.h"
@@ -83,7 +83,7 @@ static bool calc_curve_deform(
     index = axis - 3;
     if (cu->flag & CU_STRETCH) {
       const float divisor = cd->dmax[index] - cd->dmin[index];
-      if (LIKELY(divisor > FLT_EPSILON)) {
+      if (divisor > FLT_EPSILON) [[likely]] {
         fac = -(co[index] - cd->dmax[index]) / divisor;
       }
       else {
@@ -93,7 +93,7 @@ static bool calc_curve_deform(
     else {
       const CurveCache *cc = ob_curve->runtime->curve_cache;
       float totdist = BKE_anim_path_get_length(cc);
-      if (LIKELY(totdist > FLT_EPSILON)) {
+      if (totdist > FLT_EPSILON) [[likely]] {
         fac = -(co[index] - cd->dmax[index]) / totdist;
       }
       else {
@@ -105,7 +105,7 @@ static bool calc_curve_deform(
     index = axis;
     if (cu->flag & CU_STRETCH) {
       const float divisor = cd->dmax[index] - cd->dmin[index];
-      if (LIKELY(divisor > FLT_EPSILON)) {
+      if (divisor > FLT_EPSILON) [[likely]] {
         fac = (co[index] - cd->dmin[index]) / divisor;
       }
       else {
@@ -115,7 +115,7 @@ static bool calc_curve_deform(
     else {
       const CurveCache *cc = ob_curve->runtime->curve_cache;
       float totdist = BKE_anim_path_get_length(cc);
-      if (LIKELY(totdist > FLT_EPSILON)) {
+      if (totdist > FLT_EPSILON) [[likely]] {
         fac = +(co[index] - cd->dmin[index]) / totdist;
       }
       else {
@@ -204,7 +204,7 @@ static void curve_deform_coords_impl(const Object *ob_curve,
                                      const int defgrp_index,
                                      const short flag,
                                      const short defaxis,
-                                     const BMEditMesh *em_target)
+                                     const BMesh *bm_target)
 {
   BLI_assert(ushort(defaxis) < 6);
   Curve *cu;
@@ -240,8 +240,9 @@ static void curve_deform_coords_impl(const Object *ob_curve,
     INIT_MINMAX(cd.dmin, cd.dmax);
   }
 
-  if (em_target != nullptr) {
-    cd_dvert_offset = CustomData_get_offset(&em_target->bm->vdata, CD_MDEFORMVERT);
+  BMesh *bm = const_cast<BMesh *>(bm_target);
+  if (bm != nullptr) {
+    cd_dvert_offset = CustomData_get_offset(&bm->vdata, CD_MDEFORMVERT);
     if (cd_dvert_offset != -1) {
       use_dverts = true;
     }
@@ -270,10 +271,10 @@ static void curve_deform_coords_impl(const Object *ob_curve,
   } \
   ((void)0)
 
-      if (em_target != nullptr) {
+      if (bm != nullptr) {
         BMIter iter;
         BMVert *v;
-        BM_ITER_MESH_INDEX (v, &iter, em_target->bm, BM_VERTS_OF_MESH, a) {
+        BM_ITER_MESH_INDEX (v, &iter, bm, BM_VERTS_OF_MESH, a) {
           dvert = static_cast<const MDeformVert *>(BM_ELEM_CD_GET_VOID_P(v, cd_dvert_offset));
           DEFORM_OP(dvert);
         }
@@ -314,15 +315,15 @@ static void curve_deform_coords_impl(const Object *ob_curve,
   } \
   ((void)0)
 
-      if (em_target != nullptr) {
+      if (bm != nullptr) {
         BMIter iter;
         BMVert *v;
-        BM_ITER_MESH_INDEX (v, &iter, em_target->bm, BM_VERTS_OF_MESH, a) {
+        BM_ITER_MESH_INDEX (v, &iter, bm, BM_VERTS_OF_MESH, a) {
           dvert = static_cast<const MDeformVert *>(BM_ELEM_CD_GET_VOID_P(v, cd_dvert_offset));
           DEFORM_OP_MINMAX(dvert);
         }
 
-        BM_ITER_MESH_INDEX (v, &iter, em_target->bm, BM_VERTS_OF_MESH, a) {
+        BM_ITER_MESH_INDEX (v, &iter, bm, BM_VERTS_OF_MESH, a) {
           dvert = static_cast<const MDeformVert *>(BM_ELEM_CD_GET_VOID_P(v, cd_dvert_offset));
           DEFORM_OP_CLAMPED(dvert);
         }
@@ -392,7 +393,7 @@ void BKE_curve_deform_coords_with_editmesh(const Object *ob_curve,
                                            const int defgrp_index,
                                            const short flag,
                                            const short defaxis,
-                                           const BMEditMesh *em_target)
+                                           const BMesh &bm_target)
 {
   curve_deform_coords_impl(ob_curve,
                            ob_target,
@@ -402,7 +403,7 @@ void BKE_curve_deform_coords_with_editmesh(const Object *ob_curve,
                            defgrp_index,
                            flag,
                            defaxis,
-                           em_target);
+                           &bm_target);
 }
 
 void BKE_curve_deform_co(const Object *ob_curve,

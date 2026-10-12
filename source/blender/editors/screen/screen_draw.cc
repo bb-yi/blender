@@ -19,11 +19,11 @@
 
 #include "BLF_api.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_math_color.h"
-#include "BLI_math_vector.h"
-#include "BLI_rect.h"
-#include "BLI_time.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_color_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_rect.hh"
+#include "BLI_time.hh"
 
 #include "BLT_translation.hh"
 
@@ -120,7 +120,7 @@ void ED_screen_draw_edges(wmWindow *win)
     return;
   }
 
-  if (screen->areabase.is_single() && win->global_areas.areabase.first == nullptr) {
+  if (screen->areabase.is_single() && win->global_areas.areabase.first_ == nullptr) {
     /* Do not show edges on windows without global areas and with only one editor. */
     return;
   }
@@ -325,12 +325,12 @@ static void screen_draw_area_drag_tip(
   const float icon_width = (scale * ICON_DEFAULT_WIDTH / 1.4f);
   const float icon_gap = scale * 3.0f;
   const float line_gap = scale * 5.0f;
-  const int lheight = BLF_height_max(fstyle->uifont_id);
+  const int line_height = BLF_height_max(fstyle->uifont_id);
   const int descent = BLF_descender(fstyle->uifont_id);
   const float line1_len = BLF_width(fstyle->uifont_id, hint.c_str(), hint.size());
   const float line2_len = BLF_width(fstyle->uifont_id, area_name, BLF_DRAW_STR_DUMMY_MAX);
   const float width = margin + std::max(line1_len, line2_len + icon_width + icon_gap) + margin;
-  const float height = margin + lheight + line_gap + lheight + margin;
+  const float height = margin + line_height + line_gap + line_height + margin;
 
   /* Position of this hint relative to the mouse position. */
   const int left = std::min(x + int(5.0f * UI_SCALE_FAC),
@@ -358,7 +358,8 @@ static void screen_draw_area_drag_tip(
   BLF_size(fstyle->uifont_id, UI_DEFAULT_TOOLTIP_POINTS * scale);
   BLF_color4fv(fstyle->uifont_id, col_fg);
 
-  BLF_position(fstyle->uifont_id, left + margin, top - margin - lheight + (2.0f * scale), 0.0f);
+  BLF_position(
+      fstyle->uifont_id, left + margin, top - margin - line_height + (2.0f * scale), 0.0f);
   BLF_draw(fstyle->uifont_id, hint.c_str(), hint.size());
 
   BLF_position(fstyle->uifont_id,

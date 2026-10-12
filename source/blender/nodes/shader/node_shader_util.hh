@@ -11,8 +11,8 @@
 #include <cfloat>
 #include <optional>
 
-#include "BLI_listbase.h"        // IWYU pragma: export
-#include "BLI_math_constants.h"  // IWYU pragma: export
+#include "BLI_listbase.hh"        // IWYU pragma: export
+#include "BLI_math_constants.hh"  // IWYU pragma: export
 
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"  // IWYU pragma: export
@@ -45,7 +45,7 @@ struct GPUNodeStack;
 struct GPUMaterial;
 
 namespace ui {
-class Layout;
+struct Layout;
 }
 
 bool sh_node_poll_default(const bke::bNodeType *ntype,
@@ -112,5 +112,10 @@ void get_XYZ_to_RGB_for_gpu(XYZ_to_RGB *data);
 /* Link search callback that ignores the "Weight" socket in shader nodes.
  * These sockets are never available and must be ignored to avoid invalid link operations. */
 void search_link_ops_for_shader_bsdf_node(nodes::GatherLinkSearchOpParams &params);
+
+/* Link search callback that ignores the "LightIndex", "ShaderZoneIO", and "Weight" socket in
+ * shader nodes. These sockets are never available and must be ignored to avoid invalid link
+ * operations. */
+void search_link_ops_for_shader_material_lighting_node(nodes::GatherLinkSearchOpParams &params);
 
 }  // namespace blender

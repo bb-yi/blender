@@ -7,18 +7,21 @@
  */
 
 #include <algorithm>
+#include <cinttypes>
 #include <cmath>
 #include <cstdlib>
+#include <optional>
 
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
+#include "BLI_utildefines.hh"
 #include "BLI_vector.hh"
 
 #include "DNA_ID.h"
 #include "DNA_scene_types.h"
 
 #include "BKE_anim_data.hh"
+#include "BKE_armature.hh"
 #include "BKE_context.hh"
 #include "BKE_global.hh"
 #include "BKE_lib_id.hh"
@@ -28,6 +31,7 @@
 #include "BKE_node.hh"
 #include "BKE_report.hh"
 #include "BKE_scene.hh"
+#include "BKE_scene_context.hh"
 
 #include "BLT_translation.hh"
 
@@ -38,11 +42,13 @@
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
+#include "RNA_enum_types.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
 
 #include "ED_anim_api.hh"
+#include "ED_anim_transformable.hh"
 #include "ED_keyframes_keylist.hh"
 #include "ED_markers.hh"
 #include "ED_screen.hh"
@@ -59,6 +65,7 @@
 #include "SEQ_time.hh"
 
 #include "ANIM_action.hh"
+#include "ANIM_action_iterators.hh"
 #include "ANIM_animdata.hh"
 
 #include "anim_intern.hh"
@@ -77,6 +84,8 @@ class FrameChangeModalData {
    */
  public:
   AnimKeylist *keylist;
+  /** Playback state to restore when scrubbing ends. */
+  std::optional<PreScrubbingState> pre_scrubbing;
 
   FrameChangeModalData()
   {
@@ -131,7 +140,7 @@ static bool change_frame_poll(bContext *C)
       }
     }
     if (area->spacetype == SPACE_GRAPH) {
-      const SpaceGraph *sipo = static_cast<const SpaceGraph *>(area->spacedata.first);
+      const SpaceGraph *sipo = area->spacedata.first_as<SpaceGraph>();
       /* Driver Editor's X axis is not time. */
       if (sipo->mode != SIPO_MODE_DRIVERS) {
         return true;
@@ -294,18 +303,18 @@ static void seq_frame_snap_update_best(const float position,
   }
 }
 
-static void append_sequencer_strip_snap_target(Span<Strip *> strips,
-                                               const Scene *scene,
+static void append_sequencer_strip_snap_target(const Scene *scene,
                                                const float timeline_frame,
                                                Vector<SnapTarget> &r_targets)
 {
+  Editing *ed = seq::editing_get(scene);
   float best_frame = FLT_MAX;
   float best_distance = FLT_MAX;
 
-  for (Strip *strip : strips) {
-    seq_frame_snap_update_best(strip->left_handle(), timeline_frame, &best_frame, &best_distance);
+  for (Strip &strip : *seq::active_seqbase_get(ed)) {
+    seq_frame_snap_update_best(strip.left_handle(), timeline_frame, &best_frame, &best_distance);
     seq_frame_snap_update_best(
-        strip->right_handle(scene), timeline_frame, &best_frame, &best_distance);
+        strip.right_handle(scene), timeline_frame, &best_frame, &best_distance);
   }
 
   /* best_frame will be FLT_MAX if no target was found. */
@@ -377,9 +386,7 @@ static Vector<SnapTarget> seq_get_snap_targets(bContext *C,
   Vector<SnapTarget> targets;
 
   if (tool_settings->snap_playhead_mode & SCE_SNAP_TO_STRIPS) {
-    ListBaseT<Strip> *seqbase = seq::active_seqbase_get(ed);
-    append_sequencer_strip_snap_target(
-        seq::query_all_strips(seqbase), scene, timeline_frame, targets);
+    append_sequencer_strip_snap_target(scene, timeline_frame, targets);
   }
 
   if (tool_settings->snap_playhead_mode & SCE_SNAP_TO_MARKERS) {
@@ -492,8 +499,7 @@ static float apply_frame_snap(bContext *C, FrameChangeModalData &op_data, const 
   ScrArea *area = CTX_wm_area(C);
 
   Vector<SnapTarget> targets;
-  const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
-  Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  Scene *scene = bke::scene_or_sequencer_scene_from_context(*C);
   if (!scene) {
     return frame;
   }
@@ -551,8 +557,7 @@ static float apply_frame_snap(bContext *C, FrameChangeModalData &op_data, const 
 /* Set the new frame number */
 static void change_frame_apply(bContext *C, wmOperator *op, const bool always_update)
 {
-  const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
-  Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  Scene *scene = bke::scene_or_sequencer_scene_from_context(*C);
   if (!scene) {
     return;
   }
@@ -614,8 +619,7 @@ static wmOperatorStatus change_frame_exec(bContext *C, wmOperator *op)
 static float frame_from_event(bContext *C, const wmEvent *event)
 {
   ARegion *region = CTX_wm_region(C);
-  const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
-  Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  Scene *scene = bke::scene_or_sequencer_scene_from_context(*C);
   float frame;
 
   /* convert from region coordinates to View2D 'tot' space */
@@ -650,8 +654,7 @@ static void change_frame_seq_preview_end(SpaceSeq *sseq)
 
 static bool use_playhead_snapping(bContext *C)
 {
-  const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
-  Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  Scene *scene = bke::scene_or_sequencer_scene_from_context(*C);
   if (!scene) {
     return false;
   }
@@ -659,7 +662,7 @@ static bool use_playhead_snapping(bContext *C)
   ScrArea *area = CTX_wm_area(C);
 
   if (area->spacetype == SPACE_GRAPH) {
-    SpaceGraph *graph_editor = static_cast<SpaceGraph *>(area->spacedata.first);
+    SpaceGraph *graph_editor = area->spacedata.first_as<SpaceGraph>();
     /* Snapping is disabled for driver mode. Need to evaluate if it makes sense there and what form
      * it should take. */
     if (graph_editor->mode == SIPO_MODE_DRIVERS) {
@@ -713,7 +716,7 @@ static wmOperatorStatus change_frame_invoke(bContext *C, wmOperator *op, const w
     RNA_boolean_set(op->ptr, "snap", true);
   }
 
-  screen->scrubbing = true;
+  op_data->pre_scrubbing = ED_screen_scrubbing_enable(*C, *screen);
 
   if (RNA_boolean_get(op->ptr, "seq_solo_preview")) {
     SpaceSeq *sseq = CTX_wm_space_seq(C);
@@ -746,8 +749,11 @@ static bool need_extra_redraw_after_scrubbing_ends(bContext *C)
 
 static void change_frame_cancel(bContext *C, wmOperator *op)
 {
+  FrameChangeModalData *op_data = static_cast<FrameChangeModalData *>(op->customdata);
   bScreen *screen = CTX_wm_screen(C);
-  screen->scrubbing = false;
+  if (screen) {
+    ED_screen_scrubbing_disable(*C, *screen, op_data->pre_scrubbing);
+  }
 
   if (RNA_boolean_get(op->ptr, "seq_solo_preview")) {
     SpaceSeq *sseq = CTX_wm_space_seq(C);
@@ -817,9 +823,10 @@ static wmOperatorStatus change_frame_modal(bContext *C, wmOperator *op, const wm
   if (ret != OPERATOR_RUNNING_MODAL) {
     ED_workspace_status_text(C, nullptr);
     bScreen *screen = CTX_wm_screen(C);
-    screen->scrubbing = false;
-
     FrameChangeModalData *op_data = static_cast<FrameChangeModalData *>(op->customdata);
+    if (screen) {
+      ED_screen_scrubbing_disable(*C, *screen, op_data->pre_scrubbing);
+    }
     MEM_delete(op_data);
     op->customdata = nullptr;
 
@@ -912,8 +919,7 @@ static bool anim_set_end_frames_poll(bContext *C)
 
 static wmOperatorStatus anim_set_sfra_exec(bContext *C, wmOperator *op)
 {
-  const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
-  Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  Scene *scene = bke::scene_or_sequencer_scene_from_context(*C);
   int frame;
 
   if (scene == nullptr) {
@@ -968,8 +974,7 @@ static void ANIM_OT_start_frame_set(wmOperatorType *ot)
 
 static wmOperatorStatus anim_set_efra_exec(bContext *C, wmOperator *op)
 {
-  const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
-  Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  Scene *scene = bke::scene_or_sequencer_scene_from_context(*C);
   int frame;
 
   if (scene == nullptr) {
@@ -1030,8 +1035,7 @@ static void ANIM_OT_end_frame_set(wmOperatorType *ot)
 
 static wmOperatorStatus previewrange_define_exec(bContext *C, wmOperator *op)
 {
-  const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
-  Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  Scene *scene = bke::scene_or_sequencer_scene_from_context(*C);
   if (!scene) {
     return OPERATOR_CANCELLED;
   }
@@ -1098,8 +1102,7 @@ static void ANIM_OT_previewrange_set(wmOperatorType *ot)
 
 static wmOperatorStatus previewrange_clear_exec(bContext *C, wmOperator * /*op*/)
 {
-  const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
-  Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  Scene *scene = bke::scene_or_sequencer_scene_from_context(*C);
   ScrArea *curarea = CTX_wm_area(C);
 
   /* sanity checks */
@@ -1194,8 +1197,7 @@ static void ANIM_OT_debug_channel_list(wmOperatorType *ot)
 
 static wmOperatorStatus scene_range_frame_exec(bContext *C, wmOperator * /*op*/)
 {
-  const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
-  const Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  const Scene *scene = bke::scene_or_sequencer_scene_from_context(*C);
   if (!scene) {
     return OPERATOR_CANCELLED;
   }
@@ -1366,7 +1368,7 @@ static bool replace_action_common_poll(bContext *C)
   if (!active_object) {
     return false;
   }
-  AnimData *adt = BKE_animdata_from_id(&active_object->id);
+  AnimData *adt = active_object->adt;
   if (!adt || !adt->action) {
     return false;
   }
@@ -1420,12 +1422,19 @@ static wmOperatorStatus replace_action_exec(bContext *C, wmOperator *op)
   bAction *new_action = reinterpret_cast<bAction *>(
       BKE_libblock_find_session_uid(bmain, ID_AC, new_session_uid));
 
-  if (!old_action || !new_action || old_action == new_action) {
+  if (!old_action || !new_action) {
     BKE_reportf(op->reports,
                 RPT_ERROR_INVALID_INPUT,
                 "Invalid old/new Action pair ('%s' / '%s')",
-                old_action ? old_action->id.name : "Invalid UID",
-                new_action ? new_action->id.name : "Invalid UID");
+                old_action ? old_action->id.name + 2 : "Invalid UID",
+                new_action ? new_action->id.name + 2 : "Invalid UID");
+    return OPERATOR_CANCELLED;
+  }
+  if (old_action == new_action) {
+    BKE_reportf(op->reports,
+                RPT_ERROR_INVALID_INPUT,
+                "Cannot replace Action with itself ('%s')",
+                old_action->id.name + 2);
     return OPERATOR_CANCELLED;
   }
 
@@ -1501,6 +1510,71 @@ static void ANIM_OT_replace_action(wmOperatorType *ot)
       0);
 }
 
+static wmOperatorStatus replace_action_duplicate_exec(bContext *C, wmOperator *op)
+{
+  Main *bmain = CTX_data_main(C);
+  const uint32_t old_session_uid = RNA_int_get(op->ptr, "old_session_uid");
+  bAction *dna_action = reinterpret_cast<bAction *>(
+      BKE_libblock_find_session_uid(bmain, ID_AC, old_session_uid));
+
+  if (!dna_action) {
+    BKE_report(op->reports, RPT_ERROR_INVALID_INPUT, "Invalid UID for old Action");
+    return OPERATOR_CANCELLED;
+  }
+
+  bAction *dna_copy = id_cast<bAction *>(BKE_id_copy(bmain, &dna_action->id));
+  /* `BKE_id_copy` returns an ID with a user count of 1 although no user has yet been assigned. */
+  id_us_min(&dna_copy->id);
+  BLI_assert(dna_copy->id.us == 0);
+
+  Vector<ID *> failures = replace_action(*bmain, dna_action->wrap(), dna_copy->wrap());
+  replace_action_common_failure_report(failures, *op->reports);
+
+  WM_event_add_notifier(C, NC_ANIMATION | ND_NLA_ACTCHANGE, nullptr);
+
+  return OPERATOR_FINISHED;
+}
+
+static wmOperatorStatus replace_action_duplicate_invoke(bContext *C,
+                                                        wmOperator *op,
+                                                        const blender::wmEvent * /* event */)
+{
+  Object *active_object = CTX_data_active_object(C);
+  BLI_assert(active_object != nullptr);
+  AnimData *adt = BKE_animdata_from_id(&active_object->id);
+  bAction *dna_action = adt->action;
+  BLI_assert(dna_action != nullptr);
+  RNA_int_set(op->ptr, "old_session_uid", int(dna_action->id.session_uid));
+
+  return replace_action_duplicate_exec(C, op);
+}
+
+static void ANIM_OT_replace_action_duplicate(wmOperatorType *ot)
+{
+  ot->name = "Replace with Duplicate Action";
+  ot->idname = "ANIM_OT_replace_action_duplicate";
+  ot->description =
+      "Duplicates the action of the active object and swaps all users of that action to that "
+      "duplicate";
+
+  ot->invoke = replace_action_duplicate_invoke;
+  ot->exec = replace_action_duplicate_exec;
+  ot->poll = replace_action_common_poll;
+
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+  PropertyRNA *prop = RNA_def_int(ot->srna,
+                                  "old_session_uid",
+                                  0,
+                                  0,
+                                  0,
+                                  "Old Action",
+                                  "Old Action's session uid to replace",
+                                  0,
+                                  0);
+  RNA_def_property_flag(prop, PROP_HIDDEN);
+}
+
 static wmOperatorStatus replace_action_new_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
@@ -1571,6 +1645,182 @@ static void ANIM_OT_replace_action_new(wmOperatorType *ot)
 }
 
 /** \} */
+/* -------------------------------------------------------------------- */
+/** \name Convert
+ * \{ */
+
+/* Uniquely identifies an AnimTransformable for a Slot. The StringRefNull is the `rna_path()` of
+ * the AnimTransformable.  */
+using SlotTransformableID = std::pair<const animrig::Slot *, StringRefNull>;
+
+static std::string visited_slot_users_to_message(
+    const Map<SlotTransformableID, int> &num_slot_users_to_visit)
+{
+  int unmodified_count = 0;
+  std::string unmodified_message;
+  for (const auto &[identifier, value] : num_slot_users_to_visit.items()) {
+    if (value <= 0) {
+      continue;
+    }
+    if (!unmodified_message.empty()) {
+      unmodified_message.append(", ");
+    }
+    if (identifier.second.is_empty()) {
+      /* Objects don't have an rna path. Use the slot display name. */
+      unmodified_message.append(identifier.first->identifier_without_prefix());
+    }
+    else {
+      unmodified_message.append(identifier.second);
+    }
+    unmodified_count++;
+    if (unmodified_count == 3) {
+      /* The user may modify a lot of transformables at once. More than 3 names will probably
+       * be just noise. */
+      unmodified_message.append(", ...");
+      break;
+    }
+  }
+  return unmodified_message;
+}
+
+static wmOperatorStatus rotation_mode_convert_exec(bContext *C, wmOperator *op)
+{
+
+  const eRotationModes mode = eRotationModes(RNA_enum_get(op->ptr, "mode"));
+  const bool bake = RNA_boolean_get(op->ptr, "bake");
+  ID *prev_id = nullptr;
+
+  /* A map built per action+slot to make it quicker to find the FCurves by RNA path. */
+  Map<std::pair<animrig::Action *, animrig::slot_handle_t>, ChannelbagFCurveMap> data_map;
+  int skipped_datablocks = 0;
+
+  /* We need to keep track of the modified rna paths per Slot. That is to
+   * avoid modifying the same data twice if two transformables with the same rna path share an
+   * action and slot. The integer value is used to warn the artist that they modified only a subset
+   * of all users for an rna path in a slot. We store the slot user count when adding elements and
+   * decrement for each user we visit. */
+  Map<SlotTransformableID, int> num_slot_users_to_visit;
+  Set<animrig::Action *> skipped_actions;
+
+  Main *bmain = CTX_data_main(C);
+
+  Vector<ed::AnimTransformable> selected_transformables = ed::selected_transformables_from_context(
+      *C);
+  for (ed::AnimTransformable &transformable : selected_transformables) {
+    /* We cannot skip transformables based on their current rotation mode since that may be
+     * animated. So `transformable.get_rotation_mode() == mode -> continue` won't work.*/
+    ID *owner_id = transformable.owner_id();
+    if (!BKE_id_is_editable(bmain, owner_id)) {
+      skipped_datablocks++;
+      continue;
+    }
+    animrig::foreach_action_slot_use(
+        *owner_id, [&](animrig::Action &action, const animrig::slot_handle_t slot_handle) {
+          if (!BKE_id_is_editable(bmain, &action.id)) {
+            skipped_actions.add(&action);
+            return true;
+          }
+          const animrig::Slot *slot = action.slot_for_handle(slot_handle);
+          BLI_assert(slot != nullptr);
+          SlotTransformableID identifier = {slot, transformable.rna_path()};
+          int *unmodified_count = num_slot_users_to_visit.lookup_ptr(identifier);
+          if (unmodified_count) {
+            (*unmodified_count)--;
+            BLI_assert((*unmodified_count) >= 0);
+            /* We already modified the given rna path for the slot. Don't do it twice! */
+            return true;
+          }
+          else {
+            const int slot_user_count = slot->users(*bmain).size();
+            num_slot_users_to_visit.add(identifier, slot_user_count - 1);
+          }
+
+          if (!data_map.contains({&action, slot_handle})) {
+            ChannelbagFCurveMap fcurve_map = build_rotation_fcurve_map(action, slot_handle);
+            data_map.add({&action, slot_handle}, std::move(fcurve_map));
+          }
+          ChannelbagFCurveMap &channelbag_fcurve_map = data_map.lookup({&action, slot_handle});
+          if (bake) {
+            bake_rotation_fcurves(channelbag_fcurve_map, transformable);
+          }
+          convert_rotation_keys(transformable, channelbag_fcurve_map, mode);
+          DEG_id_tag_update(&action.id, ID_RECALC_ANIMATION);
+          return true;
+        });
+
+    /* Convert the property values themselves, regardless of whether they're animated or not. */
+    ed::Rotation current_rotation = transformable.get_rotation();
+    transformable.set_rotation_mode(mode);
+    transformable.set_rotation(current_rotation.converted_to_mode(mode));
+
+    if (prev_id != owner_id) {
+      DEG_id_tag_update(owner_id, ID_RECALC_GEOMETRY);
+      WM_event_add_notifier(C, NC_ANIMATION | ND_KEYFRAME | NA_ADDED, nullptr);
+      prev_id = owner_id;
+    }
+  }
+
+  std::string unmodified_message = visited_slot_users_to_message(num_slot_users_to_visit);
+  if (!unmodified_message.empty()) {
+    BKE_reportf(op->reports,
+                RPT_WARNING,
+                "Multiple users of an action and not all were selected: %s",
+                unmodified_message.data());
+  }
+
+  if (skipped_datablocks > 0) {
+    BKE_reportf(op->reports,
+                RPT_WARNING,
+                "Skipped animated data-blocks because they cannot be edited: %d",
+                skipped_datablocks);
+  }
+
+  if (skipped_actions.size() > 0) {
+    BKE_reportf(op->reports,
+                RPT_WARNING,
+                "Skipped actions because they cannot be edited: %" PRId64,
+                skipped_actions.size());
+  }
+
+  /* Update the 3d viewport so gizmos are correct. */
+  WM_event_add_notifier(C, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
+  return OPERATOR_FINISHED;
+}
+
+static bool rotation_mode_convert_poll(bContext *C)
+{
+  return ELEM(CTX_data_mode_enum(C), CTX_MODE_OBJECT, CTX_MODE_POSE);
+}
+
+static void ANIM_OT_rotation_mode_convert(wmOperatorType *ot)
+{
+  ot->name = "Convert Rotation Mode";
+  ot->idname = "ANIM_OT_rotation_mode_convert";
+  ot->description =
+      "On all selected, change the rotation mode and convert any existing animation into that new "
+      "mode";
+
+  ot->invoke = WM_menu_invoke;
+  ot->exec = rotation_mode_convert_exec;
+  ot->poll = rotation_mode_convert_poll;
+
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+  ot->prop = RNA_def_enum(ot->srna,
+                          "mode",
+                          rna_enum_object_rotation_mode_items,
+                          ROT_MODE_QUAT,
+                          "Rotation Mode",
+                          "The rotation mode to convert the selection to");
+  RNA_def_boolean(ot->srna,
+                  "bake",
+                  false,
+                  "Bake",
+                  "Creates a key on every frame before conversion so interpolation is preserved "
+                  "in the new mode");
+}
+
+/** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Registration
@@ -1626,10 +1876,16 @@ void ED_operatortypes_anim()
   WM_operatortype_append(ANIM_OT_merge_animation);
   WM_operatortype_append(ANIM_OT_replace_action);
   WM_operatortype_append(ANIM_OT_replace_action_new);
+  WM_operatortype_append(ANIM_OT_replace_action_duplicate);
+
+  WM_operatortype_append(ANIM_OT_rotation_mode_convert);
 
   WM_operatortype_append(ed::animrig::POSELIB_OT_create_pose_asset);
   WM_operatortype_append(ed::animrig::POSELIB_OT_asset_modify);
   WM_operatortype_append(ed::animrig::POSELIB_OT_asset_delete);
+
+  WM_operatortype_append(ed::animrig::ANIM_OT_world_space_copy);
+  WM_operatortype_append(ed::animrig::ANIM_OT_world_space_paste);
 }
 
 void ED_keymap_anim(wmKeyConfig *keyconf)

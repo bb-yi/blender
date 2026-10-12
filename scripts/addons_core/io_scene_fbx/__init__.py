@@ -29,6 +29,7 @@ if "bpy" in locals():
 
 
 import bpy
+from bpy.app.translations import pgettext_iface as iface_
 from bpy.props import (
     StringProperty,
     BoolProperty,
@@ -261,7 +262,7 @@ def import_panel_transform(layout, operator):
         body.prop(operator, "decal_offset")
         row = body.row()
         row.prop(operator, "bake_space_transform")
-        row.label(text="", icon='ERROR')
+        row.label(text="", icon='STATUS_ERROR')
         body.prop(operator, "use_prepost_rot")
 
         import_panel_transform_orientation(body, operator)
@@ -664,7 +665,7 @@ def export_panel_transform(layout, operator):
         body.prop(operator, "use_space_transform")
         row = body.row()
         row.prop(operator, "bake_space_transform")
-        row.label(text="", icon='ERROR')
+        row.label(text="", icon='STATUS_ERROR')
 
 
 def export_panel_geometry(layout, operator):
@@ -713,11 +714,14 @@ def export_panel_animation(layout, operator):
 
 
 def menu_func_import(self, context):
-    self.layout.operator(ImportFBX.bl_idname, text="FBX (.fbx) (Legacy)")
+    self.layout.operator(
+        ImportFBX.bl_idname,
+        text=bpy.types.FileHandler.label_with_extensions("IO_FH_fbx") + " " + iface_("(Legacy)"))
 
 
 def menu_func_export(self, context):
-    self.layout.operator(ExportFBX.bl_idname, text="FBX (.fbx)")
+    self.layout.operator(
+        ExportFBX.bl_idname, text=bpy.types.FileHandler.label_with_extensions("IO_FH_fbx"))
 
 
 classes = (

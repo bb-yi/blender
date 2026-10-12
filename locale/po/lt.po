@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.2.0 LTS Release Candidate (b'3d8c46ac31f4')\n"
+"Project-Id-Version: Blender 5.3.0 Beta (b'8f7aae950179')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-07-13 07:34+0000\n"
+"POT-Creation-Date: 2026-10-12 07:32+0000\n"
 "PO-Revision-Date: 2025-07-23 15:18+0000\n"
 "Last-Translator: Aras Pranckevičius <aras@nesnausk.org>\n"
 "Language-Team: Lithuanian <https://translate.blender.org/projects/blender-ui/ui/lt/>\n"
@@ -1041,8 +1041,8 @@ msgid "Version"
 msgstr "Versija"
 
 
-msgid "ACEScg"
-msgstr "„ACEScg“"
+msgid "Blender"
+msgstr "„Blender“"
 
 
 msgid "Not yet defined"
@@ -1060,6 +1060,10 @@ msgstr "ID tipas"
 
 msgid "Import Info"
 msgstr "Importavimo informacija"
+
+
+msgid "Path"
+msgstr "Kelias"
 
 
 msgid "Avoid"
@@ -1407,28 +1411,8 @@ msgid "Exclude"
 msgstr "Išskirti"
 
 
-msgid "ACES2065-1"
-msgstr "„ACES2065-1“"
-
-
-msgid "AgX Log"
-msgstr "„AgX“ žurnalas"
-
-
-msgid "Rec.1886"
-msgstr "„Rec.1886“"
-
-
-msgid "Rec.2020"
-msgstr "„Rec.2020“"
-
-
 msgid "Color space that the sequencer operates in"
 msgstr "Vaizdo montavimo spalvų erdvė"
-
-
-msgid "View"
-msgstr "Rodymas"
 
 
 msgid "Temperature"
@@ -1453,6 +1437,10 @@ msgstr "„HSL“"
 
 msgid "Elements"
 msgstr "Elementai"
+
+
+msgid "Identifier"
+msgstr "Identifikatorius"
 
 
 msgctxt "Text"
@@ -1526,6 +1514,10 @@ msgstr "Gylis"
 
 msgid "Surface"
 msgstr "Paviršius"
+
+
+msgid "View"
+msgstr "Rodymas"
 
 
 msgid "Radius"
@@ -1702,10 +1694,6 @@ msgstr "Sūkurys"
 
 msgid "Wind"
 msgstr "Vėjas"
-
-
-msgid "Identifier"
-msgstr "Identifikatorius"
 
 
 msgid "Group"
@@ -2409,10 +2397,6 @@ msgid "Usage"
 msgstr "Naudojimas/Vartojimas"
 
 
-msgid "Path"
-msgstr "Kelias"
-
-
 msgid "Follow"
 msgstr "Sekti"
 
@@ -3097,16 +3081,16 @@ msgid "Import"
 msgstr "Importuoti"
 
 
+msgid "Layout"
+msgstr "Išdėstymas/Maketas"
+
+
 msgid "Apply"
 msgstr "Pritaikyti"
 
 
 msgid "Track"
 msgstr "Sekti"
-
-
-msgid "Layout"
-msgstr "Išdėstymas/Maketas"
 
 
 msgid "Animals"
@@ -3135,10 +3119,6 @@ msgstr "Pridėti keitiklį"
 
 msgid "Python"
 msgstr "„Python“"
-
-
-msgid "Blender"
-msgstr "„Blender“"
 
 
 msgid "System"
@@ -3652,6 +3632,10 @@ msgid "No device - there will be no audio output"
 msgstr "Nėra įrenginio – nebus jokios garso išvesties"
 
 
+msgid "CUDA"
+msgstr "„CUDA“"
+
+
 msgid "Language"
 msgstr "Kalba"
 
@@ -3662,10 +3646,6 @@ msgstr "Kalba, naudojama vertimui"
 
 msgid "Skip Save"
 msgstr "Praleisti išsaugojimą"
-
-
-msgid "CUDA"
-msgstr "„CUDA“"
 
 
 msgid "OptiX"
@@ -3927,10 +3907,6 @@ msgid "Tool"
 msgstr "Įrankis"
 
 
-msgid "Scene Properties"
-msgstr "Scenos ypatybės"
-
-
 msgctxt "ID"
 msgid "Render"
 msgstr "Vaizduoti"
@@ -3943,6 +3919,10 @@ msgstr "Išvestis"
 
 msgid "Output Properties"
 msgstr "Išvesties ypatybės"
+
+
+msgid "Scene Properties"
+msgstr "Scenos ypatybės"
 
 
 msgid "World Properties"
@@ -4130,10 +4110,6 @@ msgstr "Kelias po"
 
 msgid "Path Before"
 msgstr "Kelias prieš"
-
-
-msgid "Selected File"
-msgstr "Pasirinktas failas"
 
 
 msgid "Font Style"
@@ -4393,13 +4369,13 @@ msgstr "Nauja/-s/-i"
 
 
 msgctxt "Operator"
-msgid "Color"
-msgstr "Spalva"
+msgid "Text"
+msgstr "Tekstas"
 
 
 msgctxt "Operator"
-msgid "Text"
-msgstr "Tekstas"
+msgid "Color"
+msgstr "Spalva"
 
 
 msgctxt "Text"

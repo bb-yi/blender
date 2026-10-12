@@ -28,13 +28,23 @@ enum class ImBufFlags {
    * (usually 1..4 channels, 32-bit float per channel).
    */
   FloatData = 1 << 5,
+  /**
+   * Multi-layer EXR handling.
+   *
+   * As a load flag, this indicates the caller supports multi-layer EXR.
+   * For such files, the MultiLayer flag will be set on the ImBuf and no
+   * pixels will be loaded yet, only metadata. The caller can then load
+   * the layers as needed using the IMB_exr API.
+   */
   MultiLayer = 1 << 7,
   Metadata = 1 << 8,
   Deinterlace = 1 << 9,
-  /** Do not clear image pixel buffer to zero. Without this flag, allocating
+  /**
+   * Do not clear image pixel buffer to zero. Without this flag, allocating
    * a new ImBuf does clear the pixel data to zero (transparent black). If
    * whole pixel data is overwritten after allocation, then this flag can be
-   * faster since it avoids a memory clear. */
+   * faster since it avoids a memory clear.
+   */
   UninitializedPixels = 1 << 10,
 
   /** Indicates whether image on disk have pre-multiplied alpha. */
@@ -47,11 +57,12 @@ enum class ImBufFlags {
   AlphaIgnore = 1 << 15,
   Thumbnail = 1 << 16,
   /**
-   * The image contains display window information. See ImbBuf.display_size and other members for
-   * more information. */
+   * The image contains display window information.
+   * See #ImbBuf.display_size and other members for more information.
+   */
   HasDisplayWindow = 1 << 17,
 
-  /** Perform no color space conversions when reading, leave the image in the file colorspace. */
+  /** Perform no color space conversions when reading, leave the image in the file color-space. */
   NoColorspaceConvert = 1 << 18,
 };
 ENUM_OPERATORS(ImBufFlags);

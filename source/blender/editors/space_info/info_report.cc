@@ -12,9 +12,9 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_dynstr.h"
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_dynstr.hh"
+#include "BLI_listbase.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 
@@ -324,7 +324,7 @@ static wmOperatorStatus report_delete_exec(bContext *C, wmOperator * /*op*/)
 
   Report *report, *report_next;
 
-  for (report = static_cast<Report *>(reports->list.first); report;) {
+  for (report = reports->list.first(); report;) {
     report_next = report->next;
 
     if ((report->type & report_mask) && (report->flag & SELECT)) {

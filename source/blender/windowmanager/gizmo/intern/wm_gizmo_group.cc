@@ -16,9 +16,9 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_rect.h"
-#include "BLI_string.h"
+#include "BLI_listbase.hh"
+#include "BLI_rect.hh"
+#include "BLI_string.hh"
 #include "BLI_vector.hh"
 
 #include "BKE_context.hh"
@@ -85,7 +85,7 @@ void wm_gizmogroup_free(bContext *C, wmGizmoGroup *gzgroup)
     wm_gizmomap_modal_set(gzmap, C, gzmap->gzmap_context.modal, nullptr, false);
   }
 
-  for (wmGizmo *gz = static_cast<wmGizmo *>(gzgroup->gizmos.first), *gz_next; gz; gz = gz_next) {
+  for (wmGizmo *gz = gzgroup->gizmos.first(), *gz_next; gz; gz = gz_next) {
     gz_next = gz->next;
     if (gzmap->gzmap_context.select.len) {
       WM_gizmo_select_unlink(gzmap, gz);
@@ -240,7 +240,7 @@ void wm_gizmogroup_intersectable_gizmos_to_list(wmWindowManager *wm,
 void WM_gizmogroup_ensure_init(const bContext *C, wmGizmoGroup *gzgroup)
 {
   /* Prepare for first draw. */
-  if (UNLIKELY((gzgroup->init_flag & WM_GIZMOGROUP_INIT_SETUP) == 0)) {
+  if ((gzgroup->init_flag & WM_GIZMOGROUP_INIT_SETUP) == 0) [[unlikely]] {
 
     gzgroup->type->setup(C, gzgroup);
 
@@ -256,7 +256,7 @@ void WM_gizmogroup_ensure_init(const bContext *C, wmGizmoGroup *gzgroup)
 
   /* Refresh may be called multiple times,
    * this just ensures its called at least once before we draw. */
-  if (UNLIKELY((gzgroup->init_flag & WM_GIZMOGROUP_INIT_REFRESH) == 0)) {
+  if ((gzgroup->init_flag & WM_GIZMOGROUP_INIT_REFRESH) == 0) [[unlikely]] {
     /* Clear the flag before calling refresh so the callback
      * can postpone the refresh by clearing this flag. */
     gzgroup->init_flag |= WM_GIZMOGROUP_INIT_REFRESH;
@@ -270,7 +270,7 @@ void WM_gizmo_group_remove_by_tool(bContext *C,
                                    const bToolRef *tref)
 {
   wmGizmoMapType *gzmap_type = WM_gizmomaptype_find(&gzgt->gzmap_params);
-  for (bScreen *screen = static_cast<bScreen *>(bmain->screens.first); screen;
+  for (bScreen *screen = bmain->screens.first(); screen;
        screen = static_cast<bScreen *>(screen->id.next))
   {
     for (ScrArea &area : screen->areabase) {
@@ -279,9 +279,7 @@ void WM_gizmo_group_remove_by_tool(bContext *C,
           wmGizmoMap *gzmap = region.runtime->gizmo_map;
           if (gzmap && gzmap->type == gzmap_type) {
             wmGizmoGroup *gzgroup, *gzgroup_next;
-            for (gzgroup = static_cast<wmGizmoGroup *>(gzmap->groups.first); gzgroup;
-                 gzgroup = gzgroup_next)
-            {
+            for (gzgroup = gzmap->groups.first(); gzgroup; gzgroup = gzgroup_next) {
               gzgroup_next = gzgroup->next;
               if (gzgroup->type == gzgt) {
                 BLI_assert(gzgroup->parent_gzmap == gzmap);
@@ -611,6 +609,23 @@ static wmOperatorStatus gizmo_tweak_invoke(bContext *C, wmOperator *op, const wm
   mtweak->flag = 0;
 
   op->customdata = mtweak;
+  wmKeyMap *keymap = WM_keymap_active(CTX_wm_manager(C), op->type->modalkeymap);
+  for (const wmKeyMapItem &kmi : keymap->items) {
+    if (kmi.flag & KMI_INACTIVE) {
+      continue;
+    }
+
+    if (kmi.propvalue == TWEAK_MODAL_SNAP_ON &&
+        WM_event_modifier_flag_match_kmi_press(event->modifier, &kmi))
+    {
+      mtweak->flag |= WM_GIZMO_TWEAK_SNAP;
+    }
+    else if (kmi.propvalue == TWEAK_MODAL_PRECISION_ON &&
+             WM_event_modifier_flag_match_kmi_press(event->modifier, &kmi))
+    {
+      mtweak->flag |= WM_GIZMO_TWEAK_PRECISE;
+    }
+  }
 
   WM_event_add_modal_handler(C, op);
 
@@ -979,8 +994,7 @@ void WM_gizmomaptype_group_init_runtime_keymap(const Main *bmain, wmGizmoGroupTy
 {
   /* Initialize key-map.
    * On startup there's an extra call to initialize keymaps for 'permanent' gizmo-groups. */
-  wm_gizmogrouptype_setup_keymap(
-      gzgt, (static_cast<wmWindowManager *>(bmain->wm.first))->runtime->defaultconf);
+  wm_gizmogrouptype_setup_keymap(gzgt, (bmain->wm.first())->runtime->defaultconf);
 }
 
 void WM_gizmomaptype_group_init_runtime(const Main *bmain,
@@ -993,12 +1007,13 @@ void WM_gizmomaptype_group_init_runtime(const Main *bmain,
   }
 
   /* Now create a gizmo for all existing areas. */
-  for (bScreen *screen = static_cast<bScreen *>(bmain->screens.first); screen;
+  for (bScreen *screen = bmain->screens.first(); screen;
        screen = static_cast<bScreen *>(screen->id.next))
   {
     for (ScrArea &area : screen->areabase) {
       for (SpaceLink &sl : area.spacedata) {
-        ListBaseT<ARegion> *lb = (&sl == area.spacedata.first) ? &area.regionbase : &sl.regionbase;
+        ListBaseT<ARegion> *lb = (&sl == area.spacedata.first_) ? &area.regionbase :
+                                                                  &sl.regionbase;
         for (ARegion &region : *lb) {
           wmGizmoMap *gzmap = region.runtime->gizmo_map;
           if (gzmap && gzmap->type == gzmap_type) {
@@ -1047,19 +1062,18 @@ void WM_gizmomaptype_group_unlink(bContext *C,
                                   const wmGizmoGroupType *gzgt)
 {
   /* Free instances. */
-  for (bScreen *screen = static_cast<bScreen *>(bmain->screens.first); screen;
+  for (bScreen *screen = bmain->screens.first(); screen;
        screen = static_cast<bScreen *>(screen->id.next))
   {
     for (ScrArea &area : screen->areabase) {
       for (SpaceLink &sl : area.spacedata) {
-        ListBaseT<ARegion> *lb = (&sl == area.spacedata.first) ? &area.regionbase : &sl.regionbase;
+        ListBaseT<ARegion> *lb = (&sl == area.spacedata.first_) ? &area.regionbase :
+                                                                  &sl.regionbase;
         for (ARegion &region : *lb) {
           wmGizmoMap *gzmap = region.runtime->gizmo_map;
           if (gzmap && gzmap->type == gzmap_type) {
             wmGizmoGroup *gzgroup, *gzgroup_next;
-            for (gzgroup = static_cast<wmGizmoGroup *>(gzmap->groups.first); gzgroup;
-                 gzgroup = gzgroup_next)
-            {
+            for (gzgroup = gzmap->groups.first(); gzgroup; gzgroup = gzgroup_next) {
               gzgroup_next = gzgroup->next;
               if (gzgroup->type == gzgt) {
                 BLI_assert(gzgroup->parent_gzmap == gzmap);

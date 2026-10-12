@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "node_shader_util.hh"
 
 #include "UI_interface_layout.hh"
@@ -35,14 +39,15 @@ static int gpu_shader_bevel(GPUMaterial *mat,
                             GPUNodeStack *out)
 {
   if (!in[1].link) {
-    GPU_link(mat, "world_normals_get", &in[1].link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &in[1].link);
   }
 
   GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
   GPU_material_hiz_data_set(mat);
 
   const float f_samples = (node->custom1 > 0) ? float(node->custom1) : 1.0f;
-  return GPU_stack_link(mat, node, "node_bevel", in, out, GPU_constant(&f_samples));
+  return GPU_stack_link(mat, node, "node_bevel", in, out, GPU_constant(&f_samples),
+                        GPU_kernel_globals(), GPU_shading_data());
 }
 
 NODE_SHADER_MATERIALX_BEGIN

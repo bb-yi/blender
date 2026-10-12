@@ -10,7 +10,7 @@
 
 #include <optional>
 
-#include "BLI_compiler_attrs.h"
+#include "BLI_compiler_attrs.hh"
 
 #include "BLI_math_vector_types.hh"
 
@@ -26,18 +26,6 @@ struct wmTimer;
 struct wmWindow;
 struct wmWindowManager;
 struct Main;
-
-struct wmPaintCursor {
-  wmPaintCursor *next, *prev;
-
-  void *customdata;
-
-  bool (*poll)(bContext *C);
-  void (*draw)(bContext *C, const int2 &xy, const float2 &tilt, void *customdata);
-
-  short space_type;
-  short region_type;
-};
 
 /**
  * Cause a delayed #WM_exit()
@@ -141,9 +129,5 @@ void wm_stereo3d_set_cancel(bContext *C, wmOperator *op);
  * Initialize operator properties.
  */
 void wm_open_init_load_ui(wmOperator *op, bool use_prefs);
-/**
- * Return true if the script auto-execution should be cleared based on #WM_file_autoexec_init.
- */
-bool wm_open_init_use_scripts(wmOperator *op, bool use_prefs) ATTR_WARN_UNUSED_RESULT;
 
 }  // namespace blender

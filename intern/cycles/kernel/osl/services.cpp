@@ -319,7 +319,7 @@ bool OSLRenderServices::texture(OSLUStringHash filename,
   return osl_shared_texture(globals->kg,
                             globals,
                             texture_handle,
-                            static_cast<void *>(&options),
+                            reinterpret_cast<OSLTextureOptions *>(&options),
                             s,
                             t,
                             dsdx,
@@ -370,7 +370,7 @@ bool OSLRenderServices::texture3d(OSLUStringHash filename,
 bool OSLRenderServices::environment(OSLUStringHash filename,
                                     TextureHandle *texture_handle,
                                     TexturePerthread * /*thread_info*/,
-                                    OSL::TextureOpt & /*options*/,
+                                    OSL::TextureOpt &options,
                                     OSL::ShaderGlobals *sg,
                                     const OSL::Vec3 &R,
                                     const OSL::Vec3 &dRdx,
@@ -394,6 +394,7 @@ bool OSLRenderServices::environment(OSLUStringHash filename,
   return osl_shared_environment(globals->kg,
                                 globals,
                                 texture_handle,
+                                reinterpret_cast<OSLTextureOptions *>(&options),
                                 make_float3(R.x, R.y, R.z),
                                 make_float3(dRdx.x, dRdx.y, dRdx.z),
                                 make_float3(dRdy.x, dRdy.y, dRdy.z),
@@ -570,8 +571,10 @@ bool OSLRenderServices::trace(TraceOpt &options,
   }
   else {
     /* Ray-trace, leaving out shadow opaque to avoid early exit. */
-    const PathRayVisibility visibility = PATH_RAY_VISIBILITY_ALL &
-                                         ~PATH_RAY_VISIBILITY_SHADOW_OPAQUE;
+    PathRayVisibility visibility = PATH_RAY_VISIBILITY_ALL & ~PATH_RAY_VISIBILITY_SHADOW_OPAQUE;
+    if (options.traceset == DeviceStrings::u_traceset_raycast) {
+      visibility = PATH_RAY_VISIBILITY_RAYCAST;
+    }
     tracedata->hit = scene_intersect(kg, &ray, visibility, &tracedata->isect);
     if (tracedata->hit) {
       tracedata->self_hit = tracedata->isect.object == sd->object;

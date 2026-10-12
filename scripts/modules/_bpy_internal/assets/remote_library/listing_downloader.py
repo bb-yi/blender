@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from __future__ import absolute_import, annotations
-import shutil
 
 __all__ = (
     'RemoteAssetListingLocator',
@@ -16,6 +15,7 @@ import copy
 import enum
 import functools
 import logging
+import shutil
 import unicodedata
 import urllib.parse
 from pathlib import Path, PurePosixPath, PurePath, PureWindowsPath
@@ -238,6 +238,7 @@ class RemoteAssetListingDownloader:
     def __init__(
         self,
         remote_url: str,
+        auth_token: str,
         local_path: Path | str,
         on_update_callback: OnUpdateCallback,
         on_done_callback: OnDoneCallback,
@@ -249,6 +250,8 @@ class RemoteAssetListingDownloader:
         :param remote_url: Base URL of the remote asset library server. See
            blender_asset_library_openapi.yaml for the files downloaded from
            there.
+
+        :param asset_library_auth_token: Optional authentication token for bearer authentication.
 
         :param local_path: The directory to download the index files to.
 
@@ -301,16 +304,20 @@ class RemoteAssetListingDownloader:
                 cache_location=self._locator.http_metadata_cache_location,
             ))
 
+        http_headers = {
+            'Accept': 'application/json',
+            'X-Blender': "{:d}.{:d}".format(*bpy.app.version),
+        }
+        if auth_token:
+            http_headers['Authorization'] = "Bearer {:s}".format(auth_token)
+
         # Create the background downloader object now, so that it
         # (hypothetically in some future) can be adjusted before the actual
         # downloading begins.
         self._bg_downloader = http_dl.BackgroundDownloader(
             options=http_dl.DownloaderOptions(
                 metadata_provider=self._http_metadata_provider,
-                http_headers={
-                    'Accept': 'application/json',
-                    'X-Blender': "{:d}.{:d}".format(*bpy.app.version),
-                },
+                http_headers=http_headers,
                 timeout=300,
                 max_disk_size_bytes=MAX_JSON_FILE_SIZE_MB * 1024 * 1024,
             ),
@@ -759,7 +766,7 @@ class RemoteAssetListingDownloader:
             return 0  # Deactivate the timer.
         except Exception:
             logger.exception(
-                "Unexpected error downloading remote asset library ilisting from %s to %s",
+                "Unexpected error downloading remote asset library listing from %s to %s",
                 self._locator.remote_url,
                 self._locator.local_path)
 
@@ -877,6 +884,7 @@ class RemoteAssetListingBackupper:
     def restore(self) -> None:
         """Restore a backup of the asset library's listing."""
         if not self.has_backup():
+            backup_path = self._locator.listing_backup_path
             logger.warning("Asset Listing backup did not exist, cannot restore: %s", backup_path)
             return
         self._restore()

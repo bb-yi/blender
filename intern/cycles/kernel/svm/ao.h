@@ -95,23 +95,21 @@ ccl_device float svm_ao(
   return ((float)unoccluded) / num_samples;
 }
 
-template<uint node_feature_mask, typename ConstIntegratorGenericState>
+template<uint64_t node_feature_mask, typename ConstIntegratorGenericState>
 #  if defined(__KERNEL_OPTIX__)
 ccl_device_inline
 #  else
 ccl_device_noinline
 #  endif
-    void
-    svm_node_ao(KernelGlobals kg,
-                ConstIntegratorGenericState state,
-                ccl_private ShaderData *sd,
-                ccl_private float *ccl_restrict stack,
-                const ccl_global SVMNodeAmbientOcclusion &ccl_restrict node)
+    void svm_node_ao(KernelGlobals kg,
+                     ConstIntegratorGenericState state,
+                     ccl_private ShaderData *sd,
+                     ccl_private float *ccl_restrict stack,
+                     const ccl_global SVMNodeAmbientOcclusion &ccl_restrict node)
 {
   float ao = 1.0f;
 
-  IF_KERNEL_NODES_FEATURE(RAYTRACE)
-  {
+  IF_KERNEL_NODES_FEATURE (RAYTRACE) {
     float dist = stack_load(stack, node.dist);
     float3 normal = stack_load_float3_default(stack, node.normal_offset, sd->N);
     normal = safe_normalize(normal);

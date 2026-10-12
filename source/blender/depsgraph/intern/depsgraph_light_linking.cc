@@ -5,14 +5,15 @@
 /** \file
  * \ingroup depsgraph
  *
- * Light linking utilities. */
+ * Light linking utilities.
+ */
 
 #include "intern/depsgraph_light_linking.hh"
 
 #include "MEM_guardedalloc.h"
 
 #include "BLI_hash.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
 
 #include "BKE_collection.hh"

@@ -2,10 +2,18 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup draw
+ */
+
 #pragma once
 
 #ifndef GPU_SHADER
 #  include "GPU_shader_shared_utils.hh"
+#endif
+
+#ifdef GPU_SHADER
+#  include "gpu_shader_compat.hh"
 #endif
 
 /* Copy of DNA enum in `DNA_curves_types.h`. */
@@ -99,5 +107,24 @@ StoredFloat as_data(float interp)
   data.x = interp;
   return data;
 }
+
+/* `uint` versions of the above structs to avoid special behavior when copying types that are not
+ * actually floats.  */
+
+struct StoredUint {
+  uint x;
+};
+
+struct StoredUint2 {
+  uint x, y;
+};
+
+struct StoredUint3 {
+  uint x, y, z;
+};
+
+struct StoredUint4 {
+  uint x, y, z, w;
+};
 
 /** \} */

@@ -2,7 +2,11 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_listbase.h"
+/** \file
+ * \ingroup bke
+ */
+
+#include "BLI_listbase.hh"
 
 #include "DNA_object_types.h"
 

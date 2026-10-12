@@ -7,8 +7,8 @@
 #include "infos/eevee_outline_infos.hh"
 
 #include "eevee_defines.hh"
-#include "gpu_shader_math_base_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_base.bsl.hh"
+#include "gpu_shader_utildefines.bsl.hh"
 
 /* Outline info is stored in integer channels to avoid Vulkan storage-image issues with UNORM
  * formats. Reserve the top width code-point so unpacking never hits 1.0 exactly and can
@@ -251,15 +251,6 @@ float outline_pixel_world_size_at(float depth, int2 extent, int2 texel)
 #endif
 }
 
-#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(GPU_FRAGMENT_SHADER)
-/* NPR: `eevee_outline_lib.glsl` is a dependency of `eevee_nodetree_lib.bsl.hh`, so its body is
- * emitted BEFORE that file's body which defines the `drw_object_infos`/`drw_resource_id` BSL
- * compatibility shims. Forward-declare them so `output_outline()` compiles ahead of the shim
- * definitions (the calls only run from appended node code, after both are defined). */
-ObjectInfos drw_object_infos();
-uint drw_resource_id();
-#endif
-
 void output_outline(float4 line_color,
                     float line_width,
                     float depth_threshold,
@@ -271,10 +262,12 @@ void output_outline(float4 line_color,
                     float outline_id,
                     bool id_edge,
                     float id_edge_width,
-                    bool freestyle_edge)
+                    bool freestyle_edge,
+                    ObjectInfos object_infos,
+                    uint resource_id)
 {
 #if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(GPU_FRAGMENT_SHADER)
-  if (flag_test(drw_object_infos().flag, OBJECT_HOLDOUT)) {
+  if (flag_test(object_infos.flag, OBJECT_HOLDOUT)) {
     return;
   }
 
@@ -285,7 +278,7 @@ void output_outline(float4 line_color,
   int2 texel = int2(gl_FragCoord.xy);
   uint custom_outline_id = uint(max(outline_id, 0.0f) + 0.5f);
   uint resolved_outline_id = (custom_outline_id > 0u) ? custom_outline_id :
-                                                      min(drw_resource_id() + 1u,
+                                                      min(resource_id + 1u,
                                                           OUTLINE_ID_VALUE_MASK);
 
   float4 stored_color = line_color;

@@ -8,6 +8,9 @@
 
 #include "MEM_guardedalloc.h"
 
+#include "gpu_capabilities_private.hh"
+
+#include "render_graph/nodes/vk_copy_buffer_node.hh"
 #include "vk_data_conversion.hh"
 #include "vk_shader.hh"
 #include "vk_shader_interface.hh"
@@ -60,7 +63,8 @@ void VKVertexBuffer::ensure_buffer_view()
   buffer_view_info.range = buffer_.size_in_bytes();
 
   const VKDevice &device = VKBackend::get().device;
-  vkCreateBufferView(device.vk_handle(), &buffer_view_info, nullptr, &vk_buffer_view_);
+  device.functions.vkCreateBufferView(
+      device.vk_handle(), &buffer_view_info, nullptr, &vk_buffer_view_);
   debug::object_label(vk_buffer_view_, "VertexBufferView");
 }
 
@@ -87,6 +91,30 @@ void VKVertexBuffer::update_sub(uint start_offset, uint data_size_in_bytes, cons
     memcpy(staging_buffer.host_buffer_get().mapped_memory_get(), data, data_size_in_bytes);
     staging_buffer.copy_to_device(context);
   }
+}
+
+void VKVertexBuffer::copy_sub(VertBuf &source_buf,
+                              uint source_first_vertex,
+                              uint dest_first_vertex,
+                              uint vertex_len)
+{
+  BLI_assert(format.stride == source_buf.format.stride);
+  BLI_assert_msg(size_t(source_first_vertex) + vertex_len <= source_buf.vertex_alloc,
+                 "Copy source range exceeds the source vertex buffer bounds");
+  BLI_assert_msg(size_t(dest_first_vertex) + vertex_len <= vertex_alloc,
+                 "Copy destination range exceeds the vertex buffer bounds");
+  VKVertexBuffer &source_vertex_buffer = unwrap(source_buf);
+  BLI_assert_msg(buffer_.is_allocated(), "GPU_vertbuf_use() not called on this buffer");
+  BLI_assert_msg(source_vertex_buffer.buffer_.is_allocated(),
+                 "GPU_vertbuf_use() not called on the source buffer");
+  VKContext &context = *VKContext::get();
+  render_graph::VKCopyBufferNode::CreateInfo copy_buffer = {};
+  copy_buffer.src_buffer = source_vertex_buffer.buffer_.resource();
+  copy_buffer.dst_buffer = buffer_.resource();
+  copy_buffer.region.srcOffset = source_first_vertex * source_vertex_buffer.format.stride;
+  copy_buffer.region.dstOffset = dest_first_vertex * format.stride;
+  copy_buffer.region.size = vertex_len * format.stride;
+  context.render_graph().add_node(copy_buffer);
 }
 
 void VKVertexBuffer::read(void *data) const
@@ -209,6 +237,10 @@ void VKVertexBuffer::allocate()
                                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
                                        VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  if (GCaps.ray_query_support) {
+    vk_buffer_usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  }
 
   buffer_.create(size_alloc_get(),
                  vk_buffer_usage,

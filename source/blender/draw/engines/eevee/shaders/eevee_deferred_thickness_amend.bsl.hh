@@ -15,7 +15,7 @@
 #include "eevee_light_lib.bsl.hh"
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_shadow_tracing.bsl.hh"
-#include "gpu_shader_fullscreen_lib.glsl"
+#include "gpu_shader_fullscreen.bsl.hh"
 
 namespace eevee::thickness {
 
@@ -29,14 +29,11 @@ struct FromShadowEvalCtx {
 
   void eval([[resource_table]] ShadowRenderData &srd, LightData light, const bool is_directional)
   {
-    [[resource_table]] const Uniform &uni = srd.uniforms;
-    [[resource_table]] const draw::View &views = srd.views;
-
     if (light.tilemap_index == LIGHT_NO_SHADOW) {
       return;
     }
 
-    LightVector lv = light_vector_get(light, is_directional, P);
+    LightVector lv = LightVector::get(light, is_directional, P);
     float attenuation = light_attenuation_surface(light, is_directional, lv);
     attenuation *= light_attenuation_facing(light, lv.L, lv.dist, -Ng, true);
 
@@ -44,7 +41,8 @@ struct FromShadowEvalCtx {
       return;
     }
 
-    float texel_radius = shadow_texel_radius_at_position(uni, views, light, is_directional, P);
+    float texel_radius = shadow_texel_radius_at_position(
+        srd.uniforms, srd.views, light, is_directional, P);
 
     float3 P_offset = P;
     /* Invert all biases to get value inside the surface.
@@ -155,7 +153,7 @@ void amend_frag([[resource_table]] ThicknessAmend &srt,
       .gbuffer_thickness = gbuffer_thickness,
       .thickness_accum = 0.0f,
       .weight_accum = 0.0f,
-      .pcf_random = pcg4d(float4(frag_co.xyz, sampling.rng_1D_get(SAMPLING_SHADOW_X))).xy,
+      .pcf_random = random::pcg_4d(float4(frag_co.xyz, sampling.rng_1D_get(SAMPLING_SHADOW_X))).xy,
   };
 
   light::foreach_visible(lrd, frag_co.xy, vPz, ctx, srd);
@@ -177,6 +175,6 @@ void amend_frag([[resource_table]] ThicknessAmend &srt,
 
 PipelineGraphic deferred_thickness_amend(amend_vert,
                                          amend_frag,
-                                         eevee::ShadowRenderData{.shadow_random = true});
+                                         eevee::ShadowRenderConstants{.shadow_random = true});
 
 }  // namespace eevee

@@ -12,7 +12,7 @@
 
 #include "BLI_map.hh"
 #include "BLI_span.hh"
-#include "BLI_time.h"
+#include "BLI_time.hh"
 #include "BLI_vector.hh"
 
 #include "GPU_capabilities.hh"
@@ -51,8 +51,10 @@ struct GPUPass {
   double compilation_start_timestamp = 0.0;
   double compilation_time = 0.0;
 
-  /** Hint that an optimized variant of this pass should be created.
-   *  Based on a complexity heuristic from pass code generation. */
+  /**
+   * Hint that an optimized variant of this pass should be created.
+   * Based on a complexity heuristic from pass code generation.
+   */
   bool should_optimize = false;
   bool is_optimization_pass = false;
 
@@ -387,7 +389,7 @@ GPUPass *GPU_generate_pass(GPUMaterial *material,
 
   GPUCodegen codegen(material, graph, debug_name);
   codegen.generate_graphs();
-  codegen.generate_cryptomatte();
+  codegen.generate_material_props();
 
   GPUPass *pass = nullptr;
 

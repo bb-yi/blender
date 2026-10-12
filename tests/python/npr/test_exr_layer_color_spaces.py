@@ -341,15 +341,18 @@ class ExrLayerColorSpaces(unittest.TestCase):
             self.assert_color(part, 'Non-Color', 3e-5)
 
     def test_15_generic_ocio_identifiers(self):
-        spaces = [('NoID', 'Linear FilmLight E-Gamut'), ('OCIOID', 'Linear Apple Wide Gamut')]
-        self.assertEqual(CONFIG.getColorSpace(spaces[0][1]).getInteropID(), '')
+        # Blender 5.3 assigns a blender: interop ID to E-Gamut. Preserve any ID supplied
+        # by the active config, while older configurations still exercise the no-ID path.
+        spaces = [('EGamut', 'Linear FilmLight E-Gamut'), ('OCIOID', 'Linear Apple Wide Gamut')]
         for name, space in spaces:
             self.add(name, space)
         _, parts = self.render()
-        self.assertNotIn('colorInteropID', parts['NoID']['attrs'])
         for name, space in spaces:
-            if name == 'OCIOID':
-                self.assertEqual(parts[name]['tag'], CONFIG.getColorSpace(space).getInteropID())
+            identifier = CONFIG.getColorSpace(space).getInteropID()
+            if identifier:
+                self.assertEqual(parts[name]['tag'], identifier)
+            else:
+                self.assertNotIn('colorInteropID', parts[name]['attrs'])
             np.testing.assert_allclose(values(parts[name]), np.broadcast_to(transformed(RGBA, space), (32, 32, 4)), atol=2e-5)
 
     def test_16_display_settings_are_not_baked(self):

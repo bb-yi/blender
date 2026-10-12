@@ -30,7 +30,8 @@ static int node_shader_gpu_screenspace_info(GPUMaterial *mat,
 
   GPU_material_flag_set(mat, GPU_MATFLAG_SCREENSPACE_INFO | GPU_MATFLAG_LIGHTPROBE_ACCESS);
   return GPU_stack_link(
-      mat, node, "node_screenspace_info", in, out, GPU_constant(&use_explicit_view_position));
+      mat, node, "node_screenspace_info", in, out, GPU_constant(&use_explicit_view_position),
+      GPU_kernel_globals(), GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_screenspace_info_cc

@@ -65,34 +65,26 @@ static void vertex_buffer_fetch_mode(ColorType color)
 
   GPU_offscreen_read_color(offscreen, GPU_DATA_FLOAT, read_data.data());
 
-  switch (attr_type) {
-    case VertAttrType::SNORM_8_8_8_8:
-      read_data[0] = read_data[0] * float(127);
-      break;
-    case VertAttrType::UNORM_8_8_8_8:
-      read_data[0] = read_data[0] * float(255);
-      break;
-    case VertAttrType::SNORM_16_16_16_16:
-      read_data[0] = read_data[0] * float(32767);
-      break;
-    case VertAttrType::UNORM_16_16_16_16:
-      read_data[0] = read_data[0] * float(65535);
-      break;
-    case VertAttrType::SNORM_10_10_10_2:
-      read_data[0] = read_data[0] * float4(511, 511, 511, 1);
-      break;
-    case VertAttrType::SFLOAT_32_32_32_32:
-      break;
-    default:
-      BLI_assert_unreachable();
-  }
+  /* Do integer comparison to avoid floating point inaccuracies from each conversion steps. */
+  if constexpr (std::is_same_v<ColorType, char4_norm> || std::is_same_v<ColorType, short2_norm> ||
+                std::is_same_v<ColorType, short4_norm> ||
+                std::is_same_v<ColorType, int1010102_norm>)
+  {
 
-  if (attr_type == VertAttrType::SFLOAT_32_32_32_32) {
+    EXPECT_EQ(int4(ColorType(read_data[0])), int4(color));
+  }
+  else if constexpr (std::is_same_v<ColorType, uchar4_norm> ||
+                     std::is_same_v<ColorType, ushort2_norm> ||
+                     std::is_same_v<ColorType, ushort4_norm> ||
+                     std::is_same_v<ColorType, uint1010102_norm>)
+  {
+    EXPECT_EQ(uint4(ColorType(read_data[0])), uint4(color));
+  }
+  else if constexpr (std::is_same_v<ColorType, float4>) {
     EXPECT_EQ(read_data[0], float4(color));
   }
   else {
-    /* Do integer comparison to avoid floating point inaccuracies from each conversion steps. */
-    EXPECT_EQ(int4(read_data[0]), int4(float4(color)));
+    static_assert(false, "Missing implementation");
   }
 
   GPU_batch_discard(batch);
@@ -101,34 +93,34 @@ static void vertex_buffer_fetch_mode(ColorType color)
 
 static void test_vertex_buffer_fetch_mode__GPU_COMP_I8__GPU_FETCH_INT_TO_FLOAT_UNIT()
 {
-  vertex_buffer_fetch_mode<VertAttrType::SNORM_8_8_8_8, char4>(char4(100, -127, 127, 0));
+  vertex_buffer_fetch_mode<VertAttrType::SNORM_8_8_8_8, char4_norm>(int4(100, -127, 127, 0));
 }
 GPU_TEST(vertex_buffer_fetch_mode__GPU_COMP_I8__GPU_FETCH_INT_TO_FLOAT_UNIT);
 
 static void test_vertex_buffer_fetch_mode__GPU_COMP_U8__GPU_FETCH_INT_TO_FLOAT_UNIT()
 {
-  vertex_buffer_fetch_mode<VertAttrType::UNORM_8_8_8_8, uchar4>(uchar4(100, 0, 255, 127));
+  vertex_buffer_fetch_mode<VertAttrType::UNORM_8_8_8_8, uchar4_norm>(uint4(100, 0, 255, 127));
 }
 GPU_TEST(vertex_buffer_fetch_mode__GPU_COMP_U8__GPU_FETCH_INT_TO_FLOAT_UNIT);
 
 static void test_vertex_buffer_fetch_mode__GPU_COMP_I16__GPU_FETCH_INT_TO_FLOAT_UNIT()
 {
-  vertex_buffer_fetch_mode<VertAttrType::SNORM_16_16_16_16, short4>(
-      short4(12034, -32767, 32767, 0));
+  vertex_buffer_fetch_mode<VertAttrType::SNORM_16_16_16_16, short4_norm>(
+      int4(12034, -32767, 32767, 0));
 }
 GPU_TEST(vertex_buffer_fetch_mode__GPU_COMP_I16__GPU_FETCH_INT_TO_FLOAT_UNIT);
 
 static void test_vertex_buffer_fetch_mode__GPU_COMP_U16__GPU_FETCH_INT_TO_FLOAT_UNIT()
 {
-  vertex_buffer_fetch_mode<VertAttrType::UNORM_16_16_16_16, ushort4>(
-      ushort4(12034, 0, 65535, 32767));
+  vertex_buffer_fetch_mode<VertAttrType::UNORM_16_16_16_16, ushort4_norm>(
+      uint4(12034, 0, 65535, 32767));
 }
 GPU_TEST(vertex_buffer_fetch_mode__GPU_COMP_U16__GPU_FETCH_INT_TO_FLOAT_UNIT);
 
 static void test_vertex_buffer_fetch_mode__GPU_COMP_I10__GPU_FETCH_INT_TO_FLOAT_UNIT()
 {
-  vertex_buffer_fetch_mode<VertAttrType::SNORM_10_10_10_2, PackedNormal>(
-      PackedNormal(321, -511, 511, 0));
+  vertex_buffer_fetch_mode<VertAttrType::SNORM_10_10_10_2, int1010102_norm>(
+      int4(321, -511, 511, 0));
 }
 GPU_TEST(vertex_buffer_fetch_mode__GPU_COMP_I10__GPU_FETCH_INT_TO_FLOAT_UNIT);
 
@@ -137,5 +129,67 @@ static void test_vertex_buffer_fetch_mode__GPU_COMP_F32__GPU_FETCH_FLOAT()
   vertex_buffer_fetch_mode<VertAttrType::SFLOAT_32_32_32_32, float4>(float4(4, 5, 6, 1));
 }
 GPU_TEST(vertex_buffer_fetch_mode__GPU_COMP_F32__GPU_FETCH_FLOAT);
+
+static void test_vertex_buffer_copy_sub()
+{
+  GPUVertFormat format = {0};
+  GPU_vertformat_attr_add(&format, "pos", gpu::VertAttrType::SFLOAT_32_32);
+  GPU_vertformat_attr_add(&format, "color", gpu::VertAttrType::SFLOAT_32_32_32_32);
+
+  struct Vert {
+    float2 pos;
+    float4 color;
+  };
+
+  /* Create source vertex buffer with known data. */
+  VertBuf *src_vbo = GPU_vertbuf_create_with_format(format);
+  GPU_vertbuf_data_alloc(*src_vbo, 4);
+
+  Vert src_data[4] = {
+      {float2(-1.0, -1.0), float4(0.0, 0.0, 0.0, 1.0)},
+      {float2(1.0, -1.0), float4(1.0, 0.0, 0.0, 1.0)},
+      {float2(1.0, 1.0), float4(1.0, 1.0, 0.0, 1.0)},
+      {float2(-1.0, 1.0), float4(0.0, 1.0, 0.0, 1.0)},
+  };
+  for (int i : IndexRange(4)) {
+    GPU_vertbuf_vert_set(src_vbo, i, &src_data[i]);
+  }
+  GPU_vertbuf_use(src_vbo);
+
+  /* Create destination vertex buffer, pre-filled with sentinel data. */
+  VertBuf *dst_vbo = GPU_vertbuf_create_with_format(format);
+  GPU_vertbuf_data_alloc(*dst_vbo, 4);
+
+  Vert dest_data[4] = {
+      {float2(-2.0, -2.0), float4(0.0, 0.0, 0.0, 0.0)},
+      {float2(-1.0, -2.0), float4(0.0, 0.0, 0.0, 0.0)},
+      {float2(0.0, -2.0), float4(0.0, 0.0, 0.0, 0.0)},
+      {float2(1.0, -2.0), float4(0.0, 0.0, 0.0, 0.0)},
+  };
+  for (int i : IndexRange(4)) {
+    GPU_vertbuf_vert_set(dst_vbo, i, &dest_data[i]);
+  }
+  GPU_vertbuf_use(dst_vbo);
+
+  /* Copy vertices [1, 3) from the source buffer to [0, 2) of the destination buffer. */
+  dst_vbo->copy_sub(*src_vbo, 1, 0, 2);
+
+  /* Read back and validate content. */
+  Vert read_data[4];
+  GPU_vertbuf_read(dst_vbo, read_data);
+  for (int i : IndexRange(2)) {
+    EXPECT_EQ(read_data[i].pos, src_data[i + 1].pos);
+    EXPECT_EQ(read_data[i].color, src_data[i + 1].color);
+  }
+  for (int i : IndexRange(2, 2)) {
+    EXPECT_EQ(read_data[i].pos, dest_data[i].pos);
+    EXPECT_EQ(read_data[i].color, dest_data[i].color);
+  }
+
+  GPU_vertbuf_discard(dst_vbo);
+  GPU_vertbuf_discard(src_vbo);
+}
+
+GPU_TEST(vertex_buffer_copy_sub);
 
 }  // namespace blender::gpu::tests

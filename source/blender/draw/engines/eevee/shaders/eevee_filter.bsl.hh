@@ -8,8 +8,7 @@
  * Filtering utilities.
  */
 
-#include "gpu_shader_math_base_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_base.bsl.hh"
 
 /* Meh, filter is a reserved keyword.  */
 namespace filters {

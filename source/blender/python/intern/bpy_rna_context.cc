@@ -10,8 +10,8 @@
 
 #include <Python.h>
 
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 #include "BKE_main.hh"
@@ -327,8 +327,12 @@ static PyObject *bpy_rna_context_temp_override_enter(BPyContextTempOverride *sel
 
   /* Manipulate the context (setup). */
   if (self->ctx_temp.screen_is_set) {
-    self->ctx_temp_orig.screen = WM_window_get_active_screen(win);
-    bpy_rna_context_temp_set_screen_for_window(C, win, self->ctx_temp.screen);
+    /* A `None` window may be passed in, as the window defines the screen,
+     * there is nothing to do here. */
+    if (win != nullptr) {
+      self->ctx_temp_orig.screen = WM_window_get_active_screen(win);
+      bpy_rna_context_temp_set_screen_for_window(C, win, self->ctx_temp.screen);
+    }
   }
 
   /* NOTE: always set these members, even when they are equal to the current values because
@@ -542,7 +546,7 @@ static PyObject *bpy_rna_context_temp_override_logging_set(BPyContextTempOverrid
   };
   static _PyArg_Parser _parser = {
       "O&" /* `enable` */
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "O&" /* `hide_missing` */
       ":logging_set",
       _keywords,

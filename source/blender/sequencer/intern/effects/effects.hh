@@ -9,7 +9,7 @@
  */
 
 #include "BLI_array.hh"
-#include "BLI_math_color.h"
+#include "BLI_math_color_c.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_task.hh"
 
@@ -58,8 +58,10 @@ struct EffectHandle {
                        const SeqResult &input2);
 };
 
-/** Get the effect handle for a given strip.
- * If `strip` is not an effect strip, returns empty `EffectHandle`. */
+/**
+ * Get the effect handle for a given strip.
+ * If `strip` is not an effect strip, returns empty `EffectHandle`.
+ */
 EffectHandle strip_effect_handle_get(Strip *strip);
 
 EffectHandle strip_blend_mode_handle_get(Strip *strip);

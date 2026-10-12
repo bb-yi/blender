@@ -13,7 +13,7 @@
 #include <cstddef>
 
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BKE_blendfile.hh"
 #include "BKE_global.hh"
@@ -93,7 +93,7 @@ static PyObject *bpy_lib_write(BPy_PropertyRNA *self, PyObject *args, PyObject *
   static _PyArg_Parser _parser = {
       "O&" /* `filepath` */
       "O!" /* `datablocks` */
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "O&" /* `path_remap` */
       "O&" /* `fake_user` */
       "O&" /* `compress` */

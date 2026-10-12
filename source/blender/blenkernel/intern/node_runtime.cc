@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
@@ -10,7 +14,7 @@
 #include "DNA_node_types.h"
 
 #include "BLI_function_ref.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_stack.hh"
 #include "BLI_task.hh"
 
@@ -165,8 +169,8 @@ static void update_internal_link_inputs(const bNodeTree &ntree)
     for (bNodeSocket *socket : node->runtime->outputs) {
       socket->runtime->internal_link_input = nullptr;
     }
-    for (bNodeLink &link : node->runtime->internal_links) {
-      link.tosock->runtime->internal_link_input = link.fromsock;
+    for (bNodeInternalLink &link : node->runtime->internal_links) {
+      link.out->runtime->internal_link_input = link.in;
     }
   }
 }
@@ -809,7 +813,8 @@ void materialize_shader_portals(bNodeTree &tree)
 
 static void add_shader_node_error(bNodeTree &tree, const bNode &node, const StringRef message)
 {
-  tree.runtime->shader_node_errors.lookup_or_add_default(node.identifier).add(message);
+  tree.runtime->shader_node_errors.lookup_or_add_default(node.identifier).add(
+      {nodes::NodeWarningType::Error, std::string(message)});
 }
 
 static void gather_shader_portal_successors(const bNodeTree &tree,

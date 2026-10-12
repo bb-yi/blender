@@ -12,6 +12,8 @@ endif()
 if(WIN32)
   # We need to keep BOOST_DEBUG_PYTHON for the vendored copy of boost inside USD.
   add_definitions(-DBOOST_DEBUG_PYTHON)
+  # Silence warnings from HD_DECLARE_DATASOURCE macro defined in USD headers.
+  add_definitions(-D_SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
 endif()
 
 # Pre-compiled Linux libraries are made with GCC, and USD uses some extensions
@@ -94,6 +96,7 @@ set(SRC
   intern/usd_reader_material.cc
   intern/usd_reader_mesh.cc
   intern/usd_reader_nurbs.cc
+  intern/usd_reader_particlefield.cc
   intern/usd_reader_pointinstancer.cc
   intern/usd_reader_points.cc
   intern/usd_reader_prim.cc
@@ -117,7 +120,6 @@ set(SRC
   intern/usd_blend_shape_utils.hh
   intern/usd_colorspace_utils.hh
   intern/usd_exporter_context.hh
-  intern/usd_hash_types.hh
   intern/usd_hierarchy_iterator.hh
   intern/usd_hook.hh
   intern/usd_instancing_utils.hh
@@ -150,6 +152,7 @@ set(SRC
   intern/usd_reader_material.hh
   intern/usd_reader_mesh.hh
   intern/usd_reader_nurbs.hh
+  intern/usd_reader_particlefield.hh
   intern/usd_reader_pointinstancer.hh
   intern/usd_reader_points.hh
   intern/usd_reader_prim.hh
@@ -167,13 +170,13 @@ if(WITH_HYDRA)
   list(APPEND SRC
     hydra/camera_delegate.cc
     hydra/curves.cc
-    hydra/scene_index.cc
     hydra/image.cc
     hydra/instancer.cc
     hydra/light.cc
     hydra/material.cc
     hydra/mesh.cc
     hydra/populate_context.cc
+    hydra/scene_index.cc
     hydra/usd_scene_index.cc
     hydra/volume.cc
     hydra/volume_modifier.cc
@@ -181,13 +184,13 @@ if(WITH_HYDRA)
 
     hydra/camera_delegate.hh
     hydra/curves.hh
-    hydra/scene_index.hh
     hydra/image.hh
     hydra/instancer.hh
     hydra/light.hh
     hydra/material.hh
     hydra/mesh.hh
     hydra/populate_context.hh
+    hydra/scene_index.hh
     hydra/usd_scene_index.hh
     hydra/util.hh
     hydra/volume.hh

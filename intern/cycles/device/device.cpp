@@ -276,8 +276,17 @@ vector<DeviceInfo> Device::available_devices(const uint mask)
 #ifdef WITH_OPTIX
   if (mask & DEVICE_MASK_OPTIX) {
     if (!(devices_initialized_mask & DEVICE_MASK_OPTIX)) {
-      if (device_optix_init()) {
+      bool meets_nvidia_driver_requirement = true;
+      if (device_optix_init(&meets_nvidia_driver_requirement) || !meets_nvidia_driver_requirement)
+      {
         device_optix_info(cuda_devices(), optix_devices());
+        for (DeviceInfo &info : optix_devices()) {
+          info.meets_driver_requirement &= meets_nvidia_driver_requirement;
+        }
+      }
+      else {
+        /* `device_optix_init` has failed but not because of the driver being too old.
+         * Nothing to do in this case. */
       }
       devices_initialized_mask |= DEVICE_MASK_OPTIX;
     }
@@ -290,8 +299,29 @@ vector<DeviceInfo> Device::available_devices(const uint mask)
 #ifdef WITH_HIP
   if (mask & DEVICE_MASK_HIP) {
     if (!(devices_initialized_mask & DEVICE_MASK_HIP)) {
-      if (device_hip_init()) {
+      bool meets_amd_driver_requirement = true;
+      if (device_hip_init(&meets_amd_driver_requirement)) {
         device_hip_info(hip_devices());
+        for (DeviceInfo &info : hip_devices()) {
+          info.meets_driver_requirement = meets_amd_driver_requirement;
+        }
+      }
+      else if (meets_amd_driver_requirement == false) {
+        /* If we are here, then hipewInit has failed with HIPEW_ERROR_OLD_DRIVER. */
+        /* It is unclear if proper device info can be collected at this point, so we create
+         * a placeholder device to communicate the need to upgrade the driver, as presumably
+         * the hardware is available. */
+        DeviceInfo info = DeviceInfo();
+        info.type = DEVICE_HIP;
+        info.description = "Unknown AMD device";
+        info.id = "unknown_amd_device_with_outdated_driver";
+        info.num = 0;
+        info.meets_driver_requirement = false;
+        hip_devices().push_back(info);
+      }
+      else {
+        /* `device_hip_init` has failed but not because of the driver being too old.
+         * Nothing to do in this case. */
       }
       devices_initialized_mask |= DEVICE_MASK_HIP;
     }
@@ -478,7 +508,7 @@ DeviceInfo Device::get_multi_device(const vector<DeviceInfo> &subdevices,
 
     /* Accumulate device info. */
     info.has_nanovdb &= device.has_nanovdb;
-    info.has_mnee_ &= device.has_mnee();
+    info.has_mnee_ &= device.has_mnee_;
     info.has_osl &= device.has_osl;
     info.has_guiding &= device.has_guiding;
     info.has_profiling &= device.has_profiling;
@@ -670,7 +700,7 @@ void GPUDevice::move_textures_to_host(size_t size, const size_t headroom, const 
       const bool is_image = is_texture && (mem.data_height > 1);
 
       /* Can't move this type of memory. */
-      if (!is_texture || cmem->array) {
+      if (!is_texture || cmem->array || (mem.flags & MEM_FLAG_NO_HOST_FALLBACK)) {
         continue;
       }
 
@@ -736,21 +766,25 @@ GPUDevice::Mem *GPUDevice::generic_alloc(device_memory &mem, const size_t pitch_
 
   const size_t headroom = (is_texture) ? device_image_headroom : device_working_headroom;
 
-  /* Move textures to host memory if needed. */
-  if (!mem.move_to_host && !is_image && can_map_host) {
-    move_textures_to_host(size, headroom, is_texture);
-  }
+  const bool no_host_fallback = (mem.type == MEM_DEVICE_ONLY) ||
+                                ((mem.flags & MEM_FLAG_NO_HOST_FALLBACK) && !mem.move_to_host);
 
-  size_t total = 0;
-  size_t free = 0;
-  get_device_memory_info(total, free);
+  if (!mem.move_to_host) {
+    /* Move textures to host memory if needed. */
+    if (!is_image && can_map_host) {
+      move_textures_to_host(size, headroom, is_texture);
+    }
 
-  /* Allocate in device memory. */
-  if ((!mem.move_to_host && (size + headroom) < free) || (mem.type == MEM_DEVICE_ONLY)) {
-    mem_alloc_result = alloc_device(device_pointer, size);
-    if (mem_alloc_result) {
-      device_mem_in_use += size;
-      status = " in device memory";
+    size_t total = 0;
+    size_t free = 0;
+    get_device_memory_info(total, free);
+
+    /* Allocate in device memory. */
+    if ((size + headroom) < free || no_host_fallback) {
+      mem_alloc_result = alloc_device(device_pointer, size);
+      if (mem_alloc_result) {
+        status = " in device memory";
+      }
     }
   }
 
@@ -758,7 +792,7 @@ GPUDevice::Mem *GPUDevice::generic_alloc(device_memory &mem, const size_t pitch_
 
   void *shared_pointer = nullptr;
 
-  if (!mem_alloc_result && can_map_host && mem.type != MEM_DEVICE_ONLY) {
+  if (!mem_alloc_result && can_map_host && !no_host_fallback) {
     if (mem.shared_pointer) {
       /* Another device already allocated host memory. */
       mem_alloc_result = true;
@@ -780,7 +814,7 @@ GPUDevice::Mem *GPUDevice::generic_alloc(device_memory &mem, const size_t pitch_
   }
 
   if (!mem_alloc_result) {
-    if (mem.type == MEM_DEVICE_ONLY) {
+    if (no_host_fallback) {
       status = " failed, out of device memory";
       set_error("System is out of GPU memory");
     }
@@ -851,7 +885,7 @@ void GPUDevice::generic_free(device_memory &mem)
         mem.host_pointer = mem.host_alloc(size);
         memcpy(mem.host_pointer, mem.shared_pointer, size);
       }
-      shared_free(mem.shared_pointer);
+      shared_free(mem.shared_pointer, mem.device_size);
       mem.shared_pointer = nullptr;
     }
     map_host_used -= mem.device_size;
@@ -859,7 +893,6 @@ void GPUDevice::generic_free(device_memory &mem)
   else {
     /* Free device memory. */
     free_device((void *)mem.device_pointer);
-    device_mem_in_use -= mem.device_size;
   }
 
   stats.mem_free(mem.device_size);

@@ -8,16 +8,17 @@
  */
 
 #include <cmath>
+#include <fmt/format.h>
 
-#include "BLI_listbase.h"
-#include "BLI_math_color.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_color_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
 #include "BLI_task.hh"
-#include "BLI_threads.h"
-#include "BLI_utildefines.h"
+#include "BLI_threads.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
@@ -25,15 +26,18 @@
 #include "DNA_sound_types.h"
 #include "DNA_space_types.h"
 #include "DNA_userdef_types.h"
+#include "DNA_workspace_types.h"
 
 #include "BKE_context.hh"
 #include "BKE_fcurve.hh"
 #include "BKE_global.hh"
 #include "BKE_layer.hh"
+#include "BKE_main.hh"
 #include "BKE_screen.hh"
 #include "BKE_sound.hh"
 
 #include "ED_anim_api.hh"
+#include "ED_gizmo_utils.hh"
 #include "ED_markers.hh"
 #include "ED_mask.hh"
 #include "ED_sequencer.hh"
@@ -50,7 +54,9 @@
 
 #include "SEQ_channels.hh"
 #include "SEQ_connect.hh"
+#include "SEQ_edit.hh"
 #include "SEQ_effects.hh"
+#include "SEQ_iterator.hh"
 #include "SEQ_prefetch.hh"
 #include "SEQ_relations.hh"
 #include "SEQ_render.hh"
@@ -62,11 +68,13 @@
 #include "SEQ_transform.hh"
 #include "SEQ_utils.hh"
 
+#include "UI_interface_c.hh"
 #include "UI_interface_icons.hh"
 #include "UI_resources.hh"
 #include "UI_view2d.hh"
 
 #include "WM_api.hh"
+#include "WM_toolsystem.hh"
 #include "WM_types.hh"
 
 #include "BLF_api.hh"
@@ -80,6 +88,7 @@ namespace blender::ed::vse {
 constexpr int MUTE_ALPHA = 120;
 
 constexpr float ICON_SIZE = 12.0f;
+constexpr float ICON_SIZE_THUMBNAIL = 20.0f;
 
 Vector<Strip *> sequencer_visible_strips_get(const bContext *C)
 {
@@ -125,8 +134,8 @@ static TimelineDrawContext timeline_draw_context_get(const bContext *C, SeqQuads
   ctx.viewport = WM_draw_region_get_viewport(ctx.region);
   ctx.framebuffer_overlay = GPU_viewport_framebuffer_overlay_get(ctx.viewport);
 
-  ctx.pixely = BLI_rctf_size_y(&ctx.v2d->cur) / (BLI_rcti_size_y(&ctx.v2d->mask) + 1);
-  ctx.pixelx = BLI_rctf_size_x(&ctx.v2d->cur) / (BLI_rcti_size_x(&ctx.v2d->mask) + 1);
+  ctx.pixelx = ui::view2d_pixel_size_get_x(ctx.v2d);
+  ctx.pixely = ui::view2d_pixel_size_get_y(ctx.v2d);
 
   ctx.retiming_selection = seq::retiming_selection_get(ctx.ed);
 
@@ -157,7 +166,7 @@ static bool strip_hides_text_overlay_first(const TimelineDrawContext &ctx,
                                            const StripDrawContext &strip_ctx)
 {
   return seq_draw_waveforms_poll(ctx.sseq, strip_ctx.strip) ||
-         strip_ctx.strip->type == STRIP_TYPE_COLOR;
+         ELEM(strip_ctx.strip->type, STRIP_TYPE_COLOR, STRIP_TYPE_TEXT);
 }
 
 static void strip_draw_context_set_text_overlay_visibility(const TimelineDrawContext &ctx,
@@ -300,7 +309,7 @@ static void color3ubv_from_seq(const Scene *curscene,
   if (show_strip_color_tag && uint(strip->color_tag) < STRIP_COLOR_TOT &&
       strip->color_tag != STRIP_COLOR_NONE)
   {
-    bTheme *btheme = ui::theme::theme_get();
+    const bTheme *btheme = ui::theme::theme_get();
     const ThemeStripColor *strip_color = &btheme->strip_color[strip->color_tag];
     copy_v3_v3_uchar(r_col, strip_color->color);
     return;
@@ -835,7 +844,7 @@ static void draw_seq_text_get_source(const Strip *strip, char *r_source, size_t 
 static size_t draw_seq_text_get_overlay_string(const TimelineDrawContext &ctx,
                                                const StripDrawContext &strip_ctx,
                                                char *r_overlay_string,
-                                               size_t overlay_string_len)
+                                               size_t overlay_string_maxncpy)
 {
   const Strip *strip = strip_ctx.strip;
 
@@ -879,7 +888,7 @@ static size_t draw_seq_text_get_overlay_string(const TimelineDrawContext &ctx,
 
   BLI_assert(i <= ARRAY_SIZE(text_array));
 
-  return BLI_string_join_array(r_overlay_string, overlay_string_len, text_array, i);
+  return BLI_string_join_array(r_overlay_string, overlay_string_maxncpy, text_array, i);
 }
 
 static void get_strip_text_color(const StripDrawContext &strip_ctx, uchar r_col[4])
@@ -894,23 +903,72 @@ static void get_strip_text_color(const StripDrawContext &strip_ctx, uchar r_col[
   if (!active_or_selected) {
     r_col[0] = r_col[1] = r_col[2] = 0;
 
-    /* On muted and missing media/data-block strips: gray color, reduce opacity. */
-    if (strip_ctx.is_muted || strip_ctx.missing_data_block || strip_ctx.missing_media) {
+    /* On missing media/data-block strips: a blend between alert and text color. */
+    if (strip_ctx.missing_data_block || strip_ctx.missing_media) {
+      uchar col_alert[4];
+      ui::theme::get_color_4ubv(TH_REDALERT, col_alert);
+      ui::theme::get_color_blend_3ubv(TH_REDALERT, TH_TEXT_HI, col_alert[3] / 255.0f, r_col);
+    }
+
+    /* On muted strips: gray color, reduce opacity. */
+    if (strip_ctx.is_muted) {
       r_col[0] = r_col[1] = r_col[2] = 192;
       r_col[3] *= 0.66f;
     }
   }
 }
 
+static int get_icon_id_from_strip_type(const Strip *strip)
+{
+  switch (strip->type) {
+    case STRIP_TYPE_SCENE:
+      return ICON_SCENE_DATA;
+    case STRIP_TYPE_MOVIECLIP:
+      return ICON_TRACKER;
+    case STRIP_TYPE_MASK:
+      return ICON_MOD_MASK;
+    case STRIP_TYPE_MOVIE:
+      return ICON_FILE_MOVIE;
+    case STRIP_TYPE_SOUND:
+      return ICON_FILE_SOUND;
+    case STRIP_TYPE_IMAGE:
+      return ICON_FILE_IMAGE;
+    case STRIP_TYPE_COLOR:
+    case STRIP_TYPE_ADJUSTMENT:
+      return ICON_COLOR;
+    case STRIP_TYPE_TEXT:
+      return ICON_FONT_DATA;
+    case STRIP_TYPE_COMPOSITOR:
+      return ICON_NODE_COMPOSITING;
+    case STRIP_TYPE_CROSS:
+    case STRIP_TYPE_ADD:
+    case STRIP_TYPE_SUB:
+    case STRIP_TYPE_ALPHAOVER:
+    case STRIP_TYPE_ALPHAUNDER:
+    case STRIP_TYPE_GAMCROSS:
+    case STRIP_TYPE_MUL:
+    case STRIP_TYPE_WIPE:
+    case STRIP_TYPE_GLOW:
+    case STRIP_TYPE_SPEED:
+    case STRIP_TYPE_MULTICAM:
+    case STRIP_TYPE_GAUSSIAN_BLUR:
+    case STRIP_TYPE_COLORMIX:
+      return ICON_SHADERFX;
+    default:
+      return ICON_SEQ_STRIP;
+  }
+}
+
 static void draw_icon_centered(const TimelineDrawContext &ctx,
                                const rctf &rect,
                                int icon_id,
-                               const uchar color[4])
+                               const uchar color[4],
+                               const float size = ICON_SIZE)
 {
   ui::view2d_view_ortho(ctx.v2d);
   wmOrtho2_region_pixelspace(ctx.region);
 
-  const float icon_size = ICON_SIZE * UI_SCALE_FAC;
+  const float icon_size = size * UI_SCALE_FAC;
   if (BLI_rctf_size_x(&rect) * 1.1f < icon_size * ctx.pixelx ||
       BLI_rctf_size_y(&rect) * 1.1f < icon_size * ctx.pixely)
   {
@@ -925,7 +983,7 @@ static void draw_icon_centered(const TimelineDrawContext &ctx,
   const float x_offset = (right - left - icon_size) * 0.5f;
   const float y_offset = (top - bottom - icon_size) * 0.5f;
 
-  const float inv_scale_fac = (ICON_DEFAULT_HEIGHT / ICON_SIZE) * UI_INV_SCALE_FAC;
+  const float inv_scale_fac = (ICON_DEFAULT_HEIGHT / size) * UI_INV_SCALE_FAC;
 
   ui::icon_draw_ex(left + x_offset,
                    bottom + y_offset,
@@ -974,7 +1032,7 @@ static void draw_strip_icons(const TimelineDrawContext &ctx,
       if (missing_media) {
         rect.xmax = min_ff(strip.right_handle - strip.handle_width,
                            rect.xmin + icon_size_x + icon_spacing);
-        draw_icon_centered(ctx, rect, ICON_ERROR, col);
+        draw_icon_centered(ctx, rect, ICON_STATUS_ERROR_FILLED, col);
         rect.xmin = rect.xmax;
       }
       if (is_connected) {
@@ -995,14 +1053,26 @@ static void draw_strip_icons(const TimelineDrawContext &ctx,
       rctf rect;
       rect.xmin = strip.left_handle + strip.handle_width;
       rect.xmax = strip.right_handle - strip.handle_width;
-      rect.ymin = strip.bottom;
-      rect.ymax = strip.strip_content_top;
-      uchar col[4] = {112, 0, 0, 255};
-      if (missing_data) {
-        draw_icon_centered(ctx, rect, ICON_LIBRARY_DATA_BROKEN, col);
-      }
-      if (missing_media) {
-        draw_icon_centered(ctx, rect, ICON_ERROR, col);
+
+      const float pad_y = 5.0f * UI_SCALE_FAC * ctx.pixely;
+      rect.ymin = strip.bottom + pad_y;
+      rect.ymax = strip.strip_content_top - pad_y;
+
+      const int icon_id = get_icon_id_from_strip_type(strip.strip);
+
+      const float avail_size = BLI_rctf_size_y(&rect) / ctx.pixely * UI_INV_SCALE_FAC;
+      const float icon_size = min_ff(ICON_SIZE_THUMBNAIL, avail_size);
+
+      uchar col[4];
+      ui::theme::get_color_4ubv(TH_REDALERT, col);
+
+      if (icon_size >= ICON_SIZE) {
+        if (missing_data) {
+          draw_icon_centered(ctx, rect, icon_id, col, icon_size);
+        }
+        if (missing_media) {
+          draw_icon_centered(ctx, rect, icon_id, col, icon_size);
+        }
       }
     }
   }
@@ -1319,16 +1389,21 @@ static void draw_strips_background(const TimelineDrawContext &ctx,
       uchar muted_color[3] = {128, 128, 128};
       ui::theme::get_color_blend_shade_3ubv(col, muted_color, 0.5f, 0, col);
     }
+
+    /* Missing media. */
+    if (strip.missing_data_block || strip.missing_media) {
+      uchar alert_color[4];
+      ui::theme::get_color_4ubv(TH_REDALERT, alert_color);
+      ui::theme::get_color_blend_shade_3ubv(col, alert_color, alert_color[3] / 255.0f, -20, col);
+    }
+
     data.col_background = color_pack(col);
 
-    const bool show_thumbnails = (ctx.sseq->timeline_overlay.flag &
-                                  SEQ_TIMELINE_STRIP_END_THUMBNAILS) ||
-                                 (ctx.sseq->timeline_overlay.flag &
-                                  SEQ_TIMELINE_CONTINUOUS_THUMBNAILS);
+    const bool show_thumbnails = (ctx.sseq->timeline_overlay.flag & SEQ_TIMELINE_SHOW_THUMBNAILS);
     /* Darker color band for thumbnail strips. */
     if (show_overlay && seq::strip_can_have_thumbnail(scene, strip.strip) && show_thumbnails) {
       /* The more negative the offset, darker the color. */
-      const int color_offset = -20;
+      const int color_offset = -15;
       uchar col_in[3] = {col[0], col[1], col[2]};
       uchar col_out[3];
 
@@ -1338,7 +1413,7 @@ static void draw_strips_background(const TimelineDrawContext &ctx,
       col[1] = col_out[1];
       col[2] = col_out[2];
 
-      data.flags |= GPU_SEQ_FLAG_COLOR_BAND;
+      data.flags |= GPU_SEQ_FLAG_THUMBNAILS_BACKGROUND;
       data.col_color_band = color_pack(col);
     }
 
@@ -1487,7 +1562,7 @@ static void strip_data_handle_flags_set(const StripDrawContext &strip,
   const bool selected = strip.strip->flag & SEQ_SELECT;
   /* Handles on left/right side. */
   if (!seq::transform_is_locked(ctx.channels, strip.strip) &&
-      can_select_handle(scene, strip.strip, ctx.v2d))
+      can_select_handle(scene, strip.strip))
   {
     const bool selected_l = selected && handle_is_selected(strip.strip, STRIP_HANDLE_LEFT);
     const bool selected_r = selected && handle_is_selected(strip.strip, STRIP_HANDLE_RIGHT);
@@ -1545,6 +1620,71 @@ static void draw_retiming_segments(const TimelineDrawContext &ctx,
   GPU_matrix_pop_projection();
 }
 
+static void draw_strip_texts(const TimelineDrawContext &ctx,
+                             const StripsDrawBatch &batch,
+                             const Vector<StripDrawContext> &strips)
+{
+  /* Nothing to do if we're not showing thumbnails overall. */
+  const bool show_thumbnails = (ctx.sseq->timeline_overlay.flag & SEQ_TIMELINE_SHOW_THUMBNAILS);
+  if ((ctx.sseq->flag & SEQ_SHOW_OVERLAY) == 0 || !show_thumbnails) {
+    return;
+  }
+
+  GPU_matrix_push_projection();
+  wmOrtho2_region_pixelspace(ctx.region);
+
+  std::lock_guard lock(seq::text_runtime_mutex_get());
+
+  for (const StripDrawContext &strip : strips) {
+    if (!strip.can_draw_strip_content || strip.strip->type != STRIP_TYPE_TEXT) {
+      continue;
+    }
+
+    TextVars *data = static_cast<TextVars *>(strip.strip->effectdata);
+    if (data == nullptr || data->text_len_bytes < 1 || data->color[3] < 0.01f) {
+      continue;
+    }
+
+    const float content_height_px = (strip.strip_content_top - strip.bottom) / ctx.pixely;
+    if (content_height_px <= 10 * UI_SCALE_FAC) {
+      continue;
+    }
+
+    const FontFlags font_flags = ((data->flag & SEQ_TEXT_BOLD) ? BLF_BOLD : BLF_NONE) |
+                                 ((data->flag & SEQ_TEXT_ITALIC) ? BLF_ITALIC : BLF_NONE) |
+                                 BLF_CLIPPING | BLF_SHADOW;
+
+    const int font = seq::text_effect_font_get(*data);
+    float font_size = std::min(data->text_size, content_height_px * 0.5f);
+    const float lightness = srgb_to_grayscale(data->color);
+    const bool outline_is_dark = lightness > 0.37f;
+    float outline_dark_color[4] = {0, 0, 0, 0.8f * data->color[3]};
+    float outline_light_color[4] = {1, 1, 1, 0.8f * data->color[3]};
+
+    BLF_enable(font, font_flags);
+    BLF_size(font, font_size);
+    BLF_shadow(
+        font, FontShadowType::None, outline_is_dark ? outline_dark_color : outline_light_color);
+    BLF_shadow_offset(font, 1, -1);
+
+    BLF_color4fv(font, data->color);
+
+    constexpr float margin = 2.0f;
+    const float x1 = batch.pos_to_pixel_space_x(strip.left_handle) + margin;
+    const float x2 = batch.pos_to_pixel_space_x(strip.right_handle) - margin;
+    const float y1 = batch.pos_to_pixel_space_y(strip.bottom) + margin;
+    const float y2 = batch.pos_to_pixel_space_y(strip.strip_content_top) - margin;
+
+    BLF_clipping(font, int(x1), int(y1), int(x2), int(y2));
+    BLF_position(font, x1 + margin, (y1 + y2) * 0.5f - font_size * 0.25f, 0.0f);
+    BLF_draw(font, data->text_ptr, data->text_len_bytes);
+
+    BLF_disable(font, font_flags);
+  }
+
+  GPU_matrix_pop_projection();
+}
+
 static void draw_seq_strips(const TimelineDrawContext &ctx,
                             StripsDrawBatch &strips_batch,
                             const Vector<StripDrawContext> &strips)
@@ -1568,8 +1708,9 @@ static void draw_seq_strips(const TimelineDrawContext &ctx,
   }
   ctx.quads->draw();
 
-  /* Draw thumbnails. */
+  /* Draw thumbnails and text strip content. */
   draw_strip_thumbnails(ctx, strips_batch, strips);
+  draw_strip_texts(ctx, strips_batch, strips);
 
   /* Draw parts of strips above thumbnails. */
   GPU_blend(GPU_BLEND_ALPHA);
@@ -1656,7 +1797,7 @@ static void draw_timeline_sfra_efra(const TimelineDrawContext &ctx)
 
   /* While in meta strip, draw a checkerboard overlay outside of frame range. */
   if (ed && !ed->metastack.is_empty()) {
-    const MetaStack *ms = static_cast<const MetaStack *>(ed->metastack.last);
+    const MetaStack *ms = ed->metastack.last();
 
     uint pos = GPU_vertformat_attr_add(immVertexFormat(), "pos", gpu::VertAttrType::SFLOAT_32_32);
     immBindBuiltinProgram(GPU_SHADER_2D_CHECKER);
@@ -1680,6 +1821,7 @@ static void draw_timeline_sfra_efra(const TimelineDrawContext &ctx)
 }
 
 struct CacheDrawData {
+  const Scene *scene;
   const View2D *v2d;
   float stripe_ofs_y;
   float stripe_ht;
@@ -1708,6 +1850,11 @@ static void draw_cache_source_iter_fn(void *userdata, const Strip *strip, int ti
   const uchar4 col{255, 25, 5, 100};
   float stripe_bot = strip->channel + STRIP_OFSBOTTOM + drawdata->stripe_ofs_y;
   float stripe_top = stripe_bot + drawdata->stripe_ht;
+  if (strip->type == STRIP_TYPE_IMAGE && seq::transform_single_image_check(strip)) {
+    drawdata->quads->add_quad(
+        strip->left_handle(), stripe_bot, strip->right_handle(drawdata->scene), stripe_top, col);
+    return;
+  }
   drawdata->quads->add_quad(timeline_frame, stripe_bot, timeline_frame + 1, stripe_top, col);
 }
 
@@ -1780,6 +1927,7 @@ static void draw_cache_view(const bContext *C)
 
   SeqQuadsBatch quads;
   CacheDrawData userdata;
+  userdata.scene = scene;
   userdata.v2d = v2d;
   userdata.stripe_ofs_y = stripe_ofs_y;
   userdata.stripe_ht = stripe_ht;
@@ -1953,6 +2101,371 @@ void draw_timeline_seq_display(const bContext *C, ARegion *region)
   else {
     region->v2d.scroll &= ~V2D_SCROLL_BOTTOM;
   }
+}
+
+static bool blade_paint_cursor_poll(bContext *C)
+{
+  ScrArea *area = CTX_wm_area(C);
+  const bToolRef *tref = area->runtime.tool;
+  if (tref == nullptr || !STREQ(tref->idname, "builtin.blade")) {
+    return false;
+  }
+  Scene *scene = CTX_data_sequencer_scene(C);
+  return scene != nullptr && seq::editing_get(scene) != nullptr;
+}
+
+static wmOperator *box_blade_op_get(wmWindow *win)
+{
+  return WM_operator_find_modal_by_type(win,
+                                        WM_operatortype_find("SEQUENCER_OT_box_blade", false));
+}
+
+/* Expand to the strips each split propagates to, skip chains that fail to split. */
+static void split_expand_strips(Editing *ed,
+                                Strip *strip,
+                                const bool ignore_connections,
+                                VectorSet<Strip *> &targets)
+{
+  if (targets.contains(strip)) {
+    return;
+  }
+  VectorSet<Strip *> chain;
+  chain.add(strip);
+  seq::expand_strips(ed,
+                     chain,
+                     ignore_connections ? seq::StripRelation::EffectChain :
+                                          seq::StripRelation::ConnectedEffectChain);
+  const ListBaseT<SeqTimelineChannel> *channels = seq::channels_displayed_get(ed);
+  for (Strip *strip_chain : chain) {
+    if (seq::transform_is_locked(channels, strip_chain)) {
+      return;
+    }
+  }
+  targets.add_multiple(chain.as_span());
+}
+
+static void box_blade_draw(Scene *scene, const ARegion *region, wmOperator *op)
+{
+  Editing *ed = seq::editing_get(scene);
+  const View2D *v2d = &region->v2d;
+
+  const rctf box_rect = box_blade_rect_get(op, v2d);
+  const bool remove_gaps = RNA_boolean_get(op->ptr, "remove_gaps");
+  const bool only_selected = split_only_selected_get(op);
+  const bool ignore_connections = only_selected || RNA_boolean_get(op->ptr, "ignore_connections");
+  const int2 rect_frames = {round_fl_to_int(box_rect.xmin), round_fl_to_int(box_rect.xmax)};
+
+  /* Gather the strips the cut propagates to, like the split preview does. */
+  VectorSet<Strip *> targets;
+  for (Strip &candidate : *ed->current_strips()) {
+    if (only_selected && (candidate.flag & SEQ_SELECT) == 0) {
+      continue;
+    }
+    rctf strip_rect = strip_bounds_get(scene, &candidate);
+    if (!BLI_rctf_isect(&strip_rect, &box_rect, nullptr)) {
+      continue;
+    }
+    split_expand_strips(ed, &candidate, ignore_connections, targets);
+  }
+
+  uint pos = GPU_vertformat_attr_add(immVertexFormat(), "pos", gpu::VertAttrType::SFLOAT_32_32);
+  GPU_blend(GPU_BLEND_ALPHA);
+  immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
+
+  /* Paint cursors draw in window space, not region space. */
+  auto draw_view_rect = [&](const rctf &rect) {
+    rcti rect_region;
+    ui::view2d_view_to_region_rcti(v2d, &rect, &rect_region);
+    BLI_rcti_translate(&rect_region, region->winrct.xmin, region->winrct.ymin);
+    immRectf(pos, rect_region.xmin, rect_region.ymin, rect_region.xmax, rect_region.ymax);
+  };
+
+  if (remove_gaps) {
+    const int channel_min = max_ii(int(box_rect.ymin), 1);
+    const int channel_max = min_ii(int(box_rect.ymax) - 1, seq::MAX_CHANNELS);
+    /* Slightly brighten all channels that the box touches. */
+    immUniformColor4ub(255, 255, 255, 15);
+    for (int channel = channel_min; channel <= channel_max; channel++) {
+      draw_view_rect({v2d->cur.xmin, v2d->cur.xmax, float(channel), float(channel + 1)});
+    }
+  }
+
+  immUniformThemeColorAlpha(TH_REDALERT, 0.4f);
+  for (const Strip *strip : targets) {
+    rctf cut_rect = strip_bounds_get(scene, strip);
+    cut_rect.xmin = max_ff(cut_rect.xmin, rect_frames[0]);
+    cut_rect.xmax = min_ff(cut_rect.xmax, rect_frames[1]);
+    if (cut_rect.xmin < cut_rect.xmax) {
+      draw_view_rect(cut_rect);
+    }
+  }
+
+  immUnbindProgram();
+  GPU_blend(GPU_BLEND_NONE);
+}
+
+static bool split_tool_prop_from_toolsettings(bToolRef *tref,
+                                              const char *identifier,
+                                              const bool default_value)
+{
+  if (tref == nullptr) {
+    return default_value;
+  }
+
+  wmOperatorType *ot_split = WM_operatortype_find("SEQUENCER_OT_split", false);
+  if (ot_split == nullptr) {
+    return default_value;
+  }
+
+  PointerRNA tool_props;
+  if (!WM_toolsystem_ref_properties_get_from_operator(tref, ot_split, &tool_props)) {
+    return default_value;
+  }
+
+  return RNA_boolean_get(&tool_props, identifier);
+}
+
+struct BladeSplit {
+  int frame;
+  bool all_channels;
+  VectorSet<Strip *> strips;
+};
+
+static std::optional<BladeSplit> blade_split_get(
+    Scene *scene, const ARegion *region, const wmWindow *win, bToolRef *tref, const int2 &xy)
+{
+  const View2D *v2d = &region->v2d;
+  Editing *ed = seq::editing_get(scene);
+
+  const int2 mval = xy - int2(region->winrct.xmin, region->winrct.ymin);
+  float2 mouse_co;
+  ui::view2d_region_to_view(v2d, mval.x, mval.y, &mouse_co.x, &mouse_co.y);
+  const int split_frame = round_fl_to_int(mouse_co.x);
+
+  const wmEvent *event = win->runtime->eventstate;
+  const bool all_channels = (event->modifier & KM_SHIFT) != 0 ||
+                            split_tool_prop_from_toolsettings(tref, "all_channels", false);
+  const bool only_selected = split_tool_prop_from_toolsettings(tref, "only_selected", false);
+  const bool ignore_connections = only_selected ||
+                                  (!all_channels && ((event->modifier & KM_ALT) != 0 ||
+                                                     split_tool_prop_from_toolsettings(
+                                                         tref, "ignore_connections", false)));
+
+  const std::optional<int> channel = all_channels ? std::nullopt :
+                                                    std::optional<int>(int(mouse_co.y));
+  BladeSplit split = {split_frame, all_channels, {}};
+  for (Strip *strip : seq::edit_split_strips_get(scene, split_frame, channel, only_selected)) {
+    split_expand_strips(ed, strip, ignore_connections, split.strips);
+  }
+
+  if (split.strips.is_empty() && !all_channels) {
+    return std::nullopt;
+  }
+  return split;
+}
+
+static void blade_split_draw(Scene *scene, const ARegion *region, const BladeSplit &split)
+{
+  const View2D *v2d = &region->v2d;
+  const int split_frame = split.frame;
+
+  /* Paint cursors draw in window space, not region space. */
+  const float2 region_offset = {float(region->winrct.xmin), float(region->winrct.ymin)};
+
+  uint pos = GPU_vertformat_attr_add(immVertexFormat(), "pos", gpu::VertAttrType::SFLOAT_32_32);
+  immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
+  GPU_blend(GPU_BLEND_ALPHA);
+
+  if (split.all_channels) {
+    const float x = ui::view2d_view_to_region_x(v2d, split_frame) + region_offset.x;
+    immUniformThemeColorAlpha(TH_GIZMO_PRIMARY, 0.3f);
+    immRectf(pos, x - 1.5f, region_offset.y, x + 1.5f, region_offset.y + region->winy);
+  }
+
+  auto draw_lines = [&](const float expand) {
+    for (const Strip *strip : split.strips) {
+      if (!seq::edit_frame_splits_strip(scene, strip, split_frame)) {
+        continue;
+      }
+      const rctf bounds = strip_bounds_get(scene, strip);
+      float x, y_bottom, y_top;
+      ui::view2d_view_to_region_fl(v2d, split_frame, bounds.ymin, &x, &y_bottom);
+      ui::view2d_view_to_region_fl(v2d, split_frame, bounds.ymax, &x, &y_top);
+      immRectf(pos,
+               x + region_offset.x - expand,
+               y_bottom + region_offset.y - (expand - 1.0f),
+               x + region_offset.x + expand,
+               y_top + region_offset.y + (expand - 1.0f));
+    }
+  };
+
+  /* Draw dark outline underneath so the line is visible on light strips too. */
+  immUniformColor4f(0.0f, 0.0f, 0.0f, 0.8f);
+  draw_lines(2.5f);
+  immUniformThemeColor(TH_GIZMO_PRIMARY);
+  draw_lines(1.5f);
+  GPU_blend(GPU_BLEND_NONE);
+
+  immUnbindProgram();
+}
+
+static void blade_paint_cursor_draw(bContext *C,
+                                    const int2 &xy,
+                                    const float2 & /*tilt*/,
+                                    void *customdata)
+{
+  wmWindow *win = CTX_wm_window(C);
+  ScrArea *area = CTX_wm_area(C);
+  ARegion *region = CTX_wm_region(C);
+  Scene *scene = CTX_data_sequencer_scene(C);
+
+  if (region != customdata) {
+    return;
+  }
+
+  if (wmOperator *box_blade_op = box_blade_op_get(win)) {
+    box_blade_draw(scene, region, box_blade_op);
+  }
+  else if (const std::optional<BladeSplit> split = blade_split_get(
+               scene, region, win, area->runtime.tool, xy))
+  {
+    blade_split_draw(scene, region, *split);
+  }
+}
+
+static void blade_paint_cursor_free_fn(void *customdata)
+{
+  if (G_MAIN->wm.first()) {
+    WM_paint_cursor_end(static_cast<wmPaintCursor *>(customdata));
+  }
+}
+
+static void WIDGETGROUP_blade_setup(const bContext *C, wmGizmoGroup *gzgroup)
+{
+  ARegion *region = CTX_wm_region(C);
+  gzgroup->customdata = WM_paint_cursor_activate(
+      SPACE_SEQ, RGN_TYPE_WINDOW, blade_paint_cursor_poll, blade_paint_cursor_draw, region);
+  gzgroup->customdata_free = blade_paint_cursor_free_fn;
+}
+
+void SEQUENCER_GGT_blade(wmGizmoGroupType *gzgt)
+{
+  gzgt->name = "Blade Widget";
+  gzgt->idname = "SEQUENCER_GGT_blade";
+
+  gzgt->gzmap_params.spaceid = SPACE_SEQ;
+  gzgt->gzmap_params.regionid = RGN_TYPE_WINDOW;
+
+  gzgt->poll = ED_gizmo_poll_or_unlink_delayed_from_tool;
+  gzgt->setup = WIDGETGROUP_blade_setup;
+}
+
+static std::string blade_frame_str_get(const Scene *scene, const int frame, const bool timecode)
+{
+  char str[64];
+  ED_time_scrub_frame_str_get(scene, timecode, frame, str, sizeof(str));
+  return str;
+}
+
+/* Shown without delay & re-created on every cursor move, unlike regular tooltips. */
+static ARegion *blade_tooltip_init(
+    bContext *C, ARegion *region, int * /*pass*/, double * /*pass_delay*/, bool *r_exit_on_event)
+{
+  wmWindow *win = CTX_wm_window(C);
+  ScrArea *area = CTX_wm_area(C);
+  Scene *scene = CTX_data_sequencer_scene(C);
+  const wmEvent *event = win->runtime->eventstate;
+
+  *r_exit_on_event = false;
+
+  std::string frames_str, timecode_str;
+  /* Box blade. */
+  if (wmOperator *box_blade_op = box_blade_op_get(win)) {
+    const rctf box_rect = box_blade_rect_get(box_blade_op, &region->v2d);
+    const int2 rect_frames = {round_fl_to_int(box_rect.xmin), round_fl_to_int(box_rect.xmax)};
+    auto range_str_get = [&](const bool timecode) {
+      return fmt::format("{} " BLI_STR_UTF8_RIGHTWARDS_ARROW " {}  ({})",
+                         blade_frame_str_get(scene, rect_frames[0], timecode),
+                         blade_frame_str_get(scene, rect_frames[1], timecode),
+                         blade_frame_str_get(scene, rect_frames[1] - rect_frames[0], timecode));
+    };
+    frames_str = range_str_get(false);
+    timecode_str = range_str_get(true);
+  }
+  /* Regular blade. */
+  else if (const std::optional<BladeSplit> split = blade_split_get(
+               scene, region, win, area->runtime.tool, int2(event->xy)))
+  {
+    frames_str = blade_frame_str_get(scene, split->frame, false);
+    timecode_str = blade_frame_str_get(scene, split->frame, true);
+  }
+  else {
+    return nullptr;
+  }
+
+  /* Offset the tooltip to the right to avoid covering the split line. */
+  const float right_offset = UI_SCALE_FAC * 55.0f;
+  const float init_position[2] = {float(event->xy[0]) + right_offset, float(event->xy[1])};
+
+  return ui::tooltip_create_from_func(
+      C,
+      [&](ui::TooltipData &data) {
+        ui::tooltip_text_field_add(data, frames_str, {}, ui::TIP_STYLE_NORMAL, ui::TIP_LC_MAIN);
+        ui::tooltip_text_field_add(data, timecode_str, {}, ui::TIP_STYLE_NORMAL, ui::TIP_LC_VALUE);
+      },
+      init_position);
+}
+
+void sequencer_blade_tooltip_show(bContext *C)
+{
+  WM_tooltip_immediate_init(
+      C, CTX_wm_window(C), CTX_wm_area(C), CTX_wm_region(C), blade_tooltip_init);
+}
+
+static void blade_edit_point_update(bContext *C)
+{
+  wmWindow *win = CTX_wm_window(C);
+  ScrArea *area = CTX_wm_area(C);
+  ARegion *region = CTX_wm_region(C);
+  Scene *scene = CTX_data_sequencer_scene(C);
+  if (scene == nullptr || scene->ed == nullptr) {
+    return;
+  }
+
+  std::optional<int> frame;
+  if (blade_paint_cursor_poll(C)) {
+    if (const std::optional<BladeSplit> split = blade_split_get(
+            scene, region, win, area->runtime.tool, int2(win->runtime->eventstate->xy)))
+    {
+      frame = split->frame;
+    }
+  }
+  scene->ed->edit_point_set(scene, frame);
+}
+
+static int blade_handler(bContext *C, const wmEvent *event, void * /*user_data*/)
+{
+  if (event->type == MOUSEMOVE || ISKEYMODIFIER(event->type)) {
+    blade_edit_point_update(C);
+  }
+  if (blade_paint_cursor_poll(C)) {
+    if (event->type == MOUSEMOVE || ISKEYMODIFIER(event->type)) {
+      sequencer_blade_tooltip_show(C);
+    }
+  }
+  return WM_UI_HANDLER_CONTINUE;
+}
+
+void sequencer_blade_handlers_add(ARegion *region)
+{
+  /* Region init can run more than once, keep a single instance of the handler. */
+  WM_event_remove_ui_handler(&region->runtime->handlers, blade_handler, nullptr, nullptr, false);
+  WM_event_add_ui_handler(nullptr,
+                          &region->runtime->handlers,
+                          blade_handler,
+                          nullptr,
+                          nullptr,
+                          eWM_EventHandlerFlag(0));
 }
 
 }  // namespace blender::ed::vse

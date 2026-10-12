@@ -91,7 +91,7 @@ static int report_textview_begin(TextViewContext *tvc)
   tvc->sel_end = 0;
 
   /* iterator */
-  tvc->iter = reports->list.last;
+  tvc->iter = reports->list.last();
 
   ui::theme::frame_buffer_clear(TH_BACK);
 
@@ -188,8 +188,8 @@ static int info_textview_main__internal(const SpaceInfo *sinfo,
   /* view */
   tvc.sel_start = 0;
   tvc.sel_end = 0;
-  tvc.lheight = 17 * UI_SCALE_FAC;
-  tvc.row_vpadding = 0.4 * tvc.lheight;
+  tvc.line_height = 17 * UI_SCALE_FAC;
+  tvc.row_vpadding = 0.4 * tvc.line_height;
   tvc.scroll_ymin = v2d->cur.ymin;
   tvc.scroll_ymax = v2d->cur.ymax;
 

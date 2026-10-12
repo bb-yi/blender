@@ -13,10 +13,10 @@
 #include "DNA_curve_types.h"
 #include "DNA_curveprofile_types.h"
 
-#include "BLI_math_geom.h"
-#include "BLI_math_vector.h"
-#include "BLI_rect.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_rect.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_curve.hh"
 #include "BKE_curveprofile.h"
@@ -85,7 +85,11 @@ CurveProfile *BKE_curveprofile_copy(const CurveProfile *profile)
 
 void BKE_curveprofile_blend_write(BlendWriter *writer, const CurveProfile *profile)
 {
-  writer->write_struct(profile);
+  writer->write_struct(profile, [&](BlendStructWriter<CurveProfile> &struct_writer) {
+    if (!writer->is_undo()) {
+      struct_writer.shallow_data.changed_timestamp = 0;
+    }
+  });
   writer->write_struct_array(profile->path_len, profile->path);
 }
 
@@ -558,11 +562,11 @@ void BKE_curveprofile_activate_nearest_point(CurveProfile *profile, const int i_
       pts[idx].flag |= PROF_ACTIVE;
       return;
     }
-    else if (pts[idx].flag & PROF_H1_SELECT) {
+    if (pts[idx].flag & PROF_H1_SELECT) {
       pts[idx].flag |= PROF_H1_ACTIVE;
       return;
     }
-    else if (pts[idx].flag & PROF_H2_SELECT) {
+    if (pts[idx].flag & PROF_H2_SELECT) {
       pts[idx].flag |= PROF_H2_ACTIVE;
       return;
     }
@@ -1054,9 +1058,11 @@ void BKE_curveprofile_update(CurveProfile *profile, const int update_flags)
     for (int i = 0; i < profile->path_len - 1; i++) {
       if (len_squared_v2v2(&points[i].x, &points[i + 1].x) < thresh) {
         if (i == 0) {
+          points[0].flag |= (points[1].flag & (PROF_SELECT | PROF_ACTIVE));
           BKE_curveprofile_remove_point(profile, &points[1]);
         }
         else {
+          points[i + 1].flag |= (points[i].flag & (PROF_SELECT | PROF_ACTIVE));
           BKE_curveprofile_remove_point(profile, &points[i]);
         }
         break; /* Assumes 1 deletion per update call is ok. */
@@ -1088,26 +1094,26 @@ CurveProfilePoint *BKE_curveprofile_active_get(CurveProfile *profile)
   return active_pt;
 }
 
-float *BKE_curveprofile_active_location_get(CurveProfilePoint *pt)
+float *BKE_curveprofile_active_location_get(CurveProfilePoint *point)
 {
-  if (pt->flag & PROF_ACTIVE) {
-    return &pt->x;
+  if (point->flag & PROF_ACTIVE) {
+    return &point->x;
   }
-  else if (pt->flag & PROF_H1_ACTIVE) {
-    return &pt->h1_loc[0];
+  if (point->flag & PROF_H1_ACTIVE) {
+    return &point->h1_loc[0];
   }
-  else if (pt->flag & PROF_H2_ACTIVE) {
-    return &pt->h2_loc[0];
+  if (point->flag & PROF_H2_ACTIVE) {
+    return &point->h2_loc[0];
   }
   /* If no active point or handles, return the selected location. */
-  else if (pt->flag & PROF_SELECT) {
-    return &pt->x;
+  if (point->flag & PROF_SELECT) {
+    return &point->x;
   }
-  else if (pt->flag & PROF_H1_SELECT) {
-    return &pt->h1_loc[0];
+  if (point->flag & PROF_H1_SELECT) {
+    return &point->h1_loc[0];
   }
-  else if (pt->flag & PROF_H2_SELECT) {
-    return &pt->h2_loc[0];
+  if (point->flag & PROF_H2_SELECT) {
+    return &point->h2_loc[0];
   }
 
   /* Either the input point itself or its handle should be labeled as active. */

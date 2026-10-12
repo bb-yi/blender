@@ -2,11 +2,15 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup DNA
+ */
+
 #pragma once
 
 #include <cstdint>
 
-#include "BLI_implicit_sharing.h"
+#include "BLI_implicit_sharing.hh"
 
 namespace blender {
 

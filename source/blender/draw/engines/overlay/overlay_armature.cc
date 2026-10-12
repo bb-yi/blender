@@ -19,12 +19,12 @@
 #include "DRW_render.hh"
 
 #include "BLI_listbase_wrapper.hh"
-#include "BLI_math_color.h"
-#include "BLI_math_matrix.h"
+#include "BLI_math_color_c.hh"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_matrix_types.hh"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_action.hh"
 #include "BKE_armature.hh"
@@ -1817,9 +1817,9 @@ static void pchan_draw_ik_lines(const Armatures::DrawContext *ctx,
         /* Find the chain's root */
         while (parchan->parent) {
           segcount++;
-          /* FIXME: revise the breaking conditions */
-          if (segcount == data->chainlen || segcount > 255) {
-            break; /* 255 is weak */
+
+          if (segcount == data->chainlen) {
+            break;
           }
           parchan = parchan->parent;
         }
@@ -1957,7 +1957,7 @@ void Armatures::draw_armature_edit(Armatures::DrawContext *ctx)
 
   const eArmature_Drawtype arm_drawtype = eArmature_Drawtype(arm.drawtype);
 
-  for (eBone = static_cast<EditBone *>(arm.edbo->first),
+  for (eBone = arm.edbo->first(),
       /* Note: Selection Next handles the object id merging later. */
        index = ctx->bone_buf ? 0x0 : ob_orig->runtime->select_id;
        eBone;
@@ -2085,7 +2085,7 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
 
   const eArmature_Drawtype arm_drawtype = eArmature_Drawtype(arm.drawtype);
 
-  for (bPoseChannel *pchan = static_cast<bPoseChannel *>(ob->pose->chanbase.first); pchan;
+  for (bPoseChannel *pchan = ob->pose->chanbase.first(); pchan;
        pchan = pchan->next, index += 0x10000)
   {
     if (!animrig::bone_is_visible(&arm, {pchan, pchan->bone_get(*ob)})) {

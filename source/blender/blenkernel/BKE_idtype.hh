@@ -15,13 +15,14 @@
 #include "BLI_color_types.hh"
 #include "BLI_function_ref.hh"
 #include "BLI_implicit_sharing_ptr.hh"
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 #include "DNA_ID.h"
 
 namespace blender {
 
 struct AssetTypeInfo;
+struct AssetWeakReference;
 struct BPathForeachPathData;
 struct BlendDataReader;
 struct BlendLibReader;
@@ -123,6 +124,9 @@ struct IDTypeForeachColorFunctionCallback {
       implicit_sharing_array;
 };
 using IDTypeForeachColorFunction = void (*)(ID *id, const IDTypeForeachColorFunctionCallback &cb);
+
+using IDTypeForeachAssetWeakReferenceFunction =
+    void (*)(ID *id, FunctionRef<void(AssetWeakReference &weak_ref)> fn);
 
 /**
  * Callback returning the address of the pointer to the owner ID,
@@ -247,6 +251,12 @@ struct IDTypeInfo {
    */
   IDTypeForeachColorFunction foreach_working_space_color =
       InvalidPointer<IDTypeForeachColorFunction>();
+
+  /**
+   * Iterator to edit all asset weak references of given ID.
+   */
+  IDTypeForeachAssetWeakReferenceFunction foreach_asset_weak_reference =
+      InvalidPointer<IDTypeForeachAssetWeakReferenceFunction>();
 
   /**
    * For embedded IDs, return the address of the pointer to their owner ID.

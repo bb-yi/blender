@@ -61,15 +61,15 @@ float4 color_vert_get(OffsetIndices<int> faces,
                       bke::AttrDomain color_domain,
                       int vert);
 
+float4 color_corner_get(const GSpan color_attribute, int corner_index);
+
 bke::GAttributeReader active_color_attribute(const Mesh &mesh);
 bke::GSpanAttributeWriter active_color_attribute_for_write(Mesh &mesh);
 
 void do_paint_brush(const Depsgraph &depsgraph,
-                    PaintModeSettings &paint_mode_settings,
                     const Sculpt &sd,
                     Object &ob,
-                    const IndexMask &node_mask,
-                    const IndexMask &texnode_mask);
+                    const IndexMask &node_mask);
 void do_smear_brush(const Depsgraph &depsgraph,
                     const Sculpt &sd,
                     Object &ob,

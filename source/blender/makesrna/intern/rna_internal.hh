@@ -10,9 +10,9 @@
 
 #include <cstdint>
 
-#include "BLI_compiler_attrs.h"
+#include "BLI_compiler_attrs.hh"
 #include "BLI_string_ref.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "DNA_listBase.h"
 
@@ -160,6 +160,7 @@ void RNA_def_animviz(BlenderRNA *brna);
 void RNA_def_armature(BlenderRNA *brna);
 void RNA_def_attribute(BlenderRNA *brna);
 void RNA_def_asset(BlenderRNA *brna);
+void RNA_def_blender_project(BlenderRNA *brna);
 void RNA_def_boid(BlenderRNA *brna);
 void RNA_def_brush(BlenderRNA *brna);
 void RNA_def_cachefile(BlenderRNA *brna);
@@ -219,6 +220,7 @@ void RNA_def_texture(BlenderRNA *brna);
 void RNA_def_timeline_marker(BlenderRNA *brna);
 void RNA_def_sound(BlenderRNA *brna);
 void RNA_def_ui(BlenderRNA *brna);
+void RNA_def_undo(BlenderRNA *brna);
 void RNA_def_usd(BlenderRNA *brna);
 void RNA_def_userdef(BlenderRNA *brna);
 void RNA_def_vfont(BlenderRNA *brna);
@@ -419,12 +421,12 @@ int rna_ViewLayer_active_lightgroup_index_get(PointerRNA *ptr);
 void rna_ViewLayer_active_lightgroup_index_set(PointerRNA *ptr, int value);
 /**
  * Set `r_rna_path` with the base view-layer path.
- * `rna_path_buffer_size` should be at least `sizeof(ViewLayer.name) * 3`.
+ * `r_rna_path_maxncpy` should be at least `sizeof(ViewLayer.name) * 3`.
  * \return actual length of the generated RNA path.
  */
 size_t rna_ViewLayer_path_buffer_get(const ViewLayer *view_layer,
                                      char *r_rna_path,
-                                     const size_t rna_path_buffer_size);
+                                     const size_t r_rna_path_maxncpy);
 
 /* named internal so as not to conflict with obj.update() rna func */
 void rna_Object_internal_update_data(Main *bmain, Scene *scene, PointerRNA *ptr);
@@ -659,6 +661,26 @@ void *rna_iterator_array_dereference_get(CollectionPropertyIterator *iter);
 void rna_iterator_array_end(CollectionPropertyIterator *iter);
 PointerRNA rna_array_lookup_int(
     PointerRNA *ptr, StructRNA *type, void *data, size_t itemsize, int64_t length, int64_t index);
+
+/* Construct a dynamic list of enum property items using a function
+ *   EnumPropertyItem CreateItemFn(const T &list_item, int index) */
+template<typename T, typename CreateItemFn>
+const EnumPropertyItem *rna_enum_property_items_from_listbase(const ListBaseT<T> &listbase,
+                                                              CreateItemFn create_item_fn)
+{
+  EnumPropertyItem *item = nullptr;
+  int i = 0, totitem = 0;
+
+  const T *list_item = listbase.first();
+  while (list_item) {
+    const EnumPropertyItem tmp = create_item_fn(*list_item, i);
+    RNA_enum_item_add(&item, &totitem, &tmp);
+    list_item = list_item->next;
+    ++i;
+  }
+  RNA_enum_item_end(&item, &totitem);
+  return item;
+}
 
 /* Duplicated code since we can't link in `blenlib`. */
 

@@ -15,15 +15,15 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_fileops.h"
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_fileops.hh"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_string_cursor_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_string_cursor_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_curve_types.h"
 #include "DNA_object_types.h"
@@ -42,7 +42,7 @@
 #include "BKE_report.hh"
 #include "BKE_vfont.hh"
 
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "BLT_translation.hh"
 
@@ -913,7 +913,7 @@ void ED_text_to_object(bContext *C, const Text *text, const bool split_lines)
   float offset[3];
   int linenum = 0;
 
-  if (!text || !text->lines.first) {
+  if (!text || !text->lines.first_) {
     return;
   }
 
@@ -944,8 +944,7 @@ void ED_text_to_object(bContext *C, const Text *text, const bool split_lines)
     offset[1] = 0.0f;
     offset[2] = 0.0f;
 
-    txt_add_object(
-        C, static_cast<const TextLine *>(text->lines.first), text->lines.count(), offset);
+    txt_add_object(C, text->lines.first(), text->lines.count(), offset);
   }
 
   DEG_relations_tag_update(bmain);
@@ -2438,7 +2437,11 @@ void FONT_OT_case_toggle(wmOperatorType *ot)
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
-/* **************** Open Font ************** */
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Open Font
+ * \{ */
 
 static void font_ui_template_init(bContext *C, wmOperator *op)
 {
@@ -2560,7 +2563,7 @@ void FONT_OT_open(wmOperatorType *ot)
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name Delete Operator
+/** \name Unlink Font Operator
  * \{ */
 
 static wmOperatorStatus font_unlink_exec(bContext *C, wmOperator *op)
@@ -2595,6 +2598,11 @@ void FONT_OT_unlink(wmOperatorType *ot)
   /* API callbacks. */
   ot->exec = font_unlink_exec;
 }
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Select Pick
+ * \{ */
 
 bool ED_curve_editfont_select_pick(
     bContext *C,

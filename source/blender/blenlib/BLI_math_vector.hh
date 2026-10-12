@@ -13,7 +13,7 @@
 #include "BLI_math_base.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 namespace blender::math {
 
@@ -287,6 +287,12 @@ template<typename T, int Size> [[nodiscard]] inline VecBase<T, Size> exp(const V
   BLI_UNROLL_MATH_VEC_OP_VEC(math::exp, x);
 }
 
+/* Per-element natural logarithm. */
+template<typename T, int Size> [[nodiscard]] inline VecBase<T, Size> log(const VecBase<T, Size> &x)
+{
+  BLI_UNROLL_MATH_VEC_OP_VEC(math::log, x);
+}
+
 /**
  * Returns \a a if it is a multiple of \a b or the next multiple or \a b after \b a .
  * In other words, it is equivalent to `divide_ceil(a, b) * b`.
@@ -511,7 +517,7 @@ template<typename T, int Size>
 [[nodiscard]] inline VecBase<T, Size> project(const VecBase<T, Size> &p,
                                               const VecBase<T, Size> &v_proj)
 {
-  if (UNLIKELY(is_zero(v_proj))) {
+  if (is_zero(v_proj)) [[unlikely]] {
     return VecBase<T, Size>(0.0f);
   }
   return v_proj * (dot(p, v_proj) / dot(v_proj, v_proj));

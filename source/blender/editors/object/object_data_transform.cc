@@ -23,10 +23,10 @@
 #include "DNA_object_types.h"
 #include "DNA_pointcloud_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_task.hh"
 
 #include "BKE_armature.hh"
@@ -154,9 +154,7 @@ static void edit_armature_coords_and_quats_get(const bArmature *arm,
                                                MutableSpan<ElemData_Armature> elem_array)
 {
   ElemData_Armature *elem = elem_array.data();
-  for (EditBone *ebone = static_cast<EditBone *>(arm->edbo->first); ebone;
-       ebone = ebone->next, elem++)
-  {
+  for (EditBone *ebone = arm->edbo->first(); ebone; ebone = ebone->next, elem++) {
 
 #define COPY_PTR(member) memcpy(elem->member, ebone->member, sizeof(ebone->member))
 #define COPY_VAL(member) memcpy(&elem->member, &ebone->member, sizeof(ebone->member))
@@ -178,9 +176,7 @@ static void edit_armature_coords_and_quats_apply_with_mat4(
     bArmature *arm, const Span<ElemData_Armature> elem_array, const float4x4 &transform)
 {
   const ElemData_Armature *elem = elem_array.data();
-  for (EditBone *ebone = static_cast<EditBone *>(arm->edbo->first); ebone;
-       ebone = ebone->next, elem++)
-  {
+  for (EditBone *ebone = arm->edbo->first(); ebone; ebone = ebone->next, elem++) {
 
 #define COPY_PTR(member) memcpy(ebone->member, elem->member, sizeof(ebone->member))
 #define COPY_VAL(member) memcpy(&ebone->member, &elem->member, sizeof(ebone->member))
@@ -219,9 +215,7 @@ static void metaball_coords_and_quats_get(const MetaBall *mb,
                                           MutableSpan<ElemData_MetaBall> elem_array)
 {
   ElemData_MetaBall *elem = elem_array.data();
-  for (const MetaElem *ml = static_cast<const MetaElem *>(mb->elems.first); ml;
-       ml = ml->next, elem++)
-  {
+  for (const MetaElem *ml = mb->elems.first(); ml; ml = ml->next, elem++) {
     copy_v3_v3(elem->co, &ml->x);
     copy_qt_qt(elem->quat, ml->quat);
     copy_v3_v3(elem->exp, &ml->expx);
@@ -234,7 +228,7 @@ static void metaball_coords_and_quats_apply_with_mat4(MetaBall *mb,
                                                       const float4x4 &transform)
 {
   const ElemData_MetaBall *elem = elem_array.data();
-  for (MetaElem *ml = static_cast<MetaElem *>(mb->elems.first); ml; ml = ml->next, elem++) {
+  for (MetaElem *ml = mb->elems.first(); ml; ml = ml->next, elem++) {
     copy_v3_v3(&ml->x, elem->co);
     copy_qt_qt(ml->quat, elem->quat);
     copy_v3_v3(&ml->expx, elem->exp);
@@ -326,7 +320,7 @@ static std::unique_ptr<XFormObjectData> data_xform_create_ex(ID *id, bool is_edi
       const int key_index = -1;
 
       if (is_edit_mode) {
-        BMesh *bm = mesh->runtime->edit_mesh->bm;
+        const BMesh *bm = BKE_editmesh_bmesh_get(mesh);
         /* Always operate on all keys for the moment. */
         // key_index = bm->shapenr - 1;
         auto xod = std::make_unique<XFormObjectData_Mesh>();
@@ -531,7 +525,7 @@ void data_xform_by_mat4(XFormObjectData &xod_base, const float4x4 &transform)
 
       const auto &xod = reinterpret_cast<XFormObjectData_Mesh &>(xod_base);
       if (xod.is_edit_mode) {
-        BMesh *bm = mesh->runtime->edit_mesh->bm;
+        BMesh *bm = BKE_editmesh_bmesh_get_for_write(mesh);
         BM_mesh_vert_coords_apply_with_mat4(bm, xod.positions, transform);
         /* Always operate on all keys for the moment. */
         // key_index = bm->shapenr - 1;
@@ -663,7 +657,7 @@ void data_xform_restore(XFormObjectData &xod_base)
 
       const auto &xod = reinterpret_cast<XFormObjectData_Mesh &>(xod_base);
       if (xod.is_edit_mode) {
-        BMesh *bm = mesh->runtime->edit_mesh->bm;
+        BMesh *bm = BKE_editmesh_bmesh_get_for_write(mesh);
         BM_mesh_vert_coords_apply(bm, xod.positions);
         /* Always operate on all keys for the moment. */
         // key_index = bm->shapenr - 1;

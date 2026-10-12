@@ -13,7 +13,7 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_math_quaternion_types.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BKE_instances.hh"
 #include "BKE_lib_id.hh"
@@ -385,7 +385,7 @@ class SpreadsheetLayoutDrawer : public SpreadsheetDrawer {
     if (type.is<bke::SocketValueVariant>()) {
       const bke::SocketValueVariant &value_variant = *value_ptr.get<bke::SocketValueVariant>();
       if (value_variant.is_single()) {
-        const GPointer single_value_ptr = value_variant.get_single_ptr();
+        const GPointer single_value_ptr = value_variant.get();
         this->draw_content_cell_value(single_value_ptr, params, column);
         return;
       }

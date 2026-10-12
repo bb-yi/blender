@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "DEG_depsgraph_query.hh"
 
@@ -103,7 +103,7 @@ class MotionPath : Overlay {
                         bMotionPath *mpath)
   {
     /* Avoid 0 size allocations. Current code to calculate motion paths should
-     * sanitize this already [see animviz_verify_motionpaths()], we might however
+     * sanitize this already [see animviz_ensure_motionpath()], we might however
      * encounter an older file where this was still possible. */
     if (mpath->length == 0) {
       return;
@@ -162,7 +162,7 @@ class MotionPath : Overlay {
       BKE_camera_multiview_window_matrix(&scene->r, camera_eval, nullptr, window_matrix.ptr());
       /* Storing the inverse perspective matrix of the current camera to convert the verts stored
        * in NDC space, back into world space from the point of view of the current camera. See
-       * `anim_motion_paths.cc/motionpaths_calc_bake_targets`. */
+       * `anim_motion_paths.cc/motionpaths_calc_bake_target`. */
       camera_matrix = math::invert(window_matrix * camera_eval->world_to_object());
     }
 

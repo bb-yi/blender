@@ -12,7 +12,7 @@
 
 #include "BLI_bit_ref.hh"
 #include "BLI_index_range.hh"
-#include "BLI_math_bits.h"
+#include "BLI_math_bits.hh"
 #include "BLI_memory_utils.hh"
 
 namespace blender {
@@ -129,8 +129,10 @@ inline OneBitIteratorRange iter_1_indices(BitInt value)
  */
 class BitSpan {
  protected:
-  /** Base pointer to the integers containing the bits. The actual bit span might start at a much
-   * higher address when `bit_range_.start()` is large. */
+  /**
+   * Base pointer to the integers containing the bits. The actual bit span might start at a much
+   * higher address when `bit_range_.start()` is large.
+   */
   const BitInt *data_ = nullptr;
   /** The range of referenced bits. */
   IndexRange bit_range_ = {0, 0};

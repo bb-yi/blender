@@ -14,11 +14,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -104,7 +104,6 @@ static void ui_imageuser_slot_menu(bContext *C, ui::Layout *layout, void *image_
     }
     ui::Button *but = uiDefIconTextBut(
         block, ui::ButtonType::ButMenu, icon, str, 0, 0, UI_UNIT_X * 5, UI_UNIT_X, nullptr, "");
-    button_retval_set(but, B_NOP);
     button_func_set(
         but, [image, slot_id = slot_id](bContext & /*C*/) { image->render_slot = slot_id; });
   }
@@ -174,7 +173,7 @@ static void ui_imageuser_layer_menu(bContext * /*C*/, ui::Layout *layout, void *
 
   /* May have been freed since drawing. */
   RenderResult *rr = BKE_image_acquire_renderresult(scene, image);
-  if (UNLIKELY(rr == nullptr)) {
+  if (rr == nullptr) [[unlikely]] {
     BKE_image_release_renderresult(scene, image, rr);
     return;
   }
@@ -198,7 +197,7 @@ static void ui_imageuser_layer_menu(bContext * /*C*/, ui::Layout *layout, void *
   }
 
   int nr = fake_name ? 1 : 0;
-  for (RenderLayer *rl = static_cast<RenderLayer *>(rr->layers.first); rl; rl = rl->next, nr++) {
+  for (RenderLayer *rl = rr->layers.first(); rl; rl = rl->next, nr++) {
     ui::Button *but = uiDefButV(block,
                                 ui::ButtonType::ButMenu,
                                 rl->name,
@@ -245,7 +244,7 @@ static void ui_imageuser_pass_menu(bContext * /*C*/, ui::Layout *layout, void *r
 
   /* may have been freed since drawing */
   rr = BKE_image_acquire_renderresult(scene, image);
-  if (UNLIKELY(rr == nullptr)) {
+  if (rr == nullptr) [[unlikely]] {
     BKE_image_release_renderresult(scene, image, rr);
     return;
   }
@@ -261,9 +260,7 @@ static void ui_imageuser_pass_menu(bContext * /*C*/, ui::Layout *layout, void *r
 
   /* rendered results don't have a Combined pass */
   /* multiview: the ordering must be ascending, so the left-most pass is always the one picked */
-  for (rpass = static_cast<RenderPass *>(rl ? rl->passes.first : nullptr); rpass;
-       rpass = rpass->next, nr++)
-  {
+  for (rpass = rl ? rl->passes.first() : nullptr; rpass; rpass = rpass->next, nr++) {
     /* just show one pass of each kind */
     if (BLI_findstring_ptr(&added_passes, rpass->name, offsetof(LinkData, data))) {
       continue;
@@ -316,7 +313,7 @@ static void ui_imageuser_view_menu_rr(bContext * /*C*/, ui::Layout *layout, void
 
   /* may have been freed since drawing */
   rr = BKE_image_acquire_renderresult(scene, image);
-  if (UNLIKELY(rr == nullptr)) {
+  if (rr == nullptr) [[unlikely]] {
     BKE_image_release_renderresult(scene, image, rr);
     return;
   }
@@ -338,9 +335,7 @@ static void ui_imageuser_view_menu_rr(bContext * /*C*/, ui::Layout *layout, void
   layout->separator();
 
   nr = (rr ? rr->views.count() : 0) - 1;
-  for (rview = static_cast<RenderView *>(rr ? rr->views.last : nullptr); rview;
-       rview = rview->prev, nr--)
-  {
+  for (rview = rr ? rr->views.last() : nullptr; rview; rview = rview->prev, nr--) {
     ui::Button *but = uiDefButV(block,
                                 ui::ButtonType::ButMenu,
                                 IFACE_(rview->name),
@@ -384,7 +379,7 @@ static void ui_imageuser_view_menu_multiview(bContext * /*C*/, ui::Layout *layou
   layout->separator();
 
   nr = image->views.count() - 1;
-  for (iv = static_cast<ImageView *>(image->views.last); iv; iv = iv->prev, nr--) {
+  for (iv = image->views.last(); iv; iv = iv->prev, nr--) {
     ui::Button *but = uiDefButV(block,
                                 ui::ButtonType::ButMenu,
                                 IFACE_(iv->name),
@@ -425,7 +420,7 @@ static bool ui_imageuser_layer_menu_step(bContext *C, int direction, void *rnd_p
   bool changed = false;
 
   rr = BKE_image_acquire_renderresult(scene, image);
-  if (UNLIKELY(rr == nullptr)) {
+  if (rr == nullptr) [[unlikely]] {
     BKE_image_release_renderresult(scene, image, rr);
     return false;
   }
@@ -475,7 +470,7 @@ static bool ui_imageuser_pass_menu_step(bContext *C, int direction, void *rnd_pt
   RenderPass *rpass;
 
   rr = BKE_image_acquire_renderresult(scene, image);
-  if (UNLIKELY(rr == nullptr)) {
+  if (rr == nullptr) [[unlikely]] {
     BKE_image_release_renderresult(scene, image, rr);
     return false;
   }
@@ -517,7 +512,7 @@ static bool ui_imageuser_pass_menu_step(bContext *C, int direction, void *rnd_pt
       return false;
     }
 
-    for (rp = static_cast<RenderPass *>(rl->passes.first); rp; rp = rp->next, rp_index++) {
+    for (rp = rl->passes.first(); rp; rp = rp->next, rp_index++) {
       if (STREQ(rp->name, rpass->name)) {
         iuser->pass = rp_index - 1;
         changed = true;
@@ -732,7 +727,7 @@ void uiTemplateImage(ui::Layout *layout,
                      bool compact,
                      bool multiview)
 {
-  if (!ptr->data) {
+  if (!*ptr) {
     return;
   }
 
@@ -1258,8 +1253,11 @@ void uiTemplateImageInfo(ui::Layout *layout, bContext *C, Image *ima, ImageUser 
 
     gpu::TextureFormat texture_format = gpu::TextureFormat::Invalid;
 
-    /* Try to see if this texture is a compressed format, if not, get the generic format. */
-    if (!IMB_gpu_get_compressed_format(ibuf, &texture_format)) {
+    /* Try to see if this texture is a compressed format, if not, get the generic format.
+     * A modified image is uploaded uncompressed so it can be written to. */
+    const bool is_compressed = (ibuf->userflags & IB_BITMAPDIRTY) == 0 &&
+                               IMB_gpu_get_compressed_format(ibuf, &texture_format);
+    if (!is_compressed) {
       texture_format = IMB_gpu_get_texture_format(
           ibuf, ima->flag & IMA_HIGH_BITDEPTH, ibuf->color_mode == ImColorMode::BW);
     }
@@ -1279,7 +1277,7 @@ void uiTemplateImageInfo(ui::Layout *layout, bContext *C, Image *ima, ImageUser 
     int duration = 0;
 
     if (ima->source == IMA_SRC_MOVIE && BKE_image_has_anim(ima)) {
-      MovieReader *anim = (static_cast<ImageAnim *>(ima->anims.first))->anim;
+      MovieReader *anim = (ima->anims.first())->anim;
       if (anim) {
         duration = MOV_get_duration_frames(anim);
       }

@@ -51,6 +51,10 @@ class DummyBackend : public GPUBackend {
   {
     return nullptr;
   }
+  WorkInFlight *work_in_flight_alloc(unsigned int /*max_in_flight*/) override
+  {
+    return nullptr;
+  }
   FrameBuffer *framebuffer_alloc(const char *name) override
   {
     return new DummyFrameBuffer(name);
@@ -92,6 +96,14 @@ class DummyBackend : public GPUBackend {
   VertBuf *vertbuf_alloc() override
   {
     return new DummyVertexBuffer;
+  }
+  TopLevelAS *tlas_alloc(const char * /*name*/) override
+  {
+    return nullptr;
+  }
+  BottomLevelAS *blas_alloc(const char * /*name*/) override
+  {
+    return nullptr;
   }
   void shader_cache_dir_clear_old() override {}
   void render_begin() override {}

@@ -96,6 +96,14 @@ class DeviceInfo {
   /* Indicate that device execution has been optimized by Blender or vendor developers.
    * For LTS versions, this helps communicate that newer versions may have better performance. */
   bool has_execution_optimization = true;
+  /* True if device's driver is above the minimal Blender required version, false otherwise.
+   * Needed for properly communicating this fact back to the user, who then can choose to upgrade
+   * the driver or do nothing.
+   *
+   * Default value is chosen to be true intentionally - assume compliant unless proven otherwise,
+   * especially since CPU devices do not have any minimal versions, as well as some GPU backends,
+   * for example CUDA. */
+  bool meets_driver_requirement = true;
 
   KernelOptimizationLevel kernel_optimization_level =
       KERNEL_OPTIMIZATION_LEVEL_FULL;         /* Optimization level applied to path tracing
@@ -122,10 +130,22 @@ class DeviceInfo {
 
   bool has_mnee() const
   {
+    if (!has_mnee_) {
+      return false;
+    }
+
     /* Shadow caustics not supported on HIP without hardware ray-tracing, see #160089.
      * This is a more complex condition that can't be determined in device_hip_info,
      * so there is a helper for it here. */
-    return has_mnee_ && (type != DEVICE_HIP || use_hardware_raytracing);
+    if (type == DEVICE_HIP && !use_hardware_raytracing) {
+      return false;
+    }
+    for (const DeviceInfo &info : multi_devices) {
+      if (info.type == DEVICE_HIP && !info.use_hardware_raytracing) {
+        return false;
+      }
+    }
+    return true;
   }
 };
 
@@ -166,7 +186,7 @@ class Device {
     return !error_message().empty();
   }
   virtual void set_error(const string &error);
-  virtual BVHLayoutMask get_bvh_layout_mask(const uint kernel_features) const = 0;
+  virtual BVHLayoutMask get_bvh_layout_mask(uint64_t kernel_features) const = 0;
 
   /* statistics */
   Stats &stats;
@@ -177,7 +197,7 @@ class Device {
   virtual void const_copy_to(const char *name, void *host, const size_t size) = 0;
 
   /* load/compile kernels, must be called before adding tasks */
-  virtual bool load_kernels(uint /*kernel_features*/)
+  virtual bool load_kernels(const uint64_t /*kernel_features*/)
   {
     return true;
   }
@@ -414,8 +434,6 @@ class GPUDevice : public Device {
   using MemMap = map<device_memory *, Mem>;
   MemMap device_mem_map;
   thread_mutex device_mem_map_mutex;
-  /* Simple counter which will try to track amount of used device memory */
-  size_t device_mem_in_use = 0;
 
   virtual void init_host_memory(const size_t preferred_texture_headroom = 0,
                                 const size_t preferred_working_headroom = 0);
@@ -438,7 +456,7 @@ class GPUDevice : public Device {
 
   /* Shared memory. */
   virtual bool shared_alloc(void *&shared_pointer, const size_t size) = 0;
-  virtual void shared_free(void *shared_pointer) = 0;
+  virtual void shared_free(void *shared_pointer, const size_t size) = 0;
   bool is_shared(const void *shared_pointer,
                  const device_ptr device_pointer,
                  Device *sub_device) override;

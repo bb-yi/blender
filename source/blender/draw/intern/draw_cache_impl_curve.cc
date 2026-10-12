@@ -11,11 +11,11 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_color_types.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_rotation.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_rotation_c.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "DNA_curve_types.h"
 #include "DNA_object_types.h"
@@ -117,10 +117,7 @@ static int curve_render_normal_len_get(const ListBaseT<Nurb> *lb, const CurveCac
   int normal_len = 0;
   const BevList *bl;
   const Nurb *nu;
-  for (bl = static_cast<const BevList *>(ob_curve_cache->bev.first),
-      nu = static_cast<const Nurb *>(lb->first);
-       nu && bl;
-       bl = bl->next, nu = nu->next)
+  for (bl = ob_curve_cache->bev.first(), nu = lb->first(); nu && bl; bl = bl->next, nu = nu->next)
   {
     int nr = bl->nr;
     int skip = nu->resolu / 16;
@@ -582,9 +579,7 @@ static void curve_create_edit_curves_nor(CurveRenderData *rdata,
   const uint tan_id = do_hq_normals ? attr_id.tan_hq : attr_id.tan;
   const uint rad_id = do_hq_normals ? attr_id.rad_hq : attr_id.rad;
 
-  for (bl = static_cast<const BevList *>(rdata->ob_curve_cache->bev.first),
-      nu = static_cast<const Nurb *>(rdata->nurbs->first);
-       nu && bl;
+  for (bl = rdata->ob_curve_cache->bev.first(), nu = rdata->nurbs->first(); nu && bl;
        bl = bl->next, nu = nu->next)
   {
     const BevPoint *bevp = bl->bevpoints;
@@ -605,8 +600,8 @@ static void curve_create_edit_curves_nor(CurveRenderData *rdata,
         GPU_vertbuf_attr_set(&vbo_curves_nor, tan_id, vbo_len_used, &ptan);
       }
       else {
-        const gpu::PackedNormal pnor = gpu::convert_normal<gpu::PackedNormal>(nor);
-        const gpu::PackedNormal ptan = gpu::convert_normal<gpu::PackedNormal>(bevp->dir);
+        const int1010102_norm pnor = gpu::convert_normal<int1010102_norm>(nor);
+        const int1010102_norm ptan = gpu::convert_normal<int1010102_norm>(bevp->dir);
         GPU_vertbuf_attr_set(&vbo_curves_nor, nor_id, vbo_len_used, &pnor);
         GPU_vertbuf_attr_set(&vbo_curves_nor, tan_id, vbo_len_used, &ptan);
       }
@@ -710,7 +705,7 @@ static void curve_create_edit_data_and_handles(CurveRenderData *rdata,
 #undef DRW_TEST_ASSIGN_IBO
 
   int nu_id = 0;
-  for (Nurb *nu = static_cast<Nurb *>(rdata->nurbs->first); nu; nu = nu->next, nu_id++) {
+  for (Nurb *nu = rdata->nurbs->first(); nu; nu = nu->next, nu_id++) {
     const BezTriple *bezt = nu->bezt;
     const BPoint *bp = nu->bp;
 

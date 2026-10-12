@@ -149,6 +149,12 @@ def view_draw(engine, depsgraph, region, v3d, rv3d):
     _cycles.view_draw(engine.session, depsgraph, v3d, rv3d)
 
 
+def view_pause(engine, pause):
+    import _cycles
+    if engine.session:
+        _cycles.view_pause(engine.session, pause)
+
+
 def available_devices():
     import _cycles
     return _cycles.available_devices()
@@ -251,6 +257,9 @@ def list_render_passes(scene, srl):
         yield (n_("Denoising Normal"), "XYZ", 'VECTOR')
         yield (n_("Denoising Roughness"), "X", 'VALUE')
         yield (n_("Denoising Depth"), "Z", 'VALUE')
+        if not (scene.render.use_motion_blur and srl.use_motion_blur):
+            yield (n_("Denoising Backward Motion"), "XYZ", 'VECTOR')
+            yield (n_("Denoising Specular Motion"), "XYZ", 'VECTOR')
 
     # Custom AOV passes.
     for aov in srl.aovs:

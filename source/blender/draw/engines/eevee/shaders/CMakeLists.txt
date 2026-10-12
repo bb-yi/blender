@@ -16,18 +16,11 @@ set(INC_GLSL
   ../../../../gpu/intern
   ../../../../gpu/shaders
   ../../../../gpu/shaders/common
+  ../../../../gpu/shaders/compat
   ../../../../gpu/shaders/infos
 
   # For grease pencil.
   ../../gpencil
-)
-
-set(SRC_GLSL_LIB
-  eevee_attributes_curves_lib.glsl
-  eevee_attributes_mesh_lib.glsl
-  eevee_attributes_pointcloud_lib.glsl
-  eevee_attributes_volume_lib.glsl
-  eevee_attributes_world_lib.glsl
 )
 
 set(SRC_BSL

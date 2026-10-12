@@ -30,12 +30,10 @@
 #include "BKE_subdiv_ccg.hh"
 
 #include "BLI_enumerable_thread_specific.hh"
-#include "BLI_math_geom.h"
+#include "BLI_math_geom_c.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_task.hh"
-
-#include "PRF_profile.hh"
 
 #include "editors/sculpt_paint/mesh/mesh_brush_common.hh"
 #include "editors/sculpt_paint/mesh/sculpt_automask.hh"
@@ -56,51 +54,6 @@ struct LocalData {
   Vector<float3> translations;
 };
 
-/**
- * Transforms positions from object space positions to brush-local space. Splitting the XY and Z
- * components gives slightly better performance.
- */
-static void calc_local_positions(const Span<float3> vert_positions,
-                                 const Span<int> verts,
-                                 const float4x4 &mat,
-                                 const MutableSpan<float2> xy_positions,
-                                 const MutableSpan<float> z_positions)
-{
-  PRF_scope(ProfileCategory::Editor);
-  BLI_assert(xy_positions.size() == verts.size());
-  BLI_assert(z_positions.size() == verts.size());
-
-  for (const int i : verts.index_range()) {
-    const float3 position = math::transform_point(mat, vert_positions[verts[i]]);
-
-    xy_positions[i] = position.xy();
-    z_positions[i] = position.z;
-  }
-}
-
-static void calc_local_positions(const Span<float3> positions,
-                                 const float4x4 &mat,
-                                 const MutableSpan<float2> xy_positions,
-                                 const MutableSpan<float> z_positions)
-{
-  PRF_scope(ProfileCategory::Editor);
-  BLI_assert(xy_positions.size() == positions.size());
-  BLI_assert(z_positions.size() == positions.size());
-
-  for (const int i : positions.index_range()) {
-    const float3 position = math::transform_point(mat, positions[i]);
-
-    xy_positions[i] = position.xy();
-    z_positions[i] = position.z;
-  }
-}
-
-/**
- * Applies a parabolic factor of the form `z * (1 - z)` to each vertex.
- * Vertices outside of the interval (0, 1) are out of range and their factors are set to zero.
- * Note: The local coordinate system is constructed such that all relevant `z` values
- * are non-negative.
- */
 static void apply_z_axis_factors(const Span<float> z_positions, const MutableSpan<float> factors)
 {
   PRF_scope(ProfileCategory::Editor);
@@ -146,7 +99,6 @@ static void calc_faces(const Depsgraph &depsgraph,
                        const MeshAttributeData &attribute_data,
                        const bke::pbvh::MeshNode &node,
                        Object &object,
-                       LocalData &tls,
                        const PositionDeformData &position_data)
 {
   SculptSession &ss = *object.runtime->sculpt_session;
@@ -154,25 +106,31 @@ static void calc_faces(const Depsgraph &depsgraph,
 
   const Span<int> verts = node.verts();
 
-  tls.factors.resize(verts.size());
-  const MutableSpan<float> factors = tls.factors;
+  Array<float, bke::pbvh::MESH_LEAF_LIMIT> factors(verts.size());
   fill_factor_from_hide_and_mask(attribute_data.hide_vert, attribute_data.mask, verts, factors);
   filter_region_clip_factors(ss, position_data.eval, verts, factors);
   if (brush.flag & BRUSH_FRONTFACE) {
     calc_front_face(cache.view_normal_symm, vert_normals, verts, factors);
   }
 
-  tls.xy_positions.resize(verts.size());
-  tls.z_positions.resize(verts.size());
-  MutableSpan<float2> xy_positions = tls.xy_positions;
-  MutableSpan<float> z_positions = tls.z_positions;
+  Array<float2, bke::pbvh::MESH_LEAF_LIMIT> xy_positions(verts.size());
+  Array<float, bke::pbvh::MESH_LEAF_LIMIT> z_positions(verts.size());
 
-  calc_local_positions(position_data.eval, verts, mat, xy_positions, z_positions);
+  calc_local_positions(position_data.eval,
+                       verts,
+                       mat,
+                       cache.location_symm,
+                       cache.view_normal_symm,
+                       eBrushFalloffShape(brush.falloff_shape),
+                       xy_positions,
+                       z_positions);
+  if (eBrushFalloffShape(brush.falloff_shape) == PAINT_FALLOFF_SHAPE_TUBE) {
+    z_positions.as_mutable_span().fill(brush.plane_offset);
+  }
   apply_z_axis_factors(z_positions, factors);
   apply_plane_trim_factors(brush, z_positions, factors);
 
-  tls.distances.resize(verts.size());
-  const MutableSpan<float> distances = tls.distances;
+  Array<float, bke::pbvh::MESH_LEAF_LIMIT> distances(verts.size());
   calc_brush_cube_distances<float2>(brush, xy_positions, distances);
   filter_distances_with_radius(1.0f, distances, factors);
   apply_hardness_to_distances(1.0f, cache.hardness, distances);
@@ -184,13 +142,13 @@ static void calc_faces(const Depsgraph &depsgraph,
 
   auto_mask::calc_vert_factors(depsgraph, object, cache.automasking.get(), node, verts, factors);
 
-  calc_brush_texture_factors(ss, brush, position_data.eval, verts, factors);
+  calc_brush_texture_factors(PaintMode::Sculpt, ss, brush, position_data.eval, verts, factors);
 
-  tls.translations.resize(verts.size());
-  translations_from_offset_and_factors(offset, factors, tls.translations);
+  Array<float3, bke::pbvh::MESH_LEAF_LIMIT> translations(verts.size());
+  translations_from_offset_and_factors(offset, factors, translations);
 
-  clip_and_lock_translations(sd, ss, position_data.eval, verts, tls.translations);
-  position_data.deform(tls.translations, verts);
+  clip_and_lock_translations(sd, ss, position_data.eval, verts, translations);
+  position_data.deform(translations, verts);
 }
 
 static void calc_grids(const Depsgraph &depsgraph,
@@ -222,7 +180,16 @@ static void calc_grids(const Depsgraph &depsgraph,
   MutableSpan<float2> xy_positions = tls.xy_positions;
   MutableSpan<float> z_positions = tls.z_positions;
 
-  calc_local_positions(positions, mat, xy_positions, z_positions);
+  calc_local_positions(positions,
+                       mat,
+                       cache.location_symm,
+                       cache.view_normal_symm,
+                       eBrushFalloffShape(brush.falloff_shape),
+                       xy_positions,
+                       z_positions);
+  if (eBrushFalloffShape(brush.falloff_shape) == PAINT_FALLOFF_SHAPE_TUBE) {
+    z_positions.fill(brush.plane_offset);
+  }
   apply_z_axis_factors(z_positions, factors);
   apply_plane_trim_factors(brush, z_positions, factors);
 
@@ -239,7 +206,7 @@ static void calc_grids(const Depsgraph &depsgraph,
 
   auto_mask::calc_grids_factors(depsgraph, object, cache.automasking.get(), node, grids, factors);
 
-  calc_brush_texture_factors(ss, brush, positions, factors);
+  calc_brush_texture_factors(PaintMode::Sculpt, ss, brush, positions, factors);
 
   tls.translations.resize(positions.size());
   translations_from_offset_and_factors(offset, factors, tls.translations);
@@ -276,7 +243,16 @@ static void calc_bmesh(const Depsgraph &depsgraph,
   MutableSpan<float2> xy_positions = tls.xy_positions;
   MutableSpan<float> z_positions = tls.z_positions;
 
-  calc_local_positions(positions, mat, xy_positions, z_positions);
+  calc_local_positions(positions,
+                       mat,
+                       cache.location_symm,
+                       cache.view_normal_symm,
+                       eBrushFalloffShape(brush.falloff_shape),
+                       xy_positions,
+                       z_positions);
+  if (eBrushFalloffShape(brush.falloff_shape) == PAINT_FALLOFF_SHAPE_TUBE) {
+    z_positions.fill(brush.plane_offset);
+  }
   apply_z_axis_factors(z_positions, factors);
   apply_plane_trim_factors(brush, z_positions, factors);
 
@@ -293,7 +269,7 @@ static void calc_bmesh(const Depsgraph &depsgraph,
 
   auto_mask::calc_vert_factors(depsgraph, object, cache.automasking.get(), node, verts, factors);
 
-  calc_brush_texture_factors(ss, brush, positions, factors);
+  calc_brush_texture_factors(PaintMode::Sculpt, ss, brush, positions, factors);
 
   tls.translations.resize(positions.size());
   translations_from_offset_and_factors(offset, factors, tls.translations);
@@ -323,8 +299,13 @@ void do_clay_strips_brush(const Depsgraph &depsgraph,
     return;
   }
 
+  const float3 &tip_normal = eBrushFalloffShape(brush.falloff_shape) ==
+                                     PAINT_FALLOFF_SHAPE_SPHERE ?
+                                 plane_normal :
+                                 ss.cache->view_normal_symm;
   const float4x4 mat = clay_strips::calc_local_matrix(
-      brush, *ss.cache, plane_normal, plane_center, flip);
+      brush, *ss.cache, tip_normal, plane_center, flip);
+
   const float3 offset = plane_normal * ss.cache->bstrength * ss.cache->radius;
 
   threading::EnumerableThreadSpecific<LocalData> all_tls;
@@ -337,7 +318,6 @@ void do_clay_strips_brush(const Depsgraph &depsgraph,
       const Span<float3> vert_normals = bke::pbvh::vert_normals_eval(depsgraph, object);
       node_mask.foreach_index(
           [&](const int i) {
-            LocalData &tls = all_tls.local();
             calc_faces(depsgraph,
                        sd,
                        brush,
@@ -347,7 +327,6 @@ void do_clay_strips_brush(const Depsgraph &depsgraph,
                        attribute_data,
                        nodes[i],
                        object,
-                       tls,
                        position_data);
             bke::pbvh::update_node_bounds_mesh(position_data.eval, nodes[i]);
           },
@@ -385,85 +364,19 @@ void do_clay_strips_brush(const Depsgraph &depsgraph,
 
 namespace clay_strips {
 
-/**
- * Checks whether the node's bounding box overlaps with the region affected by the brush.
- * Clay Strips affects only vertices below the brush plane. The brush-local coordinate
- * system is oriented so that vertices below the plane have positive local z-coordinates.
- * Therefore, we only need to check if the node intersects the [-1,1] x [-1,1] x [0,1] volume in
- * local space.
- */
-static bool node_in_box(const float4x4 &mat, const Bounds<float3> &bounds)
-{
-  const float3 brush_center = float3(0.0f, 0.0f, 0.5f);
-  const float3 node_center = math::transform_point(mat, (bounds.max + bounds.min) * 0.5f);
-  const float3 center_diff = brush_center - node_center;
-
-  const float3 brush_half_lengths = float3(1.0f, 1.0f, 0.5f);
-  const float3 node_half_lengths = (bounds.max - bounds.min) * 0.5f;
-
-  const float3 &node_x_axis = mat.x_axis();
-  const float3 &node_y_axis = mat.y_axis();
-  const float3 &node_z_axis = mat.z_axis();
-
-  /* Tests if `axis` separates the boxes. */
-  auto axis_separates_boxes = [&](const float3 &axis) {
-    const float radius1 = math::dot(math::abs(axis), brush_half_lengths);
-    const float radius2 = math::abs(math::dot(axis, node_x_axis)) * node_half_lengths.x +
-                          math::abs(math::dot(axis, node_y_axis)) * node_half_lengths.y +
-                          math::abs(math::dot(axis, node_z_axis)) * node_half_lengths.z;
-
-    const float projection = math::abs(math::dot(center_diff, axis));
-
-    return projection > radius1 + radius2;
-  };
-
-  const std::array<float3, 3> brush_axes = {
-      float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}};
-  const std::array<float3, 3> node_axes = {node_x_axis, node_y_axis, node_z_axis};
-
-  /**
-   * Intersection is tested using the Separating Axis Theorem.
-   * Two boxes (not necessarily axis-aligned) intersect if and only if there does not exist an axis
-   * that separates them. In particular, it is necessary and sufficient to:
-   */
-
-  /* 1. Test axes aligned with the region affected by the brush. */
-  for (const float3 &axis : brush_axes) {
-    if (axis_separates_boxes(axis)) {
-      return false;
-    }
-  }
-
-  /* 2. Test axes aligned with the node bounds. */
-  for (const float3 &axis : node_axes) {
-    if (axis_separates_boxes(axis)) {
-      return false;
-    }
-  }
-
-  /* 3. Test all their cross products. */
-  for (const float3 &brush_axis : brush_axes) {
-    for (const float3 &node_axis : node_axes) {
-      if (axis_separates_boxes(math::cross(brush_axis, node_axis))) {
-        return false;
-      }
-    }
-  }
-
-  /* None of the axes separates the boxes: they intersect. */
-  return true;
-}
-
 float4x4 calc_local_matrix(const Brush &brush,
                            const StrokeCache &cache,
-                           const float3 &plane_normal,
+                           const float3 &tip_normal,
                            const float3 &plane_center,
                            const bool flip)
 {
+  /* TODO: the current calculations always behave as if Rake is enabled. Use similar logic to
+   * calc_brush_local_mat in sculpt.cc to fix the issue. */
+
   float4x4 mat = float4x4::identity();
-  mat.x_axis() = math::cross(plane_normal, cache.grab_delta_symm);
-  mat.y_axis() = math::cross(plane_normal, mat.x_axis());
-  mat.z_axis() = plane_normal;
+  mat.x_axis() = math::cross(tip_normal, cache.grab_delta_symm);
+  mat.y_axis() = math::cross(tip_normal, mat.x_axis());
+  mat.z_axis() = tip_normal;
 
   /* Flip the z-axis so that the vertices below the plane have positive z-coordinates. When the
    * brush is inverted, the affected z-coordinates are already positive. */
@@ -490,6 +403,8 @@ CursorSampleResult calc_node_mask(const Depsgraph &depsgraph,
   const bke::pbvh::Tree &pbvh = *bke::object::pbvh_get(object);
   const SculptSession &ss = *object.runtime->sculpt_session;
 
+  const eBrushFalloffShape falloff_shape = eBrushFalloffShape(brush.falloff_shape);
+
   const bool flip = (ss.cache->bstrength < 0.0f);
   const float displace = ss.cache->radius * brush_plane_offset_get(brush, ss) *
                          (flip ? -1.0f : 1.0f);
@@ -499,7 +414,7 @@ CursorSampleResult calc_node_mask(const Depsgraph &depsgraph,
 
   const bool use_original = !ss.cache->accum;
   const IndexMask initial_node_mask = gather_nodes(pbvh,
-                                                   eBrushFalloffShape(brush.falloff_shape),
+                                                   falloff_shape,
                                                    use_original,
                                                    ss.cache->location_symm,
                                                    initial_radius_squared,
@@ -517,17 +432,35 @@ CursorSampleResult calc_node_mask(const Depsgraph &depsgraph,
     return {IndexMask(), plane_center, plane_normal};
   }
 
-  const float4x4 mat = calc_local_matrix(brush, *ss.cache, plane_normal, plane_center, flip);
+  switch (falloff_shape) {
+    case PAINT_FALLOFF_SHAPE_SPHERE: {
+      const float4x4 mat = calc_local_matrix(brush, *ss.cache, plane_normal, plane_center, flip);
+      const IndexMask plane_mask = bke::pbvh::search_nodes(
+          pbvh, memory, [&](const bke::pbvh::Node &node) {
+            if (node_fully_masked_or_hidden(node)) {
+              return false;
+            }
+            return node_in_box_positive_z(mat, node.bounds());
+          });
+      return {plane_mask, plane_center, plane_normal};
+    }
 
-  const IndexMask plane_mask = bke::pbvh::search_nodes(
-      pbvh, memory, [&](const bke::pbvh::Node &node) {
-        if (node_fully_masked_or_hidden(node)) {
-          return false;
-        }
-        return node_in_box(mat, node.bounds());
-      });
+    case PAINT_FALLOFF_SHAPE_TUBE: {
+      const float4x4 mat = calc_local_matrix(
+          brush, *ss.cache, ss.cache->view_normal_symm, plane_center, flip);
+      const IndexMask plane_mask = bke::pbvh::search_nodes(
+          pbvh, memory, [&](const bke::pbvh::Node &node) {
+            if (node_fully_masked_or_hidden(node)) {
+              return false;
+            }
+            return node_in_box(mat, node.bounds(), float3(0.0f), float3(1.0f, 1.0f, 1.0f), false);
+          });
+      return {plane_mask, plane_center, plane_normal};
+    }
+  }
 
-  return {plane_mask, plane_center, plane_normal};
+  BLI_assert_unreachable();
+  return {};
 }
 }  // namespace clay_strips
 

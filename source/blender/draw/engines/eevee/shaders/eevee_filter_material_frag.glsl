@@ -3,29 +3,31 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "infos/eevee_filter_material_infos.hh"
-#include "infos/eevee_nodetree_infos.hh"
 
-FRAGMENT_SHADER_CREATE_INFO(eevee_nodetree)
-FRAGMENT_SHADER_CREATE_INFO(eevee_geom_world)
 FRAGMENT_SHADER_CREATE_INFO(eevee_filter_material)
 
 #include "draw_view_lib.glsl"
-#include "eevee_attributes_world_lib.glsl"
-#include "eevee_nodetree_frag_lib.glsl"
+#include "eevee_attributes_world_lib.bsl.hh"
+#include "eevee_nodetree_lib.bsl.hh"
 #include "eevee_reverse_z_lib.glsl"
 #include "eevee_sampling_lib.glsl"
 #include "eevee_surf_lib.glsl"
 
-float4 closure_to_rgba(Closure cl)
+float4 closure_to_rgba(KernelGlobals /*kg*/, ShadingData & /*sd*/, Closure cl)
 {
   UNUSED_VARS(cl);
   return float4(0.0f);
 }
 
-float4 nodetree_filter();
-void nodetree_filter_outputs();
+float4 nodetree_filter(KernelGlobals kg, ShadingData &sd);
+void nodetree_filter_outputs(KernelGlobals kg, ShadingData &sd);
 
 #define TEXTURE_HANDLE_EVAL_DEFINED
+
+int2 filter_output_extent()
+{
+  return int2(imageSize(filter_graph_output_img).xy);
+}
 
 void input_aov_impl(uint hash, out TextureHandle color, out TextureHandle value)
 {
@@ -191,7 +193,7 @@ float4 filter_scene_position_color(int2 texel, float2 uv)
   return float4(drw_point_screen_to_world(float3(uv, depth)), 1.0f);
 }
 
-float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
+float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
 {
   int source_kind = TextureHandle_source_kind(tex);
   tex = filter_graph_input_resolve(tex);
@@ -262,15 +264,15 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
   }
 }
 
-float4 TextureHandle_eval(TextureHandle tex)
+float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex)
 {
-  return TextureHandle_eval(tex, float2(0.0f), true);
+  return TextureHandle_eval(kg, sd, tex, float2(0.0f), true);
 }
 
 /* Absolute UV sampling: use the provided uv directly (0-1 range), ignoring
  * gl_FragCoord. Enables procedural coordinate sampling (Voronoi, screen
  * coordinate nodes, etc.), matching the old Scene Color Vector input. */
-float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
+float4 TextureHandle_eval_uv(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 uv)
 {
   int source_kind = TextureHandle_source_kind(tex);
   tex = filter_graph_input_resolve(tex);
@@ -330,15 +332,3 @@ float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
   }
 }
 
-void main()
-{
-  init_globals();
-  const ViewMatrices view = view_matrices_get();
-  g_data.N = view.normal_view_to_world(view.view_incident_vector(interp.P));
-  g_data.Ni = g_data.N;
-  g_data.Ng = g_data.N;
-  g_data.P = -g_data.N;
-  attrib_load(WorldPoint{g_data.P});
-
-  nodetree_filter_outputs();
-}

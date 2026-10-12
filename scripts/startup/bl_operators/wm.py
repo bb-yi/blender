@@ -2397,6 +2397,78 @@ class WM_OT_tool_set_by_id(Operator):
             return {'CANCELLED'}
 
 
+class WM_OT_tool_set_by_id_hold(Operator):
+    """Set the tool by name while the key is held, restoring the previous tool on release (for key-maps)"""
+    bl_idname = "wm.tool_set_by_id_hold"
+    bl_label = "Set Tool by Name (Hold)"
+
+    # Only kept for identity, never inspect it's contents.
+    _active_operator = None
+
+    name: StringProperty(
+        name="Identifier",
+        description="Identifier of the tool",
+    )
+
+    space_type: rna_space_type_prop
+
+    def _active_tool_restore(self, context):
+        from bl_ui.space_toolsystem_common import activate_by_id
+        if self._tool_prev_idname:
+            activate_by_id(context, self._space_type, self._tool_prev_idname)
+        # Harmless but better not keep a dangling reference.
+        WM_OT_tool_set_by_id_hold._active_operator = None
+
+    def invoke(self, context, event):
+        from bl_ui.space_toolsystem_common import (
+            ToolSelectPanelHelper,
+            activate_by_id,
+        )
+
+        if (space_type := WM_OT_tool_set_by_id.space_type_from_operator(self, context)) is None:
+            return {'CANCELLED'}
+
+        if (
+                (op_other := context.window.modal_operators.get(self.bl_idname)) and
+                (op_other._space_type == space_type)
+        ):
+            tool_prev_idname = op_other._tool_prev_idname
+        else:
+            # Should always be set, nevertheless, if in some rare case it's not,
+            # that shouldn't prevent the tool from being activated.
+            tool_prev = ToolSelectPanelHelper.tool_active_from_context(context, space_type)
+            tool_prev_idname = "" if tool_prev is None else tool_prev.idname
+
+        if not activate_by_id(context, space_type, self.name):
+            self.report({'WARNING'}, rpt_("Tool {!r} not found for space {!r}").format(self.name, space_type))
+            return {'CANCELLED'}
+
+        self._space_type = space_type
+        self._tool_prev_idname = tool_prev_idname
+        self._event_type = event.type
+
+        WM_OT_tool_set_by_id_hold._active_operator = self
+
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def cancel(self, context):
+        if WM_OT_tool_set_by_id_hold._active_operator is not self:
+            return
+        self._active_tool_restore(context)
+
+    def modal(self, context, event):
+        # Another operator took over.
+        if WM_OT_tool_set_by_id_hold._active_operator is not self:
+            return {'FINISHED', 'PASS_THROUGH'}
+
+        if event.type == self._event_type and event.value == 'RELEASE':
+            self._active_tool_restore(context)
+            return {'FINISHED'}
+
+        return {'PASS_THROUGH'}
+
+
 class WM_OT_tool_set_by_index(Operator):
     """Set the tool by index (for key-maps)"""
     bl_idname = "wm.tool_set_by_index"
@@ -2816,11 +2888,12 @@ class WM_OT_batch_rename(Operator):
             None,
             ('BONE', "Bones", "", 'BONE_DATA', 14),
             ('NODE', "Nodes", "", 'NODETREE', 15),
-            ('SEQUENCE_STRIP', "Sequence Strips", "", 'SEQ_SEQUENCER', 16),
+            ('SEQUENCE_STRIP', "Sequence Strips", "", 'SEQ_STRIP', 16),
             ('ACTION_CLIP', "Action Clips", "", 'ACTION', 17),
             None,
             ('SCENE', "Scenes", "", 'SCENE_DATA', 18),
-            ('BRUSH', "Brushes", "", 'BRUSH_DATA', 19),
+            ('MARKER', "Markers", "", 'TIME', 19),
+            ('BRUSH', "Brushes", "", 'BRUSH_DATA', 20),
         ),
         translation_context=i18n_contexts.id_id,
         description="Type of data to rename",
@@ -2874,6 +2947,23 @@ class WM_OT_batch_rename(Operator):
             if action.is_editable
         ))
 
+    @staticmethod
+    def _markers_from_context(context, space_type, only_selected):
+        from contextlib import nullcontext
+        if space_type == 'SEQUENCE_EDITOR':
+            context_manager = context.temp_override(scene=context.sequencer_scene)
+        else:
+            context_manager = nullcontext()
+
+        with context_manager:
+            return context.selected_markers if only_selected else context.markers
+
+    @staticmethod
+    def _markers_label(markers):
+        if markers and markers[0].id_data.id_type == 'ACTION':
+            return iface_("Pose Marker(s)")
+        return iface_("Timeline Marker(s)")
+
     @classmethod
     def _data_from_context(cls, context, data_type, only_selected, *, check_context=False):
         def _is_editable(data):
@@ -2893,7 +2983,7 @@ class WM_OT_batch_rename(Operator):
                 data = (
                     context.selected_strips
                     if only_selected else
-                    scene.sequence_editor.strips_all,
+                    context.sequencer_scene.sequence_editor.strips_all,
                     "name",
                     iface_("Strip(s)"),
                 )
@@ -3044,6 +3134,13 @@ class WM_OT_batch_rename(Operator):
                     ),
                     "name",
                     iface_("Scene(s)"),
+                )
+            elif data_type == 'MARKER':
+                markers = cls._markers_from_context(context, space_type, only_selected)
+                data = (
+                    markers,
+                    "name",
+                    cls._markers_label(markers)
                 )
             elif data_type == 'BRUSH':
                 data = (
@@ -3689,14 +3786,22 @@ class WM_OT_drop_blend_file(Operator):
     use_scripts: BoolProperty(
         name="Trusted Source",
         options={'SKIP_SAVE'},
+        description="Allow .blend file to execute scripts automatically, default available from system preferences"
     )
 
     @classmethod
-    def _is_autoexec(cls, filepath):
+    def _is_autoexec(cls, filepath, *, skip_overrides):
         """
-        Return true when `filepath` is in a directory which isn't excluded.
+        Return true when the directory of ``filepath`` isn't excluded,
+        ``skip_overrides`` ignores the preference & command line override
+        which otherwise give the default for "Trusted Source".
         """
-        return bpy.path.is_autoexec(filepath, canonicalize=True, strip_filename=True)
+        return bpy.path.is_autoexec(
+            filepath,
+            skip_overrides=skip_overrides,
+            canonicalize=True,
+            strip_filename=True,
+        )
 
     def draw(self, context):
         layout = self.layout
@@ -3713,8 +3818,15 @@ class WM_OT_drop_blend_file(Operator):
         props.display_file_selector = False
         props.use_scripts = self.use_scripts
 
+        # Excluded paths can't be trusted, unless the command line overrides the preference.
+        is_untrusted = (
+            context.preferences.filepaths.use_scripts_auto_execute and
+            bpy.app.autoexec_override is None and
+            not self._is_autoexec(filepath, skip_overrides=True)
+        )
+
         col = layout.column()
-        if not context.preferences.filepaths.use_scripts_auto_execute or self._is_autoexec(filepath):
+        if not is_untrusted:
             col.prop(self, "use_scripts")
         else:
             col.enabled = False
@@ -3738,13 +3850,10 @@ class WM_OT_drop_blend_file(Operator):
         return {'CANCELLED'}
 
     def invoke(self, context, _event):
-        # Match the file selector, which defaults to the preferences.
-        self.use_scripts = (
-            context.preferences.filepaths.use_scripts_auto_execute and
-            self._is_autoexec(self.filepath)
-        )
+        # Match the file selector.
+        self.use_scripts = self._is_autoexec(self.filepath, skip_overrides=False)
         # The popup shows this operators own UI, keeping it alive while it's open.
-        return context.window_manager.invoke_popup(self, auto_keymap=True)
+        return context.window_manager.invoke_popup(self, width=200, auto_keymap=True)
 
 
 classes = (
@@ -3783,6 +3892,7 @@ classes = (
     WM_OT_url_open,
     WM_OT_url_open_preset,
     WM_OT_tool_set_by_id,
+    WM_OT_tool_set_by_id_hold,
     WM_OT_tool_set_by_index,
     WM_OT_tool_set_by_brush_type,
     WM_OT_toolbar,

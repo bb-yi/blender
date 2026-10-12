@@ -2,9 +2,13 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "node_shader_util.hh"
 
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_c.hh"
 
 #include "RNA_prototypes.hh"
 
@@ -133,7 +137,7 @@ static void node_extra_info(NodeExtraInfoParams &parameters)
   NodeExtraInfoRow row;
   row.text = RPT_("Attributes Not Supported");
   row.tooltip = TIP_("Accessing attributes is not supported by EEVEE renderer");
-  row.icon = ICON_ERROR;
+  row.icon = ICON_STATUS_ERROR;
   parameters.rows.append(std::move(row));
 }
 
@@ -178,11 +182,11 @@ static int node_shader_gpu(GPUMaterial *mat,
   GPU_material_hiz_data_set(mat);
 
   if (!in[0].link) {
-    GPU_link(mat, "world_position_get", &in[0].link);
+    GPU_link(mat, "world_position_get", GPU_shading_data(), &in[0].link);
   }
 
   if (!in[1].link) {
-    GPU_link(mat, "world_normals_get", &in[1].link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &in[1].link);
   }
 
   /* GPU raycast node does not support attribute sampling. Relink all attribute outputs to a zero
@@ -217,6 +221,8 @@ static int node_shader_gpu(GPUMaterial *mat,
                   GPU_node_get_input_link(*node, in, "Position"),
                   GPU_node_get_input_link(*node, in, "Direction"),
                   GPU_node_get_input_link(*node, in, "Length"),
+                  GPU_kernel_globals(),
+                  GPU_shading_data(),
                   &GPU_node_get_output(*node, out, "Is Hit").link,
                   &GPU_node_get_output(*node, out, "Self Hit").link,
                   &GPU_node_get_output(*node, out, "Hit Distance").link,

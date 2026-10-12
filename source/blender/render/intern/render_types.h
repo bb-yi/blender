@@ -17,7 +17,7 @@
 #include "DNA_scene_types.h"
 
 #include "BLI_mutex.hh"
-#include "BLI_threads.h"
+#include "BLI_threads.hh"
 
 #include "RE_compositor.hh"
 #include "RE_pipeline.h"
@@ -30,7 +30,7 @@ namespace blender {
 
 namespace compositor {
 class RenderContext;
-enum class NodeGroupOutputTypes : uint8_t;
+enum class SideEffectOutputTypes : uint8_t;
 }  // namespace compositor
 
 struct bNodeTree;
@@ -51,13 +51,7 @@ struct BaseRender {
    * highlight. */
   virtual render::TilesHighlight *get_tile_highlight() = 0;
 
-  virtual void compositor_execute(const Main &main,
-                                  const Scene &scene,
-                                  const RenderData &render_data,
-                                  const bNodeTree &node_tree,
-                                  const char *view_name,
-                                  compositor::RenderContext *render_context,
-                                  compositor::NodeGroupOutputTypes needed_outputs) = 0;
+  virtual void compositor_execute(render::CompositorInputData input_data) = 0;
   virtual void compositor_free() = 0;
 
   /**
@@ -96,15 +90,7 @@ struct ViewRender : public BaseRender {
     return nullptr;
   }
 
-  void compositor_execute(const Main & /*main*/,
-                          const Scene & /*scene*/,
-                          const RenderData & /*render_data*/,
-                          const bNodeTree & /*node_tree*/,
-                          const char * /*view_name*/,
-                          compositor::RenderContext * /*render_context*/,
-                          compositor::NodeGroupOutputTypes /*needed_outputs*/) override
-  {
-  }
+  void compositor_execute(render::CompositorInputData /*input_data*/) override {}
   void compositor_free() override {}
 
   bool prepare_viewlayer(struct ViewLayer * /*view_layer*/,
@@ -124,13 +110,7 @@ struct Render : public BaseRender {
     return &tile_highlight;
   }
 
-  void compositor_execute(const Main &main,
-                          const Scene &scene,
-                          const RenderData &render_data,
-                          const bNodeTree &node_tree,
-                          const char *view_name,
-                          compositor::RenderContext *render_context,
-                          compositor::NodeGroupOutputTypes needed_outputs) override;
+  void compositor_execute(render::CompositorInputData input_data) override;
   void compositor_free() override;
 
   bool prepare_viewlayer(struct ViewLayer *view_layer, struct Depsgraph *depsgraph) override;
@@ -149,9 +129,11 @@ struct Render : public BaseRender {
   /* True if result has GPU textures, to quickly skip cache clear. */
   bool result_has_gpu_texture_caches = false;
 
-  /** Window size, display rect, viewplane.
+  /**
+   * Window size, display rect, viewplane.
    * \note Buffer width and height with percentage applied
-   * without border & crop. convert to long before multiplying together to avoid overflow. */
+   * without border & crop. convert to long before multiplying together to avoid overflow.
+   */
   int winx = 0, winy = 0;
   rcti disprect = {0, 0, 0, 0};  /* part within winx winy */
   rctf viewplane = {0, 0, 0, 0}; /* mapped on winx winy */
@@ -211,7 +193,7 @@ struct RenderDisplay {
   void ensure_system_gpu_context();
   void *ensure_blender_gpu_context();
 
-  void display_update(RenderResult *render_result, rcti *rect);
+  void display_update(RenderResult *render_result);
   void current_scene_update(struct Scene *scene);
 
   void stats_draw(RenderStats *render_stats);
@@ -223,7 +205,7 @@ struct RenderDisplay {
   bool test_break();
 
   /* Callbacks */
-  void (*display_update_cb)(void *handle, RenderResult *rr, rcti *rect) = nullptr;
+  void (*display_update_cb)(void *handle, RenderResult *rr) = nullptr;
   void *duh = nullptr;
   void (*current_scene_update_cb)(void *handle, struct Scene *scene) = nullptr;
   void *suh = nullptr;

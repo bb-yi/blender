@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include <fcntl.h>
 #ifndef WIN32
 #  include <unistd.h>
@@ -19,7 +23,7 @@
 #include "BKE_main.hh"
 
 #include "BLI_fileops.hh"
-#include "BLI_mmap.h"
+#include "BLI_mmap.hh"
 #include "BLI_mutex.hh"
 #include "BLI_set.hh"
 
@@ -101,6 +105,10 @@ static std::optional<XXH128_hash_t> get_source_file_hash(const ID &id, DeepHashE
   BLI_stat_t stat;
   if (BLI_stat(path.c_str(), &stat) == -1) {
     r_errors.missing_files.add_as(path);
+    return std::nullopt;
+  }
+  else if ((id.tag & ID_TAG_MISSING) != 0) {
+    r_errors.missing_from_files.add_as(path);
     return std::nullopt;
   }
 
@@ -248,7 +256,9 @@ IDHashResult compute_linked_id_deep_hashes(const Main &bmain, Span<const ID *> i
   for (const ID *id : ids) {
     compute_deep_hash_recursive(bmain, *id, current_stack, hashes, errors);
   }
-  if (!errors.missing_files.is_empty() || !errors.updated_files.is_empty()) {
+  if (!errors.missing_files.is_empty() || !errors.missing_from_files.is_empty() ||
+      !errors.updated_files.is_empty())
+  {
     return errors;
   }
   return ValidDeepHashes{hashes};

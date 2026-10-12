@@ -29,7 +29,7 @@ static int node_shader_gpu_render_info(GPUMaterial *mat,
                                        GPUNodeStack *in,
                                        GPUNodeStack *out)
 {
-  return GPU_stack_link(mat, node, "node_render_info", in, out);
+  return GPU_stack_link(mat, node, "node_render_info", in, out, GPU_kernel_globals(), GPU_shading_data());
 }
 
 NODE_SHADER_MATERIALX_BEGIN

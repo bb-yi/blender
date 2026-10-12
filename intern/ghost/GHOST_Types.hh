@@ -13,6 +13,7 @@
 #include <string>
 
 #ifdef WITH_VULKAN_BACKEND
+#  define VK_NO_PROTOTYPES
 #  include <vulkan/vulkan_core.h>
 VK_DEFINE_HANDLE(VmaAllocator)
 #endif
@@ -249,6 +250,19 @@ enum GHOST_TModifierKey {
   GHOST_kModifierKeyLeftHyper,
   GHOST_kModifierKeyRightHyper,
   GHOST_kModifierKeyNum
+};
+
+/**
+ * Window edges the compositor has tiled against something else (a screen edge or another
+ * window). Decorations are expected to square off against a tiled edge. See
+ * #GHOST_IWindow::getTiledEdges.
+ */
+enum GHOST_TWindowTiledFlag {
+  GHOST_kWindowTiledNone = 0,
+  GHOST_kWindowTiledLeft = (1 << 0),
+  GHOST_kWindowTiledRight = (1 << 1),
+  GHOST_kWindowTiledTop = (1 << 2),
+  GHOST_kWindowTiledBottom = (1 << 3),
 };
 
 /**
@@ -768,7 +782,7 @@ struct GHOST_TEventKeyData {
 };
 
 enum GHOST_TUserSpecialDirTypes {
-  GHOST_kUserSpecialDirDesktop,
+  GHOST_kUserSpecialDirDesktop = 0,
   GHOST_kUserSpecialDirDocuments,
   GHOST_kUserSpecialDirDownloads,
   GHOST_kUserSpecialDirMusic,
@@ -777,6 +791,7 @@ enum GHOST_TUserSpecialDirTypes {
   GHOST_kUserSpecialDirCaches,
   /* Can be extended as needed. */
 };
+#define GHOST_kUserSpecialDirType_Num (GHOST_kUserSpecialDirCaches + 1)
 
 enum GHOST_TWindowDecorationStyleFlags {
   GHOST_kDecorationNone = 0,
@@ -833,6 +848,15 @@ enum GHOST_TVSyncModes {
 struct GHOST_ContextParams {
   bool is_stereo_visual;
   bool is_debug;
+  /**
+   * Request a frame-buffer with an alpha channel that the compositor blends against the
+   * desktop, instead of presenting the surface as opaque. Only needed for client-side-decorations
+   * (rounded corners), see `WITH_GHOST_CSD`. Opaque presentation is used otherwise.
+   *
+   * Used to request the alpha channel, but that request may be rejected in which case this will
+   * become false.
+   */
+  bool use_alpha;
   GHOST_TVSyncModes vsync;
 };
 
@@ -840,6 +864,7 @@ struct GHOST_ContextParams {
   { \
       /*is_stereo_visual*/ false, \
       /*is_debug*/ false, \
+      /*use_alpha*/ false, \
       /*vsync*/ GHOST_kVSyncModeUnset, \
   }
 
@@ -847,13 +872,15 @@ struct GHOST_ContextParams {
   { \
       /*is_stereo_visual*/ false, \
       /*is_debug*/ (((gpu_settings).flags & GHOST_gpuDebugContext) != 0), \
+      /*use_alpha*/ false, \
       /*vsync*/ GHOST_kVSyncModeUnset, \
   }
 
 #define GHOST_CONTEXT_PARAMS_FROM_GPU_SETTINGS(gpu_settings) \
   { \
       /*is_stereo_visual*/ (((gpu_settings).flags & GHOST_gpuStereoVisual) != 0), \
-      /*is_debug*/ (((gpu_settings).flags & GHOST_gpuDebugContext) != 0), /*vsync*/ \
+      /*is_debug*/ (((gpu_settings).flags & GHOST_gpuDebugContext) != 0), \
+      /*use_alpha*/ false, /*vsync*/ \
       (((gpu_settings).flags & GHOST_gpuVSyncIsOverridden) ? (gpu_settings).vsync : \
                                                              GHOST_kVSyncModeUnset), \
   }
@@ -1108,6 +1135,20 @@ struct GHOST_CSD_Params {
   /** Used for window interactions. */
   int cursor_drag_threshold;
   int cursor_double_click_ms;
+  /**
+   * Extra margin outside the window where the pointer still resolves to a resize border
+   * (in points, scaled by the windows DPI). Zero disables the margin.
+   */
+  int resize_margin_size;
+  /**
+   * Radius of the rounded window corners (in points, scaled by the windows DPI).
+   * Zero draws square corners.
+   *
+   * GHOST only uses this to exclude the corners from the surfaces opaque region, the corners
+   * themselves are drawn by the caller which must use the same radius.
+   * Not applied when maximized or full-screen.
+   */
+  int corner_radius;
 };
 
 #ifdef WITH_XR_OPENXR

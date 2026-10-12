@@ -4,8 +4,8 @@
 
 #include "BLI_math_quaternion.hh"
 #include "BLI_math_rotation.hh"
-#include "BLI_math_vector.h"
 #include "BLI_math_vector.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
@@ -235,7 +235,8 @@ static void node_rna(StructRNA *srna)
                     "Axis",
                     "Axis to align to the vector",
                     axis_items,
-                    NOD_inline_enum_accessors(custom1));
+                    NOD_inline_enum_accessors(custom1),
+                    int(math::Axis::Z));
 
   static const EnumPropertyItem pivot_axis_items[] = {
       {FN_NODE_ALIGN_EULER_TO_VECTOR_PIVOT_AXIS_AUTO,

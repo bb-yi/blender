@@ -35,7 +35,7 @@
  * slot definition tells you what types of elements are in it.
  */
 
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "bmesh.hh"
 #include "intern/bmesh_operators_private.hh"
@@ -224,6 +224,41 @@ static BMOpDefine bmo_recalc_face_normals_def = {
     /*init*/ nullptr,
     /*exec*/ bmo_recalc_face_normals_exec,
     /*type_flag*/ (BMO_OPTYPE_FLAG_UNTAN_MULTIRES | BMO_OPTYPE_FLAG_NORMALS_CALC),
+};
+
+static BMO_FlagSet bmo_enum_relax_edge_loops_interpolation_method[] = {
+    {RELAX_EDGE_LOOPS_INTERP_CUBIC, "CUBIC"},
+    {RELAX_EDGE_LOOPS_INTERP_LINEAR, "LINEAR"},
+    {0, nullptr},
+};
+
+/*
+ * Relax Edge Loops.
+ *
+ * Relax the loop, so it is smoother.
+ */
+static BMOpDefine bmo_relax_edge_loops_def = {
+    /*opname*/ "relax_edge_loops",
+    /*slot_types_in*/
+    {
+        /* Input geometry. */
+        {"geom", BMO_OP_SLOT_ELEMENT_BUF, {BM_EDGE}},
+        /* Method used for interpolation. */
+        {"interpolation",
+         BMO_OP_SLOT_INT,
+         to_subtype_union(BMO_OP_SLOT_SUBTYPE_INT_ENUM),
+         bmo_enum_relax_edge_loops_interpolation_method},
+        /* Number of relaxation passes. */
+        {"iterations", BMO_OP_SLOT_INT},
+        /* Distribute vertices at constant distances along the loop. */
+        {"even_spacing", BMO_OP_SLOT_BOOL},
+    },
+    /*slot_types_out*/
+    {{{'\0'}}},
+    /*init*/ nullptr,
+    /*exec*/ bmo_relax_edge_loops_exec,
+    /*type_flag*/
+    (BMO_OPTYPE_FLAG_NORMALS_CALC),
 };
 
 /*
@@ -745,6 +780,62 @@ static BMOpDefine bmo_create_vert_def = {
     /*type_flag*/ (BMO_OPTYPE_FLAG_NOP),
 };
 
+static BMO_FlagSet bmo_enum_curve_restriction[] = {
+    {CURVE_CLAMP_ELEVATION_NONE, "NONE"},
+    {CURVE_CLAMP_ELEVATION_RAISE, "RAISE"},
+    {CURVE_CLAMP_ELEVATION_LOWER, "LOWER"},
+    {0, nullptr},
+};
+
+static BMO_FlagSet bmo_enum_curve_interpolation_method[] = {
+    {CURVE_INTERP_CUBIC, "CUBIC"},
+    {CURVE_INTERP_LINEAR, "LINEAR"},
+    {0, nullptr},
+};
+
+/*
+ * Curve Edge Loops Between Selected.
+ *
+ * Fits the unselected edge loops to a curve defined by the selected vertices.
+ */
+static BMOpDefine bmo_curve_edge_loops_between_selected_def = {
+    /*opname*/ "curve_edge_loops_between_selected",
+    /*slot_types_in*/
+    {
+        /* Input geometry. */
+        {"geom", BMO_OP_SLOT_ELEMENT_BUF, {BM_VERT | BM_EDGE | BM_FACE}},
+        /* Influence factor: spans from 0.0 to 1.0. */
+        {"factor", BMO_OP_SLOT_FLT},
+        /* Restrictions on how the vertices can be moved. */
+        {"clamp_elevation",
+         BMO_OP_SLOT_INT,
+         to_subtype_union(BMO_OP_SLOT_SUBTYPE_INT_ENUM),
+         bmo_enum_curve_restriction},
+        /* Limits the tool to work within the boundaries of the selected vertices if false. */
+        {"extend_loop", BMO_OP_SLOT_BOOL},
+        /* Distribute vertices at constant distances along the curve. */
+        {"regular", BMO_OP_SLOT_BOOL},
+        /* Lock X axis editing. */
+        {"lock_x", BMO_OP_SLOT_BOOL},
+        /* Lock Y axis editing. */
+        {"lock_y", BMO_OP_SLOT_BOOL},
+        /* Lock Z axis editing. */
+        {"lock_z", BMO_OP_SLOT_BOOL},
+        /* Method used for interpolation. */
+        {"interpolation",
+         BMO_OP_SLOT_INT,
+         to_subtype_union(BMO_OP_SLOT_SUBTYPE_INT_ENUM),
+         bmo_enum_curve_interpolation_method},
+        {{'\0'}},
+    },
+    /*slot_types_out*/
+    {{{'\0'}}},
+    /*init*/ nullptr,
+    /*exec*/ bmo_curve_edge_loops_between_selected_exec,
+    /*type_flag*/
+    (BMO_OPTYPE_FLAG_NORMALS_CALC),
+};
+
 /*
  * Join Triangles.
  *
@@ -1126,6 +1217,48 @@ static BMOpDefine bmo_scale_def = {
     /*init*/ nullptr,
     /*exec*/ bmo_scale_exec,
     /*type_flag*/ (BMO_OPTYPE_FLAG_NORMALS_CALC),
+};
+
+static BMO_FlagSet bmo_enum_fit_edge_loops_to_annotation_method[] = {
+    {TO_ANNOTATION_SPREAD, "SPREAD"},
+    {TO_ANNOTATION_SPREAD_EVENLY, "SPREAD_EVENLY"},
+    {TO_ANNOTATION_PROJECT, "PROJECT"},
+    {0, nullptr}};
+
+/*
+ * Fit Edge Loops To Annotation.
+ *
+ * Stretches selected vertices to the active stroke.
+ */
+static BMOpDefine bmo_fit_edge_loops_to_annotation_def = {
+    /*opname*/ "fit_edge_loops_to_annotation",
+    /*slot_types_in*/
+    {
+        /* Input geometry. */
+        {"geom", BMO_OP_SLOT_ELEMENT_BUF, {BM_EDGE}},
+        /* Influence factor: spans from 0.0 to 1.0. */
+        {"factor", BMO_OP_SLOT_FLT},
+        /* Method of distributing the vertices over the stroke. */
+        {"method",
+         BMO_OP_SLOT_INT,
+         to_subtype_union(BMO_OP_SLOT_SUBTYPE_INT_ENUM),
+         bmo_enum_fit_edge_loops_to_annotation_method},
+        /* Array of annotation strokes to project onto (ignored if None). */
+        {"strokes", BMO_OP_SLOT_PTR, to_subtype_union(BMO_OP_SLOT_SUBTYPE_PTR_STRUCT)},
+        /* Lock X axis editing. */
+        {"lock_x", BMO_OP_SLOT_BOOL},
+        /* Lock Y axis editing. */
+        {"lock_y", BMO_OP_SLOT_BOOL},
+        /* Lock Z axis editing. */
+        {"lock_z", BMO_OP_SLOT_BOOL},
+        {{'\0'}},
+    },
+    /*slot_types_out*/
+    {{{'\0'}}},
+    /*init*/ nullptr,
+    /*exec*/ bmo_fit_edge_loops_to_annotation_exec,
+    /*type_flag*/
+    (BMO_OPTYPE_FLAG_NORMALS_CALC),
 };
 
 /*
@@ -2177,6 +2310,47 @@ static BMOpDefine bmo_create_grid_def = {
     /*type_flag*/ (BMO_OPTYPE_FLAG_NORMALS_CALC | BMO_OPTYPE_FLAG_SELECT_FLUSH),
 };
 
+static BMO_FlagSet bmo_enum_quadsphere_method[] = {
+    {QUADSPHERE_METHOD_EQUI_ANGULAR_EVEN_AREA, "EVEN_AREA"},
+    {QUADSPHERE_METHOD_EQUI_ANGULAR, "EVEN_ANGLE"},
+    {0, nullptr},
+};
+
+/*
+ * Create Quad Sphere.
+ *
+ * Creates a sphere from a subdivided cube, made up entirely of quads.
+ */
+static BMOpDefine bmo_create_quadsphere_def = {
+    /*opname*/ "create_quadsphere",
+    /*slot_types_in*/
+    {
+        /* Number of quads along each edge of the cube the sphere is made from. */
+        {"segments", BMO_OP_SLOT_INT},
+        /* Mapping from the cube onto the sphere. */
+        {"method",
+         BMO_OP_SLOT_INT,
+         to_subtype_union(BMO_OP_SLOT_SUBTYPE_INT_ENUM),
+         bmo_enum_quadsphere_method},
+        /* Radius. */
+        {"radius", BMO_OP_SLOT_FLT},
+        /* Matrix to multiply the new geometry with. */
+        {"matrix", BMO_OP_SLOT_MAT},
+        /* Calculate default UVs. */
+        {"calc_uvs", BMO_OP_SLOT_BOOL},
+        {{'\0'}},
+    },
+    /*slot_types_out*/
+    {
+        /* Output verts. */
+        {"verts.out", BMO_OP_SLOT_ELEMENT_BUF, {BM_VERT}},
+        {{'\0'}},
+    },
+    /*init*/ nullptr,
+    /*exec*/ bmo_create_quadsphere_exec,
+    /*type_flag*/ (BMO_OPTYPE_FLAG_NORMALS_CALC | BMO_OPTYPE_FLAG_SELECT_FLUSH),
+};
+
 /*
  * Create UV Sphere.
  *
@@ -2933,8 +3107,10 @@ const BMOpDefine *bmo_opdefines[] = {
     &bmo_create_grid_def,
     &bmo_create_icosphere_def,
     &bmo_create_monkey_def,
+    &bmo_create_quadsphere_def,
     &bmo_create_uvsphere_def,
     &bmo_create_vert_def,
+    &bmo_curve_edge_loops_between_selected_def,
     &bmo_delete_def,
     &bmo_dissolve_edges_def,
     &bmo_dissolve_faces_def,
@@ -2965,6 +3141,7 @@ const BMOpDefine *bmo_opdefines[] = {
     &bmo_pointmerge_facedata_def,
     &bmo_poke_def,
     &bmo_recalc_face_normals_def,
+    &bmo_relax_edge_loops_def,
     &bmo_planar_faces_def,
     &bmo_region_extend_def,
     &bmo_remove_doubles_def,
@@ -2987,6 +3164,7 @@ const BMOpDefine *bmo_opdefines[] = {
     &bmo_bisect_plane_def,
     &bmo_space_edge_loops_evenly_def,
     &bmo_symmetrize_def,
+    &bmo_fit_edge_loops_to_annotation_def,
     &bmo_transform_def,
     &bmo_translate_def,
     &bmo_triangle_fill_def,

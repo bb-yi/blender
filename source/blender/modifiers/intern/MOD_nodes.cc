@@ -14,11 +14,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_multi_value_map.hh"
 #include "BLI_set.hh"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_array_utils.hh"
 #include "DNA_collection_types.h"
@@ -145,7 +145,10 @@ static void add_object_relation(const ModifierUpdateDepsgraphContext *ctx,
     return;
   }
   if (info.geometry) {
-    if (object.type == OB_EMPTY && object.instance_collection != nullptr) {
+    const bool is_just_collection_instance = object.type == OB_EMPTY &&
+                                             object.instance_collection != nullptr &&
+                                             object.modifiers.is_empty();
+    if (is_just_collection_instance) {
       add_collection_relation(ctx, *object.instance_collection);
     }
     else if (DEG_object_has_geometry_component(&object)) {
@@ -385,49 +388,6 @@ static void update_bakes_from_node_group(NodesModifierData &nmd)
   remove_outdated_bake_caches(nmd);
 }
 
-static void update_panels_from_node_group(NodesModifierData &nmd)
-{
-  Map<int, NodesModifierPanel *> old_panel_by_id;
-  for (NodesModifierPanel &panel : MutableSpan(nmd.panels, nmd.panels_num)) {
-    old_panel_by_id.add(panel.id, &panel);
-  }
-
-  Vector<const bNodeTreeInterfacePanel *> interface_panels;
-  if (nmd.node_group && !ID_MISSING(nmd.node_group)) {
-    nmd.node_group->ensure_interface_cache();
-    nmd.node_group->tree_interface.foreach_item([&](const bNodeTreeInterfaceItem &item) {
-      if (item.item_type != NodeTreeInterfaceItemType::Panel) {
-        return true;
-      }
-      interface_panels.append(reinterpret_cast<const bNodeTreeInterfacePanel *>(&item));
-      return true;
-    });
-  }
-
-  NodesModifierPanel *new_panels = MEM_new_array<NodesModifierPanel>(interface_panels.size(),
-                                                                     __func__);
-
-  for (const int i : interface_panels.index_range()) {
-    const bNodeTreeInterfacePanel &interface_panel = *interface_panels[i];
-    const int id = interface_panel.identifier;
-    NodesModifierPanel *old_panel = old_panel_by_id.lookup_default(id, nullptr);
-    NodesModifierPanel &new_panel = new_panels[i];
-    if (old_panel) {
-      new_panel = *old_panel;
-    }
-    else {
-      new_panel.id = id;
-      const bool default_closed = interface_panel.flag & NODE_INTERFACE_PANEL_DEFAULT_CLOSED;
-      SET_FLAG_FROM_TEST(new_panel.flag, !default_closed, NODES_MODIFIER_PANEL_OPEN);
-    }
-  }
-
-  MEM_SAFE_DELETE(nmd.panels);
-
-  nmd.panels = new_panels;
-  nmd.panels_num = interface_panels.size();
-}
-
 static void update_system_properties(Main &bmain, Object &object, NodesModifierData &nmd)
 {
   if (!nmd.modifier.system_properties) {
@@ -446,7 +406,6 @@ void MOD_nodes_update_interface(Main &bmain, Object *object, NodesModifierData *
 {
   update_system_properties(bmain, *object, *nmd);
   update_bakes_from_node_group(*nmd);
-  update_panels_from_node_group(*nmd);
   nmd->runtime->usage_cache.reset();
 
   DEG_id_tag_update(&object->id, ID_RECALC_GEOMETRY);
@@ -488,8 +447,8 @@ static void try_add_side_effect_node(const ModifierEvalContext &ctx,
   }
   std::reverse(compute_context_vec.begin(), compute_context_vec.end());
 
-  const auto *modifier_compute_context = dynamic_cast<const bke::ModifierComputeContext *>(
-      compute_context_vec[1]);
+  const auto *modifier_compute_context =
+      dynamic_cast<const bke::GeometryNodesModifierComputeContext *>(compute_context_vec[1]);
   if (modifier_compute_context == nullptr) {
     return;
   }
@@ -717,7 +676,8 @@ static void find_side_effect_nodes_for_viewer_path(
   bke::ComputeContextCache compute_context_cache;
   const ComputeContext *object_context = &compute_context_cache.for_data_block(
       nullptr, parsed_path->object->id);
-  const ComputeContext *current = &compute_context_cache.for_modifier(object_context, nmd);
+  const ComputeContext *current = &compute_context_cache.for_geometry_nodes_modifier(
+      object_context, nmd);
   for (const ViewerPathElem *elem : parsed_path->node_path) {
     current = ed::viewer_path::compute_context_for_viewer_path_elem(
         *elem, compute_context_cache, current);
@@ -738,7 +698,8 @@ static void find_side_effect_nodes_for_nested_node(
   bke::ComputeContextCache compute_context_cache;
   const ComputeContext *object_context = &compute_context_cache.for_data_block(nullptr,
                                                                                ctx.object->id);
-  const ComputeContext *compute_context = &compute_context_cache.for_modifier(object_context, nmd);
+  const ComputeContext *compute_context = &compute_context_cache.for_geometry_nodes_modifier(
+      object_context, nmd);
 
   int nested_node_id = root_nested_node_id;
   const bNodeTree *tree = nmd.node_group;
@@ -837,7 +798,7 @@ static void find_side_effect_nodes(const NodesModifierData &nmd,
                                    Set<ComputeContextHash> &r_verbose_log_contexts)
 {
   Main *bmain = DEG_get_bmain(ctx.depsgraph);
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
   if (wm == nullptr) {
     return;
   }
@@ -846,7 +807,7 @@ static void find_side_effect_nodes(const NodesModifierData &nmd,
     const WorkSpace *workspace = BKE_workspace_active_get(window.workspace_hook);
     find_side_effect_nodes_for_viewer_path(workspace->viewer_path, nmd, ctx, r_side_effect_nodes);
     for (const ScrArea &area : screen->areabase) {
-      const SpaceLink *sl = static_cast<SpaceLink *>(area.spacedata.first);
+      const SpaceLink *sl = area.spacedata.first_as<SpaceLink>();
       if (sl == nullptr) {
         continue;
       }
@@ -872,7 +833,7 @@ static void find_verbose_log_contexts(const NodesModifierData &nmd,
                                       Set<ComputeContextHash> &r_socket_log_contexts)
 {
   Main *bmain = DEG_get_bmain(ctx.depsgraph);
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
   if (wm == nullptr) {
     return;
   }
@@ -880,7 +841,7 @@ static void find_verbose_log_contexts(const NodesModifierData &nmd,
   for (const wmWindow &window : wm->windows) {
     const bScreen *screen = BKE_workspace_active_screen_get(window.workspace_hook);
     for (const ScrArea &area : screen->areabase) {
-      const SpaceLink *sl = static_cast<SpaceLink *>(area.spacedata.first);
+      const SpaceLink *sl = area.spacedata.first_as<SpaceLink>();
       if (sl == nullptr) [[unlikely]] {
         continue;
       }
@@ -1842,7 +1803,8 @@ static void modifyGeometry(ModifierData *md,
   call_data.side_effect_nodes = &side_effect_nodes;
 
   bke::DataBlockComputeContext data_block_compute_context{nullptr, ctx->object->id};
-  bke::ModifierComputeContext modifier_compute_context{&data_block_compute_context, *nmd};
+  bke::GeometryNodesModifierComputeContext modifier_compute_context{&data_block_compute_context,
+                                                                    *nmd};
 
   PointerRNA md_ptr = RNA_pointer_create_discrete(&ctx->object->id, RNA_NodesModifier, md);
   PointerRNA properties_ptr = RNA_pointer_get(&md_ptr, "properties");
@@ -2019,7 +1981,6 @@ static void blend_write(BlendWriter *writer, const ID * /*id_owner*/, const Modi
       }
     }
   }
-  writer->write_struct_array(nmd->panels_num, nmd->panels);
 }
 
 static void blend_read(BlendDataReader *reader, ModifierData *md)
@@ -2080,7 +2041,6 @@ static void blend_read(BlendDataReader *reader, ModifierData *md)
       }
     }
   }
-  BLO_read_array_and_validate_size(reader, &nmd->panels, &nmd->panels_num);
 
   nmd->runtime = MEM_new<NodesModifierRuntime>(__func__);
   nmd->runtime->cache = std::make_shared<bake::ModifierCache>();
@@ -2114,10 +2074,6 @@ static void copy_data(const ModifierData *md, ModifierData *target, const int fl
       }
       nodes_modifier_packed_bake_copy(bake, nmd->bakes[i]);
     }
-  }
-
-  if (nmd->panels) {
-    tnmd->panels = MEM_dupalloc(nmd->panels);
   }
 
   tnmd->runtime = MEM_new<NodesModifierRuntime>(__func__);
@@ -2199,8 +2155,6 @@ static void free_data(ModifierData *md)
     nodes_modifier_bake_destruct(&bake, false);
   }
   MEM_SAFE_DELETE(nmd->bakes);
-
-  MEM_SAFE_DELETE(nmd->panels);
 
   MEM_SAFE_DELETE(nmd->bake_directory);
   MEM_delete(nmd->runtime);

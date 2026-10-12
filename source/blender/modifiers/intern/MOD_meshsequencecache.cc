@@ -9,8 +9,8 @@
 #include <cstring>
 
 #include "BLI_math_vector.hh"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -329,7 +329,7 @@ static void panel_draw(const bContext *C, Panel *panel)
   PointerRNA *ptr = modifier_panel_get_property_pointers(panel, &ob_ptr);
 
   PointerRNA cache_file_ptr = RNA_pointer_get(ptr, "cache_file");
-  bool has_cache_file = !RNA_pointer_is_null(&cache_file_ptr);
+  bool has_cache_file = cache_file_ptr.has_data();
 
   layout.use_property_split_set(true);
 

@@ -72,9 +72,10 @@ class OBJECT_PT_transform(ObjectButtonsPanel, Panel):
             row.prop(ob, "rotation_euler", text="Rotation")
             row.use_property_decorate = False
             row.prop(ob, "lock_rotation", text="", emboss=False, icon='DECORATE_UNLOCKED')
+
         row = layout.row(align=True)
         row.prop(ob, "rotation_mode", text="Mode")
-        row.label(text="", icon='BLANK1')
+        row.operator_menu_enum("anim.rotation_mode_convert", "mode", icon='DOWNARROW_HLT', text="")
 
         col = layout.column()
         row = col.row(align=True)
@@ -239,7 +240,7 @@ class OBJECT_PT_display(ObjectButtonsPanel, Panel):
                 'VOLUME',
                 'CURVES',
                 'POINTCLOUD'})
-        has_bounds = (is_geometry or obj_type in {'LATTICE', 'ARMATURE'})
+        has_bounds = (is_geometry or obj_type in {'LATTICE', 'ARMATURE', 'LIGHT_PROBE'})
         is_empty_image = (obj_type == 'EMPTY' and obj.empty_display_type == 'IMAGE')
         is_dupli = (obj.instance_type != 'NONE')
         is_gpencil = (obj_type == 'GREASEPENCIL')
@@ -469,7 +470,7 @@ class OBJECT_PT_visibility(ObjectButtonsPanel, Panel):
 
         layout.separator()
         col = layout.column(heading="Mask")
-        col.prop(ob, "is_holdout")
+        col.prop(ob, "is_holdout", toggle=False)
 
 
 def has_geometry_visibility(ob):

@@ -10,7 +10,7 @@
 #include "BLI_index_mask.hh"
 #include "BLI_lasso_2d.hh"
 #include "BLI_math_vector.hh"
-#include "BLI_rect.h"
+#include "BLI_rect.hh"
 
 #include "BKE_attribute.hh"
 
@@ -193,8 +193,8 @@ bool select_lasso(PointCloud &pointcloud,
         if (!BLI_rcti_isect_pt_v(&bbox, int2(pos_proj))) {
           return false;
         }
-        if (!BLI_lasso_is_point_inside(lasso_coords, int(pos_proj.x), int(pos_proj.y), IS_CLIPPED))
-        {
+        if (!BLI_lasso_is_point_inside(
+                lasso_coords, int(pos_proj.x), int(pos_proj.y), IS_CLIPPED)) {
           return false;
         }
         return true;

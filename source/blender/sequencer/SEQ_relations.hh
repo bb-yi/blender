@@ -29,16 +29,17 @@ namespace seq {
  * Check if one strip is input to the other.
  */
 bool relation_is_effect_of_strip(const Strip *effect, const Strip *input);
-/**
- * Free currently open movie strip readers.
- */
-void strip_free_movie_readers(Strip *strip);
 bool relations_check_scene_recursion(Scene *scene, ReportList *reports);
 /**
  * Check if "strip_main" (indirectly) uses strip "strip".
  */
 bool relations_render_loop_check(Strip *strip_main, Strip *strip);
 void relations_free_imbuf(Scene *scene, ListBaseT<Strip> *seqbase, bool for_render);
+
+/**
+ * Free all cached sequencer data of \a scene, including media presence and all caches.
+ */
+void relations_refresh_all(Scene *scene);
 
 /**
  * Invalidates various caches related to a given strip:
@@ -85,11 +86,12 @@ void relations_update_view_layer_scene_strips(Main *bmain,
  */
 void relations_invalidate_compositor_users(const Main *bmain, const bNodeTree *node_tree);
 
-void relations_invalidate_movieclip_strips(Main *bmain, MovieClip *clip_target);
 /**
- * Release FFmpeg handles of strips that are not currently displayed to minimize memory usage.
+ * Invalidates cached source images of effect strips without inputs, like color and text strips.
  */
-void relations_free_all_anim_ibufs(Scene *scene, int timeline_frame);
+void relations_invalidate_generator_strips(Scene *scene);
+
+void relations_invalidate_movieclip_strips(Main *bmain, MovieClip *clip_target);
 /**
  * A debug and development function which checks whether strips have unique UIDs.
  * Errors will be reported to the console.

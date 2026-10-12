@@ -20,12 +20,12 @@
 #include "DNA_userdef_types.h"
 #include "DNA_windowmanager_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_appdir.hh"
 #include "BKE_blender_version.h"
@@ -118,7 +118,7 @@ static void wm_block_splash_image_roundcorners_add(ImBuf *ibuf)
     return;
   }
 
-  bTheme *btheme = ui::theme::theme_get();
+  const bTheme *btheme = ui::theme::theme_get();
   const float roundness = btheme->tui.wcol_menu_back.roundness * UI_SCALE_FAC;
   const int size = roundness * 20;
 
@@ -335,7 +335,7 @@ static ui::Block *wm_block_splash_create(bContext *C, ARegion *region, void * /*
    * first draw or if the image changed. */
   ImBuf *ibuf = wm_block_splash_image(splash_width, &splash_height);
   /* This should never happen, if it does - don't crash. */
-  if (LIKELY(ibuf)) {
+  if (ibuf) [[likely]] {
     ui::Button *but = uiDefButImage(
         block, ibuf, 0, 0.5f * U.widget_unit, splash_width, splash_height, nullptr);
 
@@ -407,7 +407,8 @@ static ui::Block *wm_block_splash_create(bContext *C, ARegion *region, void * /*
     ui::Layout &row1 = split.row(true);
     ui::Layout &row2 = split.row(true);
 
-    row1.label(RPT_("Intel binary detected. Expect reduced performance."), ICON_ERROR);
+    row1.label(RPT_("Intel binary detected. Expect reduced performance."),
+               ICON_STATUS_WARNING_FILLED);
 
     PointerRNA op_ptr = row2.op("WM_OT_url_open",
                                 CTX_IFACE_(BLT_I18NCONTEXT_OPERATOR_DEFAULT, "Learn More"),
@@ -488,7 +489,7 @@ static ui::Block *wm_block_about_create(bContext *C, ARegion *region, void * /*a
   ImBuf *ibuf = ui::svg_icon_bitmap(ICON_BLENDER_LOGO_LARGE, size, show_color);
 
   if (ibuf) {
-    bTheme *btheme = ui::theme::theme_get();
+    const bTheme *btheme = ui::theme::theme_get();
     const uchar *color = btheme->tui.wcol_menu_back.text_sel;
 
     /* The top margin. */

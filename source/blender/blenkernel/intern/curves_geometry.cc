@@ -14,7 +14,7 @@
 #include "BLI_bounds.hh"
 #include "BLI_index_mask.hh"
 #include "BLI_length_parameterize.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_rotation_legacy.hh"
 #include "BLI_memory_counter.hh"
@@ -190,7 +190,7 @@ CurvesGeometry::CurvesGeometry(CurvesGeometry &&other)
   other.vertex_group_active_index = 0;
 
   this->attributes_active_index = other.attributes_active_index;
-  other.attributes_active_index = 0;
+  other.attributes_active_index = -1;
 
   this->runtime = other.runtime;
   other.runtime = nullptr;
@@ -284,6 +284,7 @@ void CurvesGeometry::fill_curve_types(const IndexMask &selection, const CurveTyp
 
 std::array<int, CURVE_TYPES_NUM> calculate_type_counts(const VArray<int8_t> &types)
 {
+  PRF_scope(ProfileCategory::Core);
   using CountsType = std::array<int, CURVE_TYPES_NUM>;
   CountsType counts;
   counts.fill(0);
@@ -980,7 +981,7 @@ static void rotate_directions_around_axes(MutableSpan<float3> directions,
 {
   for (const int i : directions.index_range()) {
     const float3 axis = axes[i];
-    if (UNLIKELY(math::is_zero(axis))) {
+    if (math::is_zero(axis)) [[unlikely]] {
       continue;
     }
     directions[i] = math::rotate_direction_around_axis(directions[i], axis, angles[i]);
@@ -1498,6 +1499,7 @@ CurvesGeometry curves_copy_point_selection(const CurvesGeometry &curves,
                                            const IndexMask &points_to_copy,
                                            const AttributeFilter &attribute_filter)
 {
+  PRF_scope(ProfileCategory::Core);
   const Array<int> point_to_curve_map = curves.point_to_curve_map();
   Array<int> curve_point_counts(curves.curves_num(), 0);
   points_to_copy.foreach_index_optimized<int64_t>(
@@ -1594,6 +1596,7 @@ CurvesGeometry curves_copy_curve_selection(const CurvesGeometry &curves,
                                            const IndexMask &curves_to_copy,
                                            const AttributeFilter &attribute_filter)
 {
+  PRF_scope(ProfileCategory::Core);
   const OffsetIndices points_by_curve = curves.points_by_curve();
   CurvesGeometry dst_curves(0, curves_to_copy.size());
   const OffsetIndices dst_points_by_curve = offset_indices::gather_selected_offsets(
@@ -1625,7 +1628,6 @@ CurvesGeometry curves_copy_curve_selection(const CurvesGeometry &curves,
     copy_curve_selection_custom_knots(curves, curves_to_copy, dst_curves);
   }
 
-  dst_curves.update_curve_types();
   dst_curves.remove_attributes_based_on_types();
 
   return dst_curves;
@@ -1863,29 +1865,14 @@ static GVArray adapt_curve_domain_point_to_curve(const CurvesGeometry &curves,
  * However, doing that makes the implementation simpler, and this can be optimized in the future if
  * only some values are required.
  */
-template<typename T>
-static void adapt_curve_domain_curve_to_point_impl(const CurvesGeometry &curves,
-                                                   const VArray<T> &old_values,
-                                                   MutableSpan<T> r_values)
-{
-  PRF_scope(ProfileCategory::Default);
-  const OffsetIndices points_by_curve = curves.points_by_curve();
-  for (const int i_curve : IndexRange(curves.curves_num())) {
-    r_values.slice(points_by_curve[i_curve]).fill(old_values[i_curve]);
-  }
-}
-
 static GVArray adapt_curve_domain_curve_to_point(const CurvesGeometry &curves,
                                                  const GVArray &varray)
 {
   PRF_scope(ProfileCategory::Default);
-  GVArray new_varray;
-  attribute_math::to_static_type(varray.type(), [&]<typename T>() {
-    Array<T> values(curves.points_num());
-    adapt_curve_domain_curve_to_point_impl<T>(curves, varray.typed<T>(), values);
-    new_varray = VArray<T>::from_container(std::move(values));
-  });
-  return new_varray;
+  GArray<> values(varray.type(), curves.points_num());
+  attribute_math::gather_to_groups(
+      curves.points_by_curve(), curves.curves_range(), GVArraySpan(varray), values);
+  return GVArray::from_garray(std::move(values));
 }
 
 GVArray CurvesGeometry::adapt_domain(const GVArray &varray,
@@ -1995,8 +1982,7 @@ void CurvesGeometry::blend_write_prepare(CurvesGeometry::BlendWriteData &write_d
     this->attribute_storage.dna_attributes_num = write_data.attribute_data.attributes.size();
   }
 
-  BLO_write_generated_pointer_tag(write_data.attribute_data.writer,
-                                  this->attribute_storage.dna_attributes);
+  write_data.attribute_data.writer->generated_pointer_tag(this->attribute_storage.dna_attributes);
 }
 
 void CurvesGeometry::blend_write(BlendWriter &writer,
@@ -2008,8 +1994,7 @@ void CurvesGeometry::blend_write(BlendWriter &writer,
   this->attribute_storage.wrap().blend_write(writer, write_data.attribute_data);
 
   if (this->curve_offsets) {
-    BLO_write_shared(
-        &writer,
+    writer.write_shared(
         this->curve_offsets,
         sizeof(int) * (this->curve_num + 1),
         this->runtime->curve_offsets_sharing_info,
@@ -2019,8 +2004,7 @@ void CurvesGeometry::blend_write(BlendWriter &writer,
   BKE_defbase_blend_write(&writer, &this->vertex_group_names);
 
   if (this->custom_knot_num) {
-    BLO_write_shared(
-        &writer,
+    writer.write_shared(
         this->custom_knots,
         sizeof(float) * this->custom_knot_num,
         this->runtime->custom_knots_sharing_info,

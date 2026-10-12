@@ -323,7 +323,7 @@ NODE_DEFINE(Mesh)
   return type;
 }
 
-bool Mesh::need_tesselation()
+bool Mesh::need_tessellation()
 {
   return (subdivision_type != SUBDIVISION_NONE) &&
          (position_is_modified() || subd_dicing_rate_is_modified() ||
@@ -834,7 +834,7 @@ void Mesh::update_tangents(Scene *scene, bool undisplaced)
   const char *tangent_postfix = (undisplaced) ? ".undisplaced_tangent" : ".tangent";
   const char *tangent_sign_postfix = (undisplaced) ? ".undisplaced_tangent_sign" : ".tangent_sign";
 
-  /* standard UVs */
+  /* Standard UVs. */
   if ((need_attribute(scene, tangent_std) || need_attribute(scene, tangent_sign_std)) &&
       !attributes.find(tangent_std))
   {

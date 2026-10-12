@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup balembic
+ */
+
 #include "abc_archive.h"
 
 #include "BKE_blender_version.h"
@@ -21,7 +25,7 @@
 
 #ifdef WIN32
 #  include "BLI_path_utils.hh"
-#  include "BLI_string.h"
+#  include "BLI_string.hh"
 
 #  include "utfconv.hh"
 #endif

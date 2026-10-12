@@ -14,10 +14,10 @@
 
 #include <fmt/format.h>
 
-#include "BLI_listbase.h"
-#include "BLI_string.h"
-#include "BLI_time.h"
-#include "BLI_threads.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
+#include "BLI_time.hh"
+#include "BLI_threads.hh"
 
 #include "DEG_depsgraph_query.hh"
 

@@ -33,7 +33,7 @@ float3 light_shader_info_to_euler(float3x3 mat)
 }
 
 [[node]]
-void node_eevee_light_shader_info(out float4 default_color,
+void node_eevee_light_shader_info([[resource_table]] KernelGlobals &kg, ShadingData &sd, out float4 default_color,
                                   out float default_intensity,
                                   out float default_attenuation,
                                   out float distance,
@@ -45,7 +45,7 @@ void node_eevee_light_shader_info(out float4 default_color,
 #if defined(MAT_LIGHT_SHADER)
   LightData light = light_buf[light_index];
   const bool is_directional = is_sun_light(light.type);
-  LightVector light_vector = light_vector_get(light, is_directional, g_data.P);
+  LightVector light_vector = light_vector_get(light, is_directional, sd.P);
 
   default_intensity = reduce_max(light.color);
   default_color = float4(default_intensity > 0.0f ? light.color / default_intensity :
@@ -57,18 +57,18 @@ void node_eevee_light_shader_info(out float4 default_color,
   else {
     float default_influence_radius_invsqr =
 #  if defined(MAT_LIGHT_SHADER_VOLUME)
-        light.local().local.influence_radius_invsqr_volume;
+        light_local_data_get(light).local.influence_radius_invsqr_volume;
 #  elif defined(MAT_LIGHT_SHADER_UNIFORM)
-        light.local().local.influence_radius_invsqr_surface;
+        light_local_data_get(light).local.influence_radius_invsqr_surface;
 #  else
-        light.local().local.influence_radius_invsqr_surface;
+        light_local_data_get(light).local.influence_radius_invsqr_surface;
 #  endif
     default_attenuation = light_point_light(light, is_directional, light_vector) *
                           light_influence_attenuation(light_vector.dist,
                                                       default_influence_radius_invsqr);
   }
   distance = light_vector.dist;
-  light_space = light_world_to_local_point(light, g_data.P);
+  light_space = light_world_to_local_point(light, sd.P);
   direction = light_vector.L;
   world_position = light.position();
   rotation = light_shader_info_to_euler(

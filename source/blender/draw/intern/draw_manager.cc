@@ -15,18 +15,25 @@
 #include "BKE_light.h"
 #include "DEG_depsgraph_query.hh"
 
-#include "BLI_hash.h"
+#include "BLI_hash_c.hh"
+#include "BKE_image.hh"
+#include "BKE_image_gpu.hh"
 #include "BKE_paint.hh"
 #include "BKE_paint_bvh.hh"
 
-#include "BLI_math_base.h"
-#include "BLI_math_bits.h"
+#include "BLI_math_base_c.hh"
+#include "BLI_math_bits.hh"
 #include "BLI_math_matrix.hh"
 #include "GPU_capabilities.hh"
-#include "GPU_compute.hh"
 #include "WM_api.hh"
 #include "WM_types.hh"
+#include "BLI_task.hh"
 
+#include "GPU_compute.hh"
+#include "GPU_shader.hh"
+#include "GPU_texture.hh"
+
+#include "draw_common.hh"
 #include "draw_context_private.hh"
 #include "draw_debug.hh"
 #include "draw_defines.hh"
@@ -148,6 +155,7 @@ void Manager::begin_sync(Object *object_active)
   }
 
   acquired_textures.clear();
+  deferred_textures_.clear();
   layer_attributes.clear();
   referenced_objects_.clear();
   light_shader_parameter_requests_.clear();
@@ -456,9 +464,53 @@ void Manager::sync_light_shader_parameters()
       DRW_LIGHT_SHADER_PARAMETER_MAGIC);
 }
 
+void Manager::load_deferred_textures()
+{
+  if (deferred_textures_.is_empty()) {
+    return;
+  }
+
+  GPU_debug_group_begin("Texture Loading");
+
+  /* Load files from disk in a multithreaded manner. Allow better parallelism. */
+  threading::parallel_for(deferred_textures_.index_range(), 1, [&](const IndexRange range) {
+    for (const int i : range) {
+      DeferredTexture &deferred = *deferred_textures_[i];
+      BKE_image_get_tile(deferred.image, 0);
+      threading::isolate_task([&]() {
+        ImBuf *imbuf = BKE_image_acquire_ibuf(deferred.image, deferred.image_user, nullptr);
+        BKE_image_release_ibuf(deferred.image, imbuf, nullptr);
+      });
+    }
+  });
+
+  /* Avoid any leftover bind before GPU texture creation which could cause assert
+   * about missing specialization constants. */
+  GPU_shader_unbind();
+
+  /* Upload to the GPU (create gpu::Texture). This part still requires a valid GPU context and
+   * is not easily parallelized. */
+  for (std::unique_ptr<DeferredTexture> &deferred : deferred_textures_) {
+    const ImageGPUTextures textures = deferred->use_3d_lut_strip ?
+        BKE_image_acquire_gpu_material_3d_lut_texture(deferred->image,
+            deferred->image_user, deferred->lut_dimensions.x, deferred->lut_dimensions.y,
+            deferred->lut_dimensions.z, false) :
+        BKE_image_acquire_gpu_material_texture(
+            deferred->image, deferred->image_user, deferred->use_tile_mapping, false);
+    deferred->texture = textures.texture;
+    deferred->tile_mapping = textures.tile_mapping;
+    hold_texture(textures.texture);
+    hold_texture(textures.tile_mapping);
+  }
+
+  GPU_debug_group_end();
+}
+
 void Manager::end_sync()
 {
   GPU_debug_group_begin("Manager.end_sync");
+
+  load_deferred_textures();
 
   sync_layer_attributes();
   sync_referenced_objects();

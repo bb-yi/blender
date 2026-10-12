@@ -14,10 +14,10 @@
 
 #include "DNA_anim_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_string_utf8.hh"
 
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_fcurve_driver.h"
 #include "BKE_global.hh"
 #include "BKE_idtype.hh"
@@ -211,7 +211,7 @@ static void bpy_pydriver_namespace_update_depsgraph(Depsgraph *depsgraph)
   /* This should never happen, but it's probably better to have None in Python
    * than a nullptr-wrapping Depsgraph Python struct. */
   BLI_assert(depsgraph != nullptr);
-  if (UNLIKELY(depsgraph == nullptr)) {
+  if (depsgraph == nullptr) [[unlikely]] {
     PyDict_SetItem(bpy_pydriver_Dict, bpy_intern_str_depsgraph, Py_None);
     g_pydriver_state_prev.depsgraph = nullptr;
     return;
@@ -433,15 +433,13 @@ float BPY_driver_exec(PathResolvedRNA *anim_rna,
 
   if (driver_orig->flag & DRIVER_FLAG_RENAMEVAR) {
     /* May not be set. */
-    expr_vars = PyTuple_GET_ITEM(((PyObject *)driver_orig->expr_comp), 1);
-    Py_XDECREF(expr_vars);
+    PyObject *expr_vars_prev = PyTuple_GET_ITEM(((PyObject *)driver_orig->expr_comp), 1);
 
     expr_vars = PyTuple_New(driver_orig->variables.count());
     PyTuple_SET_ITEM(((PyObject *)driver_orig->expr_comp), 1, expr_vars);
+    Py_XDECREF(expr_vars_prev);
 
-    for (dvar = static_cast<DriverVar *>(driver_orig->variables.first), i = 0; dvar;
-         dvar = dvar->next)
-    {
+    for (dvar = driver_orig->variables.first(), i = 0; dvar; dvar = dvar->next) {
       PyTuple_SET_ITEM(expr_vars, i++, PyUnicode_FromString(dvar->name));
     }
 
@@ -453,7 +451,7 @@ float BPY_driver_exec(PathResolvedRNA *anim_rna,
 
   /* Add target values to a dict that will be used as `__locals__` dict. */
   driver_vars = _PyDict_NewPresized(PyTuple_GET_SIZE(expr_vars));
-  for (dvar = static_cast<DriverVar *>(driver->variables.first), i = 0; dvar; dvar = dvar->next) {
+  for (dvar = driver->variables.first(), i = 0; dvar; dvar = dvar->next) {
     PyObject *driver_arg = nullptr;
 
 /* Support for any RNA data. */
@@ -555,7 +553,7 @@ float BPY_driver_exec(PathResolvedRNA *anim_rna,
     pydriver_error(driver, anim_rna);
   }
   else {
-    if (UNLIKELY((result = PyFloat_AsDouble(retval)) == -1.0 && PyErr_Occurred())) {
+    if ((result = PyFloat_AsDouble(retval)) == -1.0 && PyErr_Occurred()) [[unlikely]] {
       pydriver_error(driver, anim_rna);
       result = 0.0;
     }
@@ -570,7 +568,7 @@ float BPY_driver_exec(PathResolvedRNA *anim_rna,
     PyGILState_Release(gilstate);
   }
 
-  if (UNLIKELY(!isfinite(result))) {
+  if (!isfinite(result)) [[unlikely]] {
     fprintf(stderr, "\t%s: driver '%s' evaluates to '%f'\n", __func__, driver->expression, result);
     return 0.0f;
   }

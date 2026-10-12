@@ -8,7 +8,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_filter_graph_resolve)
 
 #include "draw_view_lib.glsl"
 #include "eevee_reverse_z_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_utildefines.bsl.hh"
 #include "gpu_shader_codegen_lib.glsl"
 
 float filter_graph_scene_depth_value(float2 uv)

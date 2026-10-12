@@ -7,10 +7,10 @@
 #include <string>
 
 #include "BLI_hash.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_matrix_types.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_string_ref.hh"
 
 #include "RE_pipeline.h"
@@ -331,39 +331,31 @@ CachedImage::CachedImage(Context &context,
   /* For GPU, we wrap the texture returned by IMB module and free it ourselves in destructor. For
    * CPU, we allocate the result and copy to it from the image buffer. */
   if (context.use_gpu()) {
-    texture_ = IMB_create_gpu_texture("Image Texture", linear_image_buffer, true, true, false);
-    GPU_texture_update_mipmap_chain(texture_);
+    const GPUTextureCreateFlags flags = GPUTextureCreateFlags::HighBitDepth |
+                                        GPUTextureCreateFlags::Premultiplied;
+    texture_ = IMB_create_gpu_texture("Image Texture", linear_image_buffer, flags);
     this->result.share_data(texture_);
   }
   else {
     const int2 size = int2(image_buffer->x, image_buffer->y);
-    Result buffer_result(context, float_type(image_buffer->channels), ResultPrecision::Full);
-    buffer_result.share_data(linear_image_buffer->float_buffer.data,
-                             size,
-                             linear_image_buffer->float_buffer.sharing_info);
-    this->result.allocate_texture(size, false);
-
-    if (buffer_result.type() == ResultType::Color && result.type() == ResultType::Float4) {
-      parallel_for(size, [&](const int2 texel) {
-        this->result.store_pixel(texel, float4(buffer_result.load_pixel<Color>(texel)));
-      });
-    }
-    else if (buffer_result.type() == ResultType::Float3 && result.type() == ResultType::Color) {
+    if (linear_image_buffer->channels == 3 && this->result.type() == ResultType::Color) {
       /* Color passes with no alpha could be stored in a Float3 type. */
+      Result buffer_result(context, float_type(image_buffer->channels), ResultPrecision::Full);
+      buffer_result.share_data(linear_image_buffer->float_buffer.data,
+                               size,
+                               linear_image_buffer->float_buffer.sharing_info);
+      this->result.allocate_texture(size);
       parallel_for(size, [&](const int2 texel) {
         this->result.store_pixel(texel,
                                  Color(float4(buffer_result.load_pixel<float3>(texel), 1.0f)));
       });
+      buffer_result.release();
     }
     else {
-      result.get_cpp_type().to_static_type<float, float2, float3, float4, Color>(
-          [&]<typename T>() {
-            parallel_for(result.domain().data_size, [&](const int2 texel) {
-              result.store_pixel(texel, buffer_result.load_pixel<T>(texel));
-            });
-          });
+      this->result.share_data(linear_image_buffer->float_buffer.data,
+                              size,
+                              linear_image_buffer->float_buffer.sharing_info);
     }
-    buffer_result.release();
   }
 
   if (flag_is_set(image_buffer->flags, ImBufFlags::HasDisplayWindow)) {

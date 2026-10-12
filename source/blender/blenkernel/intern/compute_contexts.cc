@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include <ostream>
 
 #include "DEG_depsgraph_query.hh"
@@ -53,29 +57,45 @@ void DataBlockComputeContext::print_current_in_line(std::ostream &stream) const
   }
 }
 
-ModifierComputeContext::ModifierComputeContext(const ComputeContext *parent,
-                                               const NodesModifierData &nmd)
-    : ModifierComputeContext(parent, nmd.modifier.persistent_uid)
+GeometryNodesModifierComputeContext::GeometryNodesModifierComputeContext(
+    const ComputeContext *parent, const NodesModifierData &nmd)
+    : GeometryNodesModifierComputeContext(parent, nmd.modifier.persistent_uid)
 {
   nmd_ = &nmd;
 }
 
-ModifierComputeContext::ModifierComputeContext(const ComputeContext *parent,
-                                               const int modifier_uid)
+GeometryNodesModifierComputeContext::GeometryNodesModifierComputeContext(
+    const ComputeContext *parent, const int modifier_uid)
     : ComputeContext(parent), modifier_uid_(std::move(modifier_uid))
 {
 }
 
-ComputeContextHash ModifierComputeContext::compute_hash() const
+ComputeContextHash GeometryNodesModifierComputeContext::compute_hash() const
 {
   return ComputeContextHash::from(parent_, "MODIFIER", modifier_uid_);
 }
 
-void ModifierComputeContext::print_current_in_line(std::ostream &stream) const
+void GeometryNodesModifierComputeContext::print_current_in_line(std::ostream &stream) const
 {
   if (nmd_) {
     stream << "Modifier: " << nmd_->modifier.name;
   }
+}
+
+SceneCompositorEffectComputeContext::SceneCompositorEffectComputeContext(
+    const ComputeContext *parent, const SceneCompositorEffect &effect)
+    : ComputeContext(parent), effect_(effect)
+{
+}
+
+ComputeContextHash SceneCompositorEffectComputeContext::compute_hash() const
+{
+  return ComputeContextHash::from(parent_, "SCENE_COMPOSITOR_EFFECT", effect_.name);
+}
+
+void SceneCompositorEffectComputeContext::print_current_in_line(std::ostream &stream) const
+{
+  stream << "Scene Compositor Effect: " << effect_.name;
 }
 
 NodeComputeContext::NodeComputeContext(const ComputeContext *parent,
@@ -291,20 +311,30 @@ const DataBlockComputeContext &ComputeContextCache::for_data_block(const Compute
   return this->for_data_block(parent, orig_session_uid, &id);
 }
 
-const ModifierComputeContext &ComputeContextCache::for_modifier(const ComputeContext *parent,
-                                                                const NodesModifierData &nmd)
+const GeometryNodesModifierComputeContext &ComputeContextCache::for_geometry_nodes_modifier(
+    const ComputeContext *parent, const NodesModifierData &nmd)
 {
-  return *modifier_contexts_cache_.lookup_or_add_cb(
+  return *geometry_nodes_modifier_contexts_cache_.lookup_or_add_cb(
       std::pair{parent, nmd.modifier.persistent_uid},
-      [&]() { return &this->for_any_uncached<ModifierComputeContext>(parent, nmd); });
+      [&]() { return &this->for_any_uncached<GeometryNodesModifierComputeContext>(parent, nmd); });
 }
 
-const ModifierComputeContext &ComputeContextCache::for_modifier(const ComputeContext *parent,
-                                                                const int modifier_uid)
+const GeometryNodesModifierComputeContext &ComputeContextCache::for_geometry_nodes_modifier(
+    const ComputeContext *parent, const int modifier_uid)
 {
-  return *modifier_contexts_cache_.lookup_or_add_cb(std::pair{parent, modifier_uid}, [&]() {
-    return &this->for_any_uncached<ModifierComputeContext>(parent, modifier_uid);
-  });
+  return *geometry_nodes_modifier_contexts_cache_.lookup_or_add_cb(
+      std::pair{parent, modifier_uid}, [&]() {
+        return &this->for_any_uncached<GeometryNodesModifierComputeContext>(parent, modifier_uid);
+      });
+}
+
+const SceneCompositorEffectComputeContext &ComputeContextCache::for_scene_compositor_effect(
+    const ComputeContext *parent, const SceneCompositorEffect &effect)
+{
+  return *scene_compositor_effect_contexts_cache_.lookup_or_add_cb(
+      std::pair{parent, effect.name}, [&]() {
+        return &this->for_any_uncached<SceneCompositorEffectComputeContext>(parent, effect);
+      });
 }
 
 const OperatorComputeContext &ComputeContextCache::for_operator(const ComputeContext *parent)

@@ -2,10 +2,14 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_fileops.h"
-#include "BLI_listbase.h"
+/** \file
+ * \ingroup edsculpt
+ */
+
+#include "BLI_fileops.hh"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "DNA_brush_types.h"
 #include "DNA_scene_types.h"
@@ -692,7 +696,6 @@ static bool brush_asset_save_poll(bContext *C)
   const std::optional<AssetLibraryReference> library_ref = get_asset_library_reference(
       *C, *paint, *brush);
   if (!library_ref) {
-    BLI_assert_unreachable();
     return false;
   }
 
@@ -755,7 +758,6 @@ static bool brush_asset_revert_poll(bContext *C)
   const std::optional<AssetLibraryReference> library_ref = get_asset_library_reference(
       *C, *paint, *brush);
   if (!library_ref) {
-    BLI_assert_unreachable();
     return false;
   }
   if (library_ref->type == ASSET_LIBRARY_LOCAL) {

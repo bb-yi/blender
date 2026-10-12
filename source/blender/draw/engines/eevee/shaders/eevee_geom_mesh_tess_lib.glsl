@@ -33,8 +33,8 @@ SHADER_LIBRARY_CREATE_INFO(eevee_geom_mesh_tess_data)
 
 #include "gpu_shader_attribute_fetch_lib.glsl"
 #include "gpu_shader_index_load_lib.glsl"
-#include "gpu_shader_math_vector_safe_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_vector_safe.bsl.hh"
+#include "gpu_shader_utildefines.bsl.hh"
 
 /* Must match #NodeShaderTessellationMode. */
 #define TESS_MODE_FIXED 0

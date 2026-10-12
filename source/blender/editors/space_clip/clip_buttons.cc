@@ -15,12 +15,12 @@
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -94,7 +94,7 @@ void ED_clip_buttons_register(ARegionType *art)
 void uiTemplateMovieClip(
     ui::Layout *layout, bContext *C, PointerRNA *ptr, const StringRefNull propname, bool compact)
 {
-  if (!ptr->data) {
+  if (!*ptr) {
     return;
   }
 
@@ -147,7 +147,7 @@ void uiTemplateMovieClip(
 
 void uiTemplateTrack(ui::Layout *layout, PointerRNA *ptr, const StringRefNull propname)
 {
-  if (!ptr->data) {
+  if (!*ptr) {
     return;
   }
 
@@ -379,7 +379,7 @@ void uiTemplateMarker(ui::Layout *layout,
                       PointerRNA *trackptr,
                       bool compact)
 {
-  if (!ptr->data) {
+  if (!*ptr) {
     return;
   }
 
@@ -719,7 +719,7 @@ void uiTemplateMovieclipInformation(ui::Layout *layout,
                                     const StringRefNull propname,
                                     PointerRNA *userptr)
 {
-  if (!ptr->data) {
+  if (!*ptr) {
     return;
   }
 

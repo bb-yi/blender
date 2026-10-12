@@ -6,8 +6,8 @@
  * \ingroup modifiers
  */
 
-#include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_string_utf8.hh"
 
 #include "MEM_guardedalloc.h"
 
@@ -89,7 +89,7 @@ void shaderfx_panel_end(ui::Layout &layout, PointerRNA *ptr)
   ShaderFxData *fx = static_cast<ShaderFxData *>(ptr->data);
   if (fx->error) {
     ui::Layout &row = layout.row(false);
-    row.label(RPT_(fx->error), ICON_ERROR);
+    row.label(RPT_(fx->error), ICON_STATUS_ERROR);
   }
 }
 

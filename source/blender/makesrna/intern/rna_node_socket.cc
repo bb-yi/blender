@@ -63,9 +63,9 @@ const EnumPropertyItem rna_enum_node_socket_type_items[] = {
 
 #  include "DNA_material_types.h"
 
-#  include "BLI_listbase.h"
-#  include "BLI_math_vector.h"
-#  include "BLI_string.h"
+#  include "BLI_listbase.hh"
+#  include "BLI_math_vector_c.hh"
+#  include "BLI_string.hh"
 #  include "BLI_string_ref.hh"
 #  include "BLI_vector.hh"
 
@@ -544,6 +544,7 @@ static void rna_NodeSocket_hide_set(PointerRNA *ptr, bool value)
 
   if (value) {
     sock->flag |= SOCK_HIDDEN;
+    sock->flag &= ~SOCK_SELECT;
   }
   else {
     sock->flag &= ~SOCK_HIDDEN;

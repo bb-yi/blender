@@ -7,7 +7,7 @@
 #include "CLG_log.h"
 #include "BKE_scene_runtime.hh"
 #include "DEG_depsgraph_query.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "GPU_context.hh"
 #include "GPU_texture.hh"

@@ -16,12 +16,12 @@
 #include "BKE_scene.hh"
 #include "BKE_screen.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_string.h"
-#include "BLI_time.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string.hh"
+#include "BLI_time.hh"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
@@ -64,7 +64,7 @@ static CLG_LogRef LOG = {"wm.xr"};
 static void wm_xr_session_create_cb()
 {
   Main *bmain = G_MAIN;
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
   wmXrData *xr_data = &wm->xr;
   wmXrSessionState *state = &xr_data->runtime->session_state;
   XrSessionSettings *settings = &xr_data->session_settings;
@@ -76,11 +76,14 @@ static void wm_xr_session_create_cb()
 
   /* Initialize navigation. */
   WM_xr_session_state_navigation_reset(state);
-  WM_xr_session_state_viewfinder_reset(state);
   if (settings->base_scale < FLT_EPSILON) {
     settings->base_scale = 1.0f;
   }
   state->prev_base_scale = settings->base_scale;
+
+  /* Initialize location scouting viewfinder. */
+  WM_xr_session_state_viewfinder_init(state);
+  WM_xr_session_state_viewfinder_reset(state);
 
   /* Initialize vignette. */
   state->vignette_aperture = 1.0f;
@@ -250,7 +253,7 @@ wmWindow *wm_xr_session_root_window_or_fallback_get(const wmWindowManager *wm,
     return xr_win;
   }
   /* Otherwise, fall back. */
-  return static_cast<wmWindow *>(wm->windows.first);
+  return wm->windows.first();
 }
 
 enum wmXrSessionStateEvent {
@@ -468,6 +471,12 @@ bContext *WM_xr_session_context_ensure(wmXrData *xr, const wmWindowManager *wm)
   /* XR session root window. Also sets the context scene. */
   wmWindow *xr_win = wm_xr_session_root_window_or_fallback_get(wm, xr->runtime);
   CTX_wm_window_set(xr->runtime->b_context, xr_win);
+
+  /* `Main` may have been replaced while the session is running (global undo),
+   * in which case only the calling context is updated and this XR context is left dangling.
+   *
+   * This is the inverse of the main-context sync in #wm_event_handle_xrevent(). */
+  CTX_data_main_set(xr->runtime->b_context, G_MAIN);
 
   /* Unique offscreen XR area. */
   CTX_wm_area_set(xr->runtime->b_context, xr->runtime->offscreen_area);
@@ -890,6 +899,34 @@ void WM_xr_session_state_navigation_reset(wmXrSessionState *state)
   state->swap_hands = false;
 }
 
+void WM_xr_session_state_viewfinder_init(wmXrSessionState *state)
+{
+  /* Create a Camera data ID to override the View3D camera (for setting parameters such as DoF).
+   * This ID is freed in #wm_xr_session_data_free. */
+  state->viewfinder.render_cam_data_id = BKE_id_new_nomain<Camera>("ViewfinderCamera");
+
+  /* Create a Camera logo texture to draw on the backside of the viewfinder. */
+  ImBuf *ibuf = ui::svg_icon_bitmap(ICON_RESTRICT_RENDER_OFF, 256.0f, false);
+  if (ibuf) {
+    const GPUTextureCreateFlags flags = GPUTextureCreateFlags::Premultiplied |
+                                        GPUTextureCreateFlags::EnableMipmaps |
+                                        GPUTextureCreateFlags::LimitSize;
+    state->viewfinder.backside_logo_texture = IMB_create_gpu_texture(
+        "viewfinder_backside_logo", ibuf, flags);
+    IMB_freeImBuf(ibuf);
+  }
+
+  /* Create the offscreen framebuffer and viewport used to draw the Viewfinder view texture. */
+  state->viewfinder.offscreen = GPU_offscreen_create(wmXrViewfinderState::view_resolution,
+                                                     wmXrViewfinderState::view_resolution,
+                                                     true,
+                                                     gpu::TextureFormat::UNORM_8_8_8_8,
+                                                     GPU_TEXTURE_USAGE_SHADER_READ,
+                                                     false,
+                                                     nullptr);
+  state->viewfinder.viewport = GPU_viewport_create();
+}
+
 void WM_xr_session_state_viewfinder_reset(wmXrSessionState *state)
 {
   /* Runtime values. */
@@ -897,37 +934,6 @@ void WM_xr_session_state_viewfinder_reset(wmXrSessionState *state)
   state->viewfinder.last_flash_trigger_time = 0.0;
   state->viewfinder.last_focus_hit_time = 0.0;
   state->viewfinder.last_focus_hit_success = false;
-
-  /* Create a Camera data ID to override the View3D camera (for setting parameters such as DoF).
-   * This ID is freed in #wm_xr_session_data_free. */
-  if (state->viewfinder.render_cam_data_id == nullptr) {
-    state->viewfinder.render_cam_data_id = BKE_id_new_nomain<Camera>("ViewfinderCamera");
-  }
-
-  /* Create a Camera logo texture to draw on the backside of the viewfinder. */
-  if (state->viewfinder.backside_logo_texture == nullptr) {
-    ImBuf *ibuf = ui::svg_icon_bitmap(ICON_RESTRICT_RENDER_OFF, 256.0f, false);
-    if (ibuf) {
-      state->viewfinder.backside_logo_texture = IMB_create_gpu_texture(
-          "viewfinder_backside_logo", ibuf, false, true, true);
-      IMB_freeImBuf(ibuf);
-    }
-  }
-
-  /* Create the offscreen framebuffer and viewport used to draw the Viewfinder view texture. */
-  if (state->viewfinder.offscreen == nullptr) {
-    state->viewfinder.offscreen = GPU_offscreen_create(
-        blender::wmXrViewfinderState::view_resolution,
-        blender::wmXrViewfinderState::view_resolution,
-        true,
-        gpu::TextureFormat::UNORM_8_8_8_8,
-        GPU_TEXTURE_USAGE_SHADER_READ,
-        false,
-        nullptr);
-  }
-  if (state->viewfinder.viewport == nullptr) {
-    state->viewfinder.viewport = GPU_viewport_create();
-  }
 
   /* Capture settings. */
   state->viewfinder.capture_dof_enabled = false;
@@ -1640,7 +1646,7 @@ void wm_xr_session_actions_update(wmWindowManager *wm)
     bContext *xr_context = WM_xr_session_context_ensure(xr, wm);
     ScrArea *xr_offscreen_area = CTX_wm_area(xr_context);
 
-    View3D *v3d = static_cast<View3D *>(xr_offscreen_area->spacedata.first);
+    View3D *v3d = static_cast<View3D *>(xr_offscreen_area->spacedata.first_);
     v3d->object_type_exclude_viewport = settings->object_type_exclude_viewport;
     v3d->object_type_exclude_select = settings->object_type_exclude_select;
 

@@ -18,16 +18,17 @@
 #include "BLI_array.hh"
 #include "BLI_delaunay_2d.hh"
 #include "BLI_index_range.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_memarena.h"
-#include "BLI_scanfill.h"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_memarena.hh"
+#include "BLI_scanfill.hh"
 #include "BLI_span.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_task.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 #include "BLI_vector.hh"
 
 #include "BKE_anim_path.h"
@@ -279,7 +280,7 @@ static float isect_vert_calc_z(int vert_index,
   /* -1 if this intersection vertex only appears on Delaunay edges
    * (edges created by triangulation) rather than edges deriving from
    * input polygon edges. Fall back to Z=0. */
-  if (UNLIKELY(edge_index == -1)) {
+  if (edge_index == -1) [[unlikely]] {
     return 0.0f;
   }
 
@@ -295,12 +296,12 @@ static float isect_vert_calc_z(int vert_index,
     const int face_index = (orig_id / result.face_edge_offset) - 1;
     const int edge_in_face = orig_id % result.face_edge_offset;
 
-    if (UNLIKELY(face_index == -1 || face_index >= int(poly_ranges.size()))) {
+    if (face_index == -1 || face_index >= int(poly_ranges.size())) [[unlikely]] {
       continue;
     }
 
     const PolyRange &poly = poly_ranges[face_index];
-    if (UNLIKELY(edge_in_face >= poly.count)) {
+    if (edge_in_face >= poly.count) [[unlikely]] {
       continue;
     }
 
@@ -319,7 +320,7 @@ static float isect_vert_calc_z(int vert_index,
     const double edge_len_sq = math::length_squared(edge_vec);
 
     double t;
-    if (UNLIKELY(edge_len_sq < 1e-16)) {
+    if (edge_len_sq < 1e-16) [[unlikely]] {
       t = 0.5;
     }
     else {
@@ -482,13 +483,21 @@ static DispList *displist_fill_cdt_process_group(const CDTFillGroup &group,
 {
   /* Build CDT input, tracking if all Z coordinates are uniform.
    * Also build vert_to_poly map for O(1) polygon lookup. */
-  Array<double2> verts_2d(group.total_verts);
-  Array<int> vert_to_poly(group.total_verts);
-  Array<Vector<int>> faces(group.poly_ranges.size());
+  Array<double2, 64> verts_2d(group.total_verts);
+  Array<int, 64> vert_to_poly(group.total_verts);
 
   const float first_z = group.poly_ranges[0].dl->verts[2];
   bool uniform_z = true;
 
+  Array<int, 8> face_offset_data(group.poly_ranges.size() + 1);
+  for (const int64_t p : group.poly_ranges.index_range()) {
+    face_offset_data[p] = group.poly_ranges[p].count;
+  }
+  const OffsetIndices<int> face_offsets = offset_indices::accumulate_counts_to_offsets(
+      face_offset_data);
+  BLI_assert(face_offsets.total_size() == group.total_verts);
+
+  Array<int, 64> face_vert_indices_data(face_offsets.total_size());
   for (const int64_t p : group.poly_ranges.index_range()) {
     const PolyRange &poly = group.poly_ranges[p];
 
@@ -498,12 +507,12 @@ static DispList *displist_fill_cdt_process_group(const CDTFillGroup &group,
      * Fill indices in reverse order to restore consistent winding
      * so the CDT winding number calculation produces correct results.
      * Needed for correct non-zero filling but harmless for odd/even, see: #155733. */
-    faces[p].resize(poly.count);
+    MutableSpan<int> indices = face_vert_indices_data.as_mutable_span().slice(face_offsets[p]);
     if (poly.dl->flag & DL_REVERSED) {
-      std::iota(faces[p].rbegin(), faces[p].rend(), poly.start);
+      std::iota(indices.rbegin(), indices.rend(), poly.start);
     }
     else {
-      std::iota(faces[p].begin(), faces[p].end(), poly.start);
+      std::iota(indices.begin(), indices.end(), poly.start);
     }
 
     /* Build vertex data. */
@@ -519,15 +528,16 @@ static DispList *displist_fill_cdt_process_group(const CDTFillGroup &group,
   }
 
   meshintersect::CDT_input<double> input;
-  input.vert = std::move(verts_2d);
-  input.face = std::move(faces);
+  input.vert = verts_2d;
+  input.face_offsets = face_offsets;
+  input.face_vert_indices = face_vert_indices_data;
   input.epsilon = 1e-8;
-  input.need_ids = true;
+  input.needed_ids = CDT_ORIG_VERTS | CDT_ORIG_EDGES;
 
   meshintersect::CDT_result<double> result = meshintersect::delaunay_2d_calc(input,
                                                                              cdt_output_type);
 
-  if (UNLIKELY(result.face.is_empty())) {
+  if (result.face.is_empty()) [[unlikely]] {
     return nullptr;
   }
 
@@ -555,8 +565,8 @@ static DispList *displist_fill_cdt_process_group(const CDTFillGroup &group,
       if (result.edge_orig[e].is_empty()) {
         continue;
       }
-      const int v0 = result.edge[e].first;
-      const int v1 = result.edge[e].second;
+      const int v0 = result.edge[e][0];
+      const int v1 = result.edge[e][1];
       if (result.vert_orig[v0].is_empty()) {
         isect_vert_to_edge[v0] = e;
       }
@@ -638,7 +648,7 @@ static void displist_fill_cdt(const ListBaseT<DispList> *dispbase,
     groups.append_unchecked(std::move(group));
   }
 
-  if (UNLIKELY(groups.is_empty())) {
+  if (groups.is_empty()) [[unlikely]] {
     return;
   }
 
@@ -772,7 +782,7 @@ static void curve_to_filledpoly(const Curve *cu, ListBaseT<DispList> *dispbase)
     return;
   }
 
-  if (dispbase->first && (static_cast<DispList *>(dispbase->first))->type == DL_SURF) {
+  if (dispbase->first() && (dispbase->first())->type == DL_SURF) {
     bevels_to_filledpoly(cu, dispbase);
   }
   else {
@@ -800,12 +810,11 @@ static float displist_calc_taper(Depsgraph *depsgraph,
     return 1.0;
   }
 
-  DispList *dl = taperobj->runtime->curve_cache ?
-                     static_cast<DispList *>(taperobj->runtime->curve_cache->disp.first) :
-                     nullptr;
+  DispList *dl = taperobj->runtime->curve_cache ? taperobj->runtime->curve_cache->disp.first() :
+                                                  nullptr;
   if (dl == nullptr) {
     BKE_displist_make_curveTypes(depsgraph, scene, taperobj, false);
-    dl = static_cast<DispList *>(taperobj->runtime->curve_cache->disp.first);
+    dl = taperobj->runtime->curve_cache->disp.first();
   }
   if (dl) {
     float minx, dx, *fp;
@@ -1477,8 +1486,8 @@ static bke::GeometrySet evaluate_curve_type_object(Depsgraph *depsgraph,
   else {
     const float widfac = cu->offset - 1.0f;
 
-    const BevList *bl = static_cast<BevList *>(ob->runtime->curve_cache->bev.first);
-    const Nurb *nu = static_cast<Nurb *>(deformed_nurbs->first);
+    const BevList *bl = ob->runtime->curve_cache->bev.first();
+    const Nurb *nu = deformed_nurbs->first();
     for (; bl && nu; bl = bl->next, nu = nu->next) {
       float *data;
 
@@ -1648,7 +1657,7 @@ static bke::GeometrySet evaluate_curve_type_object(Depsgraph *depsgraph,
           displist_surf_indices(dl);
         }
 
-        if (bottom_capbase.first) {
+        if (bottom_capbase.first()) {
           BKE_displist_fill(&bottom_capbase,
                             r_dispbase,
                             bottom_no,
@@ -1657,7 +1666,7 @@ static bke::GeometrySet evaluate_curve_type_object(Depsgraph *depsgraph,
                             CurveFillRuleType(cu->fill_rule));
           BKE_displist_free(&bottom_capbase);
         }
-        if (top_capbase.first) {
+        if (top_capbase.first()) {
           BKE_displist_fill(&top_capbase,
                             r_dispbase,
                             top_no,

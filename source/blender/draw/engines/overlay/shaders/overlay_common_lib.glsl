@@ -5,6 +5,8 @@
 #pragma once
 
 #include "draw_view_lib.glsl"
+#include "gpu_shader_math_base.bsl.hh"
+#include "gpu_shader_math_constants.bsl.hh"
 
 /* Wire Color Types, matching eV3DShadingColorType. */
 #define V3D_SHADING_SINGLE_COLOR 2
@@ -25,22 +27,58 @@ float4x4 extract_matrix_packed_data(float4x4 mat, float4 &dataA, float4 &dataB)
   return mat;
 }
 
-/* edge_start and edge_pos needs to be in the range [0..uniform_buf.size_viewport]. */
+/**
+ * Pack overlay line data to float4.
+ * Note: edge_start, edge_pos need to be in the range [0..uniform_buf.size_viewport].
+ * Note: returns float4 for FBO output; only the first two components store data.
+ */
 float4 pack_line_data(float2 frag_co, float2 edge_start, float2 edge_pos)
 {
   float2 edge = edge_start - edge_pos;
   float len = length(edge);
   if (len > 0.0f) {
     edge /= len;
+
+    /* Get perpendicular in direction of upper hemicircle. */
     float2 perp = float2(-edge.y, edge.x);
+    if (perp.y < 0.0) {
+      perp = -perp;
+    }
+
+    /* Get distance along perpendicular by projection of edge.  */
+    float sin_theta = perp.x;
     float dist = dot(perp, frag_co - edge_start);
-    /* Add 0.1f to differentiate with cleared pixels. */
-    return float4(perp * 0.5f + 0.5f, dist * 0.25f + 0.5f + 0.1f, 1.0f);
+
+    /* Pack dist to [0.1, ..., 0.9], leaving 0.1 boundary for clear or blocked pixels. */
+    return float4(sin_theta * 0.5f + 0.5f, dist * 0.4f + 0.5f, 0.0f, 1.0f);
   }
   else {
     /* Default line if the origin is perfectly aligned with a pixel. */
-    return float4(1.0f, 0.0f, 0.5f + 0.1f, 1.0f);
+    return float4(0.0f, 0.5f, 0.0f, 1.0f);
   }
+}
+
+/**
+ * Pack overlay line data to float4, carrying a blocker value to indicate
+ * a stage does its own AA in this pixel.
+ */
+float4 pack_line_data_no_aa()
+{
+  return float4(0.0f, 1.0f, 0.0f, 1.0f);
+}
+
+/**
+ * Unpack overlay line data, recovering perpendicular vector direction and signed distance.
+ */
+void unpack_line_data(float2 data, float2 &perp, float &dist)
+{
+  /* Unpack distance to edge, remove 0.1 boundary around value. */
+  dist = (data.y - 0.5f) * 2.5f;
+
+  /* Recover perpendicular vector from packed sin_theta. */
+  float sin_theta = (data.x - 0.5f) * 2.0f;
+  float cos_theta = cos_from_sin(sin_theta);
+  perp = normalize(float2(sin_theta, cos_theta));
 }
 
 /* View-space Z is used to adjust for perspective projection.
@@ -64,6 +102,7 @@ float get_homogenous_z_offset(float4x4 winmat, float vs_z, float hs_w, float vs_
   }
 }
 
+#if defined(DRAW_VIEW_CREATE_INFO)
 float mul_project_m4_v3_zfac(float pixel_fac, float3 co)
 {
   float3 vP = drw_point_world_to_view(co).xyz;
@@ -71,3 +110,4 @@ float mul_project_m4_v3_zfac(float pixel_fac, float3 co)
   return pixel_fac *
          (winmat[0][3] * vP.x + winmat[1][3] * vP.y + winmat[2][3] * vP.z + winmat[3][3]);
 }
+#endif

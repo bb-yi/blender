@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "GPU_state.hh"
 
@@ -37,7 +37,7 @@ union GPUState {
     /** GPUProvokingVertex */
     uint32_t provoking_vert : 1;
     /** Enable bits. */
-    uint32_t logic_op_xor : 1;
+
     uint32_t invert_facing : 1;
     /** Clip range of 0..1 on OpenGL. */
     uint32_t clip_control : 1;

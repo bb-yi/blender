@@ -4,7 +4,7 @@
 
 #include <memory>
 
-#include "BLI_math_color.h"
+#include "BLI_math_color_c.hh"
 #include "BLI_math_vector_types.hh"
 
 #include "BKE_lib_id.hh"
@@ -120,7 +120,7 @@ CachedMask::CachedMask(Context &context,
 
   Result result_cpu = context.create_result(ResultType::Float);
 
-  result_cpu.allocate_texture(domain, false, ResultStorageType::CPU);
+  result_cpu.allocate_texture(domain, false, ResultStorageType::CPUImage);
   parallel_for(domain.data_size, [&](const int2 texel) {
     /* Compute the coordinates in the [0, 1] range and add 0.5 to evaluate the mask at the
      * center of pixels. */

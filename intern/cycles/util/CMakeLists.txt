@@ -45,9 +45,6 @@ set(LIB
   PRIVATE bf::dependencies::opencolorio
   PRIVATE bf::dependencies::zstd
   PRIVATE bf::dependencies::openexr
-  # Used by OpenImageIO headers, which fallback to a bundled version. But we
-  # need to use the same version as Blender to avoid symbol conflicts.
-  PRIVATE bf::dependencies::fmt
 )
 
 set(SRC_HEADERS
@@ -93,6 +90,9 @@ set(SRC_HEADERS
   math_int4.h
   math_int8.h
   math_dual.h
+  math_float3x3.h
+  math_quaternion.h
+  math_spherical_harmonics.h
   md5.h
   murmurhash.h
   nanovdb.h
@@ -128,6 +128,7 @@ set(SRC_HEADERS
   types_float3.h
   types_float4.h
   types_float8.h
+  types_gpu_compressed.h
   types_image.h
   types_int2.h
   types_int3.h
@@ -135,6 +136,7 @@ set(SRC_HEADERS
   types_int8.h
   types_normal.h
   types_spectrum.h
+  types_spherical_harmonics.h
   types_rgbe.h
   types_uchar2.h
   types_uchar3.h
@@ -144,6 +146,8 @@ set(SRC_HEADERS
   types_uint4.h
   types_ushort4.h
   types_dual.h
+  types_float3x3.h
+  types_quaternion.h
   unique_ptr.h
   unique_ptr_vector.h
   vector.h

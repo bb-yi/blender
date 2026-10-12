@@ -4,31 +4,66 @@
 
 #pragma once
 
+#include "BLI_function_ref.hh"
 #include "BLI_set.hh"
 #include "BLI_vector_set.hh"
 
-#include "COM_context.hh"
-#include "COM_node_group_operation.hh"
+namespace blender {
+struct bNodeTree;
+struct bNode;
+struct bNodeSocket;
+struct ComputeContextHash;
+class ComputeContext;
+
+namespace bke {
+class bNodeTreeZone;
+}
+
+}  // namespace blender
 
 namespace blender::compositor {
 
+class Context;
+class Result;
+
 struct Schedule {
+  /* The node group the schedule is for. */
+  const bNodeTree &node_group;
+  /* The zone that the schedule is for, if nullptr, the schedule is for the root node tree. */
+  const bke::bNodeTreeZone *zone = nullptr;
+  /* The node execution schedule. */
   VectorSet<const bNode *> nodes;
   /* Holds the set of all inputs sockets that needn't be computed because the node does not need
    * them, for instance, the unneeded inputs of a Switch node. */
   Set<const bNodeSocket *> unneeded_inputs;
 };
 
-/* Computes the execution schedule of the node group with the given instance key, assuming the
- * active node group has the given active instance key. Only outputs types and node group outputs
- * that are need are computed. This is essentially a post-order depth first traversal of the node
- * tree from the needed output nodes to the leaf input nodes, with informed order of traversal of
- * dependencies based on a heuristic estimation of the number of needed buffers. */
+/* A function that returns the result associated with the given socket if it is known statically
+ * and nullptr otherwise. For instance, the results associated with the sockets of the Group Input
+ * and Group Output nodes are known statically because they are those of the node group operation
+ * itself, not a node that is yet to be compiled and evaluated. */
+using SocketResultFn = FunctionRef<Result *(const bNodeSocket &)>;
+
+/* Computes the execution schedule of the given node group in the given compute context. If the
+ * results associated with some of the sockets are known, the socket_result_fn callback should
+ * provide them. Only output types and node group outputs that are needed are computed. If a zone
+ * is provided, then only nodes in the zone are scheduled. The execution schedule only includes the
+ * zone output node of child zones, the caller will have to recursively schedule zones to fully
+ * schedule the node tree.
+ *
+ * This is essentially a post-order depth first traversal of the node tree from the needed output
+ * nodes to the leaf input nodes, with informed order of traversal of dependencies based on a
+ * heuristic estimation of the number of needed buffers. */
 Schedule compute_schedule(const Context &context,
                           const bNodeTree &node_group,
-                          NodeGroupOperation &node_group_operation,
-                          const NodeGroupOutputTypes needed_outputs_types,
-                          const bNodeInstanceKey instance_key,
-                          const bNodeInstanceKey active_node_group_instance_key);
+                          const ComputeContext &compute_context,
+                          SocketResultFn socket_result_fn,
+                          const bke::bNodeTreeZone *zone = nullptr);
+
+/* Computes how many times the given output is referenced in the given schedule, ignoring outgoing
+ * links to the given ignored nodes if not nullptr. */
+int compute_output_reference_count(const bNodeSocket &output,
+                                   const Schedule &schedule,
+                                   const VectorSet<const bNode *> *ignored_nodes = nullptr);
 
 }  // namespace blender::compositor

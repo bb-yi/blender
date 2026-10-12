@@ -17,11 +17,11 @@
 #include "BKE_report.hh"
 #include "BKE_volume.hh"
 
-#include "BLI_fileops.h"
+#include "BLI_fileops.hh"
 #include "BLI_index_range.hh"
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "DEG_depsgraph_query.hh"
 
@@ -30,7 +30,7 @@ namespace blender::io::usd {
 static bool has_varying_modifiers(const Object *ob)
 {
   /* These modifiers may vary the Volume either over time or by deformation/transformation. */
-  ModifierData *md = static_cast<ModifierData *>(ob->modifiers.first);
+  ModifierData *md = ob->modifiers.first();
   while (md) {
     if (ELEM(md->type,
              eModifierType_Nodes,

@@ -27,7 +27,7 @@ ENUM_OPERATORS(eTextViewContext_LineFlag)
 
 struct TextViewContext {
   /** Font size scaled by the interface size. */
-  int lheight;
+  int line_height;
   /** Text selection, when a selection range is in use. */
   int sel_start, sel_end;
 
@@ -56,7 +56,7 @@ struct TextViewContext {
                                               int *r_icon,
                                               uchar r_icon_fg[4],
                                               uchar r_icon_bg[4]);
-  void (*draw_cursor)(TextViewContext *tvc, int cwidth, int columns);
+  void (*draw_cursor)(TextViewContext *tvc, int char_width, int columns);
   /* constant theme colors */
   void (*const_colors)(TextViewContext *tvc, unsigned char bg_sel[4]);
   const void *iter;
@@ -81,5 +81,12 @@ int textview_draw(TextViewContext *tvc,
                   const int mval_init[2],
                   void **r_mval_pick_item,
                   int *r_mval_pick_offset);
+
+/**
+ * Return the byte offset each wrapped row starts at, matching the layout #textview_draw uses.
+ * \warning Allocated memory for \a r_offsets must be freed by the caller.
+ * \return The length in bytes.
+ */
+int textview_wrap_offsets(const char *str, int str_len, int width, int *r_lines, int **r_offsets);
 
 }  // namespace blender

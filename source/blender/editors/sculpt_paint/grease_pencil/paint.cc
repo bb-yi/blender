@@ -21,13 +21,13 @@
 #include "BLI_bounds.hh"
 #include "BLI_color_types.hh"
 #include "BLI_length_parameterize.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_base.hh"
-#include "BLI_math_color.h"
+#include "BLI_math_color_c.hh"
 #include "BLI_noise.hh"
 #include "BLI_rand.hh"
-#include "BLI_rect.h"
-#include "BLI_time.h"
+#include "BLI_rect.hh"
+#include "BLI_time.hh"
 
 #include "DEG_depsgraph_query.hh"
 
@@ -58,33 +58,23 @@
 namespace blender::ed::sculpt_paint::greasepencil {
 
 static float brush_radius_to_pixel_radius(const RegionView3D *rv3d,
+                                          const Paint *paint,
                                           const Brush *brush,
                                           const float3 pos)
 {
   if ((brush->flag & BRUSH_LOCK_SIZE) != 0) {
     const float pixel_size = ED_view3d_pixel_size(rv3d, pos);
-    return (brush->unprojected_size / 2.0f) / pixel_size;
+    return (BKE_brush_unprojected_radius_get(paint, brush)) / pixel_size;
   }
-  return float(brush->size / 2.0f);
+  return float(BKE_brush_radius_get(paint, brush));
 }
 
 template<typename T>
-static inline void linear_interpolation(const T &a,
-                                        const T &b,
-                                        MutableSpan<T> dst,
-                                        const bool include_first_point)
+static inline void linear_interpolation(const T &a, const T &b, MutableSpan<T> dst)
 {
-  if (include_first_point) {
-    const float step = math::safe_rcp(float(dst.size() - 1));
-    for (const int i : dst.index_range()) {
-      dst[i] = bke::attribute_math::mix2(float(i) * step, a, b);
-    }
-  }
-  else {
-    const float step = 1.0f / float(dst.size());
-    for (const int i : dst.index_range()) {
-      dst[i] = bke::attribute_math::mix2(float(i + 1) * step, a, b);
-    }
+  const float step = 1.0f / float(dst.size());
+  for (const int i : dst.index_range()) {
+    dst[i] = bke::attribute_math::mix2(float(i + 1) * step, a, b);
   }
 }
 
@@ -300,7 +290,7 @@ struct PaintOperationExecutor {
     use_vertex_color_ = brush_using_vertex_color(scene_->toolsettings->gp_paint, brush_);
     if (use_vertex_color_) {
       ColorGeometry4f color_base;
-      copy_v3_v3(color_base, brush_->color);
+      copy_v3_v3(color_base, BKE_brush_color_get(paint, brush_));
       color_base.a = settings_->vertex_factor;
       if (settings_->flag2 & GP_BRUSH_USE_STROKE) {
         vertex_color_ = color_base;
@@ -322,6 +312,7 @@ struct PaintOperationExecutor {
                             const bool use_fill)
   {
     const float2 start_coords = start_sample.mouse_position;
+    const Paint &paint = scene_->toolsettings->gp_paint->paint;
     const RegionView3D *rv3d = CTX_wm_region_view3d(&C);
     const ARegion *region = CTX_wm_region(&C);
 
@@ -341,6 +332,7 @@ struct PaintOperationExecutor {
     float start_radius = ed::greasepencil::radius_from_input_sample(
         rv3d,
         region,
+        paint,
         brush_,
         start_sample.pressure,
         start_location,
@@ -350,7 +342,7 @@ struct PaintOperationExecutor {
         *settings_, self.stroke_random_radius_factor_, 0.0f, start_radius, start_sample.pressure);
 
     float start_opacity = ed::greasepencil::opacity_from_input_sample(
-        start_sample.pressure, brush_, settings_);
+        start_sample.pressure, paint, brush_, settings_);
     start_opacity = ed::greasepencil::randomize_opacity(*settings_,
                                                         self.stroke_random_opacity_factor_,
                                                         0.0f,
@@ -372,6 +364,7 @@ struct PaintOperationExecutor {
 
     const bool on_back = (scene_->toolsettings->gpencil_flags & GP_TOOL_FLAG_PAINT_ONBACK) != 0;
     const bool hide_fill_while_drawing = (settings_->flag & GP_BRUSH_DISSABLE_LASSO) != 0;
+    const bool cyclic_stroke = (settings_->flag & GP_BRUSH_USE_CYCLIC_STROKE) != 0;
 
     self.screen_space_coords_orig_.append(start_coords);
     self.screen_space_curve_fitted_coords_.append(Vector<float2>({start_coords}));
@@ -387,6 +380,9 @@ struct PaintOperationExecutor {
                                        curves.curves_range().last();
     const IndexRange curve_points = curves.points_by_curve()[active_curve];
     const int last_active_point = curve_points.last();
+
+    /* Don't smooth the first point. */
+    self.active_smooth_start_index_ = 1;
 
     Set<std::string> point_attributes_to_skip;
     Set<std::string> curve_attributes_to_skip;
@@ -413,7 +409,7 @@ struct PaintOperationExecutor {
         "material_index", bke::AttrDomain::Curve);
     bke::SpanAttributeWriter<bool> cyclic = attributes.convert_or_add_for_write_span<bool>(
         "cyclic", bke::AttrDomain::Curve);
-    cyclic.span[active_curve] = use_fill && !use_stroke;
+    cyclic.span[active_curve] = cyclic_stroke;
     materials.span[active_curve] = material_index;
     curve_attributes_to_skip.add_multiple({"material_index", "cyclic"});
     cyclic.finish();
@@ -481,16 +477,21 @@ struct PaintOperationExecutor {
       end_caps.finish();
     }
 
-    if (use_fill &&
-        (start_opacity < 1.0f || attributes.contains("fill_opacity") || hide_fill_while_drawing))
+    if (attributes.contains("fill_opacity") ||
+        (use_fill && (start_opacity < 1.0f || hide_fill_while_drawing)))
     {
       bke::SpanAttributeWriter<float> fill_opacities =
           attributes.convert_or_add_for_write_span<float>(
               "fill_opacity", bke::AttrDomain::Curve, bke::AttributeInitValue(1.0f));
-      /* Use 10% opacity when using the option to hide the fill while drawing
-       * (#GP_BRUSH_DISSABLE_LASSO). */
-      self.start_opacity_ = start_opacity;
-      fill_opacities.span[active_curve] = !hide_fill_while_drawing ? start_opacity : 0.1f;
+      if (use_fill) {
+        /* Use 10% opacity when using the option to hide the fill while drawing
+         * (#GP_BRUSH_DISSABLE_LASSO). */
+        self.start_opacity_ = start_opacity;
+        fill_opacities.span[active_curve] = !hide_fill_while_drawing ? start_opacity : 0.1f;
+      }
+      else {
+        fill_opacities.span[active_curve] = 1.0f;
+      }
       curve_attributes_to_skip.add("fill_opacity");
       fill_opacities.finish();
     }
@@ -671,6 +672,8 @@ struct PaintOperationExecutor {
   {
     const RegionView3D *rv3d = CTX_wm_region_view3d(&C);
     const ARegion *region = CTX_wm_region(&C);
+    const Paint &paint = scene_->toolsettings->gp_paint->paint;
+
     const bool on_back = (scene_->toolsettings->gpencil_flags & GP_TOOL_FLAG_PAINT_ONBACK) != 0;
 
     const float2 coords = extension_sample.mouse_position;
@@ -692,16 +695,17 @@ struct PaintOperationExecutor {
 
     float radius = ed::greasepencil::radius_from_input_sample(rv3d,
                                                               region,
+                                                              paint,
                                                               brush_,
                                                               extension_sample.pressure,
                                                               position,
                                                               self.placement_.to_world_space(),
                                                               settings_);
     float opacity = ed::greasepencil::opacity_from_input_sample(
-        extension_sample.pressure, brush_, settings_);
+        extension_sample.pressure, paint, brush_, settings_);
 
     const float brush_radius_px = brush_radius_to_pixel_radius(
-        rv3d, brush_, math::transform_point(self.placement_.to_world_space(), position));
+        rv3d, &paint, brush_, math::transform_point(self.placement_.to_world_space(), position));
 
     bke::CurvesGeometry &curves = self.drawing_->strokes_for_write();
     OffsetIndices<int> points_by_curve = curves.points_by_curve();
@@ -812,9 +816,9 @@ struct PaintOperationExecutor {
     MutableSpan<float> new_opacities = self.drawing_->opacities_for_write().slice(new_points);
 
     /* Interpolate the screen space positions. */
-    linear_interpolation<float2>(prev_coords, coords, new_screen_space_coords, is_first_sample);
-    linear_interpolation<float>(prev_radius, radius, new_radii, is_first_sample);
-    linear_interpolation<float>(prev_opacity, opacity, new_opacities, is_first_sample);
+    linear_interpolation<float2>(prev_coords, coords, new_screen_space_coords);
+    linear_interpolation<float>(prev_radius, radius, new_radii);
+    linear_interpolation<float>(prev_opacity, opacity, new_opacities);
     point_attributes_to_skip.add_multiple({"position", "radius", "opacity"});
 
     /* Randomize radii. */
@@ -858,8 +862,7 @@ struct PaintOperationExecutor {
     if (use_vertex_color_ || attributes.contains("vertex_color")) {
       MutableSpan<ColorGeometry4f> new_vertex_colors =
           self.drawing_->vertex_colors_for_write().slice(new_points);
-      linear_interpolation<ColorGeometry4f>(
-          prev_vertex_color, vertex_color_, new_vertex_colors, is_first_sample);
+      linear_interpolation<ColorGeometry4f>(prev_vertex_color, vertex_color_, new_vertex_colors);
       if (use_settings_random_ || attributes.contains("vertex_color")) {
         for (const int i : IndexRange(new_points_num)) {
           new_vertex_colors[i] = ed::greasepencil::randomize_color(*settings_,
@@ -879,10 +882,8 @@ struct PaintOperationExecutor {
     const double new_delta_time = BLI_time_now_seconds() - self.start_time_;
     bke::SpanAttributeWriter<float> delta_times = attributes.convert_or_add_for_write_span<float>(
         "delta_time", bke::AttrDomain::Point);
-    linear_interpolation<float>(float(self.delta_time_),
-                                float(new_delta_time),
-                                delta_times.span.slice(new_points),
-                                is_first_sample);
+    linear_interpolation<float>(
+        float(self.delta_time_), float(new_delta_time), delta_times.span.slice(new_points));
     point_attributes_to_skip.add("delta_time");
     delta_times.finish();
 
@@ -1210,6 +1211,7 @@ void PaintOperation::on_stroke_begin(const bContext &C, const InputSample &start
     stroke_random_val_factor_ = rng_.get_float() * 2.0f - 1.0f;
   }
 
+  /* At this point it should be fine to create a new material + slot. */
   Material *material = BKE_grease_pencil_object_material_ensure_from_brush(
       CTX_data_main(&C), object_, brush);
   const int material_index = BKE_object_material_index_get(object_, material);
@@ -1740,7 +1742,8 @@ void PaintOperation::on_stroke_done(const bContext &C)
       process_stroke_weights(*scene_, *object_, drawing, active_curve);
     }
     if ((settings->flag & GP_BRUSH_OUTLINE_STROKE) != 0) {
-      const float outline_radius = brush->unprojected_size / 2.0f * settings->outline_fac * 0.5f;
+      const float outline_radius = BKE_brush_unprojected_radius_get(paint, brush) *
+                                   settings->outline_fac;
       const int material_index = [&]() {
         Material *material = BKE_grease_pencil_object_material_alt_ensure_from_brush(
             CTX_data_main(&C), object_, brush);

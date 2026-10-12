@@ -165,13 +165,23 @@ class NODE_HT_header(Header):
 
             if snode.node_tree_sub_type == 'SCENE':
                 row = layout.row()
+                active_effect = scene.compositor_effects.active
                 if snode.pin:
                     row.enabled = False
-                    row.template_ID(snode, "node_tree", new="node.new_compositing_node_group")
-                elif scene.compositing_node_group:
-                    row.template_ID(scene, "compositing_node_group", new="node.duplicate_compositing_node_group")
+                    row.template_ID(snode, "node_tree", new="scene.new_compositor_effect_node_group")
+                elif active_effect:
+                    if active_effect.node_group:
+                        row.template_ID(
+                            active_effect,
+                            "node_group",
+                            new="scene.duplicate_compositor_effect_node_group")
+                    else:
+                        row.template_ID(
+                            active_effect,
+                            "node_group",
+                            new="scene.new_compositor_effect_node_group")
                 else:
-                    row.template_ID(scene, "compositing_node_group", new="node.new_compositing_node_group")
+                    row.template_ID(snode, "node_tree", new="scene.new_compositor_effect_node_group")
             elif snode.node_tree_sub_type == 'SEQUENCER':
                 row = layout.row()
                 sequencer_scene = context.workspace.sequencer_scene
@@ -520,10 +530,6 @@ class NODE_MT_node(Menu):
         props.NODE_OT_translate_attach.TRANSFORM_OT_translate.view2d_edge_pan = True
 
         layout.separator()
-        layout.operator("node.delete", icon='X')
-        layout.operator("node.delete_reconnect")
-
-        layout.separator()
         layout.operator("node.join", text="Join in New Frame")
         layout.operator("node.detach", text="Remove from Frame")
         layout.operator("node.join_nodes", text="Join Group Inputs")
@@ -555,6 +561,10 @@ class NODE_MT_node(Menu):
         if is_compositor:
             layout.separator()
             layout.operator("node.read_viewlayers", icon='RENDERLAYERS')
+
+        layout.separator()
+        layout.operator("node.delete_reconnect")
+        layout.operator("node.delete", icon='X')
 
 
 class NODE_MT_view_pie(Menu):
@@ -694,7 +704,7 @@ class NODE_PT_geometry_node_tool_options(Panel):
         layout.prop(group, "node_tool_idname", text="Identifier")
         layout.template_node_operator_registration_errors(idname=group.node_tool_idname)
         if len(group.node_tool_idname) == 0:
-            layout.label(icon='ERROR', text="Missing operator identifier")
+            layout.label(icon='STATUS_ERROR', text="Missing operator identifier")
 
 
 class NODE_PT_node_color_presets(PresetPanel, Panel):
@@ -815,9 +825,11 @@ class NODE_MT_context_menu(Menu):
 
         layout.separator()
 
-        layout.operator("node.delete", icon='X')
-        layout.operator_context = 'EXEC_REGION_WIN'
-        layout.operator("node.delete_reconnect", text="Dissolve")
+        props = layout.operator("wm.call_panel", text="Rename Active Node...")
+        props.name = "TOPBAR_PT_name"
+        props.keep_open = False
+
+        layout.separator()
 
         if selected_nodes_len > 1:
             layout.separator()
@@ -849,14 +861,14 @@ class NODE_MT_context_menu(Menu):
 
         layout.separator()
 
-        props = layout.operator("wm.call_panel", text="Rename...")
-        props.name = "TOPBAR_PT_name"
-        props.keep_open = False
+        layout.menu("NODE_MT_context_menu_select_menu")
+        layout.menu("NODE_MT_context_menu_show_hide_menu")
 
         layout.separator()
 
-        layout.menu("NODE_MT_context_menu_select_menu")
-        layout.menu("NODE_MT_context_menu_show_hide_menu")
+        layout.operator_context = 'EXEC_REGION_WIN'
+        layout.operator("node.delete_reconnect", text="Dissolve")
+        layout.operator("node.delete", icon='X')
 
         if active_node:
             layout.separator()
@@ -904,7 +916,7 @@ class NODE_PT_active_node_generic(Panel):
         col.prop(node, "show_options")
         col.prop(node, "mute")
 
-        if tree.type in ('GEOMETRY', 'COMPOSITING'):
+        if tree.type in ('GEOMETRY', 'COMPOSITING', 'SHADER'):
             layout.prop(node, "warning_propagation", text="Propagate")
 
 
@@ -1036,6 +1048,10 @@ class NODE_PT_quality(Panel):
         if rd.compositor_device == 'GPU':
             col.prop(rd, "compositor_precision", text="Precision")
 
+        if snode.node_tree_sub_type == 'SCENE':
+            col = layout.column(heading="Cache", align=True)
+            col.prop(rd, "use_compositor_frames_cache", text="Frames")
+
 
 class NODE_PT_overlay(Panel):
     bl_space_type = 'NODE_EDITOR'
@@ -1079,6 +1095,10 @@ class NODE_PT_overlay(Panel):
 
             subcol = col.column(align=True)
             subcol.active = overlay.show_render_size and snode.show_backdrop
+
+            subcol = col.column()
+            subcol.prop(overlay, "show_text_info")
+            subcol.active = snode.show_backdrop
 
             row = subcol.row(align=True)
             row.prop(overlay, "show_render_size", text="Render Region")
@@ -1144,10 +1164,8 @@ class NODE_PT_node_tree_properties(Panel):
         col = layout.column()
         col.prop(group, "name", text="Name", placeholder="Name")
 
-        if group.asset_data:
-            col.prop(group.asset_data, "description", text="Description", placeholder="Description")
-        else:
-            col.prop(group, "description", text="Description", placeholder="Description")
+        data = group.asset_data if group.asset_data else group
+        col.textbox(data, "description", placeholder="Description")
 
         if not group.bl_use_group_interface:
             return
@@ -1174,6 +1192,7 @@ class NODE_PT_node_tree_properties(Panel):
             if body:
                 col = body.column(align=True)
                 col.prop(group, "is_strip_modifier")
+                col.prop(group, "allow_usage_in_scene_compositor_effect")
 
 
 class NODE_PT_node_tree_animation(Panel):

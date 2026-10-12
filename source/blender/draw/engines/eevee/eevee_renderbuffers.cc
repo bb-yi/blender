@@ -38,10 +38,16 @@ void RenderBuffers::init()
 
   data.normal_id = pass_index_get(EEVEE_RENDER_PASS_NORMAL, EEVEE_RENDER_PASS_AO);
   data.position_id = pass_index_get(EEVEE_RENDER_PASS_POSITION);
-  data.diffuse_light_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_LIGHT);
-  data.diffuse_color_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_COLOR);
-  data.specular_light_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_LIGHT);
-  data.specular_color_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_COLOR);
+  /* Custom lighting in the hybrid pipeline requires both passes, so the combine pass can
+   * reconstruct the radiance. */
+  data.diffuse_light_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_LIGHT,
+                                         EEVEE_RENDER_PASS_DIFFUSE_COLOR);
+  data.diffuse_color_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_COLOR,
+                                         EEVEE_RENDER_PASS_DIFFUSE_LIGHT);
+  data.specular_light_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_LIGHT,
+                                          EEVEE_RENDER_PASS_SPECULAR_COLOR);
+  data.specular_color_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_COLOR,
+                                          EEVEE_RENDER_PASS_SPECULAR_LIGHT);
   data.volume_light_id = pass_index_get(EEVEE_RENDER_PASS_VOLUME_LIGHT);
   data.emission_id = pass_index_get(EEVEE_RENDER_PASS_EMIT);
   data.environment_id = pass_index_get(EEVEE_RENDER_PASS_ENVIRONMENT);
@@ -49,6 +55,11 @@ void RenderBuffers::init()
   data.ambient_occlusion_id = pass_index_get(EEVEE_RENDER_PASS_AO);
   data.transparent_id = pass_index_get(EEVEE_RENDER_PASS_TRANSPARENT);
   data.outline_id = pass_index_get(EEVEE_RENDER_PASS_OUTLINE);
+  data.denoising_depth_id = (enabled_passes & EEVEE_RENDER_PASS_DENOISING_DEPTH) ? 0 : -1;
+  data.denoising_normal_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_NORMAL);
+  data.denoising_roughness_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_ROUGHNESS);
+  data.denoising_diffuse_albedo_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_DIFFUSE_ALBEDO);
+  data.denoising_specular_albedo_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_SPECULAR_ALBEDO);
 
   data.aovs = inst_.film.aovs_info;
 }
@@ -68,10 +79,7 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
                                            GPU_TEXTURE_USAGE_ATTACHMENT;
 
   /* Depth and combined are always needed. */
-  depth_tx.ensure_2d(depth_format, extent, usage_attachment_read);
-  /* TODO(fclem): depth_tx should ideally be a texture from pool but we need stencil_view
-   * which is currently unsupported by pool textures. */
-  // depth_tx.acquire(extent, depth_format);
+  depth_tx.acquire_2d(extent, depth_format, usage_attachment_read);
   combined_tx.acquire_2d(extent, color_format);
 
   eGPUTextureUsage usage_attachment_read_write = GPU_TEXTURE_USAGE_ATTACHMENT |
@@ -109,14 +117,14 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
   int value_len = data.value_len + data.aovs.value_len +
                   inst_.native_postfx_outputs.value_len_get();
 
-  rp_color_tx.ensure_2d_array(color_format,
-                              (color_len > 0) ? extent : int2(1),
-                              math::max(1, color_len),
-                              usage_attachment_read_write);
-  rp_value_tx.ensure_2d_array(float_format,
-                              (value_len > 0) ? extent : int2(1),
-                              math::max(1, value_len),
-                              usage_attachment_read_write);
+  rp_color_tx.acquire_2d_array((color_len > 0) ? extent : int2(1),
+                               math::max(1, color_len),
+                               color_format,
+                               usage_attachment_read_write);
+  rp_value_tx.acquire_2d_array((value_len > 0) ? extent : int2(1),
+                               math::max(1, value_len),
+                               float_format,
+                               usage_attachment_read_write);
 
   const gpu::TextureFormat cryptomatte_format = gpu::TextureFormat::SFLOAT_32_32_32_32;
   cryptomatte_tx.acquire_2d(pass_extent(EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT |
@@ -138,9 +146,7 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
 
 void RenderBuffers::release()
 {
-  /* TODO(fclem): depth_tx should ideally be a texture from pool but we need stencil_view
-   * which is currently unsupported by pool textures. */
-  // depth_tx.release();
+  depth_tx.release();
   combined_tx.release();
 
   const bool do_motion_vectors_swizzle = vector_tx_format() == gpu::TextureFormat::SFLOAT_16_16;
@@ -156,6 +162,9 @@ void RenderBuffers::release()
   cryptomatte_tx.release();
   outline_color_tx.release();
   outline_info_tx.release();
+
+  rp_color_tx.release();
+  rp_value_tx.release();
 }
 
 gpu::TextureFormat RenderBuffers::vector_tx_format()
