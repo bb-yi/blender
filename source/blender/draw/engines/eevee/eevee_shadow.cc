@@ -1551,7 +1551,7 @@ void ShadowModule::debug_end_sync()
   /* Init but not filled if no active object. */
   debug_draw_ps_.init();
 
-  int tilemap_index = 0;
+  int tilemap_index = -1;
   bool has_debug_light = false;
   Object *object_active = inst_.draw_ctx->obact;
   const bool active_light_selected = object_active != nullptr && object_active->type == OB_LAMP;

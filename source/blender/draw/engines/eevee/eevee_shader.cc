@@ -2502,7 +2502,21 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                          generated_source_block);
     }
 
+    if (use_vertex_displacement || use_tessellation_graph) {
+      for (const auto &graph : codegen.material_functions) {
+        material_graph_dependencies_append(gpumat,
+                                           graph.dependencies,
+                                           generated_dependencies,
+                                           emitted_generated_sources,
+                                           generated_source_block);
+      }
+    }
     vert_gen << generated_source_block.str();
+    if (use_vertex_displacement || use_tessellation_graph) {
+      for (const auto &graph : codegen.material_functions) {
+        vert_gen << graph.serialized;
+      }
+    }
     vert_gen << "#line 1 \"" __FILE__ "\"\n";
     vert_gen << "#line " STRINGIFY(__LINE__) "\n";
     vert_gen << "float3 nodetree_displacement(KernelGlobals kg, _ref(ShadingData, sd))\n";
@@ -2631,8 +2645,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
        * With #TESS_NORMAL_GEOMETRY, computes the normal of the displaced surface instead. */
       info.define("MAT_DISPLACEMENT_BUMP");
 
-      vert_gen << "#line 1 \"" __FILE__ "\"\n";
-      vert_gen << "#line " STRINGIFY(__LINE__) "\n";
+      frag_gen << "#line 1 \"" __FILE__ "\"\n";
+      frag_gen << "#line " STRINGIFY(__LINE__) "\n";
       frag_gen << "float3 nodetree_displacement(KernelGlobals kg, _ref(ShadingData, sd))\n";
       frag_gen << "{\n";
       frag_gen << codegen.displacement.serialized;

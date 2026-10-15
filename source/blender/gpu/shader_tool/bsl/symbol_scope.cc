@@ -57,7 +57,10 @@ Result<SymbolFunction *> SymbolScope::lookup_function(const SymbolTable &table,
     /* Try to resolve type constructors (only for builtins for now). */
     if (auto [cls, err_cls] = lookup_class(table, id); !cls->is_error && cls && cls->is_builtin())
     {
-      return {table.root->lookup_function(cls->identifier), {}};
+      /* Some builtin types have no constructor (e.g. `bool32_t`). */
+      if (SymbolFunction *ctor = table.root->lookup_function(cls->identifier)) {
+        return {ctor, {}};
+      }
     }
     return {func, err ? err : AstNodeException{id, Diag::UnknownFunction, string(id.str())}};
   }
@@ -366,17 +369,20 @@ T *SymbolScope::lookup_generic_nested(const SymbolTable &table,
 
 SymbolClass *SymbolScope::lookup_class(string id) const
 {
-  return classes.find(id)->second.second;
+  auto it = classes.find(id);
+  return it != classes.end() ? it->second.second : nullptr;
 }
 
 SymbolFunction *SymbolScope::lookup_function(string id) const
 {
-  return functions.find(id)->second.second;
+  auto it = functions.find(id);
+  return it != functions.end() ? it->second.second : nullptr;
 }
 
 SymbolVariable *SymbolScope::lookup_variable(string id) const
 {
-  return variables.find(id)->second.second;
+  auto it = variables.find(id);
+  return it != variables.end() ? it->second.second : nullptr;
 }
 
 SymbolClass *SymbolScope::as_class()
