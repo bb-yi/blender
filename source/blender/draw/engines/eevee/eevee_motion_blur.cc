@@ -29,7 +29,8 @@ void MotionBlurModule::init()
 
   /* Disable on viewport outside of animation playback,
    * since it can get distracting while editing the scene. */
-  enabled_ = (scene->r.mode & R_MBLUR) != 0 && (inst_.is_image_render || inst_.is_playback);
+  enabled_ = !inst_.is_dlss_guide_render && (scene->r.mode & R_MBLUR) != 0 &&
+             (inst_.is_image_render || inst_.is_playback);
   if (enabled_) {
     enabled_ = (view_layer->layflag & SCE_LAY_MOTION_BLUR) != 0;
   }

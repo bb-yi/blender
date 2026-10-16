@@ -29,6 +29,7 @@ class Texture;
 namespace blender::eevee {
 
 class Instance;
+class VelocityModule;
 
 struct Dlss5FrameInputs {
   gpu::Texture *color = nullptr;
@@ -67,6 +68,7 @@ class Dlss5Module {
   bool failure_reported_ = false;
   bool retry_blocked_ = false;
   bool force_history_reset_ = true;
+  bool offline_configured_ = false;
   int2 retry_input_extent_ = int2(-1);
   int2 retry_output_extent_ = int2(-1);
   std::unique_ptr<Dlss5D3D12Session> d3d12_session_;
@@ -90,13 +92,19 @@ class Dlss5Module {
                                 gpu::Texture *destination,
                                 float intensity,
                                 gpu::Texture *mask);
-  bool prepare_velocity(const Dlss5FrameInputs &inputs, gpu::Texture *destination, draw::View &view);
+  bool prepare_velocity(const Dlss5FrameInputs &inputs,
+                        gpu::Texture *destination,
+                        draw::View &view,
+                        VelocityModule &velocity);
 
  public:
   explicit Dlss5Module(Instance &inst);
   ~Dlss5Module();
 
-  gpu::Texture *process(const Dlss5FrameInputs &inputs, draw::View &view);
+  gpu::Texture *process(const Dlss5FrameInputs &inputs,
+                        draw::View &view,
+                        VelocityModule &velocity);
+  void render_final();
   /* Load D3D12 + nvngx_dlssnr.dll once. Games do this at startup, not on toggle. */
   void warmup();
   void render_readback_complete();

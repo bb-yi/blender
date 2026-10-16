@@ -58,6 +58,9 @@ void DlssSrModule::init(const int2 output_extent)
 {
   const bool was_active = active_;
   active_ = false;
+  if (inst_.is_dlss_guide_render) {
+    return;
+  }
   const Scene &scene = *inst_.scene;
   const int quality = inst_.is_viewport() ? scene.eevee.dlss_sr_viewport_quality :
                                             scene.eevee.dlss_sr_render_quality;

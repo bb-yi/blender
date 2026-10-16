@@ -119,3 +119,23 @@ the GPU device. Never set it for normal operation. An untrackable GPU submission
 disables the session and retains its resources until process exit/device removal,
 rather than freeing memory still potentially used by the GPU; the status requests
 a restart in this exceptional case.
+
+## Offline animation history regression
+
+`test_animation_history.py` is a self-contained Windows Vulkan test. Run it with an installed
+Blender containing the DLSSNR runtime, isolated `BLENDER_USER_RESOURCES`, and
+`--background --factory-startup --python-exit-code 1 --python tests/dlss5/test_animation_history.py`.
+Set `DLSS_ANIMATION_TEST_OUT` to a directory outside the source tree for logs and EXR files.
+
+The test checks actual NR completion, adjacent-frame history, independent repeated animations,
+resource-cache independence, skipped frames, camera cuts, settings changes, multiple view layers,
+shape-key deformation and motion blur. A GPU input readback checks backward pixel motion against
+an independent geometric projection (0.02 px tolerance). If the optional Pre-FX pass is present,
+it additionally checks that its history cannot alter the primary Combined output.
+
+`BLENDER_DLSS_NR_FORCE_RESET` and `BLENDER_DLSS_NR_DUMP_INPUTS` are diagnostic switches only.
+The former forces independent NR frames; the latter writes raw float Color/Depth/Motion inputs
+to an existing directory and synchronizes their GPU readback. Leave both unset in normal use.
+
+This fixes the integration's temporal continuity and motion contract. It does not promise
+pixel-identical NR output across processes or eliminate all temporal variation of the model.

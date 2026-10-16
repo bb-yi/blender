@@ -4,10 +4,22 @@
 
 #include "eevee_dlss5.hh"
 
-#include "CLG_log.h"
 #include "BKE_scene_runtime.hh"
-#include "DEG_depsgraph_query.hh"
+#include "BLI_fileops.h"
 #include "BLI_string.h"
+#include "CLG_log.h"
+#include "DEG_depsgraph_query.hh"
+#include "DRW_engine.hh"
+#include "MEM_guardedalloc.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <sstream>
+
+#include "DNA_object_types.h"
+#include "RE_engine.h"
+#include "RE_pipeline.h"
+#include "render_types.h"
 
 #include "GPU_context.hh"
 #include "GPU_texture.hh"
@@ -77,7 +89,9 @@ bool Dlss5Module::reconstruct_scene_linear(gpu::Texture *source,
 }
 
 bool Dlss5Module::prepare_velocity(const Dlss5FrameInputs &inputs,
-                                   gpu::Texture *destination, draw::View &view)
+                                   gpu::Texture *destination,
+                                   draw::View &view,
+                                   VelocityModule &velocity)
 {
   gpu::Texture *source = inputs.velocity;
   gpu::Texture *depth = inputs.depth;
@@ -94,11 +108,12 @@ bool Dlss5Module::prepare_velocity(const Dlss5FrameInputs &inputs,
   const GPUSamplerState no_filter = GPUSamplerState::default_sampler();
   velocity_convert_ps_.bind_texture("velocity_tx", &source, no_filter);
   velocity_convert_ps_.bind_texture("depth_tx", &depth, no_filter);
-  inst_.velocity.bind_resources(velocity_convert_ps_);
+  velocity.bind_resources(velocity_convert_ps_);
   velocity_convert_ps_.push_constant("guide_overscan", inputs.guide_overscan);
   velocity_convert_ps_.push_constant("guide_scale", inputs.guide_scale);
   velocity_convert_ps_.push_constant("guide_ratio", inputs.guide_ratio);
-  velocity_convert_ps_.push_constant("motion_sign", -1.0f);
+  /* EEVEE already resolves previous-current UV displacement: NGX's backward pixel motion. */
+  velocity_convert_ps_.push_constant("motion_sign", 1.0f);
   velocity_convert_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   inst_.manager->submit(velocity_convert_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_FRAMEBUFFER);
@@ -113,7 +128,9 @@ void Dlss5Module::publish_status(const bool viewport, const char *status)
   }
 }
 
-gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &view)
+gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs,
+                                   draw::View &view,
+                                   VelocityModule &velocity)
 {
   last_display_texture_ = nullptr;
   if (inst_.scene == nullptr || inst_.scene->eevee.dlss5_mode != SCE_EEVEE_DLSSNR ||
@@ -210,6 +227,27 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &v
     return inputs.color;
   }
 
+  if (!inputs.is_viewport && !offline_configured_) {
+    Dlss5OfflineFrame frame;
+    frame.sequence = inst_.render ? inst_.render->re->animation_sequence_id : 0;
+    frame.scene = DEG_get_original(inst_.scene)->id.session_uid;
+    frame.camera = inst_.camera_orig_object ? inst_.camera_orig_object->id.session_uid : 0;
+    frame.layer = inst_.view_layer->name;
+    frame.view = inst_.render ? RE_GetActiveRenderView(inst_.render->re) : "";
+    frame.pre_fx = inst_.is_pre_fx_render;
+    frame.frame = inst_.render ? inst_.render->re->r.cfra : inst_.scene->r.cfra;
+    frame.camera_type = int(inst_.camera.data_get().type);
+    frame.settings = settings;
+    std::ostringstream signature;
+    signature << inputs.input_extent.x << ',' << inputs.input_extent.y << ','
+              << inst_.film.film_offset_get().x << ',' << inst_.film.film_offset_get().y << ','
+              << inst_.scene->eevee.dlss5_mask_aov << ',' << inst_.scene->eevee.dlss5_mask_invert
+              << ',' << inputs.exposure_scale;
+    frame.signature = signature.str();
+    force_history_reset_ = !d3d12_session_->begin_offline_frame(frame);
+    offline_configured_ = true;
+  }
+
   if (!d3d12_session_->ensure_resources(inputs.input_extent,
                                         inputs.output_extent,
                                         inputs.output_extent,
@@ -269,11 +307,40 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &v
   inst_.manager->submit(depth_convert_ps_);
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_FRAMEBUFFER);
 
-  if (!prepare_velocity(inputs, d3d12_session_->velocity_texture(), view))
-  {
+  if (!prepare_velocity(inputs, d3d12_session_->velocity_texture(), view, velocity)) {
     publish_status(inputs.is_viewport, "Unavailable: motion conversion shader failed");
     CLOG_WARN(&Instance::log, "DLSS5 velocity conversion is unavailable");
     return inputs.color;
+  }
+
+  /* Isolated integration tests can compare the exact inputs across process lifetimes. */
+  if (!inputs.is_viewport) {
+    if (const char *directory = std::getenv("BLENDER_DLSS_NR_DUMP_INPUTS")) {
+      struct InputDump {
+        const char *name;
+        gpu::Texture *texture;
+        int channels;
+      };
+      const InputDump dumps[] = {{"color", d3d12_session_->color_texture(), 4},
+                                 {"depth", d3d12_session_->depth_texture(), 1},
+                                 {"motion", d3d12_session_->velocity_texture(), 2}};
+      for (const InputDump &dump : dumps) {
+        const std::string path = std::string(directory) + "/" +
+                                 std::to_string(inst_.scene->r.cfra) + "_" + dump.name + ".f32";
+        void *pixels = GPU_texture_read(dump.texture, GPU_DATA_FLOAT, 0);
+        if (pixels) {
+          if (FILE *file = BLI_fopen(path.c_str(), "wb")) {
+            std::fwrite(pixels,
+                        sizeof(float),
+                        size_t(GPU_texture_width(dump.texture)) *
+                            GPU_texture_height(dump.texture) * dump.channels,
+                        file);
+            std::fclose(file);
+          }
+          MEM_delete_void(pixels);
+        }
+      }
+    }
   }
 
   const Dlss5D3D12Frame frame = {
@@ -284,7 +351,8 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &v
       inputs.output_extent,
       inputs.output_extent,
       inputs.jitter,
-      inputs.reset_history || force_history_reset_,
+      inputs.reset_history || force_history_reset_ ||
+          (!inputs.is_viewport && std::getenv("BLENDER_DLSS_NR_FORCE_RESET")),
       false,
       inputs.depth_is_reverse_z,
       true,
@@ -352,16 +420,55 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &v
   return last_display_texture_;
 }
 
+void Dlss5Module::render_final()
+{
+  if (inst_.is_viewport() || inst_.is_dlss_guide_render ||
+      inst_.scene->eevee.dlss5_mode != SCE_EEVEE_DLSSNR ||
+      inst_.scene->eevee.dlss5_intensity == 0.0f || GPU_backend_get_type() != GPU_BACKEND_VULKAN)
+  {
+    return;
+  }
+  /* The main Film is already resolved. Sync a depth/velocity-only instance at output-frame
+   * time, independent of the last shutter/lens sample. Do not change camera/scene settings. */
+  auto guide = std::make_unique<Instance>();
+  guide->is_dlss_guide_render = true;
+  guide->is_pre_fx_render = inst_.is_pre_fx_render;
+  const int2 offset = inst_.film.film_offset_get();
+  const int2 extent = inst_.film.film_extent_get();
+  rcti rect{offset.x, offset.x + extent.x, offset.y, offset.y + extent.y};
+  guide->init(inst_.film.display_extent_get(),
+              &rect,
+              &rect,
+              inst_.render,
+              inst_.depsgraph,
+              inst_.camera_orig_object,
+              inst_.render_layer);
+  guide->render_sync();
+  while (guide->materials.queued_shaders_count > 0 || guide->materials.queued_textures_count > 0) {
+    guide->wait_for_material_passes();
+    guide->render_sync();
+  }
+  if (RE_engine_test_break(inst_.render)) {
+    return;
+  }
+  DRW_submission_start();
+  guide->sampling.step();
+  guide->uniform_data.push_update();
+  guide->render_textures.render();
+  guide->main_view.render_dlss_guides(inst_.film);
+  DRW_submission_end();
+}
+
 void Dlss5Module::warmup()
 {
-  if (!inst_.is_viewport()) {
-    d3d12_session_->reuse_for_offline_render();
-  }
   d3d12_session_->warmup();
 }
 
 void Dlss5Module::render_readback_complete()
 {
+  if (last_display_texture_) {
+    d3d12_session_->complete_offline_frame();
+  }
   if (display_texture() == nullptr) {
     return;
   }

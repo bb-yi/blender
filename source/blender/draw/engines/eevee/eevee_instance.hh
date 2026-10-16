@@ -195,6 +195,10 @@ namespace blender::eevee
     bool is_color_bake = false;
     /** True if the instance is created for either viewport image render or final image render. */
     bool is_image_render = false;
+    /** Final-render companion instance: no lens or shutter effects; writes only Pre-FX. */
+    bool is_pre_fx_render = false;
+    /** Unjittered depth/velocity only, for one resolved offline NR image. */
+    bool is_dlss_guide_render = false;
     /** True if the instance is created only for viewport image render. */
     bool is_viewport_image_render = false;
     /** True if current viewport is drawn during playback. */

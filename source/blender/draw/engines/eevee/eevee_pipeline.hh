@@ -353,6 +353,7 @@ class ForwardPipeline {
   bool use_colored_transparency() const;
   bool has_outline_occluders() const;
   void render_outline_occlusion(View &view, Framebuffer &outline_occlusion_fb);
+  void render_dlss_guides(View &view, Framebuffer &framebuffer);
 
   void render(View &view,
               gpu::Texture *depth_tx,
@@ -590,6 +591,8 @@ class DeferredLayer : DeferredLayerBase {
   /* Is the radiance split for the lighting pass. */
   static bool do_split_direct_indirect_radiance(const Instance &inst);
 
+  void render_dlss_guides(View &view, Framebuffer &framebuffer);
+
   /* Returns the radiance buffer to feed the next layer. */
   gpu::Texture *render(View &main_view,
                        View &render_view,
@@ -651,6 +654,8 @@ class DeferredPipeline {
               RayTraceBuffer &rt_buffer_opaque_layer,
               RayTraceBuffer &rt_buffer_refract_layer,
               bool &volume_compute_done);
+
+  void render_dlss_guides(View &view, Framebuffer &framebuffer);
 
   /* Return the maximum amount of gbuffer layer needed. */
   int header_layer_count() const

@@ -328,7 +328,9 @@ namespace blender::eevee
     volume.init();
     lookdev.init(&lookdev_rect);
 
-    if (GPU_backend_get_type() == GPU_BACKEND_VULKAN &&
+    /* Offline NR leases its animation session before initializing the device. Warming up
+     * the temporary per-frame session here would create and immediately discard a device. */
+    if (is_viewport() && GPU_backend_get_type() == GPU_BACKEND_VULKAN &&
         scene->eevee.dlss5_mode == SCE_EEVEE_DLSSNR && scene->eevee.dlss5_intensity != 0.0f)
     {
       dlss5.warmup();
@@ -1100,6 +1102,10 @@ namespace blender::eevee
     }
 
     this->film.cryptomatte_sort();
+
+    if (!RE_engine_test_break(engine)) {
+      dlss5.render_final();
+    }
 
     this->render_read_result(render_layer, view_name);
     telemetry.maybe_end_final_frame();

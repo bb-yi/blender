@@ -149,6 +149,7 @@ class Film {
 
   /** Blit to display. No rendered sample needed. */
   void display();
+  gpu::Texture *process_dlss(View &view, Instance &guides);
 
   float *read_pass(eViewLayerEEVEEPassType pass_type, int layer_offset);
   float *read_aov(ViewLayerAOV *aov);

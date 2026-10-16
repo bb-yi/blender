@@ -8,6 +8,7 @@
 
 #include <fmt/format.h>
 
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
@@ -1908,6 +1909,7 @@ static void render_init_depsgraph(Render *re)
 /* Free data only needed during rendering operation. */
 static void render_pipeline_free(Render *re)
 {
+  re->animation_sequence_id = 0;
   if (re->engine && !RE_engine_use_persistent_data(re->engine)) {
     RE_engine_free(re->engine);
     re->engine = nullptr;
@@ -1936,6 +1938,7 @@ void RE_RenderFrame(Render *re,
                     const float subframe,
                     const bool write_still)
 {
+  re->animation_sequence_id = 0;
   CLOG_INFO(&LOG, "Rendering frame %d", frame);
 
   render_callback_exec_id(re, re->main, &scene->id, BKE_CB_EVT_RENDER_INIT);
@@ -2406,6 +2409,8 @@ void RE_RenderAnim(Render *re,
    * to make full resolution is also set by caller renderwin.c */
   G.is_rendering = true;
 
+  static std::atomic<uint64_t> next_animation_sequence_id{1};
+  re->animation_sequence_id = next_animation_sequence_id.fetch_add(1, std::memory_order_relaxed);
   re->flag |= R_ANIMATION;
   DEG_graph_id_tag_update(re->main, re->pipeline_depsgraph, &re->scene->id, ID_RECALC_AUDIO_MUTE);
 
