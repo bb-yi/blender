@@ -57,6 +57,8 @@ enum eViewLayerEEVEEPassType : int {
   EEVEE_RENDER_PASS_TRANSPARENT = (1 << 20),
   EEVEE_RENDER_PASS_POSITION = (1 << 21),
   EEVEE_RENDER_PASS_OUTLINE = (1 << 22),
+  /** Separate final-render instance output, not a Film accumulation pass. */
+  EEVEE_RENDER_PASS_PRE_FX = (1 << 23),
   /** Viewport-only debug display. Not stored in #ViewLayerEEVEE.render_passes. */
   EEVEE_RENDER_PASS_STENCIL_VALUE = (1 << 29),
 };

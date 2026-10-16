@@ -165588,6 +165588,12 @@ msgstr "使用文件各层色彩空间"
 msgid "Input Resolution"
 msgstr "输入分辨率"
 
+msgid "Pre-FX"
+msgstr "效果前图像"
+
+msgid "Output the image before depth of field and motion blur are applied"
+msgstr "输出应用景深和运动模糊之前的图像"
+
 msgid "DLSS Super Resolution: custom input resolution using the Quality preset"
 msgstr "DLSS 超分辨率：使用质量预设，自定义输入分辨率"
 

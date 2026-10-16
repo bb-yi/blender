@@ -50,7 +50,8 @@ void DepthOfField::init()
                                           camera_object_eval->data) :
                                       nullptr;
 
-  enabled_ = !inst_.is_dlss_guide_render && camera && (camera->dof.flag & CAM_DOF_ENABLED) != 0;
+  enabled_ = !inst_.is_pre_fx_render && !inst_.is_dlss_guide_render && camera &&
+             (camera->dof.flag & CAM_DOF_ENABLED) != 0;
 
   if (enabled_ == false) {
     /* Set to invalid value for update detection */

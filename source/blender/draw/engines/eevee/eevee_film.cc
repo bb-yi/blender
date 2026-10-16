@@ -286,6 +286,8 @@ inline bool operator!=(const FilmData &a, const FilmData &b)
 static eViewLayerEEVEEPassType enabled_passes(const ViewLayer *view_layer)
 {
   eViewLayerEEVEEPassType result = eViewLayerEEVEEPassType(view_layer->eevee.render_passes);
+  /* Pre-FX is written by a separate render instance, never accumulated with these passes. */
+  result &= ~EEVEE_RENDER_PASS_PRE_FX;
 
   /* We enforce the use of combined pass to be compliant with Cycles and EEVEE-Legacy (#122188). */
   result |= EEVEE_RENDER_PASS_COMBINED;
@@ -387,10 +389,17 @@ void Film::init(const int2 &extent, const rcti *output_rect)
 
   /* Compute the passes needed by the viewport compositor. */
   Set<std::string> passes_used_by_viewport_compositor;
+  viewport_compositor_enabled_passes_ = eViewLayerEEVEEPassType(0);
   if (inst_.is_viewport_compositor_enabled) {
     passes_used_by_viewport_compositor = bke::compositor::get_used_passes(scene, inst_.view_layer);
     viewport_compositor_enabled_passes_ = get_viewport_compositor_enabled_passes(
         passes_used_by_viewport_compositor, inst_.view_layer);
+  }
+  const bool pre_fx_requested =
+      (inst_.view_layer->eevee.render_passes & EEVEE_RENDER_PASS_PRE_FX) &&
+      passes_used_by_viewport_compositor.contains(Instance::pre_fx_pass_name);
+  if (assign_if_different(pre_fx_compositor_requested_, pre_fx_requested)) {
+    inst_.sampling.reset();
   }
 
   enabled_categories_ = PassCategory(0);
@@ -428,6 +437,9 @@ void Film::init(const int2 &extent, const rcti *output_rect)
           inst_.v3d->shading.render_pass);
       const eViewLayerEEVEEPassType scene_enabled_passes = enabled_passes(inst_.view_layer);
       needed_passes = viewport_compositor_enabled_passes_;
+      if (pre_fx_compositor_requested_) {
+        needed_passes |= EEVEE_RENDER_PASS_COMBINED;
+      }
 
       if (selected_pass == EEVEE_RENDER_PASS_STENCIL_VALUE) {
         needed_passes |= EEVEE_RENDER_PASS_COMBINED;
@@ -1356,8 +1368,35 @@ static eShaderType get_aov_write_pass_shader_type(const ViewLayerAOV *aov)
   return FILM_PASS_CONVERT_VALUE;
 }
 
+void Film::write_viewport_pre_fx()
+{
+  gpu::Texture *input = get_pass_texture(EEVEE_RENDER_PASS_COMBINED, 0);
+  if (!input) {
+    return;
+  }
+  draw::TextureFromPool &output = DRW_viewport_pass_texture_get(Instance::pre_fx_pass_name);
+  output.acquire_2d(display_extent, GPU_texture_format(input));
+  PassSimple pass = {"Film.WriteViewportPreFX"};
+  pass.shader_set(inst_.shaders.static_shader_get(FILM_PASS_CONVERT_COMBINED));
+  pass.push_constant("offset", data_.offset);
+  pass.bind_texture("input_tx", input);
+  pass.bind_image("output_img", output);
+  pass.barrier(GPU_BARRIER_TEXTURE_FETCH);
+  pass.dispatch(math::divide_ceil(display_extent, int2(FILM_GROUP_SIZE)));
+  inst_.manager->submit(pass);
+}
+
 void Film::write_viewport_compositor_passes()
 {
+  if (inst_.is_pre_fx_render) {
+    write_viewport_pre_fx();
+    return;
+  }
+  if (pre_fx_compositor_requested_ && !inst_.depth_of_field.enabled() &&
+      !inst_.motion_blur.postfx_enabled())
+  {
+    write_viewport_pre_fx();
+  }
   this->cryptomatte_sort();
 
   /* Write standard passes. */
