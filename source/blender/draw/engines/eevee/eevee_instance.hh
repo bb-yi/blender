@@ -301,6 +301,11 @@ namespace blender::eevee
       return (loaded_shaders & groups) == groups;
     }
 
+    bool render_is_ready() const
+    {
+      return !skip_render_ && is_loaded(needed_shaders) && film.is_valid_render_extent();
+    }
+
     bool discard_viewport_history() const
     {
       return discard_viewport_history_;

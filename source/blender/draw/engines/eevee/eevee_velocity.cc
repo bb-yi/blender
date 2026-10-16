@@ -49,7 +49,10 @@ void VelocityModule::init()
     const Scene *scene = inst_.scene;
     float initial_time = scene->r.cfra + scene->r.subframe;
     step_sync(STEP_PREVIOUS, initial_time - 1.0f);
-    step_sync(STEP_NEXT, initial_time + 1.0f);
+    /* NR consumes backward motion only; avoid evaluating and copying future geometry. */
+    if (!inst_.is_dlss_guide_render) {
+      step_sync(STEP_NEXT, initial_time + 1.0f);
+    }
     /* Let the main sync loop handle the current step. */
     inst_.set_time(initial_time);
     step_ = STEP_CURRENT;
@@ -57,7 +60,8 @@ void VelocityModule::init()
 
   /* For viewport, only previous motion is supported.
    * Still bind previous step to avoid undefined behavior. */
-  next_step_ = (inst_.is_viewport() || inst_.is_baking()) ? STEP_PREVIOUS : STEP_NEXT;
+  next_step_ = (inst_.is_viewport() || inst_.is_baking() || inst_.is_dlss_guide_render) ?
+                   STEP_PREVIOUS : STEP_NEXT;
 }
 
 /* Similar to Instance::object_sync, but only syncs velocity. */
@@ -194,6 +198,9 @@ bool VelocityModule::step_object_sync(const ObjectHandle &ob_handle,
         object_steps[STEP_PREVIOUS]->get_or_resize(
             vel.obj.ofs[STEP_PREVIOUS]) = ob_handle.object_to_world(i);
       }
+      if (inst_.is_dlss_guide_render) {
+        vel.obj.ofs[STEP_NEXT] = vel.obj.ofs[STEP_PREVIOUS];
+      }
       if (vel.obj.ofs[STEP_NEXT] == -1) {
         if (inst_.is_viewport()) {
           /* Just set it to 0. motion.next is not meant to be valid in the viewport. */
@@ -211,7 +218,7 @@ bool VelocityModule::step_object_sync(const ObjectHandle &ob_handle,
     if (step_ == STEP_CURRENT && has_motion == true && has_deform == false) {
       const float4x4 &obmat_curr = (*object_steps[STEP_CURRENT])[vel.obj.ofs[STEP_CURRENT]];
       const float4x4 &obmat_prev = (*object_steps[STEP_PREVIOUS])[vel.obj.ofs[STEP_PREVIOUS]];
-      if (inst_.is_viewport()) {
+      if (inst_.is_viewport() || inst_.is_dlss_guide_render) {
         any_instance_has_motion |= obmat_curr != obmat_prev;
       }
       else {
@@ -393,6 +400,11 @@ void VelocityModule::end_sync()
                           (vel.geo.len[STEP_PREVIOUS] == GPU_vertbuf_get_vertex_len(pos_buf));
     }
     else {
+      if (inst_.is_dlss_guide_render) {
+        /* Both next-step buffer bindings alias PREVIOUS in the guide path. */
+        vel.geo.ofs[STEP_NEXT] = vel.geo.ofs[STEP_PREVIOUS];
+        vel.geo.len[STEP_NEXT] = vel.geo.len[STEP_PREVIOUS];
+      }
       vel.geo.do_deform = (vel.geo.len[STEP_CURRENT] != 0) &&
                           (vel.geo.len[STEP_CURRENT] == vel.geo.len[STEP_PREVIOUS]) &&
                           (vel.geo.len[STEP_CURRENT] == vel.geo.len[STEP_NEXT]);
@@ -403,10 +415,14 @@ void VelocityModule::end_sync()
   }
 
   object_steps[STEP_PREVIOUS]->push_update();
-  object_steps[STEP_NEXT]->push_update();
+  if (!inst_.is_dlss_guide_render) {
+    object_steps[STEP_NEXT]->push_update();
+  }
   camera_steps[STEP_PREVIOUS]->push_update();
   camera_steps[STEP_CURRENT]->push_update();
-  camera_steps[STEP_NEXT]->push_update();
+  if (!inst_.is_dlss_guide_render) {
+    camera_steps[STEP_NEXT]->push_update();
+  }
   indirection_buf.push_update();
 }
 
@@ -442,8 +458,8 @@ bool VelocityModule::object_is_deform(const Object *ob)
 bool VelocityModule::camera_has_motion() const
 {
   /* Only valid after sync. */
-  if (inst_.is_viewport()) {
-    /* Viewport has no next step. */
+  if (inst_.is_viewport() || inst_.is_dlss_guide_render) {
+    /* These paths have no next step. */
     return *camera_steps[STEP_PREVIOUS] != *camera_steps[STEP_CURRENT];
   }
   return *camera_steps[STEP_PREVIOUS] != *camera_steps[STEP_CURRENT] &&

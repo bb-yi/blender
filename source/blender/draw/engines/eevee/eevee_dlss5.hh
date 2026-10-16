@@ -85,6 +85,8 @@ class Dlss5Module {
   bool color_convert_inverse_ = false;
 
   void publish_status(bool viewport, const char *status);
+  Dlss5NRSettings settings_get() const;
+  bool prepare_session(const Dlss5FrameInputs &inputs);
   bool prepare_display_color(gpu::Texture *source, gpu::Texture *destination);
   bool reconstruct_scene_linear(gpu::Texture *source,
                                 gpu::Texture *input,

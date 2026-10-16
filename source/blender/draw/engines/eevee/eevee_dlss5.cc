@@ -13,6 +13,7 @@
 #include "MEM_guardedalloc.h"
 
 #include <cstdio>
+#include <cmath>
 #include <cstdlib>
 #include <sstream>
 
@@ -128,6 +129,77 @@ void Dlss5Module::publish_status(const bool viewport, const char *status)
   }
 }
 
+Dlss5NRSettings Dlss5Module::settings_get() const
+{
+  return {
+      inst_.scene->eevee.dlss5_intensity,
+      inst_.scene->eevee.dlss5_local_tone_strength,
+      inst_.scene->eevee.dlss5_local_structure_strength,
+      inst_.scene->eevee.dlss5_skin_structure_strength,
+      inst_.scene->eevee.dlss5_use_auto_mask != 0,
+      inst_.scene->eevee.dlss5_ui_correction != 0,
+      int(inst_.scene->eevee.dlss5_style),
+  };
+}
+
+bool Dlss5Module::prepare_session(const Dlss5FrameInputs &inputs)
+{
+  const Dlss5NRSettings settings = settings_get();
+
+  if (inst_.dlss5_settings_changed() ||
+      (retry_blocked_ &&
+       (retry_input_extent_ != inputs.input_extent || retry_output_extent_ != inputs.output_extent)))
+  {
+    retry_blocked_ = false;
+    failure_reported_ = false;
+    d3d12_session_->retry_initialization();
+  }
+  if (retry_blocked_) {
+    return false;
+  }
+
+  if (!inputs.is_viewport && !offline_configured_) {
+    Dlss5OfflineFrame frame;
+    frame.sequence = inst_.render ? inst_.render->re->animation_sequence_id : 0;
+    frame.scene = DEG_get_original(inst_.scene)->id.session_uid;
+    frame.camera = inst_.camera_orig_object ? inst_.camera_orig_object->id.session_uid : 0;
+    frame.layer = inst_.view_layer->name;
+    frame.view = inst_.render ? RE_GetActiveRenderView(inst_.render->re) : "";
+    frame.pre_fx = inst_.is_pre_fx_render;
+    frame.frame = inst_.render ? inst_.render->re->r.cfra : inst_.scene->r.cfra;
+    frame.camera_type = int(inst_.camera.data_get().type);
+    frame.settings = settings;
+    std::ostringstream signature;
+    signature << inputs.input_extent.x << ',' << inputs.input_extent.y << ','
+              << inst_.film.film_offset_get().x << ',' << inst_.film.film_offset_get().y << ','
+              << inst_.scene->eevee.dlss5_mask_aov << ',' << inst_.scene->eevee.dlss5_mask_invert
+              << ',' << inputs.exposure_scale;
+    frame.signature = signature.str();
+    force_history_reset_ = !d3d12_session_->begin_offline_frame(frame);
+    offline_configured_ = true;
+  }
+
+  if (!d3d12_session_->ensure_resources(inputs.input_extent,
+                                        inputs.output_extent,
+                                        inputs.output_extent,
+                                        settings,
+                                        false,
+                                        inputs.depth_is_reverse_z))
+  {
+    retry_blocked_ = true;
+    retry_input_extent_ = inputs.input_extent;
+    retry_output_extent_ = inputs.output_extent;
+    publish_status(inputs.is_viewport, d3d12_session_->status());
+    if (!failure_reported_) {
+      CLOG_WARN(&Instance::log, "DLSS5 disabled until settings change: %s",
+                d3d12_session_->status());
+      failure_reported_ = true;
+    }
+    return false;
+  }
+  return true;
+}
+
 gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs,
                                    draw::View &view,
                                    VelocityModule &velocity)
@@ -205,65 +277,8 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs,
   if (guide_extent.x < 32 || guide_extent.y < 32) {
     return inputs.color;
   }
-  const Dlss5NRSettings settings = {
-      inst_.scene->eevee.dlss5_intensity,
-      inst_.scene->eevee.dlss5_local_tone_strength,
-      inst_.scene->eevee.dlss5_local_structure_strength,
-      inst_.scene->eevee.dlss5_skin_structure_strength,
-      inst_.scene->eevee.dlss5_use_auto_mask != 0,
-      inst_.scene->eevee.dlss5_ui_correction != 0,
-      int(inst_.scene->eevee.dlss5_style),
-  };
-
-  if (inst_.dlss5_settings_changed() ||
-      (retry_blocked_ &&
-       (retry_input_extent_ != inputs.input_extent || retry_output_extent_ != inputs.output_extent)))
-  {
-    retry_blocked_ = false;
-    failure_reported_ = false;
-    d3d12_session_->retry_initialization();
-  }
-  if (retry_blocked_) {
-    return inputs.color;
-  }
-
-  if (!inputs.is_viewport && !offline_configured_) {
-    Dlss5OfflineFrame frame;
-    frame.sequence = inst_.render ? inst_.render->re->animation_sequence_id : 0;
-    frame.scene = DEG_get_original(inst_.scene)->id.session_uid;
-    frame.camera = inst_.camera_orig_object ? inst_.camera_orig_object->id.session_uid : 0;
-    frame.layer = inst_.view_layer->name;
-    frame.view = inst_.render ? RE_GetActiveRenderView(inst_.render->re) : "";
-    frame.pre_fx = inst_.is_pre_fx_render;
-    frame.frame = inst_.render ? inst_.render->re->r.cfra : inst_.scene->r.cfra;
-    frame.camera_type = int(inst_.camera.data_get().type);
-    frame.settings = settings;
-    std::ostringstream signature;
-    signature << inputs.input_extent.x << ',' << inputs.input_extent.y << ','
-              << inst_.film.film_offset_get().x << ',' << inst_.film.film_offset_get().y << ','
-              << inst_.scene->eevee.dlss5_mask_aov << ',' << inst_.scene->eevee.dlss5_mask_invert
-              << ',' << inputs.exposure_scale;
-    frame.signature = signature.str();
-    force_history_reset_ = !d3d12_session_->begin_offline_frame(frame);
-    offline_configured_ = true;
-  }
-
-  if (!d3d12_session_->ensure_resources(inputs.input_extent,
-                                        inputs.output_extent,
-                                        inputs.output_extent,
-                                        settings,
-                                        false,
-                                        inputs.depth_is_reverse_z))
-  {
-    retry_blocked_ = true;
-    retry_input_extent_ = inputs.input_extent;
-    retry_output_extent_ = inputs.output_extent;
-    publish_status(inputs.is_viewport, d3d12_session_->status());
-    if (!failure_reported_) {
-      CLOG_WARN(&Instance::log, "DLSS5 disabled until settings change: %s",
-                d3d12_session_->status());
-      failure_reported_ = true;
-    }
+  const Dlss5NRSettings settings = settings_get();
+  if (!prepare_session(inputs)) {
     return inputs.color;
   }
 
@@ -428,6 +443,22 @@ void Dlss5Module::render_final()
   {
     return;
   }
+  last_display_texture_ = nullptr;
+  const int2 output_extent = inst_.film.film_extent_get();
+  if (!dlss5_extent_supported(output_extent)) {
+    publish_status(false, "Bypassed: DLSSNR needs edges >= 32px and at least one edge > 64px");
+    return;
+  }
+  if (!inst_.film.dlss_mask_valid()) {
+    publish_status(false, "Bypassed: mask AOV missing, invalid or not Value");
+    return;
+  }
+  Dlss5FrameInputs preflight;
+  preflight.input_extent = preflight.output_extent = output_extent;
+  preflight.exposure_scale = exp2f(inst_.scene->view_settings.exposure);
+  if (!prepare_session(preflight)) {
+    return;
+  }
   /* The main Film is already resolved. Sync a depth/velocity-only instance at output-frame
    * time, independent of the last shutter/lens sample. Do not change camera/scene settings. */
   auto guide = std::make_unique<Instance>();
@@ -443,12 +474,29 @@ void Dlss5Module::render_final()
               inst_.depsgraph,
               inst_.camera_orig_object,
               inst_.render_layer);
+  auto guides_ready = [&]() {
+    if (!guide->render_is_ready() || std::getenv("BLENDER_DLSS_NR_TEST_GUIDE_FAILURE")) {
+      force_history_reset_ = true;
+      publish_status(false, "Bypassed: NR guide initialization failed");
+      CLOG_WARN(&Instance::log, "DLSSNR guides unavailable: %s", guide->info_get());
+      return false;
+    }
+    return true;
+  };
+  if (!guides_ready()) {
+    return;
+  }
+  CLOG_INFO(&Instance::log, "DLSS_GUIDE begin frame=%d", inst_.scene->r.cfra);
   guide->render_sync();
   while (guide->materials.queued_shaders_count > 0 || guide->materials.queued_textures_count > 0) {
     guide->wait_for_material_passes();
     guide->render_sync();
   }
   if (RE_engine_test_break(inst_.render)) {
+    publish_status(false, "Bypassed: render cancelled during NR guide preparation");
+    return;
+  }
+  if (!guides_ready()) {
     return;
   }
   DRW_submission_start();

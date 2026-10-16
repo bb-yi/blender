@@ -1105,6 +1105,8 @@ static void do_render_compositor_scene(Render *re, Scene *sce, int cfra)
   resc->scene = sce;
 
   RE_display_share(resc, re);
+  /* Composited scenes belong to the same output animation, with separate NR streams. */
+  resc->animation_sequence_id = re->animation_sequence_id;
 
   do_render_engine(resc);
 

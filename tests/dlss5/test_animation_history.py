@@ -115,9 +115,55 @@ def child():
             scene.eevee.dlss5_intensity = 1 if scene.frame_current < 3 else .5
         bpy.app.handlers.render_pre.append(settings)
 
+    secondary = None
+    if scenario == 'compositor':
+        secondary = s.copy()
+        secondary.name = 'NR Secondary Scene'
+        tree = bpy.data.node_groups.new('NR Scene Composite', 'CompositorNodeTree')
+        tree.interface.new_socket(name='Image', in_out='OUTPUT', socket_type='NodeSocketColor')
+        s.compositing_node_group = tree
+        s.render.use_compositing = True
+        primary_node = tree.nodes.new('CompositorNodeRLayers')
+        secondary_node = tree.nodes.new('CompositorNodeRLayers')
+        secondary_node.scene = secondary
+        mix = tree.nodes.new('CompositorNodeAlphaOver')
+        mix.inputs['Factor'].default_value = .5
+        output = tree.nodes.new('NodeGroupOutput')
+        tree.links.new(primary_node.outputs['Image'], mix.inputs['Background'])
+        tree.links.new(secondary_node.outputs['Image'], mix.inputs['Foreground'])
+        tree.links.new(mix.outputs[0], output.inputs['Image'])
+
+    if scenario == 'missing_mask':
+        s.eevee.dlss5_mask_aov = 'No Such Value AOV'
+    if scenario == 'small':
+        s.render.resolution_x = s.render.resolution_y = 32
+    if scenario == 'guide_failure':
+        def fail_one_frame(scene):
+            if scene.frame_current == 2:
+                os.environ['BLENDER_DLSS_NR_TEST_GUIDE_FAILURE'] = '1'
+            else:
+                os.environ.pop('BLENDER_DLSS_NR_TEST_GUIDE_FAILURE', None)
+        bpy.app.handlers.render_pre.append(fail_one_frame)
+
+    visits = []
+    frame_times = {}
+    if scenario == 'backward':
+        s.view_layers[0].use_pass_vector = False
+        def start_frame(_scene):
+            visits.clear()
+        def changed(scene, _depsgraph=None):
+            if scene == s:
+                visits.append(scene.frame_current + scene.frame_subframe)
+        bpy.app.handlers.render_pre.append(start_frame)
+        bpy.app.handlers.frame_change_post.append(changed)
+
     statuses = []
     def written(scene):
         statuses.append(scene.eevee.dlss5_render_status)
+        if scenario == 'backward':
+            frame_times[scene.frame_current] = list(visits)
+            assert visits and max(visits) <= scene.frame_current, (scene.frame_current, visits)
+            assert scene.frame_current-1 in visits, (scene.frame_current, visits)
     bpy.app.handlers.render_write.append(written)
     arrays = {}
     repeats = 2 if scenario == 'temporal' else 1
@@ -131,10 +177,38 @@ def child():
             data = image.read_image(format='float')
             assert np.isfinite(data).all()
             names = list(spec.channelnames)
-            rgba = np.stack([data[...,names.index('ViewLayer.Combined.'+c)] for c in 'RGBA'],axis=-1)
+            prefix = 'Composite.Combined.' if scenario == 'compositor' else 'ViewLayer.Combined.'
+            rgba = np.stack([data[...,names.index(prefix+c)] for c in 'RGBA'],axis=-1)
             arrays[f'{run}_{frame}'] = rgba
             image.close()
-    assert statuses and all(v.startswith('Completed') for v in statuses), statuses
+    bpy.app.handlers.render_write.remove(written)
+    if scenario in ('missing_mask', 'small'):
+        assert statuses and all(v.startswith('Bypassed:') for v in statuses), statuses
+    elif scenario == 'guide_failure':
+        assert len(statuses) == 5 and 'guide initialization failed' in statuses[1], statuses
+        assert all(statuses[i].startswith('Completed') for i in (0,2,3,4)), statuses
+    else:
+        assert statuses and all(v.startswith('Completed') for v in statuses), statuses
+    if secondary:
+        assert secondary.eevee.dlss5_render_status.startswith('Completed')
+    if frame_times:
+        assert len(frame_times) == 5, frame_times
+        for frame, times in frame_times.items():
+            assert times and max(times) <= frame and frame-1 in times, (frame, times)
+        (target/'frame_times.json').write_text(json.dumps(frame_times,indent=2),encoding='utf-8')
+    if scenario in ('missing_mask','small','guide_failure'):
+        os.environ.pop('BLENDER_DLSS_NR_TEST_GUIDE_FAILURE',None)
+        frame = 2 if scenario == 'guide_failure' else 1
+        s.eevee.dlss5_mode = 'OFF'
+        s.frame_set(frame)
+        s.render.filepath = str(target/'native.exr')
+        bpy.ops.render.render(write_still=True)
+        image = oiio.ImageInput.open(s.render.filepath)
+        names = list(image.spec().channelnames)
+        data = image.read_image(format='float')
+        native = np.stack([data[...,names.index('ViewLayer.Combined.'+c)] for c in 'RGBA'],axis=-1)
+        image.close()
+        np.testing.assert_allclose(arrays[f'0_{frame}'],native,rtol=.003,atol=.003)
     if repeats == 2:
         for frame in range(1,6):
             np.testing.assert_allclose(arrays[f'0_{frame}'],arrays[f'1_{frame}'],rtol=.003,atol=.003)
@@ -157,15 +231,23 @@ else:
     assert os.environ.get('BLENDER_USER_RESOURCES'), 'User resources must be isolated'
     reports = {'pre_fx_available': HAS_PRE_FX}
     scenarios = ['temporal', 'reset', 'cache_off', 'skip', 'camera', 'settings',
-                 'layers', 'motion_blur', 'motion']
+                 'layers', 'motion_blur', 'motion', 'compositor', 'backward',
+                 'missing_mask', 'small', 'guide_failure']
     if HAS_PRE_FX:
         scenarios.append('prefx')
+    selected = os.environ.get('DLSS_ANIMATION_SCENARIOS')
+    if selected:
+        requested = set(selected.split(','))
+        assert requested <= set(scenarios), requested
+        scenarios = [name for name in scenarios if name in requested]
+    reports['executed_scenarios'] = scenarios
     for scenario in scenarios:
         env = dict(os.environ,DLSS_ANIMATION_CHILD=scenario,DLSS_ANIMATION_TEST_OUT=str(OUT),
                    DLSS5_CACHE_DIR=str(OUT/'ngx-cache'))
         env.pop('BLENDER_DLSS_NR_FORCE_RESET',None)
         env.pop('BLENDER_DLSS_NR_DUMP_INPUTS',None)
         env.pop('BLENDER_DLSS_DISABLE_SESSION_CACHE',None)
+        env.pop('BLENDER_DLSS_NR_TEST_GUIDE_FAILURE',None)
         proc = subprocess.run([bpy.app.binary_path,'--background','--factory-startup',
                                '--gpu-backend','vulkan','--log','eevee','--log-level','info',
                                '--python-exit-code','1','--python',str(Path(__file__).resolve())],
@@ -187,20 +269,28 @@ else:
         elif scenario == 'layers':
             streams = 3 if HAS_PRE_FX else 2
             assert resets == ['1']*streams+['0']*(streams*4),resets
+        elif scenario == 'compositor':
+            assert resets == ['1','1']+['0','0']*4,resets
+        elif scenario == 'guide_failure':
+            assert resets == ['1','0','1','0','0'],resets
+        elif scenario in ('missing_mask','small'):
+            assert not resets and 'DLSS_GUIDE begin' not in log,(scenario,resets)
         else:
             assert resets == ['1','0','0','0','0'],(scenario,resets)
         reports[scenario] = dict(pass_status=True,resets=resets)
-    with np.load(OUT/'temporal/pixels.npz') as temporal, np.load(OUT/'reset/pixels.npz') as reset:
-        np.testing.assert_allclose(temporal['0_1'],reset['0_1'],rtol=.003,atol=.003)
-        difference = np.mean([np.abs(temporal[f'0_{f}']-reset[f'0_{f}']).mean() for f in range(2,6)])
-        assert difference > 1e-6, ('History produced no pixel effect',difference)
-        reports['history_rgb_difference'] = float(difference)
-        with np.load(OUT/'cache_off/pixels.npz') as uncached:
-            for frame in range(1,6):
-                np.testing.assert_allclose(temporal[f'0_{frame}'],uncached[f'0_{frame}'],rtol=.003,atol=.003)
-        if HAS_PRE_FX:
-            with np.load(OUT/'prefx/pixels.npz') as prefx:
-                for frame in range(1,6):
-                    np.testing.assert_allclose(temporal[f'0_{frame}'],prefx[f'0_{frame}'],rtol=.003,atol=.003)
+    if 'temporal' in scenarios and 'reset' in scenarios:
+        with np.load(OUT/'temporal/pixels.npz') as temporal, np.load(OUT/'reset/pixels.npz') as reset:
+            np.testing.assert_allclose(temporal['0_1'],reset['0_1'],rtol=.003,atol=.003)
+            difference = np.mean([np.abs(temporal[f'0_{f}']-reset[f'0_{f}']).mean() for f in range(2,6)])
+            assert difference > 1e-6, ('History produced no pixel effect',difference)
+            reports['history_rgb_difference'] = float(difference)
+            if 'cache_off' in scenarios:
+                with np.load(OUT/'cache_off/pixels.npz') as uncached:
+                    for frame in range(1,6):
+                        np.testing.assert_allclose(temporal[f'0_{frame}'],uncached[f'0_{frame}'],rtol=.003,atol=.003)
+            if HAS_PRE_FX and 'prefx' in scenarios:
+                with np.load(OUT/'prefx/pixels.npz') as prefx:
+                    for frame in range(1,6):
+                        np.testing.assert_allclose(temporal[f'0_{frame}'],prefx[f'0_{frame}'],rtol=.003,atol=.003)
     (OUT/'report.json').write_text(json.dumps(reports,indent=2),encoding='utf-8')
     print('DLSS_ANIMATION_HISTORY_PASS',flush=True)

@@ -160,6 +160,9 @@ void RenderBuffers::release()
 
 gpu::TextureFormat RenderBuffers::vector_tx_format()
 {
+  if (inst_.is_dlss_guide_render) {
+    return gpu::TextureFormat::SFLOAT_16_16;
+  }
   const eViewLayerEEVEEPassType enabled_passes = inst_.film.render_buffer_passes_get();
   bool do_full_vector_render_pass = ((enabled_passes & EEVEE_RENDER_PASS_VECTOR) ||
                                      inst_.motion_blur.postfx_enabled()) &&

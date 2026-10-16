@@ -707,6 +707,10 @@ void Film::init(const int2 &extent, const rcti *output_rect)
       enabled_categories_ |= PASS_CATEGORY_CRYPTOMATTE;
     }
   }
+  /* Guides use Film metadata for camera/material setup, but never accumulate an image. */
+  if (inst_.is_dlss_guide_render) {
+    return;
+  }
   {
     int2 weight_extent = (data_.sr_active || inst_.camera.is_panoramic() ||
                           (data_.scaling_factor > 1)) ?
@@ -761,6 +765,9 @@ void Film::init(const int2 &extent, const rcti *output_rect)
 
 void Film::sync()
 {
+  if (inst_.is_dlss_guide_render) {
+    return;
+  }
   nr_mask_id_ = -1;
   if (nr_mask_aov_) {
     const uint hash = BLI_hash_string(nr_mask_aov_->name);
@@ -881,6 +888,11 @@ void Film::init_pass(PassSimple &pass, gpu::Shader *sh)
 
 void Film::end_sync()
 {
+  if (inst_.is_dlss_guide_render) {
+    /* Render Texture captures can still bind AOV metadata while producing guide dependencies. */
+    aovs_info.push_update();
+    return;
+  }
   use_reprojection_ = inst_.sampling.interactive_mode();
 
   if (inst_.is_viewport()) {
@@ -1204,6 +1216,12 @@ void Film::accumulate(View &view,
   }
 }
 
+bool Film::dlss_mask_valid()
+{
+  return !inst_.scene->eevee.dlss5_mask_aov[0] ||
+         (nr_mask_aov_ && get_aov_texture(nr_mask_aov_));
+}
+
 gpu::Texture *Film::process_dlss(View &view, Instance &guides)
 {
   gpu::Texture *color = combined_output_tx_.gpu_texture();
@@ -1225,7 +1243,7 @@ gpu::Texture *Film::process_dlss(View &view, Instance &guides)
        viewport ? inst_.dlss5_reset() : inst_.is_viewport(), viewport, true, true, true, false,
        exp2f(inst_.scene->view_settings.exposure),
        nr_mask_aov_ ? get_aov_texture(nr_mask_aov_) : nullptr,
-       !inst_.scene->eevee.dlss5_mask_aov[0] || (nr_mask_aov_ && get_aov_texture(nr_mask_aov_)),
+       dlss_mask_valid(),
        viewport ? (data_.sr_active ? data_.sr_render_ratio : float2(0.0f)) : ratio},
       view, guides.velocity);
   if (inst_.is_image_render && output && inst_.dlss5.display_texture() == output) {
