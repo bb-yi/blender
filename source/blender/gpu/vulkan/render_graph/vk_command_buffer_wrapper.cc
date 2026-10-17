@@ -25,12 +25,15 @@ void VKCommandBufferWrapper::begin_recording()
       nullptr,
       VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
       nullptr};
-  vkBeginCommandBuffer(vk_command_buffer_, &vk_command_buffer_begin_info);
+  VKBackend::get().device.submission_error_set(
+      vkBeginCommandBuffer(vk_command_buffer_, &vk_command_buffer_begin_info),
+      "vkBeginCommandBuffer");
 }
 
 void VKCommandBufferWrapper::end_recording()
 {
-  vkEndCommandBuffer(vk_command_buffer_);
+  VKBackend::get().device.submission_error_set(vkEndCommandBuffer(vk_command_buffer_),
+                                               "vkEndCommandBuffer");
 }
 
 void VKCommandBufferWrapper::bind_pipeline(VkPipelineBindPoint pipeline_bind_point,

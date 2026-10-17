@@ -182,8 +182,12 @@ void VKBuffer::read_async(VKContext &context, void *data)
     async_flush_to_host(context);
   }
   VKDevice &device = VKBackend::get().device;
-  device.wait_for_timeline(async_timeline_);
+  const bool completed = device.wait_for_timeline(async_timeline_);
   async_timeline_ = 0;
+  if (!completed) {
+    memset(data, 0, size_in_bytes_);
+    return;
+  }
   memcpy(data, mapped_memory_, size_in_bytes_);
 }
 
@@ -193,9 +197,13 @@ void VKBuffer::read(VKContext &context, void *data) const
   BLI_assert_msg(is_mapped(), "Cannot read a non-mapped buffer.");
   BLI_assert(async_timeline_ == 0);
   context.rendering_end();
-  context.flush_render_graph(RenderGraphFlushFlags::SUBMIT |
-                             RenderGraphFlushFlags::WAIT_FOR_COMPLETION |
-                             RenderGraphFlushFlags::RENEW_RENDER_GRAPH);
+  const TimelineValue timeline = context.flush_render_graph(
+      RenderGraphFlushFlags::SUBMIT | RenderGraphFlushFlags::WAIT_FOR_COMPLETION |
+      RenderGraphFlushFlags::RENEW_RENDER_GRAPH);
+  if (timeline == 0) {
+    memset(data, 0, size_in_bytes_);
+    return;
+  }
   memcpy(data, mapped_memory_, size_in_bytes_);
 }
 

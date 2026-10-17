@@ -904,11 +904,15 @@ if(WITH_GPU_RENDER_TESTS)
     render_info_stages
     tessellation_default_coordinates
     filter_stage_pool
+    vulkan_failure_recovery
   )
   foreach(backend IN ITEMS opengl vulkan)
     string(TOUPPER "${backend}" backend_upper)
     if(WITH_${backend_upper}_BACKEND AND (backend STREQUAL "opengl" OR WITH_GPU_RENDER_TESTS_VULKAN))
       foreach(test IN LISTS npr_material_tests)
+        if(test STREQUAL "vulkan_failure_recovery" AND NOT backend STREQUAL "vulkan")
+          continue()
+        endif()
         set(test_name "npr_${test}_${backend}")
         set(test_output "${TEST_OUT_DIR}/${test_name}")
         file(MAKE_DIRECTORY
@@ -925,6 +929,9 @@ if(WITH_GPU_RENDER_TESTS)
           "BLENDER_USER_DATAFILES=${test_output}/user/datafiles"
           "BLENDER_USER_EXTENSIONS=${test_output}/user/extensions"
         )
+        if(test STREQUAL "vulkan_failure_recovery")
+          list(APPEND test_environment "NPR_FAILURE_TEST_OUT=${test_output}")
+        endif()
         add_blender_test_impl(${test_name} "${test_environment}" "${TEST_BLENDER_EXE}"
           ${TEST_BLENDER_EXE_PARAMS}
           "${TEST_BLENDER_EXE_PARAMS_NO_THUMB}"
