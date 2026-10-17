@@ -34,7 +34,11 @@
 
 #include "CLG_log.h"
 
+#include <type_traits>
+
 namespace blender {
+
+static_assert(std::extent_v<decltype(bke::ImageRuntime::gputexture)> == TEXTARGET_COUNT);
 
 static CLG_LogRef LOG = {"gpu.texture"};
 
@@ -290,6 +294,16 @@ static gpu::Texture *image_gpu_texture_error_create(eGPUTextureTarget textarget)
 {
   CLOG_ERROR(&LOG, "Failed to create GPU texture from Blender image");
   switch (textarget) {
+    case TEXTARGET_CUBE: {
+      const float pixels[24] = {1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1,
+                                1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1};
+      return GPU_texture_create_cube("Invalid Cube Strip",
+                                     1,
+                                     1,
+                                     gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                     GPU_TEXTURE_USAGE_SHADER_READ,
+                                     pixels);
+    }
     case TEXTARGET_3D_LUT_STRIP:
       return GPU_texture_create_error(3, false);
     case TEXTARGET_2D_ARRAY:
@@ -515,7 +529,8 @@ static ImageGPUTextures image_get_gpu_texture(Image *ima,
                                               const int lut_3d_width,
                                               const int lut_3d_height,
                                               const int lut_3d_depth,
-                                              bool try_only)
+                                              bool try_only,
+                                              bool use_cube_strip = false)
 {
   ImageGPUTextures result = {};
 
@@ -561,7 +576,10 @@ static ImageGPUTextures image_get_gpu_texture(Image *ima,
 
   /* Test if we need to get a tiled array texture. */
   eGPUTextureTarget textarget = TEXTARGET_2D;
-  if (use_3d_lut_strip) {
+  if (use_cube_strip) {
+    textarget = TEXTARGET_CUBE;
+  }
+  else if (use_3d_lut_strip) {
     textarget = TEXTARGET_3D_LUT_STRIP;
   }
   else if (use_tile_mapping && ima->source == IMA_SRC_TILED) {
@@ -628,6 +646,40 @@ static ImageGPUTextures image_get_gpu_texture(Image *ima,
     *result.texture = gpu_texture_create_tile_array(ima, ibuf);
     *result.tile_mapping = gpu_texture_create_tile_mapping(ima, iuser ? iuser->multiview_eye : 0);
   }
+  else if (textarget == TEXTARGET_CUBE) {
+    const int size = ibuf->y;
+    if (size > 0 && int64_t(ibuf->x) == int64_t(size) * 6 && size <= GPU_max_texture_size()) {
+      const size_t pixels_num = size_t(ibuf->x) * size_t(size);
+      float *faces = MEM_new_array_uninitialized<float>(pixels_num * 4, __func__);
+      /* Horizontal +X, -X, +Y, -Y, +Z, -Z strip; preserve each face's pixel rows. */
+      for (int face = 0; face < 6; face++) {
+        IMB_colormanagement_imbuf_to_float_texture(
+            faces + 4 * size_t(face) * size * size,
+            face * size,
+            0,
+            size,
+            size,
+            ibuf,
+            BKE_image_has_gpu_texture_premultiplied_alpha(ima, ibuf));
+      }
+      *result.texture = GPU_texture_create_cube(ima->id.name + 2,
+                                                size,
+                                                9999,
+                                                gpu::TextureFormat::SFLOAT_32_32_32_32,
+                                                GPU_TEXTURE_USAGE_SHADER_READ,
+                                                faces);
+      MEM_delete(faces);
+      if (*result.texture) {
+        GPU_texture_update_mipmap_chain(*result.texture);
+        GPU_texture_mipmap_mode(*result.texture, true, true);
+      }
+    }
+    else {
+      CLOG_ERROR(&LOG,
+                 "Cube Strip '%s' requires six square faces in a horizontal strip",
+                 ima->id.name + 2);
+    }
+  }
   else if (textarget == TEXTARGET_3D_LUT_STRIP) {
     *result.texture = image_gpu_texture_3d_lut_strip_create(
         ima, ibuf, lut_3d_width, lut_3d_height, lut_3d_depth);
@@ -691,6 +743,14 @@ ImageGPUTextures BKE_image_get_gpu_material_texture_try(Image *image,
 {
   return image_get_gpu_texture(
       image, iuser, nullptr, false, use_tile_mapping, false, 0, 0, 0, true);
+}
+
+ImageGPUTextures BKE_image_get_gpu_material_cube_texture(Image *image,
+                                                         ImageUser *iuser,
+                                                         bool try_only)
+{
+  return image_get_gpu_texture(
+      image, iuser, nullptr, false, false, false, 0, 0, 0, try_only, true);
 }
 
 ImageGPUTextures BKE_image_get_gpu_material_3d_lut_texture(Image *image,
@@ -1098,6 +1158,9 @@ static void image_update_gputexture_ex(
 
   if (tile == ima->tiles.first) {
     image_free_gpu_3d_lut_textures(ima, true);
+    for (int view = 0; view < 2; view++) {
+      GPU_TEXTURE_FREE_SAFE(ima->runtime->gputexture[TEXTARGET_CUBE][view]);
+    }
   }
 
   /* Check if we need to update the array gputexture. */

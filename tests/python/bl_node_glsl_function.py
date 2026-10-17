@@ -478,7 +478,7 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(glsl_node.parse_status, 'ERROR')
 
-    def test_top_level_conditional_function_errors(self):
+    def test_known_top_level_conditional_function_parses(self):
         _, tree = self.make_material_tree()
         glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
         source = (
@@ -495,6 +495,20 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.configure_glsl_node(
             glsl_node, "glsl_conditional_top_level_function.glsl", "conditional_export")
 
+        self.assertEqual(glsl_node.parse_status, 'READY')
+
+    def test_unknown_top_level_conditional_function_errors(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "#ifdef GPU_FRAGMENT_SHADER\n"
+            "vec4 conditional_helper(vec4 color){return color + vec4(0.1);}\n"
+            "#endif\n"
+            "vec4 conditional_export(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_conditional_unknown_function.glsl", source)
+        self.configure_glsl_node(
+            glsl_node, "glsl_conditional_unknown_function.glsl", "conditional_export")
         self.assertEqual(glsl_node.parse_status, 'ERROR')
 
     def test_top_level_preprocessor_only_conditional_parses(self):

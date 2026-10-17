@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <optional>
 
 #include "BLI_hash.h"
 #include "BLI_listbase.h"
@@ -28,8 +29,9 @@
 
 #include "NOD_filter_graph.hh"
 
-#include "GPU_material.hh"
+#include "GPU_capabilities.hh"
 #include "GPU_framebuffer.hh"
+#include "GPU_material.hh"
 #include "GPU_texture.hh"
 
 #include "eevee_filter_material.hh"
@@ -39,8 +41,11 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "CLG_log.h"
 
 namespace blender::eevee {
+
+static CLG_LogRef LOG = {"eevee.filter_graph"};
 
 static constexpr uint32_t FILTER_TEX_HANDLE_NULL = TEX_HANDLE_NULL;
 static constexpr uint32_t FILTER_TEX_HANDLE_RP_COLOR = TEX_HANDLE_RP_COLOR;
@@ -162,28 +167,15 @@ static bool filter_graph_enabled(const Scene &scene)
   return scene.eevee.filter_graph != nullptr;
 }
 
-static int filter_graph_resolution_divisor(const float resolution_scale)
+static std::optional<int2> filter_graph_scaled_extent(const int2 base, const float scale)
 {
-  if (resolution_scale <= 0.07f) {
-    return 16;
+  const double x = std::ceil(double(base.x) * double(scale));
+  const double y = std::ceil(double(base.y) * double(scale));
+  const int limit = GPU_max_texture_size();
+  if (!std::isfinite(x) || !std::isfinite(y) || scale <= 0.0f || x > limit || y > limit) {
+    return std::nullopt;
   }
-  if (resolution_scale <= 0.14f) {
-    return 8;
-  }
-  if (resolution_scale <= 0.30f) {
-    return 4;
-  }
-  if (resolution_scale <= 0.75f) {
-    return 2;
-  }
-  return 1;
-}
-
-static int2 filter_graph_scaled_extent(const int2 stage_extent, const float resolution_scale)
-{
-  const int divisor = filter_graph_resolution_divisor(resolution_scale);
-  return int2(math::max(1, int(std::ceil(float(stage_extent.x) / float(divisor)))),
-              math::max(1, int(std::ceil(float(stage_extent.y) / float(divisor)))));
+  return int2(int(std::max(1.0, x)), int(std::max(1.0, y)));
 }
 
 static int filter_graph_resample_mode_for_source(const int source_kind)
@@ -1030,13 +1022,21 @@ bool FilterMaterialModule::uses_aov_name(const char *name) const
   return false;
 }
 
-void FilterMaterialModule::reset_graph_texture_pool(const int2 stage_extent)
+void FilterMaterialModule::reset_graph_texture_pool(const int2 stage_extent,
+                                                    const SceneEEVEEFilterExecutionStage stage)
 {
-  if (!filter_graph_extent_matches(graph_texture_pool_stage_extent_, stage_extent)) {
-    graph_texture_pool_.clear();
-    graph_texture_pool_stage_extent_ = stage_extent;
+  active_graph_texture_pool_ = int(stage);
+  BLI_assert(active_graph_texture_pool_ >= 0 &&
+             active_graph_texture_pool_ < graph_texture_pools_.size());
+  GraphTexturePool &pool = graph_texture_pools_[active_graph_texture_pool_];
+  if (!filter_graph_extent_matches(pool.stage_extent, stage_extent)) {
+    pool.entries.clear();
+    pool.stage_extent = stage_extent;
   }
-  for (GraphTexturePoolEntry &entry : graph_texture_pool_) {
+  /* Drop entries that were not needed by the previous stage execution. Stage results are
+   * resolved into ping/pong textures, so no graph-local handles escape render_stage(). */
+  std::erase_if(pool.entries, [](const GraphTexturePoolEntry &entry) { return !entry.used; });
+  for (GraphTexturePoolEntry &entry : pool.entries) {
     entry.used = false;
   }
 }
@@ -1047,12 +1047,34 @@ Texture *FilterMaterialModule::acquire_graph_texture(const char *name,
                                                      const int layers)
 {
   const int layer_count = math::max(1, layers);
-  for (GraphTexturePoolEntry &entry : graph_texture_pool_) {
+  std::vector<GraphTexturePoolEntry> &entries =
+      graph_texture_pools_[active_graph_texture_pool_].entries;
+  for (GraphTexturePoolEntry &entry : entries) {
     if (!entry.used && entry.format == format && filter_graph_extent_matches(entry.extent, extent) &&
         entry.layers == layer_count)
     {
       entry.used = true;
       entry.texture->ensure_2d_array(format, extent, layer_count, GPU_TEXTURE_USAGE_GENERAL);
+      return entry.texture.get();
+    }
+  }
+
+  /* A continuously edited scale produces a new extent on almost every redraw. Reconfigure an
+   * unused slot instead of retaining a texture for every historical size. Never reuse a slot
+   * already referenced by the current graph's handles or resampling caches. */
+  for (GraphTexturePoolEntry &entry : entries) {
+    if (!entry.used) {
+      entry.format = format;
+      entry.extent = extent;
+      entry.layers = layer_count;
+      entry.used = true;
+      entry.texture->ensure_2d_array(format, extent, layer_count, GPU_TEXTURE_USAGE_GENERAL);
+      CLOG_DEBUG(&LOG,
+                 "Texture allocation: stage=%d size=%dx%d layers=%d",
+                 active_graph_texture_pool_,
+                 extent.x,
+                 extent.y,
+                 layer_count);
       return entry.texture.get();
     }
   }
@@ -1064,8 +1086,14 @@ Texture *FilterMaterialModule::acquire_graph_texture(const char *name,
   entry.layers = layer_count;
   entry.used = true;
   entry.texture->ensure_2d_array(format, extent, layer_count, GPU_TEXTURE_USAGE_GENERAL);
-  graph_texture_pool_.push_back(std::move(entry));
-  return graph_texture_pool_.back().texture.get();
+  CLOG_DEBUG(&LOG,
+             "Texture allocation: stage=%d size=%dx%d layers=%d",
+             active_graph_texture_pool_,
+             extent.x,
+             extent.y,
+             layer_count);
+  entries.push_back(std::move(entry));
+  return entries.back().texture.get();
 }
 
 void FilterMaterialModule::update_filter_object_mask_buffer(GPUMaterial *gpumat)
@@ -1188,6 +1216,20 @@ void FilterMaterialModule::begin_sync()
 {
   entries_.clear();
   uses_scene_time_ = false;
+  if (filter_graph_enabled(*inst_.scene)) {
+    inst_.scene->eevee.filter_graph->ensure_topology_cache();
+  }
+  for (int stage = 0; stage < graph_texture_pools_.size(); stage++) {
+    if (!has_stage_entries(SceneEEVEEFilterExecutionStage(stage))) {
+      if (!graph_texture_pools_[stage].entries.empty()) {
+        CLOG_DEBUG(&LOG, "Release inactive stage: stage=%d", stage);
+      }
+      graph_texture_pools_[stage].entries.clear();
+    }
+  }
+  if (!filter_graph_enabled(*inst_.scene)) {
+    graph_input_fbs_.clear();
+  }
 
   if (filter_graph_enabled(*inst_.scene)) {
     bNodeTree *filter_graph = inst_.scene->eevee.filter_graph;
@@ -1312,7 +1354,7 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
   Texture &stage_tx = (input_tx == ping_tx_.gpu_texture()) ? pong_tx_ : ping_tx_;
   const GPUSamplerState nearest_sampler = GPUSamplerState::default_sampler();
   const GPUSamplerState linear_sampler = {GPU_SAMPLER_FILTERING_LINEAR};
-  reset_graph_texture_pool(extent);
+  reset_graph_texture_pool(extent, stage);
 
   auto black_graph_output = [&]() -> gpu::Texture * {
     graph_black_tx_.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
@@ -1478,9 +1520,11 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     const float clear_color[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     GPU_texture_clear(output_tx, GPU_DATA_FLOAT, clear_color);
     GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_SHADER_IMAGE_ACCESS);
-    pass_tx_.ensure_2d(
-        gpu::TextureFormat::SFLOAT_16_16_16_16, pass_extent, GPU_TEXTURE_USAGE_GENERAL);
-    framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(pass_tx_));
+    Texture *pass_tx = acquire_graph_texture(
+        "FilterMaterial.Pass", gpu::TextureFormat::SFLOAT_16_16_16_16, pass_extent, 1);
+    pass_tx->ensure_layer_views();
+    framebuffer_.ensure(GPU_ATTACHMENT_NONE,
+                        GPU_ATTACHMENT_TEXTURE_LAYER(pass_tx->layer_view(0), 0));
 
     PassSimple pass = {"FilterMaterial.Pass"};
     pass.state_set(DRW_STATE_WRITE_COLOR);
@@ -1858,7 +1902,40 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
 
         Vector<FilterGraphImageHandle> material_inputs;
         material_inputs.reserve(storage->items_num);
-        const int2 pass_extent = filter_graph_scaled_extent(extent, storage->resolution_scale);
+        int2 base_extent = extent;
+        if (storage->resolution_basis == 1 && storage->items_num > 0) {
+          const std::string identifier = "Image_" + std::to_string(storage->resolution_input);
+          const bNodeSocket *reference = node->input_by_identifier(UString(identifier));
+          if (reference == nullptr) {
+            inst_.info_append_i18n("Error: Filter Graph resolution reference input was removed");
+            return black_graph_output();
+          }
+          const bNodeLink *link = filter_graph_socket_used_link(*reference);
+          if (link != nullptr) {
+            const FilterGraphImageHandle handle = result_by_socket.lookup_default(
+                link->fromsock, FilterGraphImageHandle::null());
+            if (handle.extent.x > 0 && handle.extent.y > 0) {
+              base_extent = handle.extent;
+            }
+          }
+        }
+        if (storage->resolution_basis == 2) {
+          base_extent = int2(storage->resolution_width, storage->resolution_height);
+        }
+        const std::optional<int2> scaled_extent = filter_graph_scaled_extent(
+            base_extent, storage->resolution_basis == 2 ? 1.0f : storage->resolution_scale);
+        if (!scaled_extent || base_extent.x < 1 || base_extent.y < 1) {
+          inst_.info_append_i18n(
+              "Error: Filter Graph execution size exceeds GPU limits or is invalid");
+          return black_graph_output();
+        }
+        const int2 pass_extent = *scaled_extent;
+        if (entry->uses_aov_output && !filter_graph_extent_matches(pass_extent, extent)) {
+          inst_.info_append_i18n(
+              "Error: Scaled Filter Passes must write AOVs through a Filter Graph AOV Output "
+              "node");
+          return black_graph_output();
+        }
         for (const int i : IndexRange(storage->items_num)) {
           const std::string identifier = "Image_" + std::to_string(storage->items[i].identifier);
           const bNodeSocket *socket = node->input_by_identifier(UString(identifier));

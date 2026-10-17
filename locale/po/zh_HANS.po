@@ -165602,3 +165602,9 @@ msgstr "输入宽高占输出宽高的百分比，四舍五入到整数像素，
 
 msgid "Interpret multi-layer EXR using each part's color space metadata; fall back to the file or image color space for untagged parts"
 msgstr "使用各部分的色彩空间元数据解释多层 EXR；没有标记的部分回退到文件或图像色彩空间"
+
+msgid "Original Frame"
+msgstr "原画幅"
+
+msgid "Fixed Pixels"
+msgstr "固定像素"

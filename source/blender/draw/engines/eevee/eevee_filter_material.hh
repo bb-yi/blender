@@ -23,6 +23,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <array>
 
 struct bNode;
 
@@ -57,6 +58,10 @@ class FilterMaterialModule {
     int layers = 0;
     bool used = false;
   };
+  struct GraphTexturePool {
+    std::vector<GraphTexturePoolEntry> entries;
+    int2 stage_extent = int2(0);
+  };
 
   Instance &inst_;
 
@@ -64,13 +69,13 @@ class FilterMaterialModule {
   Framebuffer framebuffer_ = {"FilterMaterial.Framebuffer"};
   Texture ping_tx_ = {"FilterMaterial.Ping"};
   Texture pong_tx_ = {"FilterMaterial.Pong"};
-  Texture pass_tx_ = {"FilterMaterial.Pass"};
   Texture aov_color_snapshot_tx_ = {"FilterMaterial.AOVColorSnapshot"};
   Texture aov_value_snapshot_tx_ = {"FilterMaterial.AOVValueSnapshot"};
   Texture graph_black_tx_ = {"FilterMaterial.GraphBlack"};
   Vector<std::unique_ptr<Framebuffer>> graph_input_fbs_;
-  std::vector<GraphTexturePoolEntry> graph_texture_pool_;
-  int2 graph_texture_pool_stage_extent_ = int2(0);
+  /* Each execution stage retains only its own current working set. */
+  std::array<GraphTexturePool, 4> graph_texture_pools_;
+  int active_graph_texture_pool_ = 0;
   FilterObjectInfoBuf filter_object_info_buf_ = {"FilterObjectInfoBuf"};
   FilterGraphInputHandleBuf filter_graph_input_buf_ = {"FilterGraphInputBuf"};
   bool uses_scene_depth_ = false;
@@ -81,7 +86,7 @@ class FilterMaterialModule {
   blender::Vector<std::string> used_aov_names_;
   bool uses_scene_time_ = false;
 
-  void reset_graph_texture_pool(int2 stage_extent);
+  void reset_graph_texture_pool(int2 stage_extent, SceneEEVEEFilterExecutionStage stage);
   Texture *acquire_graph_texture(const char *name,
                                  gpu::TextureFormat format,
                                  int2 extent,

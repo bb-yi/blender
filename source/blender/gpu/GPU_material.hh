@@ -353,6 +353,7 @@ enum GPUType {
   GPU_TEX2D = 1002,
   GPU_TEX2D_ARRAY = 1003,
   GPU_TEX3D = 1004,
+  GPU_TEXCUBE = 1005,
 
   /* GLSL Struct types */
   GPU_CLOSURE = 1007,
@@ -412,6 +413,7 @@ struct GPUMaterialTexture {
   ImageUser iuser = {};
   bool iuser_available = false;
   bool use_3d_lut_strip = false;
+  bool use_cube_strip = false;
   int lut_3d_width = 0;
   int lut_3d_height = 0;
   int lut_3d_depth = 0;
@@ -561,6 +563,10 @@ GPUNodeLink *GPU_image(GPUMaterial *mat,
                        Image *ima,
                        ImageUser *iuser,
                        GPUSamplerState sampler_state);
+GPUNodeLink *GPU_image_cube_strip(GPUMaterial *mat,
+                                  Image *ima,
+                                  ImageUser *iuser,
+                                  GPUSamplerState sampler_state);
 GPUNodeLink *GPU_image_3d_lut_strip(GPUMaterial *mat,
                                     Image *ima,
                                     ImageUser *iuser,

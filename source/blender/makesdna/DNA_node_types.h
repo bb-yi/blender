@@ -665,6 +665,7 @@ enum eNodeImage_Extension : short {
 enum {
   IMA_IMAGE_TO_CLOSURE_TEXTURE_2D = 0,
   IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP = 1,
+  IMA_IMAGE_TO_CLOSURE_TEXTURE_CUBE_STRIP = 2,
 };
 
 /* Image to Closure 3D LUT strip size mode. */
@@ -3487,7 +3488,10 @@ struct NodeEeveeFilterGraphFilterMaterial {
   int active_index = 0;
   int next_identifier = 0;
   float resolution_scale = 1.0f;
-  char _pad[8] = {};
+  int resolution_basis = 0; /* 0: stage, 1: input, 2: fixed pixels. */
+  int resolution_input = 0; /* Stable socket item identifier, not its list index. */
+  int resolution_width = 256;
+  int resolution_height = 256;
 };
 
 struct NodeEeveeFilterGraphAOVInput {

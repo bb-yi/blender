@@ -279,7 +279,9 @@ void GPUCodegen::generate_resources()
       const char *name = info.name_buffer.append_sampler_name(tex.sampler_name);
       BLI_assert(tex.ima != nullptr);
       info.sampler(slot++,
-                   tex.use_3d_lut_strip ? ImageType::Float3D : ImageType::Float2D,
+                   tex.use_cube_strip   ? ImageType::FloatCube :
+                   tex.use_3d_lut_strip ? ImageType::Float3D :
+                                          ImageType::Float2D,
                    name,
                    Frequency::BATCH);
     }

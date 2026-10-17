@@ -2268,6 +2268,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                          << "vertices.x)" << swizzle << ") * weights.x + " << input.type << "("
                          << fetch << "vertices.y)" << swizzle << ") * weights.y + " << input.type
                          << "(" << fetch << "vertices.z)" << swizzle << ") * weights.z;\n";
+        if (input.name == "orco") {
+          /* An undeformed mesh has no ORCO VBO. Match the generic vertex attribute's W=1
+           * sentinel so attr_load_orco uses MeshVertex::orco_default instead of constant .5. */
+          tess_attr_interp << "  if (gpu_attr_" << slot << "_meta == 0) {\n"
+                           << "    orco = float4(0.0f, 0.0f, 0.0f, 1.0f);\n"
+                           << "  }\n";
+        }
         slot++;
       }
       vertex_inputs.clear();

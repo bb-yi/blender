@@ -9,10 +9,11 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
-#include <cmath>
 #include <climits>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <sstream>
 
 #include "node_exec.hh"
@@ -202,8 +203,7 @@ namespace blender
       }
     }
 
-    enum class GLSLBoundaryType
-    {
+    enum class GLSLBoundaryType {
       Unsupported = 0,
       Float,
       Int,
@@ -216,6 +216,7 @@ namespace blender
       Mat4,
       Sample2D,
       Sample3D,
+      SampleCube,
       Void,
     };
 
@@ -582,6 +583,9 @@ namespace blender
       {
         return GLSLBoundaryType::Sample2D;
       }
+      if (type_name == "samplerCube") {
+        return GLSLBoundaryType::SampleCube;
+      }
       if (type_name == "sampler3D")
       {
         return GLSLBoundaryType::Sample3D;
@@ -651,7 +655,10 @@ namespace blender
 
     static bool glsl_boundary_type_is_sampler(const GLSLBoundaryType type)
     {
-      return ELEM(type, GLSLBoundaryType::Sample2D, GLSLBoundaryType::Sample3D);
+      return ELEM(type,
+                  GLSLBoundaryType::Sample2D,
+                  GLSLBoundaryType::Sample3D,
+                  GLSLBoundaryType::SampleCube);
     }
 
     static bool glsl_boundary_type_uses_float_transport(const GLSLBoundaryType type)
@@ -671,6 +678,9 @@ namespace blender
 
     static StringRefNull sampler_type_name(const GLSLBoundaryType type)
     {
+      if (type == GLSLBoundaryType::SampleCube) {
+        return StringRefNull("samplerCube");
+      }
       return glsl_boundary_type_is_sample3d(type) ? StringRefNull("sampler3D") :
                                                     StringRefNull("sampler2D");
     }
@@ -993,6 +1003,10 @@ namespace blender
                                     GPU_SAMPLER_FILTERING_LINEAR :
                                     GPU_SAMPLER_FILTERING_ANISOTROPIC_ENABLE |
                                       GPU_SAMPLER_FILTERING_LINEAR | GPU_SAMPLER_FILTERING_MIPMAP;
+      }
+      else if (image_to_closure_texture_type(node) == IMA_IMAGE_TO_CLOSURE_TEXTURE_CUBE_STRIP) {
+        /* Explicit textureLod must still select a mip with nearest-neighbor filtering. */
+        sampler_state.filtering = GPU_SAMPLER_FILTERING_MIPMAP;
       }
 
       return sampler_state;
@@ -1883,6 +1897,10 @@ namespace blender
           }
           if (source_kind == GLSLSamplerSourceKind::ClosureOutput)
           {
+            if (param.type == GLSLBoundaryType::SampleCube) {
+              r_error = "samplerCube requires an Image to Closure Cube Strip source";
+              return false;
+            }
             std::string closure_error;
             if (!closure_output_has_required_sampler_signature(
                   *used_link->fromnode, param.type, closure_error))
@@ -1905,6 +1923,12 @@ namespace blender
           if (used_link->fromnode != nullptr)
           {
             const int texture_type = image_to_closure_texture_type(*used_link->fromnode);
+            if (param.type == GLSLBoundaryType::SampleCube &&
+                texture_type != IMA_IMAGE_TO_CLOSURE_TEXTURE_CUBE_STRIP)
+            {
+              r_error = "samplerCube parameter '" + param.name + "' requires Cube Strip";
+              return false;
+            }
             if (glsl_boundary_type_is_sample2d(param.type) &&
                 texture_type != IMA_IMAGE_TO_CLOSURE_TEXTURE_2D)
             {
@@ -1933,21 +1957,12 @@ namespace blender
             r_error = "Choose an image on the Image to Closure node connected to '" + param.name + "'";
             return false;
           }
-          if (glsl_boundary_type_is_sample3d(param.type))
-          {
-            std::string lut_error;
-            ResolvedLut3DStripDimensions dimensions;
-            if (!resolve_3d_lut_strip_dimensions(
-                  *used_link->fromnode, *image, dimensions, lut_error))
-            {
-              r_error = "sampler3D parameter '" + param.name + "': " + lut_error;
-              return false;
-            }
-            continue;
-          }
+          /* Image dimensions are checked when building the GPU resource. Do not acquire image
+           * buffers here: this runs while reading a new Main, before its relative path is active.
+           */
           if (image->source == IMA_SRC_TILED)
           {
-            r_error = "sampler2D parameter '" + param.name +
+            r_error = std::string(sampler_type_name(param.type)) + " parameter '" + param.name +
               "' does not support UDIM tiled images yet";
             return false;
           }
@@ -3939,6 +3954,277 @@ namespace blender
       return ss.str();
     }
 
+    /* Resolve only conditions whose values are owned by this node/source. Unknown backend
+     * macros remain intact for the GPU preprocessor. Keep byte offsets and line numbers stable. */
+    static std::string specialize_glsl_static_branches(const bNode &node,
+                                                       const StringRef source,
+                                                       const Span<GLSLDefineMeta> defines)
+    {
+      Map<std::string, int64_t> values;
+      Set<std::string> defined;
+      for (const GLSLDefineMeta &item : defines) {
+        const int value = glsl_define_value_or_default(node, item);
+        values.add_overwrite(item.name, value);
+        if (item.type != SHD_GLSL_FUNCTION_DEFINE_BOOL || value != 0) {
+          defined.add(item.name);
+        }
+      }
+      std::function<std::optional<int64_t>(std::string)> evaluate;
+      evaluate = [&](std::string text) -> std::optional<int64_t> {
+        text = trim_copy(text);
+        if (text.empty()) {
+          return std::nullopt;
+        }
+        if (text.front() == '(' && text.back() == ')') {
+          int depth = 0;
+          bool encloses = true;
+          for (size_t i = 0; i + 1 < text.size(); i++) {
+            depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+            if (depth == 0) {
+              encloses = false;
+              break;
+            }
+          }
+          if (encloses) {
+            return evaluate(text.substr(1, text.size() - 2));
+          }
+        }
+        for (const StringRef op : {StringRef("||"),
+                                   StringRef("&&"),
+                                   StringRef("=="),
+                                   StringRef("!="),
+                                   StringRef(">="),
+                                   StringRef("<="),
+                                   StringRef(">"),
+                                   StringRef("<")})
+        {
+          if (op == "==") {
+            /* Leave chained comparisons and shifts to the backend preprocessor. */
+            int depth = 0, comparisons = 0;
+            for (size_t i = 0; i < text.size(); i++) {
+              depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+              if (depth != 0) {
+                continue;
+              }
+              if (text[i] == '<' || text[i] == '>' || text[i] == '=' ||
+                  (text[i] == '!' && i + 1 < text.size() && text[i + 1] == '='))
+              {
+                comparisons++;
+                if (i + 1 < text.size() && text[i + 1] == '=') {
+                  i++;
+                }
+              }
+            }
+            if (comparisons > 1) {
+              return std::nullopt;
+            }
+          }
+          int depth = 0;
+          for (size_t i = 0; i + op.size() <= text.size(); i++) {
+            depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+            if (depth != 0 || StringRef(text).substr(i, op.size()) != op) {
+              continue;
+            }
+            const auto a = evaluate(text.substr(0, i));
+            const auto b = evaluate(text.substr(i + op.size()));
+            if (!a || !b) {
+              return std::nullopt;
+            }
+            if (op == "||") {
+              return *a || *b;
+            }
+            if (op == "&&") {
+              return *a && *b;
+            }
+            if (op == "==") {
+              return *a == *b;
+            }
+            if (op == "!=") {
+              return *a != *b;
+            }
+            if (op == ">=") {
+              return *a >= *b;
+            }
+            if (op == "<=") {
+              return *a <= *b;
+            }
+            if (op == ">") {
+              return *a > *b;
+            }
+            return *a < *b;
+          }
+        }
+        if (text.front() == '!') {
+          const auto value = evaluate(text.substr(1));
+          return value ? std::optional<int64_t>(!*value) : std::nullopt;
+        }
+        if (StringRef(text).startswith("defined(") || StringRef(text).startswith("defined ") ||
+            StringRef(text).startswith("defined\t"))
+        {
+          std::string name = trim_copy(StringRef(text).substr(7));
+          if (!name.empty() && name.front() == '(' && name.back() == ')') {
+            name = trim_copy(StringRef(name).substr(1, name.size() - 2));
+          }
+          if (defined.contains(name)) {
+            return 1;
+          }
+          return values.contains(name) ? std::optional<int64_t>(0) : std::nullopt;
+        }
+        if (const int64_t *value = values.lookup_ptr(text)) {
+          return *value;
+        }
+        char *end = nullptr;
+        errno = 0;
+        const int64_t value = std::strtoll(text.c_str(), &end, 0);
+        /* GLSL preprocessors do not all evaluate wide/unsigned literals like host int64_t.
+         * Leave those expressions intact rather than choosing a potentially different branch. */
+        if (errno != ERANGE && end != text.c_str() && *end == '\0' && value >= INT_MIN &&
+            value <= INT_MAX)
+        {
+          return value;
+        }
+        return std::nullopt;
+      };
+      struct Line {
+        size_t start, end;
+        std::string directive, argument;
+      };
+      Vector<Line> lines;
+      std::string result(source);
+      for (size_t pos = 0; pos < result.size();) {
+        const size_t newline = result.find('\n', pos);
+        const size_t end = newline == std::string::npos ? result.size() : newline + 1;
+        std::string text = trim_copy(StringRef(result).substr(pos, end - pos));
+        Line line{pos, end, {}, {}};
+        if (!text.empty() && text[0] == '#') {
+          text = trim_copy(StringRef(text).substr(1));
+          size_t split = text.find_first_of(" \t(");
+          line.directive = text.substr(0, split);
+          if (split != std::string::npos) {
+            line.argument = trim_copy(StringRef(text).substr(split));
+          }
+        }
+        lines.append(std::move(line));
+        pos = end;
+      }
+      auto blank = [&](int begin, int end) {
+        for (int i = begin; i < end; i++) {
+          for (size_t c = lines[i].start; c < lines[i].end; c++) {
+            if (result[c] != '\n' && result[c] != '\r') {
+              result[c] = ' ';
+            }
+          }
+        }
+      };
+      std::function<void(int, int)> process;
+      process = [&](int begin, int end) {
+        for (int i = begin; i < end; i++) {
+          const Line &line = lines[i];
+          if (line.directive == "define") {
+            const size_t split = line.argument.find_first_of(" \t(");
+            const std::string name = line.argument.substr(0, split);
+            defined.add(name);
+            values.remove(name);
+            if (split != std::string::npos && line.argument[split] != '(') {
+              /* Macro replacements are expanded at use time. Never cache an alias/expression
+               * here: a referenced macro can be redefined after this directive. */
+              const std::string replacement = trim_copy(StringRef(line.argument).substr(split));
+              char *end = nullptr;
+              errno = 0;
+              const int64_t value = std::strtoll(replacement.c_str(), &end, 0);
+              if (errno != ERANGE && end != replacement.c_str() && *end == '\0' &&
+                  value >= INT_MIN && value <= INT_MAX)
+              {
+                values.add_overwrite(name, value);
+              }
+            }
+            continue;
+          }
+          if (line.directive == "undef") {
+            defined.remove(line.argument);
+            values.add_overwrite(line.argument, 0);
+            continue;
+          }
+          if (line.directive != "if" && line.directive != "ifdef" && line.directive != "ifndef") {
+            continue;
+          }
+          Vector<int> branches = {i};
+          int depth = 1, finish = i + 1;
+          for (; finish < end; finish++) {
+            const std::string &directive = lines[finish].directive;
+            if (directive == "if" || directive == "ifdef" || directive == "ifndef") {
+              depth++;
+            }
+            else if (directive == "endif") {
+              if (--depth == 0) {
+                break;
+              }
+            }
+            else if (depth == 1 && (directive == "else" || directive == "elif")) {
+              branches.append(finish);
+            }
+          }
+          if (finish == end) {
+            return;
+          }
+          int chosen = -1;
+          bool known = true;
+          for (int branch : branches) {
+            const Line &head = lines[branch];
+            std::optional<int64_t> condition;
+            if (head.directive == "else") {
+              condition = 1;
+            }
+            else if (head.directive == "ifdef" || head.directive == "ifndef") {
+              condition = evaluate("defined(" + head.argument + ")");
+              if (condition && head.directive == "ifndef") {
+                condition = !*condition;
+              }
+            }
+            else {
+              condition = evaluate(head.argument);
+            }
+            if (!condition) {
+              known = false;
+              break;
+            }
+            if (*condition) {
+              chosen = branch;
+              break;
+            }
+          }
+          if (known) {
+            branches.append(finish);
+            for (int b = 0; b + 1 < branches.size(); b++) {
+              const int head = branches[b], next = branches[b + 1];
+              blank(head, head + 1);
+              if (head == chosen) {
+                process(head + 1, next);
+              }
+              else {
+                blank(head + 1, next);
+              }
+            }
+            blank(finish, finish + 1);
+          }
+          else {
+            /* A conditional definition may change later conditions; do not guess its value. */
+            for (int j = i + 1; j < finish; j++) {
+              if (lines[j].directive == "define" || lines[j].directive == "undef") {
+                const std::string name = lines[j].argument.substr(
+                    0, lines[j].argument.find_first_of(" \t("));
+                values.remove(name);
+                defined.remove(name);
+              }
+            }
+          }
+          i = finish;
+        }
+      };
+      process(0, lines.size());
+      return result;
+    }
+
     static bool validate_glsl_define_name_collisions(const Span<GLSLDefineMeta> defines,
       const Span<std::string> function_names,
       const Span<std::string> global_names,
@@ -5316,21 +5602,22 @@ namespace blender
       const StringRef param_name = identifiers.last()->text;
       const GLSLBoundaryType boundary_type = glsl_boundary_type_from_name(type_name);
       if (!ELEM(boundary_type,
-        GLSLBoundaryType::Float,
-        GLSLBoundaryType::Int,
-        GLSLBoundaryType::Bool,
-        GLSLBoundaryType::Vec2,
-        GLSLBoundaryType::Vec3,
-        GLSLBoundaryType::Vec4,
-        GLSLBoundaryType::Mat2,
-        GLSLBoundaryType::Mat3,
-        GLSLBoundaryType::Mat4,
-        GLSLBoundaryType::Sample2D,
-        GLSLBoundaryType::Sample3D))
+                GLSLBoundaryType::Float,
+                GLSLBoundaryType::Int,
+                GLSLBoundaryType::Bool,
+                GLSLBoundaryType::Vec2,
+                GLSLBoundaryType::Vec3,
+                GLSLBoundaryType::Vec4,
+                GLSLBoundaryType::Mat2,
+                GLSLBoundaryType::Mat3,
+                GLSLBoundaryType::Mat4,
+                GLSLBoundaryType::Sample2D,
+                GLSLBoundaryType::Sample3D,
+                GLSLBoundaryType::SampleCube))
       {
         r_error =
-          "Supported parameter types are float, int, bool, vec2, vec3, vec4, mat2, mat3, mat4, "
-          "sampler2D, and sampler3D";
+            "Supported parameter types are float, int, bool, vec2, vec3, vec4, mat2, mat3, mat4, "
+            "sampler2D, sampler3D, and samplerCube";
         return false;
       }
 
@@ -7122,7 +7409,7 @@ namespace blender
           }
           const GLSLToken& declared_type = tokens[lhs_token_index - 1];
           if (declared_type.kind == GLSLToken::Kind::Identifier &&
-              ELEM(declared_type.text, "sampler2D", "sampler3D"))
+              ELEM(declared_type.text, "sampler2D", "sampler3D", "samplerCube"))
           {
             replacements.append(
               {declared_type.source_start, declared_type.source_end, "float"});
@@ -8087,8 +8374,7 @@ vec3 glsl_ambient_lighting()
       {
         return StringRefNull("float");
       }
-      return glsl_boundary_type_is_sample3d(param.type) ? StringRefNull("sampler3D") :
-                                                          StringRefNull("sampler2D");
+      return sampler_type_name(param.type);
     }
 
     static StringRefNull emitted_type_name(const GLSLBoundaryType type, const StringRefNull type_name)
@@ -8710,8 +8996,9 @@ vec3 glsl_ambient_lighting()
         }
 
         GLSLClosureSampleHelper helper;
-        const std::string sampler_dimension = glsl_boundary_type_is_sample3d(param.type) ? "3d" :
-                                                                                        "2d";
+        const std::string sampler_dimension = param.type == GLSLBoundaryType::SampleCube ? "cube" :
+                                              glsl_boundary_type_is_sample3d(param.type) ? "3d" :
+                                                                                           "2d";
         const char* helper_prefix = *source_kind == GLSLSamplerSourceKind::FallbackWhite ?
           "glsl_sampler_fallback" :
           "glsl_sampler";
@@ -8723,7 +9010,8 @@ vec3 glsl_ambient_lighting()
         {
           helper.param_name = param.name;
           helper.helper_name = helper_name;
-          helper.coordinate_type = glsl_boundary_type_is_sample3d(param.type) ? GPU_VEC3 : GPU_VEC2;
+          helper.coordinate_type = !glsl_boundary_type_is_sample2d(param.type) ? GPU_VEC3 :
+                                                                                 GPU_VEC2;
           helper.is_fallback_white = true;
           closure_helpers.append(std::move(helper));
           continue;
@@ -8958,7 +9246,8 @@ vec3 glsl_ambient_lighting()
       }
       result.defines_parsed = true;
 
-      const std::string stripped_source = strip_glsl_comments(source);
+      const std::string stripped_source = specialize_glsl_static_branches(
+          node, strip_glsl_comments(source), result.defines);
       if (!validate_glsl_closure_function_like_macros(
             stripped_source, raw_closures, result.error))
       {
@@ -9061,7 +9350,7 @@ vec3 glsl_ambient_lighting()
       }
 
       result.ok = true;
-      result.source = source;
+      result.source = stripped_source;
       result.resolved_function_name = result.function.name;
       result.used_first_function = false;
 
@@ -10285,6 +10574,26 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
           if (glsl_boundary_type_is_sample2d(param.type))
           {
             image = resolve_sample2d_image(param);
+          }
+          else if (param.type == GLSLBoundaryType::SampleCube) {
+            const bNodeLink *used_link = resolve_image_to_closure_link(param);
+            if (!used_link || !used_link->fromnode ||
+                image_to_closure_texture_type(*used_link->fromnode) !=
+                    IMA_IMAGE_TO_CLOSURE_TEXTURE_CUBE_STRIP)
+            {
+              return false;
+            }
+            image = resolve_image_to_closure_image(*used_link);
+            if (!image || image->source == IMA_SRC_TILED) {
+              return false;
+            }
+            stack->type = GPU_TEXCUBE;
+            stack->link = GPU_image_cube_strip(
+                mat,
+                image,
+                nullptr,
+                sampler_state_from_image_to_closure_node(*used_link->fromnode));
+            continue;
           }
           else if (glsl_boundary_type_is_sample3d(param.type))
           {

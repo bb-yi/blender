@@ -81,7 +81,7 @@ struct ImageRuntime {
   ImBufCache *cache = nullptr;
 
   /* The 2 is for the left/right stereo eyes. */
-  gpu::Texture *gputexture[/*TEXTARGET_COUNT*/ 3][2] = {};
+  gpu::Texture *gputexture[/*TEXTARGET_COUNT*/ 4][2] = {};
   ListBaseT<ImageRuntimeGPUTexture3DLutStrip> gputextures_3d_lut_strip = {nullptr, nullptr};
 
   /* GPU texture flag. */
@@ -712,6 +712,9 @@ ImageGPUTextures BKE_image_get_gpu_material_texture_try(Image *image,
                                                         ImageUser *iuser,
                                                         const bool use_tile_mapping);
 
+ImageGPUTextures BKE_image_get_gpu_material_cube_texture(Image *image,
+                                                         ImageUser *iuser,
+                                                         bool try_only = false);
 ImageGPUTextures BKE_image_get_gpu_material_3d_lut_texture(Image *image,
                                                            ImageUser *iuser,
                                                            int width,

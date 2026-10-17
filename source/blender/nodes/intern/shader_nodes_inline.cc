@@ -280,13 +280,11 @@ class ShaderNodesInliner {
         }
         for (const bNodeSocket *socket : node->input_sockets()) {
           const StringRef identifier(socket->identifier);
-          if (socket->type == SOCK_CLOSURE && identifier.startswith("closure.") &&
-              socket->is_directly_linked())
-          {
+          if (socket->type == SOCK_CLOSURE && socket->is_directly_linked()) {
             params_.r_error_messages.append(
                 {node,
                  fmt::format("GLSL closure callback '{}' is part of a cyclic shader dependency",
-                             identifier.drop_prefix(8))});
+                             identifier)});
           }
         }
       }
@@ -1332,8 +1330,9 @@ class ShaderNodesInliner {
 
   static bool is_glsl_closure_callback_input(const NodeInContext &node, const bNodeSocket &socket)
   {
-    return node->is_type("ShaderNodeGLSLFunction"_ustr) && socket.type == SOCK_CLOSURE &&
-           StringRef(socket.identifier).startswith("closure.");
+    /* Sampler closures also capture values from their creation context. Preserving their raw
+     * source zone loses group instance inputs when the GPU helper is compiled later. */
+    return node->is_type("ShaderNodeGLSLFunction"_ustr) && socket.type == SOCK_CLOSURE;
   }
 
   std::optional<SocketValue> ensure_glsl_closure_callback_localized(
@@ -1342,7 +1341,9 @@ class ShaderNodesInliner {
       const ClosureZoneValue closure_zone_value)
   {
     const StringRef socket_identifier(callback_socket.identifier);
-    const StringRef helper_name = socket_identifier.drop_prefix(StringRef("closure.").size());
+    const StringRef helper_name = socket_identifier.startswith("closure.") ?
+                                      socket_identifier.drop_prefix(8) :
+                                      socket_identifier;
 
     const bke::bNodeTreeZone *zone = closure_zone_value.zone;
     const bNode *closure_input_node = zone ? zone->input_node() : nullptr;
