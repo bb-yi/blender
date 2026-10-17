@@ -10462,8 +10462,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       const GLSLFunctionDefinition& function,
       GPUNodeStack* in)
     {
-      static float zero_value[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-
       if (in == nullptr || !glsl_function_has_sampler_inputs(function))
       {
         return true;
@@ -10567,7 +10565,10 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
                    GLSLSamplerSourceKind::FallbackWhite))
           {
             stack->type = GPU_FLOAT;
-            stack->link = GPU_constant(zero_value);
+            /* Let graph linking create the placeholder only when it is consumed. Helper
+             * specialization can fail before the wrapper is linked. */
+            stack->link = nullptr;
+            std::fill_n(stack->vec, 4, 0.0f);
             continue;
           }
 
@@ -10784,8 +10785,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
             {
               for (int i = 0; !out[i].end; i++)
               {
-                if (out[i].type != GPU_NONE)
-                {
+                if (out[i].type != GPU_NONE && out[i].hasoutput) {
                   out[i].link = GPU_constant(zero_value);
                 }
               }
@@ -10820,8 +10820,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         {
           for (int i = 0; !out[i].end; i++)
           {
-            if (out[i].type != GPU_NONE)
-            {
+            if (out[i].type != GPU_NONE && out[i].hasoutput) {
               out[i].link = GPU_constant(zero_value);
             }
           }
@@ -10863,8 +10862,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         {
           for (int i = 0; !out[i].end; i++)
           {
-            if (out[i].type != GPU_NONE)
-            {
+            if (out[i].type != GPU_NONE && out[i].hasoutput) {
               out[i].link = GPU_constant(zero_value);
             }
           }
@@ -10901,8 +10899,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         {
           for (int i = 0; !out[i].end; i++)
           {
-            if (out[i].type != GPU_NONE)
-            {
+            if (out[i].type != GPU_NONE && out[i].hasoutput) {
               out[i].link = GPU_constant(zero_value);
             }
           }
