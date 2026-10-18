@@ -6,6 +6,14 @@
 
 #include "infos/eevee_common_infos.hh"
 #include "infos/eevee_geom_infos.hh"
+#include "infos/eevee_sampling_infos.hh"
+
+/* NPR uses legacy sampling resources. The fragment-stage declaration does not instantiate them
+ * for BSL vertex displacement (mesh, curves, pointcloud) or tessellation. Declare them before the
+ * Sampling functions below; leave the fragment stage's existing declaration unchanged. */
+#if defined(GPU_VERTEX_SHADER) && defined(NPR_SHADER)
+VERTEX_SHADER_CREATE_INFO(eevee_sampling_data)
+#endif
 
 #include "draw_intersect_lib.glsl"
 #include "gpu_shader_common_hash.glsl"
