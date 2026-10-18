@@ -622,7 +622,7 @@ static void node_update(bNodeTree * /*tree*/, bNode *node)
 static void draw_resolution(ui::Layout &layout, PointerRNA *ptr)
 {
   ui::Layout &mode_row = layout.row(true);
-  mode_row.prop(ptr, "resolution_basis", ui::ITEM_R_EXPAND, "", ICON_NONE);
+  mode_row.prop(ptr, "resolution_basis", ui::ITEM_R_EXPAND, std::nullopt, ICON_NONE);
   const int basis = RNA_enum_get(ptr, "resolution_basis");
   if (basis == 2) {
     ui::Layout &row = layout.row(true);
@@ -630,11 +630,7 @@ static void draw_resolution(ui::Layout &layout, PointerRNA *ptr)
     row.prop(ptr, "resolution_height", ui::ITEM_R_SPLIT_EMPTY_NAME, IFACE_("Height"), ICON_NONE);
   }
   else {
-    const auto *storage = static_cast<const NodeEeveeFilterGraphFilterMaterial *>(
-        ptr->data_as<bNode>()->storage);
-    const bool has_single_reference = storage && storage->items_num == 1 &&
-                                      storage->resolution_input == storage->items[0].identifier;
-    if (basis == 1 && !has_single_reference && storage && storage->items_num > 0) {
+    if (basis == 1) {
       layout.prop(
           ptr, "resolution_input", ui::ITEM_R_SPLIT_EMPTY_NAME, IFACE_("Reference"), ICON_NONE);
     }
