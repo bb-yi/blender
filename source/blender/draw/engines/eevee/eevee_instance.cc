@@ -307,6 +307,8 @@ namespace blender::eevee
 
     anisotropic_filtering = GPU_anisotropic_filtering_flags(scene->r.anisotropic_filter);
 
+    dlss5.init();
+
     sampling.init(scene);
     camera.init();
     filter_materials.init();

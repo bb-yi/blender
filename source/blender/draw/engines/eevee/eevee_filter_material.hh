@@ -69,8 +69,6 @@ class FilterMaterialModule {
   Framebuffer framebuffer_ = {"FilterMaterial.Framebuffer"};
   Texture ping_tx_ = {"FilterMaterial.Ping"};
   Texture pong_tx_ = {"FilterMaterial.Pong"};
-  Texture aov_color_snapshot_tx_ = {"FilterMaterial.AOVColorSnapshot"};
-  Texture aov_value_snapshot_tx_ = {"FilterMaterial.AOVValueSnapshot"};
   Texture graph_black_tx_ = {"FilterMaterial.GraphBlack"};
   Vector<std::unique_ptr<Framebuffer>> graph_input_fbs_;
   /* Each execution stage retains only its own current working set. */

@@ -649,27 +649,24 @@ static ImageGPUTextures image_get_gpu_texture(Image *ima,
   else if (textarget == TEXTARGET_CUBE) {
     const int size = ibuf->y;
     if (size > 0 && int64_t(ibuf->x) == int64_t(size) * 6 && size <= GPU_max_texture_size()) {
-      const size_t pixels_num = size_t(ibuf->x) * size_t(size);
-      float *faces = MEM_new_array_uninitialized<float>(pixels_num * 4, __func__);
-      /* Horizontal +X, -X, +Y, -Y, +Z, -Z strip; preserve each face's pixel rows. */
-      for (int face = 0; face < 6; face++) {
-        IMB_colormanagement_imbuf_to_float_texture(
-            faces + 4 * size_t(face) * size * size,
-            face * size,
-            0,
-            size,
-            size,
-            ibuf,
-            BKE_image_has_gpu_texture_premultiplied_alpha(ima, ibuf));
-      }
+      const bool store_premultiplied = BKE_image_has_gpu_texture_premultiplied_alpha(ima, ibuf);
+      /* Keep float precision, including mip interpolation of byte sources and HDR data. */
       *result.texture = GPU_texture_create_cube(ima->id.name + 2,
                                                 size,
                                                 9999,
-                                                gpu::TextureFormat::SFLOAT_32_32_32_32,
+                                                 gpu::TextureFormat::SFLOAT_32_32_32_32,
                                                 GPU_TEXTURE_USAGE_SHADER_READ,
-                                                faces);
-      MEM_delete(faces);
+                                                 nullptr);
       if (*result.texture) {
+        /* Upload one face at a time instead of allocating a six-face float copy. */
+        float *face_pixels = MEM_new_array_uninitialized<float>(size_t(size) * size * 4, __func__);
+        for (int face = 0; face < 6; face++) {
+          IMB_colormanagement_imbuf_to_float_texture(
+              face_pixels, face * size, 0, size, size, ibuf, store_premultiplied);
+          GPU_texture_update_sub(
+              *result.texture, GPU_DATA_FLOAT, face_pixels, 0, 0, face, size, size, 1);
+        }
+        MEM_SAFE_DELETE(face_pixels);
         GPU_texture_update_mipmap_chain(*result.texture);
         GPU_texture_mipmap_mode(*result.texture, true, true);
       }

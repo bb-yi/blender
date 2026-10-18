@@ -1219,6 +1219,7 @@ void FilterMaterialModule::begin_sync()
   if (filter_graph_enabled(*inst_.scene)) {
     inst_.scene->eevee.filter_graph->ensure_topology_cache();
   }
+  bool has_active_stage = false;
   for (int stage = 0; stage < graph_texture_pools_.size(); stage++) {
     if (!has_stage_entries(SceneEEVEEFilterExecutionStage(stage))) {
       if (!graph_texture_pools_[stage].entries.empty()) {
@@ -1226,9 +1227,15 @@ void FilterMaterialModule::begin_sync()
       }
       graph_texture_pools_[stage].entries.clear();
     }
+    else {
+      has_active_stage = true;
+    }
   }
-  if (!filter_graph_enabled(*inst_.scene)) {
+  if (!has_active_stage) {
     graph_input_fbs_.clear();
+    ping_tx_.free();
+    pong_tx_.free();
+    graph_black_tx_.free();
   }
 
   if (filter_graph_enabled(*inst_.scene)) {
@@ -1434,7 +1441,7 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     if (graph_input_tx == nullptr) {
       graph_input_tx = acquire_graph_texture("FilterMaterial.GraphInput",
                                              gpu::TextureFormat::SFLOAT_16_16_16_16,
-                                             target_extent,
+                                             texture_inputs.is_empty() ? int2(1) : target_extent,
                                              layer_count);
     }
     if (!texture_inputs.is_empty() && !graph_input_cached) {
@@ -1482,6 +1489,9 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
                                  Texture &output_tx) {
     gpu::Texture *aov_color_tx = inst_.render_buffers.rp_color_tx;
     gpu::Texture *aov_value_tx = inst_.render_buffers.rp_value_tx;
+    /* Snapshots only live for this pass. Reuse their storage in subsequent passes/stages. */
+    TextureFromPool aov_color_snapshot_tx("FilterMaterial.AOVColorSnapshot");
+    TextureFromPool aov_value_snapshot_tx("FilterMaterial.AOVValueSnapshot");
 
     if (!entry.conflicting_aov_names.is_empty()) {
       bool snapshot_color = false;
@@ -1493,22 +1503,22 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
                           0;
       }
       if (snapshot_color) {
-        aov_color_snapshot_tx_.ensure_2d_array(
-            GPU_texture_format(inst_.render_buffers.rp_color_tx),
+        aov_color_snapshot_tx.acquire_2d_array(
             extent,
             GPU_texture_layer_count(inst_.render_buffers.rp_color_tx),
+            GPU_texture_format(inst_.render_buffers.rp_color_tx),
             GPU_TEXTURE_USAGE_GENERAL);
-        GPU_texture_copy(aov_color_snapshot_tx_, inst_.render_buffers.rp_color_tx);
-        aov_color_tx = aov_color_snapshot_tx_;
+        GPU_texture_copy(aov_color_snapshot_tx, inst_.render_buffers.rp_color_tx);
+        aov_color_tx = aov_color_snapshot_tx;
       }
       if (snapshot_value) {
-        aov_value_snapshot_tx_.ensure_2d_array(
-            GPU_texture_format(inst_.render_buffers.rp_value_tx),
+        aov_value_snapshot_tx.acquire_2d_array(
             extent,
             GPU_texture_layer_count(inst_.render_buffers.rp_value_tx),
+            GPU_texture_format(inst_.render_buffers.rp_value_tx),
             GPU_TEXTURE_USAGE_GENERAL);
-        GPU_texture_copy(aov_value_snapshot_tx_, inst_.render_buffers.rp_value_tx);
-        aov_value_tx = aov_value_snapshot_tx_;
+        GPU_texture_copy(aov_value_snapshot_tx, inst_.render_buffers.rp_value_tx);
+        aov_value_tx = aov_value_snapshot_tx;
       }
       if (snapshot_color || snapshot_value) {
         GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
@@ -1520,11 +1530,11 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     const float clear_color[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     GPU_texture_clear(output_tx, GPU_DATA_FLOAT, clear_color);
     GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_SHADER_IMAGE_ACCESS);
-    Texture *pass_tx = acquire_graph_texture(
-        "FilterMaterial.Pass", gpu::TextureFormat::SFLOAT_16_16_16_16, pass_extent, 1);
-    pass_tx->ensure_layer_views();
-    framebuffer_.ensure(GPU_ATTACHMENT_NONE,
-                        GPU_ATTACHMENT_TEXTURE_LAYER(pass_tx->layer_view(0), 0));
+    /* This attachment is never a graph result. It need not stay live with the graph outputs. */
+    TextureFromPool pass_tx("FilterMaterial.Pass");
+    pass_tx.acquire_2d(
+        pass_extent, gpu::TextureFormat::SFLOAT_16_16_16_16, GPU_TEXTURE_USAGE_GENERAL);
+    framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(pass_tx));
 
     PassSimple pass = {"FilterMaterial.Pass"};
     pass.state_set(DRW_STATE_WRITE_COLOR);

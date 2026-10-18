@@ -37,6 +37,23 @@ Dlss5Module::Dlss5Module(Instance &inst)
 
 Dlss5Module::~Dlss5Module() = default;
 
+void Dlss5Module::init()
+{
+  const bool enabled = inst_.scene->eevee.dlss5_mode == SCE_EEVEE_DLSSNR &&
+                       inst_.scene->eevee.dlss5_intensity != 0.0f;
+  if (enabled_ && !enabled) {
+    /* Retire external GPU work before releasing the feature and shared images. The process-wide
+     * NGX runtime stays warm, and untrackable submissions retain their existing safety policy. */
+    d3d12_session_->reset();
+    scene_linear_output_tx_.free();
+    invalidate();
+    offline_configured_ = false;
+    active_reported_ = false;
+    failure_reported_ = false;
+  }
+  enabled_ = enabled;
+}
+
 bool Dlss5Module::prepare_display_color(gpu::Texture *source, gpu::Texture *destination)
 {
   gpu::Shader *shader = inst_.shaders.static_shader_get(DLSS5_COLOR_CONVERT);

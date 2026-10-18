@@ -63,6 +63,7 @@ struct Dlss5FrameInputs {
 class Dlss5Module {
  private:
   Instance &inst_;
+  bool enabled_ = false;
   bool reported_ = false;
   bool active_reported_ = false;
   bool failure_reported_ = false;
@@ -102,6 +103,8 @@ class Dlss5Module {
  public:
   explicit Dlss5Module(Instance &inst);
   ~Dlss5Module();
+
+  void init();
 
   gpu::Texture *process(const Dlss5FrameInputs &inputs,
                         draw::View &view,
