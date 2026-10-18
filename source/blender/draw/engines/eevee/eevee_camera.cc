@@ -324,6 +324,9 @@ void Camera::sync()
 
   data_.initialized = true;
   view_changed_ = assign_if_different(last_persmat_, data_.persmat);
+  /* Screen-edge tessellation also changes with render/viewport resolution. */
+  view_changed_ |= assign_if_different(last_render_extent_, inst_.film.render_extent_get());
+  position_changed_ = assign_if_different(last_position_, data_.viewinv.location());
 
   update_bounds();
 }

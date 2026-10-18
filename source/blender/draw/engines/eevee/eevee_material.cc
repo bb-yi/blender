@@ -784,8 +784,10 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
         material_tessellation_settings_get(blender_mat, tessellation))
     {
       mat.tessellation_level = node_shader_tessellation_expansion(tessellation);
-      mat.tessellation_view_dependent = tessellation.mode != SHD_TESSELLATION_FIXED &&
+      mat.tessellation_view_dependent = tessellation.mode == SHD_TESSELLATION_SCREEN_EDGE &&
                                         tessellation.min_level != tessellation.max_level;
+      mat.tessellation_position_dependent = tessellation.mode == SHD_TESSELLATION_DISTANCE &&
+                                            tessellation.min_level != tessellation.max_level;
     }
     if (is_filter_material) {
       /* Filter-domain materials are scene fullscreen passes, not object surface materials. */

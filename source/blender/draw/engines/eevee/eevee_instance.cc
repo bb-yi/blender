@@ -532,6 +532,7 @@ namespace blender::eevee
 
   void Instance::begin_sync()
   {
+    sync.begin_sync();
     if (pre_fx_viewport_) {
       pre_fx_viewport_->begin_sync();
     }

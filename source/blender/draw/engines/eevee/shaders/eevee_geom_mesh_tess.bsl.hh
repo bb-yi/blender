@@ -4,7 +4,7 @@
 
 /**
  * Vertex shader of tessellated meshes (#MAT_GEOM_MESH_TESS). See `eevee_geom_mesh_tess_lib.glsl`.
- * Must be drawn using primitive expansion of `max_level^2` triangles per mesh triangle.
+ * Must be drawn using primitive expansion of `tessellation_expand^2` triangles per mesh triangle.
  * Keep the outputs in sync with `eevee::geom_mesh`.
  */
 
@@ -12,10 +12,17 @@
 
 #include "infos/eevee_geom_infos.hh"
 #include "infos/eevee_nodetree_infos.hh"
+#include "infos/eevee_sampling_infos.hh"
 
 VERTEX_SHADER_CREATE_INFO(eevee_nodetree)
 VERTEX_SHADER_CREATE_INFO(eevee_clip_plane)
 VERTEX_SHADER_CREATE_INFO(eevee_geom_mesh_tess_data)
+
+/* NPR supplies legacy sampling resources. Its fragment declaration does not instantiate them in
+ * this BSL vertex stage, although the nodetree library uses the Sampling resource table here. */
+#ifdef NPR_SHADER
+VERTEX_SHADER_CREATE_INFO(eevee_sampling_data)
+#endif
 
 #include "draw_model.bsl.hh"
 #include "eevee_attributes_mesh_lib.glsl"

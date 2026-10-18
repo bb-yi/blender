@@ -473,12 +473,13 @@ struct Material {
   /* Absolute unlinked Strength value of the Outline Shell Output node.
    * Used to inflate the object bounds for vertex offsets. */
   float outline_shell_bounds_inflation;
-  /* Lattice resolution of fully subdivided triangles of tessellated materials
-   * (#node_shader_tessellation_expansion). Zero if not tessellated.
+  /* Lattice resolution budget (#node_shader_tessellation_expansion). Zero if not tessellated.
+   * The per-object material copy may reduce this using a conservative bound on edge LOD.
    * Passes using #MAT_GEOM_MESH_TESS shaders expand each triangle into level^2 triangles. */
   int tessellation_level;
-  /* The tessellated geometry depends on the camera position. */
+  /* Screen-edge LOD depends on projection/resolution; distance LOD only on position. */
   bool tessellation_view_dependent;
+  bool tessellation_position_dependent;
   /* These pipelines need a sub-pass per object/instance, so the returned sub_pass for these are
    * always null and the sub-pass creation is handled directly by the SyncModule.
    * Note that this also applies to the shading MaterialPass in the case of alpha-blended

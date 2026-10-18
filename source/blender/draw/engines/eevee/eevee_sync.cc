@@ -8,13 +8,22 @@
  * Converts the different renderable object types to draw-calls.
  */
 
+#include <cmath>
+#include <limits>
+
+#include "BLI_math_matrix.hh"
+#include "BLI_math_vector.hh"
+
 #include "BKE_paint.hh"
 #include "BKE_paint_bvh.hh"
 #include "DNA_curves_types.h"
+#include "DNA_mesh_types.h"
 #include "DNA_modifier_types.h"
 #include "DNA_particle_types.h"
 #include "DNA_pointcloud_types.h"
 #include "DNA_volume_types.h"
+
+#include "NOD_shader.h"
 
 #include "draw_cache.hh"
 #include "draw_common.hh"
@@ -106,15 +115,20 @@ static int material_pass_tessellation_level(const Material &material, GPUMateria
   return GPU_material_has_tessellation_output(gpumat) ? material.tessellation_level : 1;
 }
 
-static inline void geometry_call(PassMain::Sub *sub_pass,
-                                 gpu::Batch *geom,
-                                 ResourceHandleRange resource_handle,
-                                 int tessellation_level = 0)
+void SyncModule::geometry_call(PassMain::Sub *sub_pass,
+                               gpu::Batch *geom,
+                               ResourceHandleRange resource_handle,
+                               int tessellation_level)
 {
   if (sub_pass == nullptr || geom == nullptr) {
     return;
   }
   if (tessellation_level > 0) {
+    sub_pass = tessellation_passes_.lookup_or_add_cb({sub_pass, tessellation_level}, [&]() {
+      PassMain::Sub &tess_pass = sub_pass->sub("Tessellation budget");
+      tess_pass.push_constant("tessellation_expand", tessellation_level);
+      return &tess_pass;
+    });
     /* Each triangle is subdivided into level^2 triangles inside the vertex shader.
      * The batch content is only generated after object sync, so the resulting vertex count is
      * unknown here. #GPU_batch_draw_expanded_parameter_get skips overflowing draw-calls. */
@@ -123,6 +137,99 @@ static inline void geometry_call(PassMain::Sub *sub_pass,
     return;
   }
   sub_pass->draw(geom, resource_handle);
+}
+
+/** Bound every original edge's LOD without changing its fractional partitioning.
+ * Evaluated bounds enclose endpoints and their midpoints. All instances share the largest budget.
+ * Displacement and Phong smoothing happen after LOD, so they do not enlarge these bounds. */
+static int material_tessellation_budget(const Instance &inst,
+                                        const ObjectHandle &ob_handle,
+                                        const Material &material)
+{
+  ShaderTessellationSettings settings;
+  if (material.tessellation_level <= 1 || material.shading.gpumat == nullptr ||
+      !material_tessellation_settings_get(GPU_material_get_material(material.shading.gpumat),
+                                          settings) ||
+      settings.mode == SHD_TESSELLATION_FIXED || settings.min_level == settings.max_level)
+  {
+    return material.tessellation_level;
+  }
+  /* Render Texture captures reuse these draw commands while overriding CameraData. A budget
+   * derived only from the main camera could truncate a closer capture's lattice. Keep the full
+   * budget until capture-specific draws (or a bound over every capture camera) are available. */
+  if (inst.render_textures.has_active()) {
+    return material.tessellation_level;
+  }
+  /* Use the same evaluated mesh as DRW_cache_mesh_surface_shaded_get (also in edit mode). */
+  const Mesh &mesh = DRW_object_get_data_for_drawing<Mesh>(*ob_handle.object);
+  const std::optional<Bounds<float3>> bounds = mesh.bounds_min_max();
+  if (!bounds) {
+    return material.tessellation_level;
+  }
+  const CameraData &camera = inst.camera.data_get();
+  int budget = 1;
+  for (const int instance : IndexRange(ob_handle.instances_count())) {
+    const float4x4 &model = ob_handle.object_to_world(instance);
+    float3 world_min(std::numeric_limits<float>::max());
+    float3 world_max(std::numeric_limits<float>::lowest());
+    float2 screen_min(std::numeric_limits<float>::max());
+    float2 screen_max(std::numeric_limits<float>::lowest());
+    for (int corner = 0; corner < 8; corner++) {
+      const float3 local((corner & 1) ? bounds->max.x : bounds->min.x,
+                         (corner & 2) ? bounds->max.y : bounds->min.y,
+                         (corner & 4) ? bounds->max.z : bounds->min.z);
+      const float3 world = math::transform_point(model, local);
+      if (!std::isfinite(world.x) || !std::isfinite(world.y) || !std::isfinite(world.z)) {
+        return material.tessellation_level;
+      }
+      world_min = math::min(world_min, world);
+      world_max = math::max(world_max, world);
+      if (settings.mode == SHD_TESSELLATION_SCREEN_EDGE) {
+        const float4 clip = camera.persmat * float4(world, 1.0f);
+        /* A box crossing/behind the camera plane has no finite projected diameter bound. */
+        if (!(clip.w > 1e-5f)) {
+          return material.tessellation_level;
+        }
+        const float2 pixel = (float2(clip.x, clip.y) / clip.w) * 0.5f *
+                             float2(inst.film.render_extent_get());
+        if (!std::isfinite(pixel.x) || !std::isfinite(pixel.y)) {
+          return material.tessellation_level;
+        }
+        screen_min = math::min(screen_min, pixel);
+        screen_max = math::max(screen_max, pixel);
+      }
+    }
+    float factor;
+    if (settings.mode == SHD_TESSELLATION_DISTANCE) {
+      const float3 camera_position = camera.viewinv.location();
+      const float3 closest = math::clamp(camera_position, world_min, world_max);
+      /* Round toward MORE work to cover CPU/GPU transform and distance roundoff. */
+      const float epsilon = 1e-4f * std::max({1.0f,
+                                              math::length(camera_position),
+                                              math::length(world_min),
+                                              math::length(world_max)});
+      const float distance = std::max(0.0f, math::distance(camera_position, closest) - epsilon);
+      const float fac = math::clamp(
+          (distance - settings.near_distance) /
+              std::max(settings.far_distance - settings.near_distance, 1e-6f),
+          0.0f,
+          1.0f);
+      factor = (1.0f - fac) * settings.max_level + fac * settings.min_level;
+      if (fac > 0.0f && fac < 1.0f) {
+        factor += 1e-4f;
+      }
+    }
+    else {
+      factor = math::distance(screen_min, screen_max) / std::max(settings.edge_length, 1.0f);
+      factor += 1e-4f * std::max(1.0f, factor);
+      factor = math::clamp(factor, float(settings.min_level), float(settings.max_level));
+    }
+    if (!std::isfinite(factor)) {
+      return material.tessellation_level;
+    }
+    budget = std::max(budget, int(std::ceil(factor)) | 1);
+  }
+  return std::min(budget, material.tessellation_level);
 }
 
 static inline void geometry_volume_call(PassMain::Sub *pass,
@@ -267,6 +374,7 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
   bool has_transparent_shadows = false;
   bool has_time_dependent_shadows = false;
   bool has_view_dependent_shadows = false;
+  bool has_position_dependent_shadows = false;
   float inflate_bounds = 0.0f;
 
   for (const Material *material : materials) {
@@ -289,6 +397,7 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
                                   (material->has_transparent_shadows || has_displacement);
     /* View dependent tessellation changes the shadow caster geometry with the camera. */
     has_view_dependent_shadows |= material->tessellation_view_dependent;
+    has_position_dependent_shadows |= material->tessellation_position_dependent;
     has_time_dependent_shadows |= material->outline_shell_shadow.gpumat != nullptr &&
                                   GPU_material_is_time_dependent(
                                       material->outline_shell_shadow.gpumat);
@@ -313,7 +422,8 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
                             is_alpha_blend,
                             has_transparent_shadows,
                             has_time_dependent_shadows,
-                            has_view_dependent_shadows);
+                            has_view_dependent_shadows,
+                            has_position_dependent_shadows);
 
   if (has_volume) {
     inst_.volume.object_sync(ob_handle);
@@ -378,6 +488,7 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
     }
 
     Material &material = material_array.materials[i];
+    material.tessellation_level = material_tessellation_budget(inst_, ob_handle, material);
     synced_materials.append(&material);
 
     if (material.has_volume) {

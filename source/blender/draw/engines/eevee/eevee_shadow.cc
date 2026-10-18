@@ -1086,7 +1086,8 @@ void ShadowModule::sync_object(const ObjectHandle &ob_handle,
                                bool is_alpha_blend,
                                bool has_transparent_shadows,
                                bool has_time_dependent_shadows,
-                               bool has_view_dependent_shadows)
+                               bool has_view_dependent_shadows,
+                               bool has_position_dependent_shadows)
 {
   if (is_alpha_blend && !inst_.is_baking()) {
     tilemap_usage_transparent_ps_->draw(box_batch_, ob_handle.res_handle);
@@ -1099,7 +1100,8 @@ void ShadowModule::sync_object(const ObjectHandle &ob_handle,
 
   const bool shape_changed = (has_time_dependent_shadows &&
                               inst_.materials.material_time_changed) ||
-                             (has_view_dependent_shadows && inst_.camera.view_changed());
+                              (has_view_dependent_shadows && inst_.camera.view_changed()) ||
+                              (has_position_dependent_shadows && inst_.camera.position_changed());
 
   for (int i : IndexRange(ob_handle.instances_count())) {
     ShadowObject &shadow_ob = objects_.lookup_or_add_default(ObjectKey(ob_handle, i));

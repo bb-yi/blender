@@ -19,6 +19,7 @@
 #include "DRW_render.hh"
 
 #include "draw_handle.hh"
+#include "draw_pass.hh"
 
 namespace blender::eevee {
 
@@ -53,10 +54,17 @@ struct MaterialPass;
 class SyncModule {
  private:
   Instance &inst_;
+  /* Keep draws sharing a material and expansion budget batched together. */
+  Map<std::pair<PassMain::Sub *, int>, PassMain::Sub *> tessellation_passes_;
 
  public:
   SyncModule(Instance &inst) : inst_(inst) {};
   ~SyncModule() {};
+
+  void begin_sync()
+  {
+    tessellation_passes_.clear();
+  }
 
   ObjectHandle sync_object(const ObjectRef &ob_ref,
                            const ResourceHandleRange &res_handle,
@@ -70,6 +78,10 @@ class SyncModule {
                    struct HairParticleInfo const *hair_particle = nullptr);
 
  private:
+  void geometry_call(PassMain::Sub *sub_pass,
+                     gpu::Batch *geom,
+                     ResourceHandleRange resource_handle,
+                     int tessellation_level = 0);
   void sync_common_passes(const Material &material,
                           FunctionRef<void(const MaterialPass &)> sync_cb);
   void sync_volume_passes(const ObjectHandle &ob_handle,
