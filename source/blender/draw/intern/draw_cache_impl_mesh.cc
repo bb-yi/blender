@@ -761,8 +761,8 @@ Span<gpu::Batch *> DRW_mesh_batch_cache_get_surface_shaded(
   MeshBatchCache &cache = *mesh_batch_cache_get(mesh);
   mesh_cd_calc_used_gpu_layers(object, mesh, materials, &cache.attr_needed, &cache.cd_needed);
 
-  BLI_assert(materials.size() == cache.mat_len);
-
+  /* Materials describe the union of shader attribute requirements, not batch slot indices.
+   * Several passes can draw the same surface_per_mat batches with different requirements. */
   mesh_batch_cache_request_surface_batches(mesh, cache);
   return cache.surface_per_mat;
 }

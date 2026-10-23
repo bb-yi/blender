@@ -56,6 +56,10 @@ class SyncModule {
   Instance &inst_;
   /* Keep draws sharing a material and expansion budget batched together. */
   Map<std::pair<PassMain::Sub *, int>, PassMain::Sub *> tessellation_passes_;
+  /* Cache only the request schema. Object/instance attribute values are read on every sync. */
+  Map<Vector<GPUMaterial *>, Vector<const GPUUniformAttr *>> object_attribute_requests_;
+  int64_t object_attribute_request_hits_ = 0;
+  int64_t mesh_attribute_requests_ = 0;
 
  public:
   SyncModule(Instance &inst) : inst_(inst) {};
@@ -64,6 +68,22 @@ class SyncModule {
   void begin_sync()
   {
     tessellation_passes_.clear();
+    object_attribute_requests_.clear();
+    object_attribute_request_hits_ = 0;
+    mesh_attribute_requests_ = 0;
+  }
+
+  int64_t object_attribute_request_count() const
+  {
+    return object_attribute_requests_.size();
+  }
+  int64_t object_attribute_request_hits() const
+  {
+    return object_attribute_request_hits_;
+  }
+  int64_t mesh_attribute_requests() const
+  {
+    return mesh_attribute_requests_;
   }
 
   ObjectHandle sync_object(const ObjectRef &ob_ref,
@@ -93,7 +113,7 @@ class SyncModule {
                                  bool outline_shell = false);
   void sync_outline_occlusion_passes(const ObjectHandle &ob_handle,
                                      const Material &material,
-                                     FunctionRef<void(const MaterialPass &, int)> sync_cb);
+                                     FunctionRef<void(const MaterialPass &)> sync_cb);
 
   void sync_common(const ObjectHandle &ob_handle,
                    Span<Material *> materials,

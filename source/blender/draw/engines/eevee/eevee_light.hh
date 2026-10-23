@@ -46,6 +46,12 @@ class ShadowModule;
 class ShadowDirectional;
 class ShadowPunctual;
 
+enum class LightShaderDependency {
+  Passthrough,
+  Uniform,
+  PointDependent,
+};
+
 /* -------------------------------------------------------------------- */
 /** \name Light Object
  * \{ */
@@ -155,6 +161,14 @@ class LightModule {
   Instance &inst_;
   /** Map of light objects data. Converted to flat array each frame. */
   Map<ObjectKey, Light> light_map_;
+  struct NodeTreeInfo {
+    float range_scale;
+    LightShaderDependency dependency;
+    bool uses_scene_time;
+  };
+  /* Evaluated light data can be shared by many objects; recompute once per sync. */
+  Map<const blender::Light *, NodeTreeInfo> node_tree_info_;
+  int64_t node_tree_info_hits_ = 0;
   /**
    * In order to treat the world sun lights the same way as regular lights,
    * an #ObjectKey needs to be associated to each of them.
@@ -280,6 +294,15 @@ class LightModule {
   int light_count() const
   {
     return lights_len_;
+  }
+
+  int64_t node_tree_info_count() const
+  {
+    return node_tree_info_.size();
+  }
+  int64_t node_tree_info_hits() const
+  {
+    return node_tree_info_hits_;
   }
 
   Span<const TelemetryShadowLightCost> shadow_light_costs() const

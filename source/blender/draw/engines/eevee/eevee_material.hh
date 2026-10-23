@@ -19,6 +19,7 @@
 #include "BLI_vector.hh"
 
 #include "GPU_material.hh"
+#include "NOD_shader.h"
 
 #include "draw_pass.hh"
 
@@ -30,7 +31,6 @@ namespace blender {
 
 struct bNodeSocketValueFloat;
 struct bNodeSocketValueRGBA;
-struct ShaderTessellationSettings;
 
 namespace eevee {
 
@@ -56,6 +56,19 @@ static inline bool geometry_type_is_mesh(eMaterialGeometry geometry_type)
  */
 bool material_tessellation_settings_get(blender::Material *mat,
                                         ShaderTessellationSettings &r_settings);
+bool material_output_has_depth_offset(bNodeTree *nodetree);
+
+/** Evaluated node-tree properties. Owned by one MaterialModule sync, never shared across frames.
+ */
+struct MaterialNodeTreeInfo {
+  ShaderTessellationSettings tessellation = {};
+  bNodeTree *npr_tree = nullptr;
+  bool has_tessellation = false;
+  bool uses_outline_control = false;
+  bool has_depth_offset = false;
+  bool has_outline_shell = false;
+  float outline_shell_bounds_inflation = 0.0f;
+};
 
 enum eMaterialDisplacement {
   MAT_DISPLACEMENT_BUMP = 0,
@@ -527,6 +540,9 @@ class MaterialModule {
   bool has_time_dependent_materials_ = false;
 
   Map<MaterialKey, Material> material_map_;
+  Map<const blender::Material *, MaterialNodeTreeInfo> node_tree_info_;
+  int64_t node_tree_info_hits_ = 0;
+  int64_t skipped_material_slots_ = 0;
   Map<ShaderKey, PassMain::Sub *> shader_map_;
   Set<blender::Material *> depth_offset_shadow_disabled_mats_;
   Set<blender::Material *> current_depth_offset_shadow_disabled_mats_;
@@ -554,7 +570,20 @@ class MaterialModule {
   int raycast_material_count() const;
   int glsl_function_material_count() const;
   bool has_visible_outline_materials() const;
-  bool material_uses_outline_control(const blender::Material *material) const;
+  bool material_uses_outline_control(const blender::Material *material);
+  const MaterialNodeTreeInfo &node_tree_info_get(const blender::Material *material);
+  int64_t node_tree_info_count() const
+  {
+    return node_tree_info_.size();
+  }
+  int64_t node_tree_info_hits() const
+  {
+    return node_tree_info_hits_;
+  }
+  int64_t skipped_material_slots() const
+  {
+    return skipped_material_slots_;
+  }
 
   /**
    * Returned Material references are valid until the next call to this function or material_get().

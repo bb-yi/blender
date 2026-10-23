@@ -65,6 +65,21 @@ float DEG_get_ctime(const Depsgraph *graph);
 bool DEG_id_type_updated(const Depsgraph *depsgraph, short id_type);
 bool DEG_id_type_any_updated(const Depsgraph *depsgraph);
 
+/** True only during an evaluation driven exclusively by time changes. Any other update cause
+ * anywhere in the graph conservatively disables this optimization. */
+bool DEG_is_evaluating_time_update(const Depsgraph *depsgraph);
+
+struct DEGMaterialEvalStats {
+  /* Reused, non-time, unsupported material, driver/NLA, action layout, socket,
+   * sequence image, external ID, no action, changed value, generated source,
+   * referenced object, shader not ready, no GPU cache. */
+  uint64_t reasons[14] = {};
+  uint64_t state_nanoseconds = 0;
+};
+bool DEG_material_eval_profile_enabled(const Depsgraph *depsgraph);
+void DEG_material_eval_profile_add(Depsgraph *depsgraph, int reason, uint64_t state_nanoseconds);
+DEGMaterialEvalStats DEG_material_eval_profile_get(const Depsgraph *depsgraph);
+
 /** Check if given ID type is present in the depsgraph */
 bool DEG_id_type_any_exists(const Depsgraph *depsgraph, short id_type);
 

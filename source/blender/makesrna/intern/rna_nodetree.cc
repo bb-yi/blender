@@ -5052,6 +5052,17 @@ static void rna_ShaderNodeScript_bytecode_set(PointerRNA *ptr, const char *value
   }
 }
 
+static void rna_ShaderNodeScriptExpression_error_get(PointerRNA *ptr, char *value)
+{
+  const std::string error = nodes::script_expression_error_get(*ptr->data_as<bNode>());
+  memcpy(value, error.c_str(), error.size() + 1);
+}
+
+static int rna_ShaderNodeScriptExpression_error_length(PointerRNA *ptr)
+{
+  return int(nodes::script_expression_error_get(*ptr->data_as<bNode>()).size());
+}
+
 static void rna_ShaderNodeGLSLFunction_tag_dirty(PointerRNA *ptr)
 {
   bNode *node = ptr->data_as<bNode>();
@@ -9094,6 +9105,13 @@ static const EnumPropertyItem shader_derivative_data_type_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
+static const EnumPropertyItem shader_script_expression_dimensions_items[] = {
+    {2, "VEC2", 0, "2D", "Two components (X, Y)"},
+    {0, "VEC3", 0, "3D", "Three components (X, Y, Z)"},
+    {4, "VEC4", 0, "4D", "Four components (XYZ vector and W)"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
 static const EnumPropertyItem shader_script_expression_socket_type_items[] = {
     {SOCK_FLOAT, "FLOAT", ICON_NODE_SOCKET_FLOAT, "Float", "Evaluate to a floating-point value"},
     {SOCK_VECTOR, "VECTOR", ICON_NODE_SOCKET_VECTOR, "Vector", "Evaluate to a vector value"},
@@ -9431,6 +9449,20 @@ static void rna_def_sh_script_expression_variable(BlenderRNA *brna)
   RNA_def_struct_sdna(srna, "NodeShaderScriptExpressionVariable");
 
   rna_def_node_item_array_socket_item_common(srna, "ShScriptExpressionVariablesAccessor", true);
+
+  PropertyRNA *prop = RNA_def_property(srna, "vector_dimensions", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, shader_script_expression_dimensions_items);
+  RNA_def_property_ui_text(prop, "Dimensions", "Vector dimensions inside the expression");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED,
+                         "rna_Node_ItemArray_item_update<ShScriptExpressionVariablesAccessor>");
+
+  prop = RNA_def_property(srna, "separate_alpha", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "separate_alpha", 1);
+  RNA_def_property_ui_text(prop, "Separate Alpha", "Replace the color alpha with a separate input");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED,
+                         "rna_Node_ItemArray_item_update<ShScriptExpressionVariablesAccessor>");
 }
 
 static void rna_def_sh_script_expression_variables(BlenderRNA *brna)
@@ -9454,6 +9486,14 @@ static void def_sh_script_expression(BlenderRNA *brna, StructRNA *srna)
 
   RNA_def_struct_sdna_from(srna, "NodeShaderScriptExpression", "storage");
 
+  prop = RNA_def_property(srna, "error_message", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop,
+                               "rna_ShaderNodeScriptExpression_error_get",
+                               "rna_ShaderNodeScriptExpression_error_length",
+                               nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Error Message", "Expression validation or material shader compiler diagnostics");
+
   prop = RNA_def_property(srna, "expression", PROP_STRING, PROP_NONE);
   RNA_def_property_string_sdna(prop, nullptr, "expression");
   RNA_def_property_ui_text(prop, "Expression", "Single GLSL expression assigned to the output");
@@ -9463,6 +9503,12 @@ static void def_sh_script_expression(BlenderRNA *brna, StructRNA *srna)
   RNA_def_property_enum_sdna(prop, nullptr, "output_socket_type");
   RNA_def_property_enum_items(prop, shader_script_expression_socket_type_items);
   RNA_def_property_ui_text(prop, "Output Type", "Data type of the single result output");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
+
+  prop = RNA_def_property(srna, "output_vector_dimensions", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, shader_script_expression_dimensions_items);
+  RNA_def_property_ui_text(prop, "Dimensions", "Result vector dimensions; 2D is output as XYZ with Z zero");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
 
   prop = RNA_def_property(srna, "variables", PROP_COLLECTION, PROP_NONE);

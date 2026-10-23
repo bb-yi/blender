@@ -198,6 +198,7 @@ static void gpu_node_input_link(GPUNode *node, GPUNodeLink *link, const GPUType 
       break;
     case GPU_NODE_LINK_UNIFORM:
       input->source = GPU_SOURCE_UNIFORM;
+      input->uniform_source_index = link->uniform_source_index;
       break;
     case GPU_NODE_LINK_DIFFERENTIATE_FLOAT_FN:
       input->source = GPU_SOURCE_FUNCTION_CALL;
@@ -285,7 +286,7 @@ static GPUNodeLink *gpu_uniformbuffer_link(GPUMaterial *mat,
     return nullptr;
   }
 
-  GPUNodeLink *link = GPU_uniform(stack->vec);
+  GPUNodeLink *link = GPU_uniform_from_socket(mat, socket, stack->vec);
 
   if (in_out == SOCK_IN) {
     GPU_link(mat,
@@ -760,6 +761,15 @@ GPUNodeLink *GPU_uniform(const float *num)
   GPUNodeLink *link = gpu_node_link_create();
   link->link_type = GPU_NODE_LINK_UNIFORM;
   link->data = num;
+  return link;
+}
+
+GPUNodeLink *GPU_uniform_from_socket(GPUMaterial *material,
+                                     const bNodeSocket *socket,
+                                     const float *num)
+{
+  GPUNodeLink *link = GPU_uniform(num);
+  link->uniform_source_index = GPU_material_uniform_source_register(material, socket);
   return link;
 }
 

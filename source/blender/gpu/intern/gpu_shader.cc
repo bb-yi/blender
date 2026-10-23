@@ -843,6 +843,7 @@ Shader *ShaderCompiler::compile(const shader::ShaderCreateInfo &orig_info, bool 
   }
 
   const shader::ShaderCreateInfo &info = shader->patch_create_info(specialized_info);
+  shader->compilation_diagnostics = info.compilation_diagnostics;
 
   /* Needs to be called before init as GL uses the default specialization constants state to insert
    * default shader inside a map. */

@@ -11,6 +11,7 @@
 #include <climits>
 #include <cstring>
 #include <mutex>
+#include <memory>
 #include <unordered_map>
 
 #include "BKE_lib_id.hh"
@@ -38,11 +39,15 @@
 #include "BKE_material.hh"
 #include "BKE_node.hh"
 #include "BKE_node_runtime.hh"
+#include "RNA_access.hh"
+#include "RNA_path.hh"
+#include "GPU_context.hh"
 
 #include "NOD_shader.h"
 #include "NOD_shader_nodes_inline.hh"
 
 #include "GPU_material.hh"
+#include "GPU_material_profile.hh"
 #include "GPU_pass.hh"
 #include "GPU_shader.hh"
 #include "GPU_texture.hh"
@@ -56,6 +61,8 @@
 
 namespace blender {
 
+thread_local GPUMaterialProfile *gpu_material_profile_active = nullptr;
+
 static void gpu_material_ramp_texture_build(GPUMaterial *mat);
 static void gpu_material_sky_texture_build(GPUMaterial *mat);
 
@@ -66,6 +73,12 @@ static const Material *gpu_material_recompile_serial_key(const Material *materia
 {
   return material->id.orig_id ? reinterpret_cast<const Material *>(material->id.orig_id) : material;
 }
+
+struct MaterialUniformBinding {
+  nodes::ShaderUniformSource source;
+  size_t byte_offset = 0;
+  int components = 0;
+};
 
 /* Structs */
 #define MAX_COLOR_BAND 128
@@ -116,6 +129,21 @@ struct GPUMaterial {
 
   /* Source material, might be null for worlds and lights. */
   Material *source_material = nullptr;
+  /* Reuse preprocessing between passes of the same evaluated material. Owned by one GPU
+   * material, so normal material invalidation also discards animated values and topology. */
+  const bNodeTree *surface_source_tree = nullptr;
+  bNodeTree *surface_preprocessed_tree = nullptr;
+  std::shared_ptr<const Vector<double>> animation_state;
+  bool animation_state_valid = false;
+  /* Pointer keys exist only while this material is being compiled. */
+  std::unique_ptr<nodes::ShaderUniformTracking> uniform_tracking;
+  const bNodeTree *uniform_tracking_tree = nullptr;
+  Vector<nodes::ShaderUniformSource> uniform_origins;
+  Vector<nodes::ShaderUniformSource> uniform_unsafe_sources;
+  Vector<MaterialUniformBinding> uniform_bindings;
+  Vector<uint8_t> uniform_cpu_data;
+  bool uniform_tracking_supported = false;
+  bool uniform_update_pending = false;
   bool is_world = false;
   /* The node graph is rooted at an Outline Shell Output node instead of the
    * regular material output. */
@@ -164,6 +192,9 @@ struct GPUMaterial {
   ~GPUMaterial()
   {
     gpu_node_graph_free(&graph);
+    if (surface_preprocessed_tree != nullptr) {
+      BKE_id_free(nullptr, &surface_preprocessed_tree->id);
+    }
 
     if (optimized_pass != nullptr) {
       GPU_pass_release(optimized_pass);
@@ -185,6 +216,24 @@ struct GPUMaterial {
     }
   }
 };
+
+static bool gpu_material_can_cache_surface_tree(const bNodeTree &tree)
+{
+  for (const bNode *node : tree.all_nodes()) {
+    if (node->is_type("ShaderNodeGLSLFunction"_ustr) ||
+        node->is_type("GeometryNodeRepeatOutput"_ustr) ||
+        node->is_type("ShaderNodeForeachLightOutput"_ustr))
+    {
+      return false;
+    }
+    for (const bNodeSocket &socket : node->inputs) {
+      if (ELEM(socket.type, SOCK_CLOSURE, SOCK_BUNDLE)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
 
 static void gpu_material_force_glsl_closure_callback_inline_error(
     GPUMaterial *material, const StringRef helper_name)
@@ -214,6 +263,10 @@ static void gpu_material_force_glsl_closure_callback_inline_error(
 
 /* Public API */
 
+static bool uniform_tracking_animation_safe(const Material &material,
+                                            Span<double> state,
+                                            const nodes::ShaderUniformTracking &tracking);
+
 GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     Material *ma,
     bNodeTree *ntree,
@@ -232,20 +285,53 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     bool outline_shell_root)
 {
   /* Search if this material is not already compiled. */
+  const bool cache_surface = ma != nullptr && ma->eevee_domain == MA_EEVEE_DOMAIN_SURFACE &&
+                             engine == GPU_MAT_EEVEE && compile_surface_graph &&
+                             !compile_light_shader_graph && !outline_shell_root;
+  bNodeTree *cached_surface = nullptr;
+  const GPUMaterial *animation_owner = nullptr;
   for (LinkData &link : *gpumaterials) {
     GPUMaterial *mat = static_cast<GPUMaterial *>(link.data);
+    if (!animation_owner && mat->engine == engine && mat->source_material == ma) {
+      animation_owner = mat;
+    }
     if (mat->uuid == shader_uuid && mat->engine == engine) {
+      GPU_material_profile_count(GPUMaterialProfileCounter::MaterialHits);
+      if (mat->uniform_update_pending) {
+        BLI_assert(mat->ubo && !mat->uniform_cpu_data.is_empty());
+        GPU_uniformbuf_update(mat->ubo, mat->uniform_cpu_data.data());
+        mat->uniform_update_pending = false;
+        mat->flag |= GPU_MATFLAG_UPDATED;
+        GPU_material_profile_count(GPUMaterialProfileCounter::UniformUpdates);
+      }
       if (!deferred_compilation) {
+        GPUMaterialProfileTimer profile(GPUMaterialProfileStage::LookupWait);
         GPU_pass_ensure_its_ready(mat->pass);
       }
       return {mat};
+    }
+    if (cache_surface && mat->surface_source_tree == ntree) {
+      cached_surface = mat->surface_preprocessed_tree;
     }
   }
 
   GPUMaterialFromNodeTreeResult result;
 
   GPUMaterial *mat = MEM_new<GPUMaterial>(__func__, engine);
+  GPU_material_profile_count(GPUMaterialProfileCounter::MaterialBuilds);
   mat->source_material = ma;
+  if (ma != nullptr && engine == GPU_MAT_EEVEE) {
+    GPUMaterialProfileTimer profile(GPUMaterialProfileStage::AnimationState);
+    if (animation_owner) {
+      mat->animation_state = animation_owner->animation_state;
+      mat->animation_state_valid = animation_owner->animation_state_valid;
+    }
+    else {
+      auto state = std::make_shared<Vector<double>>();
+      mat->animation_state_valid = BKE_material_animation_state_get(*ma, *state);
+      mat->animation_state = std::move(state);
+    }
+  }
   mat->is_world = (ma == nullptr) && compile_surface_graph && !compile_light_shader_graph;
   mat->is_outline_shell = outline_shell_root;
   mat->uuid = shader_uuid;
@@ -254,17 +340,61 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
 
   bNodeTree *npr_localtree = nullptr;
   bNodeTree *localtree = nullptr;
-  if (compile_surface_graph || compile_light_shader_graph) {
+  bool owns_localtree = true;
+  const bool track_uniforms = ma != nullptr && mat->animation_state_valid &&
+                              engine == GPU_MAT_EEVEE && compile_surface_graph &&
+                              !compile_light_shader_graph && !compile_npr_graph &&
+                              !outline_shell_root &&
+                              (!animation_owner || animation_owner->uniform_tracking_supported) &&
+                              GPU_backend_get_type() != GPU_BACKEND_METAL;
+  if (track_uniforms) {
+    /* Every pass needs a source map for its own UBO; do not reuse a tree without provenance. */
+    cached_surface = nullptr;
+    mat->uniform_tracking = std::make_unique<nodes::ShaderUniformTracking>();
+  }
+  if (cached_surface != nullptr) {
+    localtree = cached_surface;
+    owns_localtree = false;
+    /* Begin/EndExecTree rebuild and discard the per-pass stacks. Preprocessing is the only
+     * step shared here; GPU nodes, resources, flags and uniforms still belong to this mat. */
+    GPUMaterialProfileTimer profile(GPUMaterialProfileStage::Execute);
+    ntreeGPUMaterialNodes(localtree, mat, true);
+  }
+  else if (compile_surface_graph || compile_light_shader_graph) {
     /* Localize tree to create links for reroute and mute. */
     localtree = bke::node_tree_add_tree(
         nullptr, (StringRef(ntree->id.name) + " Inlined").c_str(), ntree->idname);
     localtree->flag |= NTREE_IS_GPU_SHADER_INTERNAL;
+    mat->uniform_tracking_tree = track_uniforms ? localtree : nullptr;
     nodes::InlineShaderNodeTreeParams inline_params;
     inline_params.allow_preserving_repeat_zones = true;
     inline_params.target_engine_ = engine == GPU_MAT_EEVEE ? SHD_OUTPUT_EEVEE : SHD_OUTPUT_ALL;
-    const bool inline_success = nodes::inline_shader_node_tree(*ntree, *localtree, inline_params);
+    inline_params.r_uniform_tracking = mat->uniform_tracking.get();
+    bool inline_success;
+    {
+      GPUMaterialProfileTimer profile(GPUMaterialProfileStage::Inline);
+      inline_success = nodes::inline_shader_node_tree(*ntree, *localtree, inline_params);
+    }
 
     std::string callback_inline_failure_helper;
+    if (track_uniforms) {
+      mat->uniform_tracking_supported = inline_success &&
+                                        inline_params.r_error_messages.is_empty() &&
+                                        !mat->uniform_tracking->unsupported_context &&
+                                        uniform_tracking_animation_safe(
+                                            *ma, mat->animation_state->as_span(),
+                                            *mat->uniform_tracking);
+      /* These consumers duplicate closure branches during preprocessing. Their copied sockets
+       * do not carry provenance, so a partially tracked branch must never be updated in place. */
+      for (const bNode &node : localtree->nodes) {
+        if (node.is_type("ShaderNodeShaderToRGB"_ustr) ||
+            node.is_type("ShaderNodeNPRSurfaceDiffusion"_ustr))
+        {
+          mat->uniform_tracking_supported = false;
+        }
+      }
+      mat->uniform_unsafe_sources = mat->uniform_tracking->unsafe_sources;
+    }
     for (nodes::InlineShaderNodeTreeParams::ErrorMessage &error : inline_params.r_error_messages) {
       if (!inline_success && callback_inline_failure_helper.empty()) {
         const StringRef message(error.message);
@@ -281,7 +411,19 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     }
 
     if (compile_surface_graph) {
-      ntreeGPUMaterialNodes(localtree, mat);
+      {
+        GPUMaterialProfileTimer profile(GPUMaterialProfileStage::Preprocess);
+        ntreeGPUMaterialNodesPreprocess(localtree, mat);
+      }
+      if (cache_surface && !mat->uniform_tracking_supported && inline_success &&
+          result.errors.is_empty() && gpu_material_can_cache_surface_tree(*localtree))
+      {
+        mat->surface_source_tree = ntree;
+        mat->surface_preprocessed_tree = localtree;
+        owns_localtree = false;
+      }
+      GPUMaterialProfileTimer profile(GPUMaterialProfileStage::Execute);
+      ntreeGPUMaterialNodes(localtree, mat, true);
     }
     if (compile_light_shader_graph) {
       ntreeGPULightShaderNodes(localtree, mat);
@@ -296,12 +438,16 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
       GPU_material_flag_set(mat, GPU_MATFLAG_NPR);
     }
     if (GPU_material_flag_get(mat, GPU_MATFLAG_NPR)) {
+      GPUMaterialProfileTimer profile(GPUMaterialProfileStage::NPR);
       npr_localtree = ntreeGPUNPRNodes(ntree, mat);
     }
   }
 
-  gpu_material_ramp_texture_build(mat);
-  gpu_material_sky_texture_build(mat);
+  {
+    GPUMaterialProfileTimer profile(GPUMaterialProfileStage::Textures);
+    gpu_material_ramp_texture_build(mat);
+    gpu_material_sky_texture_build(mat);
+  }
 
   /* Use default material pass when possible. */
   if (GPUPass *default_pass = pass_replacement_cb ? pass_replacement_cb(thunk, mat) : nullptr) {
@@ -328,9 +474,13 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   }
 
   gpu_node_graph_free_nodes(&mat->graph);
+  mat->uniform_tracking.reset();
+  mat->uniform_tracking_tree = nullptr;
+  mat->uniform_origins.clear();
   /* Only free after GPU_pass_shader_get where gpu::UniformBuf read data from the local
    * tree. */
-  if (localtree != nullptr) {
+  if (localtree != nullptr && owns_localtree) {
+    GPUMaterialProfileTimer profile(GPUMaterialProfileStage::Cleanup);
     BKE_id_free(nullptr, &localtree->id);
   }
   if (npr_localtree != nullptr) {
@@ -387,6 +537,362 @@ GPUMaterial *GPU_material_from_callbacks(eGPUMaterialEngine engine,
   gpu_node_graph_free_nodes(&material->graph);
 
   return material;
+}
+
+int GPU_material_uniform_source_register(GPUMaterial *material, const bNodeSocket *socket)
+{
+  if (!material || !material->uniform_tracking || !material->uniform_tracking_supported ||
+      &socket->owner_tree() != material->uniform_tracking_tree)
+  {
+    return 0;
+  }
+  const nodes::ShaderUniformTarget *target = material->uniform_tracking->sources.lookup_ptr(
+      socket);
+  if (!target) {
+    return 0;
+  }
+  const bNode &node = socket->owner_node();
+  if (node.identifier != target->node_identifier || node.name != target->node_name ||
+      socket->identifier != target->socket_identifier || socket->in_out != target->in_out ||
+      socket->type != target->socket_type)
+  {
+    /* Preprocessing may delete/replace a socket and reuse its address. */
+    return 0;
+  }
+  for (const int i : material->uniform_origins.index_range()) {
+    if (material->uniform_origins[i] == target->source) {
+      return i + 1;
+    }
+  }
+  material->uniform_origins.append(target->source);
+  return material->uniform_origins.size();
+}
+
+void GPU_material_uniform_capture_input(GPUMaterial *material,
+                                        const GPUInput &input,
+                                        size_t byte_offset)
+{
+  if (!input.uniform_source_index || !material->uniform_tracking_supported) {
+    return;
+  }
+  const auto &source = material->uniform_origins[input.uniform_source_index - 1];
+  if (int(input.type) != source.components || !ELEM(input.type, GPU_FLOAT, GPU_VEC3, GPU_VEC4)) {
+    material->uniform_unsafe_sources.append(source);
+    return;
+  }
+  material->uniform_bindings.append({source, byte_offset, int(input.type)});
+}
+
+void GPU_material_uniform_capture_data(GPUMaterial *material, const void *data, size_t size)
+{
+  if (!material->uniform_bindings.is_empty()) {
+    material->uniform_cpu_data.resize(size);
+    memcpy(material->uniform_cpu_data.data(), data, size);
+  }
+}
+
+static uint32_t uniform_tree_uid(const bNodeTree &tree)
+{
+  return tree.id.orig_id ? tree.id.orig_id->session_uid : tree.id.session_uid;
+}
+
+static const bNodeSocket *uniform_source_resolve(const Material &material,
+                                                 const nodes::ShaderUniformSource &source)
+{
+  const bNodeTree *tree = material.nodetree;
+  if (!tree) {
+    return nullptr;
+  }
+  for (const auto &step : source.group_path) {
+    if (uniform_tree_uid(*tree) != step.parent_tree_uid) {
+      return nullptr;
+    }
+    const bNode *group = tree->node_by_id(step.group_node_identifier);
+    if (!group || !group->is_group() || !group->id) {
+      return nullptr;
+    }
+    tree = reinterpret_cast<const bNodeTree *>(group->id);
+    if (uniform_tree_uid(*tree) != step.child_tree_uid) {
+      return nullptr;
+    }
+  }
+  if (uniform_tree_uid(*tree) != source.tree_uid) {
+    return nullptr;
+  }
+  const bNode *node = tree->node_by_id(source.node_identifier);
+  if (!node) {
+    return nullptr;
+  }
+  const auto &sockets = source.in_out == SOCK_IN ? node->inputs : node->outputs;
+  for (const bNodeSocket &socket : sockets) {
+    if (socket.identifier == source.socket_identifier && socket.type == source.socket_type) {
+      return &socket;
+    }
+  }
+  return nullptr;
+}
+
+struct AnimatedUniformChange {
+  uint32_t tree_uid;
+  const bNodeSocket *socket;
+  int component;
+  uint32_t bits;
+};
+
+static bool uniform_change_matches(const AnimatedUniformChange &change,
+                                   const nodes::ShaderUniformSource &source)
+{
+  return change.tree_uid == source.tree_uid &&
+         change.socket->owner_node().identifier == source.node_identifier &&
+         change.socket->identifier == source.socket_identifier &&
+         change.socket->in_out == source.in_out && change.socket->type == source.socket_type;
+}
+
+/* The existing exact snapshot includes every supported Action curve and its full RNA path.
+ * Only the final value word of a curve may differ; every identity word must still match. */
+static bool animation_uniform_changes(const Material &material,
+                                      Span<double> old_state,
+                                      Span<double> state,
+                                      Vector<AnimatedUniformChange> &changes,
+                                      bool include_unchanged = false)
+{
+  if (old_state.size() != state.size() || !material.nodetree) {
+    return false;
+  }
+  Map<uint32_t, const bNodeTree *> trees;
+  StructRNA *socket_rna = RNA_struct_find("NodeSocket");
+  if (!socket_rna) {
+    return false;
+  }
+  const auto visit = [&](const auto &self, const bNodeTree &tree) -> void {
+    if (trees.contains(uniform_tree_uid(tree))) {
+      return;
+    }
+    trees.add_new(uniform_tree_uid(tree), &tree);
+    /* Copy-on-evaluation replaces socket runtimes. Rebuild owner links before resolving
+     * stable source identities; never consult an owner pointer from a previous evaluation. */
+    tree.ensure_topology_cache();
+    for (const bNode &node : tree.nodes) {
+      if (node.id && GS(node.id->name) == ID_NT) {
+        self(self, *reinterpret_cast<const bNodeTree *>(node.id));
+      }
+    }
+  };
+  visit(visit, *material.nodetree);
+  int64_t index = 0;
+  const auto same = [&]() {
+    if (index >= state.size() || state[index] != old_state[index]) {
+      return false;
+    }
+    index++;
+    return true;
+  };
+  while (index < state.size()) {
+    const uint32_t uid = uint32_t(state[index]);
+    if (!same() || !same() || !same() || index >= state.size()) {
+      return false;
+    }
+    const int count = int(state[index]);
+    if (!same() || count < 0 || count > state.size() - index) {
+      return false;
+    }
+    const bNodeTree *tree = trees.lookup_default(uid, nullptr);
+    if (!tree) {
+      return false;
+    }
+    for (int curve = 0; curve < count; curve++) {
+      if (index >= state.size()) {
+        return false;
+      }
+      const int length = int(state[index]);
+      if (!same() || length < 0 || length > state.size() - index - 2) {
+        return false;
+      }
+      std::string path;
+      path.reserve(length);
+      for (int c = 0; c < length; c++) {
+        path.push_back(char(uint8_t(state[index])));
+        if (!same()) {
+          return false;
+        }
+      }
+      const int component = int(state[index]);
+      if (!same() || index >= state.size()) {
+        return false;
+      }
+      const uint32_t bits = uint32_t(state[index]);
+      if (include_unchanged || bits != uint32_t(old_state[index])) {
+        PointerRNA owner = RNA_id_pointer_create(const_cast<ID *>(&tree->id));
+        PointerRNA ptr;
+        PropertyRNA *property = nullptr;
+        if (!RNA_path_resolve_property(&owner, path.c_str(), &ptr, &property) ||
+            !RNA_struct_is_a(ptr.type, socket_rna))
+        {
+          return false;
+        }
+        changes.append({uid, static_cast<const bNodeSocket *>(ptr.data), component, bits});
+      }
+      index++;
+    }
+  }
+  return !changes.is_empty();
+}
+
+static bool uniform_tracking_animation_safe(const Material &material,
+                                            Span<double> state,
+                                            const nodes::ShaderUniformTracking &tracking)
+{
+  if (tracking.unsafe_sources.is_empty()) {
+    return true;
+  }
+  Vector<AnimatedUniformChange> animated;
+  if (!animation_uniform_changes(material, state, state, animated, true)) {
+    return false;
+  }
+  for (const auto &source : tracking.unsafe_sources) {
+    for (const auto &value : animated) {
+      if (uniform_change_matches(value, source)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool GPU_material_animation_uniform_update(Material *material, Span<double> state)
+{
+  if (!material || material->gpumaterial.is_empty()) {
+    return false;
+  }
+  GPUMaterial *first = static_cast<GPUMaterial *>(
+      static_cast<LinkData *>(material->gpumaterial.first)->data);
+  if (!first->uniform_tracking_supported || !first->animation_state_valid ||
+      !first->animation_state)
+  {
+    return false;
+  }
+  Vector<AnimatedUniformChange> changes;
+  if (!animation_uniform_changes(*material, first->animation_state->as_span(), state, changes)) {
+    return false;
+  }
+  Vector<bool> covered(changes.size(), false);
+  struct Pending {
+    GPUMaterial *material;
+    Vector<uint8_t> data;
+  };
+  Vector<Pending> pending;
+  /* Validate every pass before changing any shadow UBO. No GPU calls in this evaluation path. */
+  for (LinkData &link : material->gpumaterial) {
+    GPUMaterial *mat = static_cast<GPUMaterial *>(link.data);
+    if (!mat->uniform_tracking_supported || !mat->animation_state_valid || !mat->animation_state ||
+        mat->animation_state->as_span() != first->animation_state->as_span() ||
+        mat->engine != GPU_MAT_EEVEE || GPU_material_status(mat) != GPU_MAT_SUCCESS ||
+        mat->optimized_pass || mat->uses_referenced_object_data ||
+        !mat->generated_sources.is_empty())
+    {
+      return false;
+    }
+    for (const auto &unsafe : mat->uniform_unsafe_sources) {
+      for (const auto &change : changes) {
+        if (uniform_change_matches(change, unsafe)) {
+          return false;
+        }
+      }
+    }
+    Pending item{mat, mat->uniform_cpu_data};
+    bool changed = false;
+    for (const MaterialUniformBinding &binding : mat->uniform_bindings) {
+      const bNodeSocket *socket = uniform_source_resolve(*material, binding.source);
+      if (!socket || !mat->ubo ||
+          binding.byte_offset + binding.components * sizeof(float) > item.data.size())
+      {
+        return false;
+      }
+      for (const int i : changes.index_range()) {
+        const auto &change = changes[i];
+        if (uniform_change_matches(change, binding.source)) {
+          if (change.component < 0 || change.component >= binding.components ||
+              socket != change.socket)
+          {
+            return false;
+          }
+          memcpy(item.data.data() + binding.byte_offset + change.component * sizeof(float),
+                 &change.bits,
+                 sizeof(float));
+          covered[i] = true;
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      pending.append(std::move(item));
+    }
+  }
+  for (const bool found : covered) {
+    if (!found) {
+      return false;
+    }
+  }
+  auto new_state = std::make_shared<Vector<double>>(state);
+  for (Pending &item : pending) {
+    item.material->uniform_cpu_data = std::move(item.data);
+    item.material->uniform_update_pending = true;
+  }
+  for (LinkData &link : material->gpumaterial) {
+    GPUMaterial *mat = static_cast<GPUMaterial *>(link.data);
+    mat->animation_state = new_state;
+    /* Never retain evaluated node pointers through another depsgraph evaluation. */
+    if (mat->surface_preprocessed_tree) {
+      BKE_id_free(nullptr, &mat->surface_preprocessed_tree->id);
+      mat->surface_preprocessed_tree = nullptr;
+      mat->surface_source_tree = nullptr;
+    }
+  }
+  return true;
+}
+
+bool GPU_material_animation_state_matches(ListBaseT<LinkData> *gpumaterial,
+                                          Span<double> state,
+                                          int *r_reject_reason)
+{
+  const auto reject = [&](const int reason) {
+    if (r_reject_reason) {
+      *r_reject_reason = reason;
+    }
+    return false;
+  };
+  if (gpumaterial->is_empty()) {
+    return reject(13);
+  }
+  for (LinkData &link : *gpumaterial) {
+    GPUMaterial *mat = static_cast<GPUMaterial *>(link.data);
+    if (!mat->animation_state_valid || !mat->animation_state) {
+      return reject(2);
+    }
+    if (mat->engine != GPU_MAT_EEVEE || GPU_material_status(mat) != GPU_MAT_SUCCESS) {
+      return reject(12);
+    }
+    if (mat->uses_referenced_object_data) {
+      return reject(11);
+    }
+    if (!mat->generated_sources.is_empty()) {
+      return reject(10);
+    }
+    if (mat->animation_state->as_span() != state) {
+      return reject(9);
+    }
+  }
+  /* Evaluated node trees may have been replaced during animation evaluation. Keep GPU data,
+   * but discard preprocessing trees holding references to the previous evaluated nodes. */
+  for (LinkData &link : *gpumaterial) {
+    GPUMaterial *mat = static_cast<GPUMaterial *>(link.data);
+    if (mat->surface_preprocessed_tree) {
+      BKE_id_free(nullptr, &mat->surface_preprocessed_tree->id);
+      mat->surface_preprocessed_tree = nullptr;
+      mat->surface_source_tree = nullptr;
+    }
+  }
+  return true;
 }
 
 void GPU_material_free_single(GPUMaterial *material)
@@ -479,6 +985,11 @@ GPUMaterialStatus GPU_material_status(GPUMaterial *mat)
     default:
       return GPU_MAT_FAILED;
   }
+}
+
+std::string GPU_material_error_message(GPUMaterial *material)
+{
+  return GPU_pass_error_message(material->pass);
 }
 
 eGPUMaterialOptimizationStatus GPU_material_optimization_status(GPUMaterial *mat)
@@ -857,7 +1368,7 @@ bool GPU_material_is_time_dependent(const GPUMaterial *mat)
 
 void GPU_material_uniform_buffer_create(GPUMaterial *material, ListBaseT<LinkData> *inputs)
 {
-  material->ubo = GPU_uniformbuf_create_from_list(inputs, material->name.c_str());
+  material->ubo = GPU_uniformbuf_create_from_list(inputs, material->name.c_str(), material);
 }
 
 gpu::UniformBuf *GPU_material_uniform_buffer_get(GPUMaterial *material)

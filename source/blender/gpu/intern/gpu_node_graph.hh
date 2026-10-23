@@ -94,6 +94,8 @@ struct GPUNode {
 };
 
 struct GPUNodeLink {
+  /* One-based index in the owning material's stable uniform-source registry. */
+  uint32_t uniform_source_index;
   GPUNodeStack *socket;
 
   GPUNodeLinkType link_type;
@@ -140,6 +142,7 @@ struct GPUOutput {
 
 struct GPUInput {
   GPUInput *next, *prev;
+  uint32_t uniform_source_index;
 
   GPUNode *node;
   GPUType type; /* data-type. */

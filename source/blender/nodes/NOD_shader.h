@@ -84,7 +84,10 @@ void ntreeGPULightShaderNodes(struct bNodeTree *localtree, struct GPUMaterial *m
 /**
  * This one needs to work on a local tree.
  */
-void ntreeGPUMaterialNodes(struct bNodeTree *localtree, struct GPUMaterial *mat);
+void ntreeGPUMaterialNodesPreprocess(struct bNodeTree *localtree, struct GPUMaterial *mat);
+void ntreeGPUMaterialNodes(struct bNodeTree *localtree,
+                          struct GPUMaterial *mat,
+                          bool preprocessed = false);
 
 bool node_shader_glsl_function_source_get(const bNode &node,
                                           std::string &r_source,

@@ -541,6 +541,7 @@ namespace blender::eevee
     update_eval_members();
     telemetry.maybe_begin_viewport_frame();
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncBegin);
+    GPUMaterialProfileContext material_profile(telemetry.material_profile_get());
     dlss5_settings_changed_ = false;
     if (scene != nullptr) {
       const SceneEEVEE &dlss5 = scene->eevee;
@@ -631,6 +632,10 @@ namespace blender::eevee
       pre_fx_viewport_->object_sync(ob_ref, *manager);
     }
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncObjects);
+    GPUMaterialProfileContext material_profile(telemetry.material_profile_get());
+    if (telemetry.enabled()) {
+      telemetry.object_update_add(get_recalc_flags(ob_ref));
+    }
     if (skip_render_) {
       return;
     }
@@ -693,6 +698,7 @@ namespace blender::eevee
       pre_fx_viewport_->end_sync();
     }
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncEnd);
+    GPUMaterialProfileContext material_profile(telemetry.material_profile_get());
     if (skip_render_)
     {
       /* We might run in the case where the next check sets skip_render_ to false after the

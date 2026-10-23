@@ -3305,7 +3305,9 @@ struct NodeShaderScriptExpressionVariable {
   char *name = nullptr;
   /** #eNodeSocketDatatype. */
   short socket_type = 0;
-  char _pad[2] = {};
+  /** Zero preserves the legacy three-dimensional vector. */
+  char vector_dimensions = 0;
+  char separate_alpha = 0;
   /** Generated unique identifier for sockets which stays stable when names or order change. */
   int identifier = 0;
 };
@@ -3317,7 +3319,8 @@ struct NodeShaderScriptExpression {
   NodeShaderScriptExpressionVariable *variables = nullptr;
   /** #eNodeSocketDatatype. */
   short output_socket_type = SOCK_FLOAT;
-  short _pad = 0;
+  /** Zero preserves the legacy three-dimensional vector. */
+  short output_vector_dimensions = 0;
   int variables_num = 0;
   int active_variable_index = 0;
   int next_identifier = 0;

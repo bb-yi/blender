@@ -6,6 +6,8 @@
  * \ingroup eevee
  */
 
+#include <algorithm>
+
 #include "BLI_set.hh"
 #include "BLI_string.h"
 #include "BLI_time.h"
@@ -13,12 +15,15 @@
 
 #include "BKE_lib_id.hh"
 #include "BKE_material.hh"
+#include "BKE_mesh.hh"
+#include "BKE_mesh_runtime.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_scene.hh"
 
 #include "NOD_shader.h"
+#include "DEG_depsgraph_query.hh"
 
 #include "GPU_capabilities.hh"
 #include "GPU_context.hh"
@@ -27,6 +32,25 @@
 #include "eevee_material.hh"
 
 namespace blender::eevee {
+
+static void store_expression_compile_errors(bNodeTree *tree,
+                                            const std::string &message,
+                                            Set<const bNodeTree *> &visited)
+{
+  if (!tree || !visited.add(tree)) {
+    return;
+  }
+  bNodeTree *original = DEG_get_original(tree);
+  for (bNode &node : tree->nodes) {
+    if (node.is_type("ShaderNodeScriptExpression"_ustr)) {
+      std::lock_guard lock(original->runtime->shader_node_errors_mutex);
+      original->runtime->shader_node_errors.lookup_or_add_default(node.identifier).add(message);
+    }
+    else if (node.is_group() && node.id) {
+      store_expression_compile_errors(reinterpret_cast<bNodeTree *>(node.id), message, visited);
+    }
+  }
+}
 
 bool material_tessellation_settings_get(blender::Material *mat,
                                         ShaderTessellationSettings &r_settings)
@@ -314,6 +338,9 @@ void MaterialModule::begin_sync()
 
   texture_loading_queue_.clear();
   material_map_.clear();
+  node_tree_info_.clear();
+  node_tree_info_hits_ = 0;
+  skipped_material_slots_ = 0;
   shader_map_.clear();
 }
 
@@ -457,27 +484,38 @@ bool MaterialModule::has_visible_outline_materials() const
   return false;
 }
 
-bool MaterialModule::material_uses_outline_control(const blender::Material *material) const
+const MaterialNodeTreeInfo &MaterialModule::node_tree_info_get(const blender::Material *material)
 {
-  if (material == nullptr) {
-    return false;
+  if (const MaterialNodeTreeInfo *info = node_tree_info_.lookup_ptr(material)) {
+    node_tree_info_hits_++;
+    return *info;
   }
-
-  if (material->nodetree != nullptr) {
-    Set<const bNodeTree *> visited;
-    if (node_tree_uses_outline_control(*material->nodetree, visited)) {
-      return true;
+  return node_tree_info_.lookup_or_add_cb(material, [&]() {
+    MaterialNodeTreeInfo info;
+    if (material == nullptr) {
+      return info;
     }
-  }
-
-  if (bNodeTree *npr_tree = npr_tree_get_from_mat(const_cast<blender::Material *>(material))) {
+    info.has_tessellation = material_tessellation_settings_get(
+        const_cast<blender::Material *>(material), info.tessellation);
+    info.has_depth_offset = material_output_has_depth_offset(material->nodetree);
+    info.npr_tree = npr_tree_get_from_mat(const_cast<blender::Material *>(material));
+    bNode *shell = material_outline_shell_node_get(material);
+    info.has_outline_shell = shell != nullptr;
+    info.outline_shell_bounds_inflation = material_outline_shell_bounds_inflation(shell);
     Set<const bNodeTree *> visited;
-    if (node_tree_uses_outline_control(*npr_tree, visited)) {
-      return true;
+    if (material->nodetree != nullptr) {
+      info.uses_outline_control = node_tree_uses_outline_control(*material->nodetree, visited);
     }
-  }
+    if (!info.uses_outline_control && info.npr_tree != nullptr) {
+      info.uses_outline_control = node_tree_uses_outline_control(*info.npr_tree, visited);
+    }
+    return info;
+  });
+}
 
-  return false;
+bool MaterialModule::material_uses_outline_control(const blender::Material *material)
+{
+  return node_tree_info_get(material).uses_outline_control;
 }
 
 MaterialPass MaterialModule::material_pass_get(Object *ob,
@@ -512,16 +550,18 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                                        geometry_type;
 
   MaterialPass matpass = MaterialPass();
-  matpass.gpumat = inst_.shaders.material_shader_get(
-      blender_mat,
-      ntree,
-      pipeline_type,
-      geometry_type,
-      probe_capture,
-      use_deferred_compilation,
-      default_mat,
-      inst_.scene->eevee.use_outline != 0,
-      outline_shell);
+  /* Keep a value copy: fallback material registration can grow the metadata map. */
+  const MaterialNodeTreeInfo node_tree_info = node_tree_info_get(blender_mat);
+  matpass.gpumat = inst_.shaders.material_shader_get(blender_mat,
+                                                     ntree,
+                                                     pipeline_type,
+                                                     geometry_type,
+                                                     probe_capture,
+                                                     use_deferred_compilation,
+                                                     default_mat,
+                                                     inst_.scene->eevee.use_outline != 0,
+                                                     outline_shell,
+                                                     &node_tree_info);
 
   has_time_dependent_materials_ |= GPU_material_is_time_dependent(matpass.gpumat);
 
@@ -574,6 +614,12 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     case GPU_MAT_FAILED:
     default:
       material_failed = true;
+      {
+        Set<const bNodeTree *> visited;
+        std::string message = "Material shader compilation failed. Check the expression and connected nodes.\n";
+        message += GPU_material_error_message(matpass.gpumat);
+        store_expression_compile_errors(blender_mat->nodetree, message, visited);
+      }
       if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell) {
         inst_.telemetry.material_sync_add(shader_queued,
                                           optimize_queued,
@@ -745,7 +791,8 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
   const bool color_write = material_color_write_get(*blender_mat);
   const bool depth_write = material_depth_write_get(*blender_mat);
   const bool use_outline = inst_.scene->eevee.use_outline != 0;
-  const bool uses_outline_control = material_uses_outline_control(blender_mat);
+  const MaterialNodeTreeInfo node_tree_info = node_tree_info_get(blender_mat);
+  const bool uses_outline_control = node_tree_info.uses_outline_control;
   const bool uses_custom_ztest = material_ztest_mode_get(*blender_mat) != MA_ZTEST_LESS_EQUAL;
   const bool use_forward_pipeline =
       blender_mat->surface_render_method == MA_SURFACE_METHOD_FORWARD ||
@@ -779,10 +826,8 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
   Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
     Material mat = {};
     mat.uses_outline_control = uses_outline_control;
-    ShaderTessellationSettings tessellation;
-    if (geometry_type == MAT_GEOM_MESH_TESS &&
-        material_tessellation_settings_get(blender_mat, tessellation))
-    {
+    const ShaderTessellationSettings &tessellation = node_tree_info.tessellation;
+    if (geometry_type == MAT_GEOM_MESH_TESS && node_tree_info.has_tessellation) {
       mat.tessellation_level = node_shader_tessellation_expansion(tessellation);
       mat.tessellation_view_dependent = tessellation.mode == SHD_TESSELLATION_SCREEN_EDGE &&
                                         tessellation.min_level != tessellation.max_level;
@@ -821,7 +866,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
 
       mat.shading = material_pass_get(ob, blender_mat, surface_pipe, geometry_type);
       const bool has_deferred_npr_tree = !hide_on_camera && (surface_pipe == MAT_PIPE_DEFERRED) &&
-                                         (npr_tree_get_from_mat(blender_mat) != nullptr);
+                                         (node_tree_info.npr_tree != nullptr);
       const bool has_surface_npr_tree = has_deferred_npr_tree && color_write;
       mat.npr = has_surface_npr_tree ? material_pass_get(
                                    ob, blender_mat, MAT_PIPE_DEFERRED_NPR, geometry_type) :
@@ -988,12 +1033,10 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
     {
       /* Shells are drawn using their own batch and are not tessellated. */
       const eMaterialGeometry shell_geometry_type = MAT_GEOM_MESH;
-      bNode *shell_node = material_outline_shell_node_get(blender_mat);
-      if (shell_node != nullptr) {
+      if (node_tree_info.has_outline_shell) {
         mat.is_outline_shell_blended = blender_mat->outline_shell_transparency_method ==
                                         MA_OUTLINE_SHELL_BLENDED;
-        mat.outline_shell_bounds_inflation = material_outline_shell_bounds_inflation(
-            shell_node);
+        mat.outline_shell_bounds_inflation = node_tree_info.outline_shell_bounds_inflation;
         const SurfaceDrawState shell_state = surface_draw_state_outline_shell(*blender_mat);
         const bool use_deferred = shell_state.depth_write &&
                                   shell_state.ztest_mode == MA_ZTEST_LESS_EQUAL &&
@@ -1086,13 +1129,37 @@ MaterialArray &MaterialModule::material_array_get(const ObjectHandle &ob_handle,
 
   const int materials_len = BKE_object_material_used_with_fallback_eval(*ob);
 
+  /* Preserve slot indexing, but don't prepare materials that no evaluated face can draw.
+   * Edit/sculpt and empty meshes keep the established fallback path. */
+  const VectorSet<int> *used_slots = nullptr;
+  if (ob->type == OB_MESH && ob->mode == OB_MODE_OBJECT) {
+    const Mesh &mesh = DRW_object_get_data_for_drawing<Mesh>(*ob);
+    if (mesh.faces_num > 0 && mesh.runtime->edit_mesh == nullptr && materials_len > 1) {
+      const VectorSet<int> &indices = mesh.material_indices_used();
+      const int actual_slots = BKE_object_material_count_eval(*ob, mesh.id);
+      if (!indices.is_empty() && std::all_of(indices.begin(), indices.end(), [&](const int i) {
+            return i >= 0 && i < materials_len && i < actual_slots;
+          }))
+      {
+        used_slots = &indices;
+      }
+    }
+  }
+
   for (auto i : IndexRange(materials_len)) {
+    if (used_slots != nullptr && !used_slots->contains(i)) {
+      material_array_.materials.append(Material{});
+      material_array_.gpu_materials.append(nullptr);
+      material_array_.gpu_materials_npr.append(nullptr);
+      material_array_.gpu_materials_outline_shell.append(nullptr);
+      skipped_material_slots_++;
+      continue;
+    }
     blender::Material *blender_mat = (material_override) ? material_override :
                                                            material_from_slot(ob, i);
     eMaterialGeometry geometry_type = to_material_geometry(ob);
-    ShaderTessellationSettings tessellation;
     if (geometry_type == MAT_GEOM_MESH && use_tessellation && !inst_.is_baking() &&
-        material_tessellation_settings_get(blender_mat, tessellation))
+        node_tree_info_get(blender_mat).has_tessellation)
     {
       geometry_type = MAT_GEOM_MESH_TESS;
     }

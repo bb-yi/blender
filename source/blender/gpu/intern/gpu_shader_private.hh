@@ -51,6 +51,7 @@ struct PatchedShaderCreateInfo {
  */
 class Shader {
  public:
+  std::shared_ptr<ShaderCompileDiagnostics> compilation_diagnostics;
   /** Uniform & attribute locations for shader. */
   ShaderInterface *interface = nullptr;
   /** Bit-set indicating the frame-buffer color attachments that this shader writes to. */

@@ -29,6 +29,8 @@ struct Light;
 
 namespace blender::eevee {
 
+struct MaterialNodeTreeInfo;
+
 using StaticShader = gpu::StaticShader;
 
 enum class eLightShaderPipeline {
@@ -336,7 +338,8 @@ class ShaderModule {
                                    bool deferred_compilation,
                                    blender::Material *default_mat,
                                    bool use_outline = true,
-                                   bool outline_shell = false);
+                                   bool outline_shell = false,
+                                   const MaterialNodeTreeInfo *node_tree_info = nullptr);
   GPUMaterial *world_shader_get(blender::World *blender_world,
                                 bNodeTree *nodetree,
                                 eMaterialPipeline pipeline_type,

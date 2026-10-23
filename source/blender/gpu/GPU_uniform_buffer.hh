@@ -22,6 +22,7 @@
 namespace blender {
 
 struct GPUInput;
+struct GPUMaterial;
 
 namespace gpu {
 class UniformBuf;
@@ -34,7 +35,9 @@ gpu::UniformBuf *GPU_uniformbuf_create_ex(size_t size, const void *data, const c
  * \param inputs: ListBaseT<LinkData>
  * \return nullptr if failed to create or if `inputs` is empty.
  */
-gpu::UniformBuf *GPU_uniformbuf_create_from_list(ListBaseT<LinkData> *inputs, const char *name);
+gpu::UniformBuf *GPU_uniformbuf_create_from_list(ListBaseT<LinkData> *inputs,
+                                                 const char *name,
+                                                 GPUMaterial *material = nullptr);
 
 #define GPU_uniformbuf_create(size) GPU_uniformbuf_create_ex(size, nullptr, __func__);
 
