@@ -614,4 +614,5 @@ else:
         raise
     finally:
         (OUT / 'uniform_manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
-    print('MATERIAL_UNIFORM_ANIMATION_OK', gpu.platform.backend_type_get(), flush=True)
+    print('MATERIAL_UNIFORM_ANIMATION_BACKEND', gpu.platform.backend_type_get(), flush=True)
+    print('MATERIAL_UNIFORM_ANIMATION_OK', flush=True)
