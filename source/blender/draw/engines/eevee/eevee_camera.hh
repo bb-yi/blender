@@ -120,6 +120,9 @@ class Camera {
   /** View projection matrix of the last #sync, to detect view changes. */
   float4x4 last_persmat_ = float4x4::zero();
   bool view_changed_ = true;
+  float3 last_position_ = float3(0.0f);
+  int2 last_render_extent_ = int2(-1);
+  bool position_changed_ = true;
 
  public:
   Camera(Instance &inst, CameraData &data) : inst_(inst), data_(data) {};
@@ -185,6 +188,10 @@ class Camera {
   bool view_changed() const
   {
     return view_changed_;
+  }
+  bool position_changed() const
+  {
+    return position_changed_;
   }
 
  private:

@@ -953,25 +953,50 @@ static void rna_EeveeFilterGraphNode_material_update(Main *bmain,
   DEG_relations_tag_update(bmain);
 }
 
+static const EnumPropertyItem *rna_EeveeFilterGraphNode_resolution_input_items(
+    bContext * /*C*/, PointerRNA *ptr, PropertyRNA * /*prop*/, bool *r_free)
+{
+  const bNode &node = *ptr->data_as<bNode>();
+  const auto *storage = static_cast<const NodeEeveeFilterGraphFilterMaterial *>(node.storage);
+  EnumPropertyItem *items = nullptr;
+  int count = 0;
+  if (storage && storage->items_num > 0) {
+    for (int i = 0; i < storage->items_num; i++) {
+      const auto &input = storage->items[i];
+      const std::string identifier = "Image_" + std::to_string(input.identifier);
+      const bNodeSocket *socket = bke::node_find_socket(
+          const_cast<bNode &>(node), SOCK_IN, UString(identifier));
+      if (socket == nullptr) {
+        continue;
+      }
+      EnumPropertyItem item = {
+          input.identifier, socket->identifier, 0, input.name, "Use this input's dimensions"};
+      RNA_enum_item_add(&items, &count, &item);
+    }
+  }
+  if (count == 0) {
+    const EnumPropertyItem item = {
+        0, "NONE", 0, "No Input (Stage Size)", "Use stage dimensions until an input is available"};
+    RNA_enum_item_add(&items, &count, &item);
+  }
+  RNA_enum_item_end(&items, &count);
+  *r_free = true;
+  return items;
+}
+
 static int rna_EeveeFilterGraphNode_execution_resolution_get(PointerRNA *ptr)
 {
   bNode &node = *ptr->data_as<bNode>();
   const NodeEeveeFilterGraphFilterMaterial *storage =
       static_cast<const NodeEeveeFilterGraphFilterMaterial *>(node.storage);
   const float scale = storage ? storage->resolution_scale : 1.0f;
-  if (scale <= 0.07f) {
-    return 4;
+  const float presets[] = {1.0f, 0.5f, 0.25f, 0.125f, 0.0625f};
+  for (int i = 0; i < 5; i++) {
+    if (scale == presets[i]) {
+      return i;
+    }
   }
-  if (scale <= 0.14f) {
-    return 3;
-  }
-  if (scale <= 0.30f) {
-    return 2;
-  }
-  if (scale <= 0.75f) {
-    return 1;
-  }
-  return 0;
+  return 5;
 }
 
 static void rna_EeveeFilterGraphNode_execution_resolution_set(PointerRNA *ptr, int value)
@@ -983,6 +1008,8 @@ static void rna_EeveeFilterGraphNode_execution_resolution_set(PointerRNA *ptr, i
     return;
   }
   switch (value) {
+    case 5:
+      return;
     case 4:
       storage->resolution_scale = 1.0f / 16.0f;
       break;
@@ -5025,6 +5052,17 @@ static void rna_ShaderNodeScript_bytecode_set(PointerRNA *ptr, const char *value
   }
 }
 
+static void rna_ShaderNodeScriptExpression_error_get(PointerRNA *ptr, char *value)
+{
+  const std::string error = nodes::script_expression_error_get(*ptr->data_as<bNode>());
+  memcpy(value, error.c_str(), error.size() + 1);
+}
+
+static int rna_ShaderNodeScriptExpression_error_length(PointerRNA *ptr)
+{
+  return int(nodes::script_expression_error_get(*ptr->data_as<bNode>()).size());
+}
+
 static void rna_ShaderNodeGLSLFunction_tag_dirty(PointerRNA *ptr)
 {
   bNode *node = ptr->data_as<bNode>();
@@ -8900,6 +8938,7 @@ static void def_eevee_filter_graph_filter_material(BlenderRNA *brna, StructRNA *
       {2, "QUARTER", 0, "1/4", "Execute this filter pass at quarter stage resolution"},
       {3, "EIGHTH", 0, "1/8", "Execute this filter pass at one eighth stage resolution"},
       {4, "SIXTEENTH", 0, "1/16", "Execute this filter pass at one sixteenth stage resolution"},
+      {5, "CUSTOM", 0, "Custom", "Use the custom resolution scale"},
       {0, nullptr, 0, nullptr, nullptr},
   };
   PropertyRNA *prop;
@@ -8951,9 +8990,55 @@ static void def_eevee_filter_graph_filter_material(BlenderRNA *brna, StructRNA *
   RNA_def_property_update(
       prop, NC_NODE | NA_EDITED, "rna_EeveeFilterGraphNode_execution_resolution_update");
 
-  prop = RNA_def_property(srna, "resolution_scale", PROP_FLOAT, PROP_FACTOR);
+  static const EnumPropertyItem basis_items[] = {
+      {0, "STAGE", 0, "Original Frame", "Scale the original stage dimensions"},
+      {1,
+       "INPUT",
+       0,
+       "Input",
+       "Scale the selected input; unconnected inputs use stage dimensions"},
+      {2, "FIXED", 0, "Fixed Pixels", "Use an explicit width and height"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem reference_items[] = {
+      {0, "NONE", 0, "No Input", "Use stage dimensions"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "resolution_basis", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "resolution_basis");
+  RNA_def_property_enum_items(prop, basis_items);
+  RNA_def_property_ui_text(prop, "Size From", "Reference used to determine execution size");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_EeveeFilterGraphNode_execution_resolution_update");
+  prop = RNA_def_property(srna, "resolution_input", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "resolution_input");
+  RNA_def_property_enum_items(prop, reference_items);
+  RNA_def_property_enum_funcs(
+      prop, nullptr, nullptr, "rna_EeveeFilterGraphNode_resolution_input_items");
+  RNA_def_property_ui_text(
+      prop,
+      "Reference Input",
+      "Input whose dimensions are used; identified independently of socket order");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_EeveeFilterGraphNode_execution_resolution_update");
+  prop = RNA_def_property(srna, "resolution_width", PROP_INT, PROP_PIXEL);
+  RNA_def_property_int_sdna(prop, nullptr, "resolution_width");
+  RNA_def_property_range(prop, 1, INT_MAX);
+  RNA_def_property_ui_range(prop, 1, 16384, 1, 0);
+  RNA_def_property_ui_text(prop, "Width", "Fixed execution size in pixels");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_EeveeFilterGraphNode_execution_resolution_update");
+  prop = RNA_def_property(srna, "resolution_height", PROP_INT, PROP_PIXEL);
+  RNA_def_property_int_sdna(prop, nullptr, "resolution_height");
+  RNA_def_property_range(prop, 1, INT_MAX);
+  RNA_def_property_ui_range(prop, 1, 16384, 1, 0);
+  RNA_def_property_ui_text(prop, "Height", "Fixed execution size in pixels");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_EeveeFilterGraphNode_execution_resolution_update");
+  prop = RNA_def_property(srna, "resolution_scale", PROP_FLOAT, PROP_NONE);
   RNA_def_property_float_sdna(prop, nullptr, "resolution_scale");
-  RNA_def_property_range(prop, 0.0625f, 1.0f);
+  RNA_def_property_range(prop, 0.000001f, FLT_MAX);
+  RNA_def_property_ui_range(prop, 0.001f, 4.0f, 1, 4);
   RNA_def_property_ui_text(
       prop, "Resolution Scale", "Internal execution resolution scale for this filter pass");
   RNA_def_property_update(
@@ -9017,6 +9102,13 @@ static const EnumPropertyItem shader_derivative_data_type_items[] = {
     {SOCK_FLOAT, "FLOAT", ICON_NODE_SOCKET_FLOAT, "Float", "Differentiate a floating-point value"},
     {SOCK_VECTOR, "VECTOR", ICON_NODE_SOCKET_VECTOR, "Vector", "Differentiate a vector value"},
     {SOCK_RGBA, "RGBA", ICON_NODE_SOCKET_RGBA, "Color", "Differentiate a color value"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+static const EnumPropertyItem shader_script_expression_dimensions_items[] = {
+    {2, "VEC2", 0, "2D", "Two components (X, Y)"},
+    {0, "VEC3", 0, "3D", "Three components (X, Y, Z)"},
+    {4, "VEC4", 0, "4D", "Four components (XYZ vector and W)"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -9357,6 +9449,20 @@ static void rna_def_sh_script_expression_variable(BlenderRNA *brna)
   RNA_def_struct_sdna(srna, "NodeShaderScriptExpressionVariable");
 
   rna_def_node_item_array_socket_item_common(srna, "ShScriptExpressionVariablesAccessor", true);
+
+  PropertyRNA *prop = RNA_def_property(srna, "vector_dimensions", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, shader_script_expression_dimensions_items);
+  RNA_def_property_ui_text(prop, "Dimensions", "Vector dimensions inside the expression");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED,
+                         "rna_Node_ItemArray_item_update<ShScriptExpressionVariablesAccessor>");
+
+  prop = RNA_def_property(srna, "separate_alpha", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "separate_alpha", 1);
+  RNA_def_property_ui_text(prop, "Separate Alpha", "Replace the color alpha with a separate input");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED,
+                         "rna_Node_ItemArray_item_update<ShScriptExpressionVariablesAccessor>");
 }
 
 static void rna_def_sh_script_expression_variables(BlenderRNA *brna)
@@ -9380,6 +9486,14 @@ static void def_sh_script_expression(BlenderRNA *brna, StructRNA *srna)
 
   RNA_def_struct_sdna_from(srna, "NodeShaderScriptExpression", "storage");
 
+  prop = RNA_def_property(srna, "error_message", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop,
+                               "rna_ShaderNodeScriptExpression_error_get",
+                               "rna_ShaderNodeScriptExpression_error_length",
+                               nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Error Message", "Expression validation or material shader compiler diagnostics");
+
   prop = RNA_def_property(srna, "expression", PROP_STRING, PROP_NONE);
   RNA_def_property_string_sdna(prop, nullptr, "expression");
   RNA_def_property_ui_text(prop, "Expression", "Single GLSL expression assigned to the output");
@@ -9389,6 +9503,12 @@ static void def_sh_script_expression(BlenderRNA *brna, StructRNA *srna)
   RNA_def_property_enum_sdna(prop, nullptr, "output_socket_type");
   RNA_def_property_enum_items(prop, shader_script_expression_socket_type_items);
   RNA_def_property_ui_text(prop, "Output Type", "Data type of the single result output");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
+
+  prop = RNA_def_property(srna, "output_vector_dimensions", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, shader_script_expression_dimensions_items);
+  RNA_def_property_ui_text(prop, "Dimensions", "Result vector dimensions; 2D is output as XYZ with Z zero");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
 
   prop = RNA_def_property(srna, "variables", PROP_COLLECTION, PROP_NONE);
@@ -9801,12 +9921,21 @@ static void def_sh_render_texture(BlenderRNA * /*brna*/, StructRNA *srna)
 static void def_sh_image_to_closure(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem texture_type_items[] = {
-      {IMA_IMAGE_TO_CLOSURE_TEXTURE_2D, "IMAGE_2D", 0, "2D Image", "Expose the image as a 2D sampler"},
+      {IMA_IMAGE_TO_CLOSURE_TEXTURE_2D,
+       "IMAGE_2D",
+       0,
+       "2D Image",
+       "Expose the image as a 2D sampler"},
       {IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP,
        "LUT_STRIP_3D",
        0,
        "3D LUT Strip",
        "Convert a horizontal LUT strip into a real 3D texture sampler"},
+      {IMA_IMAGE_TO_CLOSURE_TEXTURE_CUBE_STRIP,
+       "CUBE_STRIP",
+       0,
+       "Cube Strip",
+       "Six square faces in a horizontal +X, -X, +Y, -Y, +Z, -Z strip; native cube sampling"},
       {0, nullptr, 0, nullptr, nullptr},
   };
   static const EnumPropertyItem texture_size_mode_items[] = {

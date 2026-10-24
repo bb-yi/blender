@@ -29,6 +29,7 @@ class RenderTextureModule {
   struct RuntimeSlot {
     int uid = -1;
     Object *camera = nullptr;
+    Object *camera_orig = nullptr;
     int2 extent = int2(1);
     int source = 0;
     int format = 0;

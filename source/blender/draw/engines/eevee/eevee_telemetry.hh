@@ -16,6 +16,7 @@
 
 #include "BLI_span.hh"
 #include "BLI_vector.hh"
+#include "GPU_material_profile.hh"
 
 namespace blender::eevee {
 
@@ -278,6 +279,9 @@ struct TelemetryFrameRecord {
   std::array<TelemetryPassReadbackSample, int(TelemetryPassReadbackType::Count)> pass_readbacks =
       {};
   TelemetryMaterialSyncSample material_sync;
+  GPUMaterialProfile material_preparation;
+  std::array<uint64_t, 4> object_updates = {};
+  std::string sync_details;
   Vector<TelemetryMaterialHotspot> material_hotspots;
   int64_t material_hotspot_untracked_count = 0;
   TelemetryFeatureSnapshot features;
@@ -360,6 +364,11 @@ class TelemetryModule {
 
   void frame_begin(TelemetryRuntimeMode mode);
   void frame_end();
+  GPUMaterialProfile *material_profile_get()
+  {
+    return enabled() && frame_active_ ? &current_frame_.material_preparation : nullptr;
+  }
+  void object_update_add(int recalc);
 
   void maybe_begin_viewport_frame();
   void maybe_end_viewport_frame();

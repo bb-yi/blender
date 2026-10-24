@@ -18,6 +18,7 @@
 #include "BLI_string_ref.hh"
 
 #include "BLO_read_write.hh"
+#include "BKE_node_runtime.hh"
 
 #include "DNA_node_types.h"
 
@@ -43,6 +44,24 @@ namespace nodes::node_shader_script_expression_cc {
 NODE_STORAGE_FUNCS(NodeShaderScriptExpression)
 
 static const UString script_expr_output_identifier = "Result"_ustr;
+
+static int vector_dimensions(const int value)
+{
+  return ELEM(value, 2, 4) ? value : 3;
+}
+
+static bool has_extra_input(const NodeShaderScriptExpressionVariable &item)
+{
+  return (item.socket_type == SOCK_VECTOR && vector_dimensions(item.vector_dimensions) == 4) ||
+         (item.socket_type == SOCK_RGBA && item.separate_alpha);
+}
+
+static bool has_extra_output(const NodeShaderScriptExpression &storage)
+{
+  return storage.output_socket_type == SOCK_RGBA ||
+         (storage.output_socket_type == SOCK_VECTOR &&
+          vector_dimensions(storage.output_vector_dimensions) == 4);
+}
 
 static bool socket_type_supported(const eNodeSocketDatatype socket_type)
 {
@@ -327,12 +346,15 @@ static std::string source_hash_suffix(const bNode &node)
   BLI_hash_mm2a_init(&mm2, 0);
   BLI_hash_mm2a_add_int(&mm2, node.identifier);
   BLI_hash_mm2a_add_int(&mm2, int(storage.output_socket_type));
+  BLI_hash_mm2a_add_int(&mm2, storage.output_vector_dimensions);
   BLI_hash_mm2a_add(&mm2,
                     reinterpret_cast<const unsigned char *>(storage.expression),
                     strlen(storage.expression));
   for (const NodeShaderScriptExpressionVariable &item : storage.variables_span()) {
     BLI_hash_mm2a_add_int(&mm2, item.identifier);
     BLI_hash_mm2a_add_int(&mm2, int(item.socket_type));
+    BLI_hash_mm2a_add_int(&mm2, item.vector_dimensions);
+    BLI_hash_mm2a_add_int(&mm2, item.separate_alpha);
     if (item.name != nullptr) {
       BLI_hash_mm2a_add(
           &mm2, reinterpret_cast<const unsigned char *>(item.name), strlen(item.name));
@@ -346,31 +368,72 @@ static std::string build_wrapper_source(const bNode &node, const StringRefNull f
   const NodeShaderScriptExpression &storage = node_storage(node);
   std::stringstream source;
   source << "void " << function_name << "(";
-  bool first_argument = true;
+  std::stringstream locals;
+  int input_index = 0;
   for (const NodeShaderScriptExpressionVariable &item : storage.variables_span()) {
-    if (!first_argument) {
-      source << ", ";
-    }
-    first_argument = false;
+    const std::string argument = "_script_expr_in_" + std::to_string(input_index++);
+    const bool vec2 = item.socket_type == SOCK_VECTOR &&
+                      vector_dimensions(item.vector_dimensions) == 2;
     source << glsl_type_for_socket(safe_socket_type(item.socket_type)) << " "
-           << (item.name ? item.name : "var");
-  }
-  if (!first_argument) {
-    source << ", ";
+           << argument << ", ";
+    if (has_extra_input(item)) {
+      source << "float " << argument << "_extra, ";
+      if (item.socket_type == SOCK_VECTOR) {
+        locals << "  float4 " << item.name << " = float4(" << argument << ", " << argument
+               << "_extra);\n";
+      }
+      else {
+        locals << "  float4 " << item.name << " = float4(" << argument << ".rgb, " << argument
+               << "_extra);\n";
+      }
+    }
+    else if (vec2) {
+      locals << "  float2 " << item.name << " = " << argument << ".xy;\n";
+    }
+    else {
+      locals << "  " << glsl_type_for_socket(safe_socket_type(item.socket_type)) << " "
+             << item.name << " = " << argument << ";\n";
+    }
   }
   source << "out " << glsl_type_for_socket(safe_socket_type(storage.output_socket_type))
-         << " result)\n";
+         << " result";
+  if (has_extra_output(storage)) {
+    source << ", out float _script_expr_extra";
+  }
+  source << ")\n";
   source << "{\n";
-  source << "  result = " << StringRef(storage.expression).trim() << ";\n";
+  source << locals.str();
+  const StringRef expression = StringRef(storage.expression).trim();
+  if (storage.output_socket_type == SOCK_VECTOR &&
+      vector_dimensions(storage.output_vector_dimensions) != 3)
+  {
+    const bool vec2 = vector_dimensions(storage.output_vector_dimensions) == 2;
+    source << "  " << (vec2 ? "float2" : "float4") << " _script_expr_value = "
+           << (vec2 ? "float2" : "float4") << "(" << expression << ");\n";
+    source << "  result = "
+           << (vec2 ? "float3(_script_expr_value, 0.0)" : "_script_expr_value.xyz") << ";\n";
+    if (!vec2) {
+      source << "  _script_expr_extra = _script_expr_value.w;\n";
+    }
+  }
+  else {
+    source << "  result = " << glsl_type_for_socket(safe_socket_type(storage.output_socket_type))
+           << "(" << expression << ");\n";
+    if (storage.output_socket_type == SOCK_RGBA) {
+      source << "  _script_expr_extra = result.a;\n";
+    }
+  }
   source << "}\n";
   return source.str();
 }
 
-static void set_zero_output(GPUNodeStack *out)
+static void set_zero_output(GPUMaterial *mat, GPUNodeStack *out)
 {
-  static float zero_value[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-  if (out != nullptr && out[0].type != GPU_NONE) {
-    out[0].link = GPU_constant(zero_value);
+  for (int i = 0; out != nullptr && out[i].type != GPU_NONE; i++) {
+    const char *function = out[i].type == GPU_VEC4 ? "set_rgba_zero" :
+                           out[i].type == GPU_VEC3 ? "set_rgb_zero" :
+                                                     "set_value_zero";
+    GPU_link(mat, function, &out[i].link);
   }
 }
 
@@ -396,9 +459,12 @@ static void node_declare(NodeDeclarationBuilder &b)
 
   const NodeShaderScriptExpression &storage = node_storage(*node);
   PanelDeclarationBuilder &expression_panel = b.add_panel("Expression"_ustr, 0);
-  expression_panel.add_output(safe_socket_type(storage.output_socket_type),
-                              "Result"_ustr,
-                              script_expr_output_identifier);
+  expression_panel.add_output(
+      safe_socket_type(storage.output_socket_type), "Result"_ustr, script_expr_output_identifier);
+  if (has_extra_output(storage)) {
+    expression_panel.add_output<decl::Float>(
+        storage.output_socket_type == SOCK_RGBA ? "Alpha"_ustr : "W"_ustr, "Result_W"_ustr);
+  }
   expression_panel.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
     draw_expression_settings(layout, ptr);
   });
@@ -420,6 +486,13 @@ static void node_declare(NodeDeclarationBuilder &b)
                                             &item,
                                             "name");
     input_decl.structure_type(StructureType::Dynamic);
+    if (has_extra_input(item)) {
+      const bool color = socket_type == SOCK_RGBA;
+      inputs_panel
+          .add_input<decl::Float>(UString(std::string(name) + (color ? " Alpha" : " W")),
+                                  UString(identifier + (color ? "_Alpha" : "_W")))
+          .default_value(color ? 1.0f : 0.0f);
+    }
   }
 }
 
@@ -428,12 +501,38 @@ static void draw_expression_settings(ui::Layout &layout, PointerRNA *ptr)
   layout.use_property_split_set(true);
   layout.use_property_decorate_set(false);
   layout.prop(ptr, "output_type", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  if (RNA_enum_get(ptr, "output_type") == SOCK_VECTOR) {
+    layout.prop(ptr, "output_vector_dimensions", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  }
   layout.prop(ptr, "expression", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
   const bNode &node = *ptr->data_as<bNode>();
-  const ExpressionValidation validation = validate_expression_for_node(node);
-  if (!validation.ok) {
-    layout.label(validation.error.c_str(), ICON_ERROR);
+  const std::string error = script_expression_error_get(node);
+  if (!error.empty()) {
+    ui::Layout &box = layout.box();
+    box.red_alert_set(true);
+    box.label(IFACE_("Expression / Shader Error"), ICON_ERROR);
+    /* Keep the node readable; the header warning tooltip and RNA expose the full log. */
+    std::istringstream lines(error);
+    std::string line;
+    int shown = 0;
+    const size_t columns = size_t(std::max(12, int(node.width / 7.0f) - 4));
+    while (shown < 12 && std::getline(lines, line)) {
+      for (size_t offset = 0; offset < line.size() && shown < 12; offset += columns, shown++) {
+        box.label(line.substr(offset, columns).c_str(), ICON_NONE);
+      }
+    }
+  }
+}
+
+static void draw_variable_type(ui::Layout &layout, PointerRNA *ptr)
+{
+  layout.prop(ptr, "socket_type", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  if (RNA_enum_get(ptr, "socket_type") == SOCK_VECTOR) {
+    layout.prop(ptr, "vector_dimensions", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  }
+  else if (RNA_enum_get(ptr, "socket_type") == SOCK_RGBA) {
+    layout.prop(ptr, "separate_alpha", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 }
 
@@ -448,7 +547,7 @@ static void draw_variables_settings(ui::Layout &layout, bContext *C, PointerRNA 
       ntree, node, [&](PointerRNA *item_ptr) {
         layout.use_property_split_set(true);
         layout.use_property_decorate_set(false);
-        layout.prop(item_ptr, "socket_type", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+        draw_variable_type(layout, item_ptr);
       });
 }
 
@@ -471,7 +570,7 @@ static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
         ntree, node, [&](PointerRNA *item_ptr) {
           panel->use_property_split_set(true);
           panel->use_property_decorate_set(false);
-          panel->prop(item_ptr, "socket_type", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+          draw_variable_type(*panel, item_ptr);
         });
   }
 }
@@ -519,7 +618,7 @@ static void node_blend_read(bNodeTree & /*tree*/, bNode &node, BlendDataReader &
   }
 }
 
-static void node_update(bNodeTree * /*ntree*/, bNode *node)
+static void node_update(bNodeTree *ntree, bNode *node)
 {
   if (node->storage == nullptr) {
     return;
@@ -528,6 +627,11 @@ static void node_update(bNodeTree * /*ntree*/, bNode *node)
   storage.output_socket_type = safe_socket_type(storage.output_socket_type);
   for (NodeShaderScriptExpressionVariable &item : storage.variables_span()) {
     item.socket_type = safe_socket_type(item.socket_type);
+  }
+  const ExpressionValidation validation = validate_expression_for_node(*node);
+  if (!validation.ok) {
+    std::lock_guard lock(ntree->runtime->shader_node_errors_mutex);
+    ntree->runtime->shader_node_errors.lookup_or_add_default(node->identifier).add(validation.error);
   }
 }
 
@@ -538,12 +642,12 @@ static int node_shader_gpu_script_expression(GPUMaterial *mat,
                                              GPUNodeStack *out)
 {
   if (node->storage == nullptr) {
-    set_zero_output(out);
+    set_zero_output(mat, out);
     return true;
   }
   const ExpressionValidation validation = validate_expression_for_node(*node);
   if (!validation.ok) {
-    set_zero_output(out);
+    set_zero_output(mat, out);
     return true;
   }
 
@@ -551,9 +655,7 @@ static int node_shader_gpu_script_expression(GPUMaterial *mat,
   if (out != nullptr) {
     out[0].type = gpu_type_for_socket(safe_socket_type(storage.output_socket_type));
   }
-  for (const int index : storage.variables_span().index_range()) {
-    in[index].type = gpu_type_for_socket(safe_socket_type(storage.variables[index].socket_type));
-  }
+  /* Stack types follow the declared sockets, including scalar W/Alpha inputs. */
 
   const std::string hash = source_hash_suffix(*node);
   const std::string function_name = "script_expr_" + std::to_string(node->identifier) + "_" +
@@ -575,9 +677,38 @@ static void node_operators()
   socket_items::ops::make_common_operators<ShScriptExpressionVariablesAccessor>();
 }
 
+static void node_label(const bNodeTree * /*tree*/, const bNode *node, char *label, int maxlen)
+{
+  const StringRef expression = StringRef(node_storage(*node).expression).trim();
+  BLI_strncpy(label,
+              expression.is_empty() ? "GLSL Script Expression" : std::string(expression).c_str(),
+              maxlen);
+}
+
 }  // namespace nodes::node_shader_script_expression_cc
 
 namespace nodes {
+
+std::string script_expression_error_get(const bNode &node)
+{
+  const auto validation = node_shader_script_expression_cc::validate_expression_for_node(node);
+  if (!validation.ok) {
+    return validation.error;
+  }
+  const bNodeTree &tree = node.owner_tree();
+  std::lock_guard lock(tree.runtime->shader_node_errors_mutex);
+  const auto *errors = tree.runtime->shader_node_errors.lookup_ptr(node.identifier);
+  std::string result;
+  if (errors) {
+    for (const std::string &error : *errors) {
+      if (!result.empty()) {
+        result += '\n';
+      }
+      result += error;
+    }
+  }
+  return result;
+}
 
 StructRNA **ShScriptExpressionVariablesAccessor::item_srna =
     &RNA_ShaderScriptExpressionVariable;
@@ -643,7 +774,7 @@ std::string ShScriptExpressionVariablesAccessor::validate_name(const StringRef n
   if (result.empty() || !node_shader_script_expression_cc::is_identifier_start(result[0])) {
     result = "var";
   }
-  if (StringRef(result).startswith("gl_")) {
+  if (StringRef(result).startswith("gl_") || StringRef(result).startswith("_script_expr_")) {
     result = "var_" + result;
   }
   else if (node_shader_script_expression_cc::is_glsl_reserved_identifier(result) ||
@@ -708,6 +839,7 @@ void register_node_type_sh_script_expression()
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_layout;
   ntype.draw_buttons_ex = file_ns::node_layout_ex;
+  ntype.labelfunc = file_ns::node_label;
   ntype.initfunc = file_ns::node_init;
   ntype.updatefunc = file_ns::node_update;
   ntype.gpu_fn = file_ns::node_shader_gpu_script_expression;

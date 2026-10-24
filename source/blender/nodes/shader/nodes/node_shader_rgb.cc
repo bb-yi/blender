@@ -37,7 +37,7 @@ static int gpu_shader_rgb(GPUMaterial *mat,
 {
   const bNodeSocket *socket = static_cast<bNodeSocket *>(node->outputs.first);
   float *value = static_cast<bNodeSocketValueRGBA *>(socket->default_value)->value;
-  return GPU_link(mat, "set_rgba", GPU_uniform(value), &out->link);
+  return GPU_link(mat, "set_rgba", GPU_uniform_from_socket(mat, socket, value), &out->link);
 }
 
 NODE_SHADER_MATERIALX_BEGIN

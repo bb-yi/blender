@@ -20,6 +20,7 @@
 #define DNA_DEPRECATED_ALLOW
 
 #include "DNA_ID.h"
+#include "DNA_anim_types.h"
 #include "DNA_curve_types.h"
 #include "DNA_curves_types.h"
 #include "DNA_gpencil_legacy_types.h"
@@ -37,9 +38,15 @@
 #include "BLI_array_utils.h"
 #include "BLI_enum_flags.hh"
 #include "BLI_listbase.h"
+#include "BLI_time.h"
 #include "BLI_math_color.h"
 #include "BLI_math_vector.h"
 #include "BLI_string.h"
+#include "BLI_set.hh"
+#include "ANIM_action.hh"
+#include "RNA_access.hh"
+#include "RNA_path.hh"
+#include "RNA_prototypes.hh"
 
 #include "BLT_translation.hh"
 
@@ -2142,9 +2149,132 @@ void ramp_blend(int type, float r_col[4], const float fac, const float col[4])
   }
 }
 
+bool BKE_material_animation_state_get(const Material &material,
+                                      Vector<double> &r_state,
+                                      int *r_reject_reason)
+{
+  r_state.clear();
+  const auto reject = [&](const int reason) {
+    if (r_reject_reason) {
+      *r_reject_reason = reason;
+    }
+    return false;
+  };
+  if (material.nodetree == nullptr || material.eevee_domain != MA_EEVEE_DOMAIN_SURFACE ||
+      (material.adt && (material.adt->action || !material.adt->drivers.is_empty() ||
+                        !material.adt->nla_tracks.is_empty())))
+  {
+    return reject(2);
+  }
+  Set<const bNodeTree *> visited;
+  bool has_animation = false;
+  const auto visit = [&](const auto &self, const bNodeTree &tree) -> bool {
+    if (!visited.add(&tree)) {
+      return true;
+    }
+    r_state.append(double(DEG_get_original(&tree)->id.session_uid));
+    const AnimData *adt = tree.adt;
+    if (adt && (!adt->drivers.is_empty() || !adt->nla_tracks.is_empty() || adt->tmpact)) {
+      return reject(3);
+    }
+    r_state.append(adt && adt->action ? double(adt->action->id.session_uid) : 0.0);
+    r_state.append(adt && adt->action ? double(adt->slot_handle) : 0.0);
+    if (adt && adt->action) {
+      const animrig::Action &action = adt->action->wrap();
+      if (action.layers().size() != 1 || action.layers()[0]->strips().size() != 1) {
+        return reject(4);
+      }
+      const Span<const FCurve *> curves = animrig::fcurves_for_action_slot(action, adt->slot_handle);
+      if (curves.is_empty()) {
+        return reject(8);
+      }
+      has_animation = true;
+      r_state.append(double(curves.size()));
+      PointerRNA owner = RNA_id_pointer_create(const_cast<ID *>(&tree.id));
+      for (const FCurve *curve : curves) {
+        PointerRNA ptr;
+        PropertyRNA *property = nullptr;
+        if (curve->rna_path == nullptr ||
+            !RNA_path_resolve_property(&owner, curve->rna_path, &ptr, &property) ||
+            !RNA_struct_is_a(ptr.type, RNA_NodeSocket) ||
+            !STREQ(RNA_property_identifier(property), "default_value") ||
+            RNA_property_type(property) != PROP_FLOAT)
+        {
+          return reject(5);
+        }
+        const int length = RNA_property_array_length(&ptr, property);
+        if (length && (curve->array_index < 0 || curve->array_index >= length)) {
+          return reject(5);
+        }
+        const float value = length ? RNA_property_float_get_index(&ptr, property, curve->array_index) :
+                                     RNA_property_float_get(&ptr, property);
+        if (!std::isfinite(value)) {
+          return reject(5);
+        }
+        r_state.append(double(strlen(curve->rna_path)));
+        for (const char *c = curve->rna_path; *c; c++) {
+          r_state.append(double(uint8_t(*c)));
+        }
+        r_state.append(double(curve->array_index));
+        /* Compare the exact float representation, including signed zero. The 32-bit value and
+         * ID/path identity are exactly representable as doubles; no hash collisions or epsilon. */
+        uint32_t value_bits;
+        memcpy(&value_bits, &value, sizeof(value_bits));
+        r_state.append(double(value_bits));
+      }
+    }
+    else {
+      r_state.append(0.0);
+    }
+    for (const bNode &node : tree.nodes) {
+      if (node.id == nullptr) {
+        continue;
+      }
+      if (GS(node.id->name) == ID_NT) {
+        if (!self(self, *reinterpret_cast<const bNodeTree *>(node.id))) {
+          return false;
+        }
+      }
+      else if (GS(node.id->name) == ID_IM) {
+        const Image &image = *reinterpret_cast<const Image *>(node.id);
+        if (ELEM(image.source, IMA_SRC_SEQUENCE, IMA_SRC_MOVIE)) {
+          return reject(6);
+        }
+      }
+      else if (GS(node.id->name) != ID_TXT) {
+        return reject(7);
+      }
+    }
+    return true;
+  };
+  return visit(visit, *material.nodetree) && (has_animation || reject(8));
+}
+
 void BKE_material_eval(Depsgraph *depsgraph, Material *material)
 {
   DEG_debug_print_eval(depsgraph, __func__, material->id.name, material);
+  const bool profile = DEG_material_eval_profile_enabled(depsgraph);
+  const double start = profile ? BLI_time_now_seconds() : 0.0;
+  int reason = material->gpumaterial.is_empty() ? 13 : 1;
+  if (DEG_get_mode(depsgraph) == DAG_EVAL_VIEWPORT &&
+      DEG_is_evaluating_time_update(depsgraph) && !material->gpumaterial.is_empty())
+  {
+    Vector<double> state;
+    if (BKE_material_animation_state_get(*material, state, &reason) &&
+        (GPU_material_animation_state_matches(&material->gpumaterial, state, &reason) ||
+         GPU_material_animation_uniform_update(material, state)))
+    {
+      if (profile) {
+        DEG_material_eval_profile_add(
+            depsgraph, 0, uint64_t((BLI_time_now_seconds() - start) * 1e9));
+      }
+      return;
+    }
+  }
+  if (profile) {
+    DEG_material_eval_profile_add(
+        depsgraph, reason, uint64_t((BLI_time_now_seconds() - start) * 1e9));
+  }
   GPU_material_free(&material->gpumaterial);
 }
 

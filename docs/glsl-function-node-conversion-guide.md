@@ -38,6 +38,7 @@
   - `mat4`
   - `sampler2D`
   - `sampler3D`
+  - `samplerCube`
 - 输出参数 `out`
   - `float`
   - `int`
@@ -63,7 +64,7 @@
 ### 2. 当前不支持的函数接口写法
 
 - `inout`
-- `out sampler2D` / `out sampler3D`
+- `out sampler2D` / `out sampler3D` / `out samplerCube`
 - `struct` / `array` 作为函数边界类型
 - 非方阵矩阵（例如 `mat2x3`）作为函数边界类型
 - 多返回值结构体
@@ -93,6 +94,15 @@
 - `mat2/mat3/mat4` 边界会按列拆分为多个向量插口；`mat4` 的每列会进一步拆成 `vec3 + float W`
 
 ### 3A. 5.2 当前 Closure / sampler 快速判定
+
+2026-10 材质兼容更新：
+
+- `samplerCube` 连接 `Image to Closure` 的 **Cube Strip**。输入为六个等大正方形面的水平图集，左到右为 `+X, -X, +Y, -Y, +Z, -Z`，不做经纬度重采样。各面行序按 GPU Cube 坐标约定；导入游戏贴图时先核对面朝向，不凭资源名推测。
+- Cube 使用原生 GPU 纹理及自动生成的 mip，支持方向向量采样 `texture`、显式 `textureLod` 和返回 `ivec2` 的 `textureSize`。当前不支持把程序化 `Closure Output` 当作 Cube，也不直接读取 DDS Cube 或保留源游戏自带 mip 链。
+- Cube 可穿过节点组 Closure 接口；HDR 数据遵循图像色彩空间设置，数据纹理建议 Non-Color / Channel Packed。图像重载和像素编辑会使 GPU Cube 缓存失效。
+- 3D LUT 与 Cube 的像素尺寸在 GPU 资源准备阶段检查，节点解析不提前加载图像。因此 `parse_status=READY` 只证明接口与语法通过，仍须实渲验证图像格式、路径及 GPU 资源。
+- 程序化 sampler Closure 与 typed callback 都在创建它们的组实例上下文中展开，组输入不再退回节点组定义里的默认值。
+- 对已知节点宏或源码整数宏，依赖分析前会裁剪确定不执行的条件分支。支持 `#if/#ifdef/#ifndef/#elif/#else`、括号、`defined`、比较及 `! / && / ||`；源码整数仅提前求值无后缀的有符号 32 位常量。宽整数、无符号常量、宏别名与替换表达式、无法确定的表达式和 GPU 后端宏保留给后端，避免宿主整数语义或后续宏重定义改变结果。不能假设任意 C 预处理表达式都被节点分析器求值。
 
 转换前先判断外部代码依赖的是哪一种 Closure 合同。下面四种路径不能互相替换：
 

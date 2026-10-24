@@ -11,9 +11,13 @@
  * It is the module that tracks the objects between frames updates.
  */
 
+#include <algorithm>
+#include <limits>
+
 #include "BKE_duplilist.hh"
 #include "BKE_object.hh"
 #include "BLI_map.hh"
+#include "BLI_time.h"
 #include "DEG_depsgraph_query.hh"
 #include "DNA_modifier_types.h"
 #include "DNA_particle_types.h"
@@ -21,6 +25,7 @@
 
 #include "DRW_engine.hh"
 #include "GPU_capabilities.hh"
+#include "GPU_context.hh"
 #include "draw_cache.hh"
 #include "draw_cache_impl.hh"
 
@@ -34,6 +39,53 @@
 
 namespace blender::eevee {
 
+/* Keep allocation decisions local to velocity. In particular, a snapshot buffer must not shrink
+ * on every small topology change, and its history must never be discarded before consumption. */
+static int64_t velocity_buffer_capacity(const int64_t used,
+                                        const int64_t capacity,
+                                        const int64_t minimum,
+                                        const int64_t maximum,
+                                        uint32_t &low_usage_count)
+{
+  BLI_assert(used >= 0 && used <= maximum && minimum <= maximum);
+  const int64_t required = std::max(used, minimum);
+  bool resize = required > capacity;
+  if (resize || used >= capacity / 4 + int64_t(capacity % 4 != 0)) {
+    low_usage_count = 0;
+  }
+  else if (++low_usage_count >= 120) {
+    resize = true;
+    low_usage_count = 0;
+  }
+  if (!resize) {
+    return capacity;
+  }
+  int64_t target = minimum;
+  while (target < required) {
+    /* The device limit need not be a power of two. Do not round past it or overflow. */
+    target = target > maximum / 2 ? maximum : target * 2;
+  }
+  return target;
+}
+
+template<typename T>
+static uint64_t velocity_buffer_upload(draw::StorageArrayBuffer<T, 16> &buffer, const int64_t used)
+{
+  /* Vulkan also uses this prefix as the descriptor range. Keep a valid, initialized dummy
+   * element when there is no history, and include every slot referenced by history indices. */
+  if (used == 0) {
+    buffer[0] = T{};
+  }
+  const int64_t upload_size = GPU_backend_get_type() == GPU_BACKEND_VULKAN ?
+                                  std::max<int64_t>(used, 1) :
+                                  buffer.size();
+  if (GPU_backend_get_type() == GPU_BACKEND_VULKAN) {
+    GPU_storagebuf_usage_size_set(buffer, uint64_t(upload_size) * sizeof(T));
+  }
+  buffer.push_update();
+  return uint64_t(upload_size) * sizeof(T);
+}
+
 /* -------------------------------------------------------------------- */
 /** \name VelocityModule
  *
@@ -41,6 +93,15 @@ namespace blender::eevee {
 
 void VelocityModule::init()
 {
+  runtime_stats_enabled_ = inst_.telemetry.enabled();
+  runtime_stats_ = {};
+  if (runtime_stats_enabled_) {
+    for (const VelocityGeometryBuf *buffer : geometry_steps) {
+      runtime_stats_.geometry_capacity_bytes += uint64_t(buffer->size()) * sizeof(float4);
+    }
+    runtime_stats_.indirection_capacity_bytes = uint64_t(indirection_buf.size()) *
+                                                sizeof(VelocityIndex);
+  }
   if (!inst_.is_viewport() && !inst_.is_baking() &&
       (inst_.film.render_buffer_passes_get() & EEVEE_RENDER_PASS_VECTOR) &&
       !inst_.motion_blur.postfx_enabled())
@@ -49,7 +110,10 @@ void VelocityModule::init()
     const Scene *scene = inst_.scene;
     float initial_time = scene->r.cfra + scene->r.subframe;
     step_sync(STEP_PREVIOUS, initial_time - 1.0f);
-    step_sync(STEP_NEXT, initial_time + 1.0f);
+    /* NR consumes backward motion only; avoid evaluating and copying future geometry. */
+    if (!inst_.is_dlss_guide_render) {
+      step_sync(STEP_NEXT, initial_time + 1.0f);
+    }
     /* Let the main sync loop handle the current step. */
     inst_.set_time(initial_time);
     step_ = STEP_CURRENT;
@@ -57,7 +121,9 @@ void VelocityModule::init()
 
   /* For viewport, only previous motion is supported.
    * Still bind previous step to avoid undefined behavior. */
-  next_step_ = (inst_.is_viewport() || inst_.is_baking()) ? STEP_PREVIOUS : STEP_NEXT;
+  next_step_ = (inst_.is_viewport() || inst_.is_baking() || inst_.is_dlss_guide_render) ?
+                   STEP_PREVIOUS :
+                   STEP_NEXT;
 }
 
 /* Similar to Instance::object_sync, but only syncs velocity. */
@@ -194,6 +260,9 @@ bool VelocityModule::step_object_sync(const ObjectHandle &ob_handle,
         object_steps[STEP_PREVIOUS]->get_or_resize(
             vel.obj.ofs[STEP_PREVIOUS]) = ob_handle.object_to_world(i);
       }
+      if (inst_.is_dlss_guide_render) {
+        vel.obj.ofs[STEP_NEXT] = vel.obj.ofs[STEP_PREVIOUS];
+      }
       if (vel.obj.ofs[STEP_NEXT] == -1) {
         if (inst_.is_viewport()) {
           /* Just set it to 0. motion.next is not meant to be valid in the viewport. */
@@ -211,7 +280,7 @@ bool VelocityModule::step_object_sync(const ObjectHandle &ob_handle,
     if (step_ == STEP_CURRENT && has_motion == true && has_deform == false) {
       const float4x4 &obmat_curr = (*object_steps[STEP_CURRENT])[vel.obj.ofs[STEP_CURRENT]];
       const float4x4 &obmat_prev = (*object_steps[STEP_PREVIOUS])[vel.obj.ofs[STEP_PREVIOUS]];
-      if (inst_.is_viewport()) {
+      if (inst_.is_viewport() || inst_.is_dlss_guide_render) {
         any_instance_has_motion |= obmat_curr != obmat_prev;
       }
       else {
@@ -238,20 +307,30 @@ bool VelocityModule::step_object_sync(const ObjectHandle &ob_handle,
 
 void VelocityModule::geometry_steps_fill()
 {
-  uint dst_ofs = 0;
+  const double start_time = runtime_stats_enabled_ ? BLI_time_now_seconds() : 0.0;
+  /* Offsets/lengths are signed shader integers; the copy API has unsigned byte offsets/sizes. */
+  const uint64_t maximum = std::min({uint64_t(GPU_max_storage_buffer_size() / sizeof(float4)),
+                                     uint64_t(std::numeric_limits<int>::max()),
+                                     uint64_t(std::numeric_limits<uint>::max() / sizeof(float4))});
+  uint64_t dst_ofs = 0;
+  bool overflow = maximum < 16;
   for (VelocityGeometryData &geom : geometry_map.values()) {
     gpu::VertBuf *pos_buf = geom.pos_buf_get();
     if (!pos_buf) {
       continue;
     }
-    uint src_len = GPU_vertbuf_get_vertex_len(pos_buf);
-    geom.len = src_len;
-    geom.ofs = dst_ofs;
+    const uint64_t src_len = GPU_vertbuf_get_vertex_len(pos_buf);
+    if (src_len > maximum - dst_ofs) {
+      overflow = true;
+      break;
+    }
+    geom.len = int(src_len);
+    geom.ofs = int(dst_ofs);
     dst_ofs += src_len;
   }
 
   /* Fallback when velocity buffer could not be allocated.  */
-  if (GPU_max_storage_buffer_size() < dst_ofs * sizeof(float) * 4) {
+  if (overflow) {
     inst_.info_append_i18n(
         "Error: Could not allocate velocity geometry buffer. Only object and camera velocities "
         "will be used.");
@@ -260,9 +339,39 @@ void VelocityModule::geometry_steps_fill()
       vel.geo.ofs[step_] = -1;
       vel.id = 0;
     }
+    geometry_map.clear();
+    if (runtime_stats_enabled_) {
+      runtime_stats_.snapshot_cpu_ms += (BLI_time_now_seconds() - start_time) * 1000.0;
+    }
     return;
   }
-  geometry_steps[step_]->resize(max_ii(16, dst_ofs));
+  const int64_t old_capacity = geometry_steps[step_]->size();
+  const int64_t capacity = velocity_buffer_capacity(
+      int64_t(dst_ofs), old_capacity, 16, int64_t(maximum), geometry_low_usage_count_[step_]);
+  geometry_steps[step_]->resize(capacity);
+  if (runtime_stats_enabled_) {
+    runtime_stats_.geometry_reallocations += capacity != old_capacity;
+    runtime_stats_.geometry_shrinks += capacity < old_capacity;
+    runtime_stats_.geometry_capacity_bytes = uint64_t(geometry_steps[0]->size() +
+                                                      geometry_steps[1]->size() +
+                                                      geometry_steps[2]->size()) *
+                                             sizeof(float4);
+    runtime_stats_.snapshot_vertices += dst_ofs;
+    runtime_stats_.snapshot_copy_bytes += dst_ofs * sizeof(float4);
+  }
+
+  if (GPU_backend_get_type() == GPU_BACKEND_VULKAN) {
+    GPU_storagebuf_usage_size_set(*geometry_steps[step_],
+                                  std::max<uint64_t>(dst_ofs, 1) * sizeof(float4));
+    if (dst_ofs == 0) {
+      /* No shader will read this slot, but a zero-sized Vulkan descriptor is invalid. */
+      const float4 dummy(0.0f);
+      GPU_storagebuf_update(*geometry_steps[step_], &dummy);
+      if (runtime_stats_enabled_) {
+        runtime_stats_.upload_bytes += sizeof(dummy);
+      }
+    }
+  }
 
   DRW_submission_start();
 
@@ -313,6 +422,9 @@ void VelocityModule::geometry_steps_fill()
   }
 
   geometry_map.clear();
+  if (runtime_stats_enabled_) {
+    runtime_stats_.snapshot_cpu_ms += (BLI_time_now_seconds() - start_time) * 1000.0;
+  }
 }
 
 void VelocityModule::step_swap()
@@ -320,6 +432,7 @@ void VelocityModule::step_swap()
   auto swap_steps = [&](eVelocityStep step_a, eVelocityStep step_b) {
     std::swap(object_steps[step_a], object_steps[step_b]);
     std::swap(geometry_steps[step_a], geometry_steps[step_b]);
+    std::swap(geometry_low_usage_count_[step_a], geometry_low_usage_count_[step_b]);
     std::swap(camera_steps[step_a], camera_steps[step_b]);
     std::swap(step_time[step_a], step_time[step_b]);
     std::swap(object_steps_usage[step_a], object_steps_usage[step_b]);
@@ -377,7 +490,36 @@ void VelocityModule::end_sync()
     velocity_map.remove(key);
   }
 
-  indirection_buf.resize(ceil_to_multiple_u(max_resource_index_ + 1, 128));
+  const int64_t indirection_used = int64_t(max_resource_index_) + 1;
+  const int64_t old_capacity = indirection_buf.size();
+  const int64_t maximum = int64_t(std::min<uint64_t>(
+      GPU_max_storage_buffer_size() / sizeof(VelocityIndex), std::numeric_limits<int64_t>::max()));
+  BLI_assert(indirection_used <= maximum);
+  /* If the scene's resource table itself exceeds the device limit, retain the previous exact-size
+   * behavior. This must not turn the bounded power-of-two calculation into an overflow or loop. */
+  const int64_t capacity = indirection_used > maximum ?
+                               indirection_used :
+                               velocity_buffer_capacity(indirection_used,
+                                                        old_capacity,
+                                                        std::min<int64_t>(128, maximum),
+                                                        maximum,
+                                                        indirection_low_usage_count_);
+  indirection_buf.resize(capacity);
+  indirection_initialized_size_ = std::min(indirection_initialized_size_, capacity);
+  if (indirection_initialized_size_ < indirection_used) {
+    /* Sparse resource indices may leave holes. Initialize each host slot once so the Vulkan
+     * upload prefix is fully initialized without clearing the whole retained capacity each frame.
+     */
+    indirection_buf.as_span()
+        .slice(indirection_initialized_size_, indirection_used - indirection_initialized_size_)
+        .fill(VelocityIndex{});
+    indirection_initialized_size_ = indirection_used;
+  }
+  if (runtime_stats_enabled_) {
+    runtime_stats_.indirection_reallocations += capacity != old_capacity;
+    runtime_stats_.indirection_shrinks += capacity < old_capacity;
+    runtime_stats_.indirection_capacity_bytes = uint64_t(capacity) * sizeof(VelocityIndex);
+  }
 
   /* Avoid uploading more data to the GPU as well as an extra level of
    * indirection on the GPU by copying back offsets the to VelocityIndex. */
@@ -393,6 +535,11 @@ void VelocityModule::end_sync()
                           (vel.geo.len[STEP_PREVIOUS] == GPU_vertbuf_get_vertex_len(pos_buf));
     }
     else {
+      if (inst_.is_dlss_guide_render) {
+        /* Both next-step buffer bindings alias PREVIOUS in the guide path. */
+        vel.geo.ofs[STEP_NEXT] = vel.geo.ofs[STEP_PREVIOUS];
+        vel.geo.len[STEP_NEXT] = vel.geo.len[STEP_PREVIOUS];
+      }
       vel.geo.do_deform = (vel.geo.len[STEP_CURRENT] != 0) &&
                           (vel.geo.len[STEP_CURRENT] == vel.geo.len[STEP_PREVIOUS]) &&
                           (vel.geo.len[STEP_CURRENT] == vel.geo.len[STEP_NEXT]);
@@ -402,12 +549,21 @@ void VelocityModule::end_sync()
     vel.obj.resource_index = uint(-1);
   }
 
-  object_steps[STEP_PREVIOUS]->push_update();
-  object_steps[STEP_NEXT]->push_update();
+  uint64_t upload_bytes = velocity_buffer_upload(*object_steps[STEP_PREVIOUS],
+                                                 object_steps_usage[STEP_PREVIOUS]);
+  if (!inst_.is_dlss_guide_render) {
+    upload_bytes += velocity_buffer_upload(*object_steps[STEP_NEXT],
+                                           object_steps_usage[STEP_NEXT]);
+  }
   camera_steps[STEP_PREVIOUS]->push_update();
   camera_steps[STEP_CURRENT]->push_update();
-  camera_steps[STEP_NEXT]->push_update();
-  indirection_buf.push_update();
+  if (!inst_.is_dlss_guide_render) {
+    camera_steps[STEP_NEXT]->push_update();
+  }
+  upload_bytes += velocity_buffer_upload(indirection_buf, indirection_used);
+  if (runtime_stats_enabled_) {
+    runtime_stats_.upload_bytes += upload_bytes;
+  }
 }
 
 bool VelocityModule::object_has_velocity(const Object *ob)
@@ -442,8 +598,8 @@ bool VelocityModule::object_is_deform(const Object *ob)
 bool VelocityModule::camera_has_motion() const
 {
   /* Only valid after sync. */
-  if (inst_.is_viewport()) {
-    /* Viewport has no next step. */
+  if (inst_.is_viewport() || inst_.is_dlss_guide_render) {
+    /* These paths have no next step. */
     return *camera_steps[STEP_PREVIOUS] != *camera_steps[STEP_CURRENT];
   }
   return *camera_steps[STEP_PREVIOUS] != *camera_steps[STEP_CURRENT] &&

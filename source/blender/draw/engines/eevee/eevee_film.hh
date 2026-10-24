@@ -119,6 +119,7 @@ class Film {
   /* Store the pass types needed by the viewport compositor separately, because some passes might
    * be enabled but not used by the viewport compositor, so they needn't be written. */
   eViewLayerEEVEEPassType viewport_compositor_enabled_passes_ = eViewLayerEEVEEPassType(0);
+  bool pre_fx_compositor_requested_ = false;
   PassCategory enabled_categories_ = PassCategory(0);
   bool use_reprojection_ = false;
   bool is_valid_render_extent_ = true;
@@ -131,6 +132,11 @@ class Film {
   void init(const int2 &full_extent, const rcti *output_rect);
 
   void sync();
+  bool pre_fx_compositor_requested() const
+  {
+    return pre_fx_compositor_requested_;
+  }
+  void write_viewport_pre_fx();
   void end_sync();
 
   const FilmData &get_data()
@@ -149,6 +155,8 @@ class Film {
 
   /** Blit to display. No rendered sample needed. */
   void display();
+  gpu::Texture *process_dlss(View &view, Instance &guides);
+  bool dlss_mask_valid();
 
   float *read_pass(eViewLayerEEVEEPassType pass_type, int layer_offset);
   float *read_aov(ViewLayerAOV *aov);

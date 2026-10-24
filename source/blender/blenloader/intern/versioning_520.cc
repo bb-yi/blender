@@ -1166,6 +1166,27 @@ void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 55)) {
+    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+      for (bNode &node : ntree->nodes) {
+        if (!STREQ(node.idname, "EeveeFilterGraphNodeFilterMaterial") || !node.storage) {
+          continue;
+        }
+        auto &data = *static_cast<NodeEeveeFilterGraphFilterMaterial *>(node.storage);
+        const float scale = data.resolution_scale;
+        data.resolution_scale = scale <= 0.07f ? 0.0625f :
+                                scale <= 0.14f ? 0.125f :
+                                scale <= 0.30f ? 0.25f :
+                                scale <= 0.75f ? 0.5f :
+                                                 1.0f;
+        data.resolution_basis = 0;
+        data.resolution_input = data.items_num ? data.items[0].identifier : 0;
+        data.resolution_width = data.resolution_height = 256;
+      }
+    }
+    FOREACH_NODETREE_END;
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.

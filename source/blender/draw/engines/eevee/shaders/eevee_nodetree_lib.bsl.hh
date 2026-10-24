@@ -6,6 +6,14 @@
 
 #include "infos/eevee_common_infos.hh"
 #include "infos/eevee_geom_infos.hh"
+#include "infos/eevee_sampling_infos.hh"
+
+/* NPR uses legacy sampling resources. The fragment-stage declaration does not instantiate them
+ * for BSL vertex displacement (mesh, curves, pointcloud) or tessellation. Declare them before the
+ * Sampling functions below; leave the fragment stage's existing declaration unchanged. */
+#if defined(GPU_VERTEX_SHADER) && defined(NPR_SHADER)
+VERTEX_SHADER_CREATE_INFO(eevee_sampling_data)
+#endif
 
 #include "draw_intersect_lib.glsl"
 #include "gpu_shader_common_hash.glsl"
@@ -18,6 +26,7 @@
 #include "eevee_pipeline.bsl.hh"
 #include "eevee_ray_trace_screen_lib.bsl.hh"
 #include "eevee_renderpass.bsl.hh"
+#include "eevee_sampling_lib.bsl.hh"
 #include "eevee_sampling_shared.hh"
 #include "eevee_uniform.bsl.hh"
 #include "eevee_utility_tx.bsl.hh"
@@ -36,6 +45,7 @@ bool TextureHandle_is_scene_depth(TextureHandle tex);
 #endif
 
 #ifdef MAT_FILTER
+int2 filter_graph_output_extent();
 bool TextureHandle_stores_transmittance_alpha(TextureHandle tex);
 #endif
 
@@ -176,6 +186,17 @@ ObjectInfos drw_object_infos()
 #if defined(GPU_FRAGMENT_SHADER)
 #  include "eevee_outline_lib.glsl"
 #endif
+
+float2 render_info_samples()
+{
+#ifdef CREATE_INFO_eevee_Sampling
+  [[resource_table]] const eevee::Sampling &sampling = resource_table_get(eevee::Sampling);
+  return float2(float(sampling.sampling_buf.sample_index),
+                float(max(sampling.sampling_buf.sample_count, 1)));
+#else
+  return float2(0.0f, 1.0f);
+#endif
+}
 
 /* Additional create-info composition propagates the resource-table marker, not the legacy data
  * define, to dynamically generated material shaders. */

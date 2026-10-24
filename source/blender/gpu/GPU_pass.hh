@@ -35,6 +35,7 @@ GPUPass *GPU_generate_pass(GPUMaterial *material,
                            bool optimize_graph);
 
 GPUPassStatus GPU_pass_status(GPUPass *pass);
+std::string GPU_pass_error_message(GPUPass *pass);
 bool GPU_pass_should_optimize(GPUPass *pass);
 void GPU_pass_ensure_its_ready(GPUPass *pass);
 gpu::Shader *GPU_pass_shader_get(GPUPass *pass);

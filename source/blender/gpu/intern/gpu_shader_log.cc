@@ -46,6 +46,13 @@ void Shader::print_log(Span<StringRefNull> sources,
                        const bool error,
                        GPULogParser *parser)
 {
+  if (error && compilation_diagnostics) {
+    std::lock_guard lock(compilation_diagnostics->mutex);
+    std::string &message = compilation_diagnostics->message;
+    if (message.size() < 8192) {
+      message += std::string(stage) + ":\n" + std::string(log).substr(0, 8192 - message.size());
+    }
+  }
   const char line_prefix[] = "      | ";
   char err_col[] = "\033[31;1m";
   char warn_col[] = "\033[33;1m";

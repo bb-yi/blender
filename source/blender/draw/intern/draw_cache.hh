@@ -63,7 +63,8 @@ gpu::Batch *DRW_cache_mesh_surface_get(Object *ob);
 gpu::Batch *DRW_cache_mesh_paint_overlay_surface_get(Object *ob);
 gpu::Batch *DRW_cache_mesh_paint_overlay_edges_get(Object *ob);
 /**
- * Return list of batches with length equal to `max(1, totcol)`.
+ * Return batches indexed by evaluated mesh material slots. Materials only describe attribute
+ * requirements; their count and order need not match those slots.
  */
 Span<gpu::Batch *> DRW_cache_mesh_surface_shaded_get(Object *ob,
                                                      Span<const GPUMaterial *> materials);

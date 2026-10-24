@@ -330,9 +330,19 @@ void GLTexture::update_sub(int mip,
 
   GLContext::state_manager_active_get()->texture_bind_temp(this);
   if (type_ == GPU_TEXTURE_CUBE) {
+    const size_t pixel_size = (clamped_half_buffer || short_buffer) ?
+                                  to_component_len(format_) * sizeof(uint16_t) :
+                                  to_bytesize(format_, type);
+    const size_t face_size = size_t(extent[0]) * size_t(extent[1]) * pixel_size;
     for (int i = 0; i < extent[2]; i++) {
       GLenum target = GL_TEXTURE_CUBE_MAP_POSITIVE_X + offset[2] + i;
-      glTexSubImage2D(target, mip, UNPACK2(offset), UNPACK2(extent), gl_format, gl_type, data);
+      glTexSubImage2D(target,
+                      mip,
+                      UNPACK2(offset),
+                      UNPACK2(extent),
+                      gl_format,
+                      gl_type,
+                      POINTER_OFFSET(data, size_t(i) * face_size));
     }
   }
   else if (format_flag_ & GPU_FORMAT_COMPRESSED) {

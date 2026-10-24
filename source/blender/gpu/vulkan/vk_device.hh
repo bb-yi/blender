@@ -184,6 +184,8 @@ class VKDevice : public NonCopyable {
    * Must be externally synced by orphaned_data.mutex_get()
    */
   TimelineValue timeline_value_ = 0;
+  /** First submission/synchronization failure. A failed device requires a restart. */
+  std::atomic<VkResult> submission_error_{VK_SUCCESS};
 
   VKSamplers samplers_;
   VKDescriptorSetLayouts descriptor_set_layouts_;
@@ -430,28 +432,24 @@ class VKDevice : public NonCopyable {
                                     VkFence signal_fence,
                                     uint64_t wait_semaphore_value,
                                     uint64_t signal_semaphore_value);
-  void wait_for_timeline(TimelineValue timeline);
-  void wait_queue_idle();
+  bool wait_for_timeline(TimelineValue timeline);
+  bool wait_queue_idle();
+
+  VkResult submission_error_get() const
+  {
+    return submission_error_.load();
+  }
+  bool submission_failed() const
+  {
+    return submission_error_get() != VK_SUCCESS;
+  }
+  /** Log the first failure only. Never substitute a successful completion timeline. */
+  void submission_error_set(VkResult result, const char *operation, TimelineValue timeline = 0);
 
   /**
    * Retrieve the last finished submission timeline.
    */
-  TimelineValue submission_finished_timeline_get() const
-  {
-    BLI_assert(vk_timeline_semaphore_ != VK_NULL_HANDLE);
-    TimelineValue current_timeline;
-    VkResult result = vkGetSemaphoreCounterValue(
-        vk_device_, vk_timeline_semaphore_, &current_timeline);
-    UNUSED_VARS(result);
-    BLI_assert_msg(
-        result == VK_SUCCESS && current_timeline != UINT64_MAX,
-        "Potential driver crash has happened. Several drivers will report UINT64_MAX when "
-        "requesting a counter value of an timeline semaphore right after/during a driver reset. "
-        "If this happen we should investigate what makes the driver crash. In the past this has "
-        "been detected on QUALCOMM and NVIDIA drivers. The result code of the call is "
-        "VK_SUCCESS.");
-    return current_timeline;
-  }
+  bool submission_finished_timeline_get(TimelineValue &r_timeline);
 
   /** \} */
 

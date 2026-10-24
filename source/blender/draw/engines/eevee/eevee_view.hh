@@ -28,6 +28,7 @@
 namespace blender::eevee {
 
 class Instance;
+class Film;
 
 /* -------------------------------------------------------------------- */
 /** \name ShadingView
@@ -80,6 +81,7 @@ class ShadingView {
   void sync();
 
   void render();
+  void render_dlss_guides(Film &film);
 
  private:
   void render_transparent_pass(RenderBuffers &rbufs);
@@ -147,6 +149,13 @@ class MainView {
   {
     for (auto i : IndexRange(6)) {
       shading_views_[i].render();
+    }
+  }
+
+  void render_dlss_guides(Film &film)
+  {
+    for (auto i : IndexRange(6)) {
+      shading_views_[i].render_dlss_guides(film);
     }
   }
 

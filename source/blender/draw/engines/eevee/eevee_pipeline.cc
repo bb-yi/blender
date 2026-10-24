@@ -1287,6 +1287,15 @@ void ForwardPipeline::render_outline_occlusion(View &view, Framebuffer &outline_
   GPU_debug_group_end();
 }
 
+void ForwardPipeline::render_dlss_guides(View &view, Framebuffer &framebuffer)
+{
+  framebuffer.bind();
+  prepass_.render(view, nullptr, false);
+  if (has_stencil_) {
+    inst_.manager->submit(stencil_ps_, view);
+  }
+}
+
 void ForwardPipeline::render(View &view,
                              gpu::Texture *depth_tx,
                              Framebuffer &prepass_fb,
@@ -2420,6 +2429,27 @@ PassMain::Sub *DeferredPipeline::npr_add(blender::Material *blender_mat,
     return get_refraction_layer(refraction_layer).npr_add(blender_mat, gpumat);
   }
   return opaque_layer_.npr_add(blender_mat, gpumat);
+}
+
+void DeferredLayer::render_dlss_guides(View &view, Framebuffer &framebuffer)
+{
+  if (is_empty()) {
+    return;
+  }
+  framebuffer.bind();
+  GPU_framebuffer_clear_stencil(framebuffer, 0xFFu);
+  prepass_.render(view, inst_.render_buffers.depth_tx, false);
+  if (has_stencil_) {
+    inst_.manager->submit(stencil_ps_, view);
+  }
+}
+
+void DeferredPipeline::render_dlss_guides(View &view, Framebuffer &framebuffer)
+{
+  opaque_layer_.render_dlss_guides(view, framebuffer);
+  for (auto &entry : refraction_layers_) {
+    entry.second->render_dlss_guides(view, framebuffer);
+  }
 }
 
 void DeferredPipeline::render(View &main_view,

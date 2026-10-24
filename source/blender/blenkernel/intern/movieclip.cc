@@ -69,7 +69,11 @@
 
 #include "CLG_log.h"
 
+#include <type_traits>
+
 namespace blender {
+
+static_assert(std::extent_v<decltype(MovieClip_RuntimeGPUTexture::gputexture)> == TEXTARGET_COUNT);
 
 static CLG_LogRef LOG = {"gpu.texture"};
 

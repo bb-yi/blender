@@ -211,7 +211,9 @@ gpu::UniformBuf *GPU_uniformbuf_create_ex(size_t size, const void *data, const c
   return ubo;
 }
 
-gpu::UniformBuf *GPU_uniformbuf_create_from_list(ListBaseT<LinkData> *inputs, const char *name)
+gpu::UniformBuf *GPU_uniformbuf_create_from_list(ListBaseT<LinkData> *inputs,
+                                                 const char *name,
+                                                 GPUMaterial *material)
 {
   /* There is no point on creating an UBO if there is no arguments. */
   if (inputs->is_empty()) {
@@ -222,6 +224,15 @@ gpu::UniformBuf *GPU_uniformbuf_create_from_list(ListBaseT<LinkData> *inputs, co
   size_t buffer_size = buffer_size_from_list(inputs);
   void *data = MEM_new_uninitialized(buffer_size, __func__);
   buffer_fill_from_list(data, inputs);
+  if (material) {
+    size_t offset = 0;
+    for (LinkData &link : *inputs) {
+      const GPUInput &input = *static_cast<GPUInput *>(link.data);
+      GPU_material_uniform_capture_input(material, input, offset);
+      offset += get_padded_gpu_type(&link) * sizeof(float);
+    }
+    GPU_material_uniform_capture_data(material, data, buffer_size);
+  }
 
   UniformBuf *ubo = nullptr;
   if (buffer_size <= GPU_max_uniform_buffer_size()) {

@@ -347,6 +347,10 @@ void VKTexture::read_sub(
   const int3 offset = int3(region[0], region[1], region[2]);
   const int3 extent = int3(region[3] - region[0], region[4] - region[1], region[5] - region[2]);
   TransferRegion full_transfer_region({offset, extent, layers});
+  if (VKBackend::get().device.submission_failed()) {
+    memset(r_data, 0, full_transfer_region.sample_count() * to_bytesize(format_, format));
+    return;
+  }
   const VkDeviceSize sample_bytesize = to_bytesize(device_format_);
   const uint64_t x_bytesize = sample_bytesize * extent.x;
   const uint64_t xy_bytesize = x_bytesize * extent.y;
@@ -445,9 +449,13 @@ void VKTexture::read_sub(
   }
 
   /* Submit and wait for the transfers to be completed. */
-  context.flush_render_graph(RenderGraphFlushFlags::SUBMIT |
-                             RenderGraphFlushFlags::RENEW_RENDER_GRAPH |
-                             RenderGraphFlushFlags::WAIT_FOR_COMPLETION);
+  const TimelineValue timeline = context.flush_render_graph(
+      RenderGraphFlushFlags::SUBMIT | RenderGraphFlushFlags::RENEW_RENDER_GRAPH |
+      RenderGraphFlushFlags::WAIT_FOR_COMPLETION);
+  if (timeline == 0) {
+    memset(r_data, 0, full_transfer_region.sample_count() * to_bytesize(format_, format));
+    return;
+  }
 
   /* Convert the data to r_data. */
   for (int index : transfer_regions.index_range()) {

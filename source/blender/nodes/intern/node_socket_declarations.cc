@@ -1104,9 +1104,9 @@ bool Custom::matches(const bNodeSocket &socket) const
   if (!this->matches_common_data(socket)) {
     return false;
   }
-  if (socket.type != SOCK_CUSTOM) {
-    return false;
-  }
+  /* Custom declarations also wrap built-in socket types, e.g. on reroutes. The
+   * declared idname identifies the type; requiring SOCK_CUSTOM would refresh
+   * unchanged sockets and invalidate downstream outputs on every link edit. */
   if (socket.typeinfo->idname != idname_) {
     return false;
   }

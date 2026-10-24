@@ -45,8 +45,8 @@ struct TessSettings {
   int mode;
   int min_level;
   int max_level;
-  /* Primitive expansion level: the lattice resolution of a fully subdivided triangle. Equal to
-   * `max_level` rounded up to an odd number for the view dependent modes. */
+  /* Primitive expansion budget, bounded on the CPU using the evaluated mesh and all instances.
+   * The edge factors still use the original min/max levels for identical geometry in all passes. */
   int max_expand;
   /* Bound on how far vertices can move (vertex displacement plus a margin for smoothing), used
    * to cull conservatively. Negative when the material displaces vertices without a declared
@@ -70,7 +70,7 @@ TessSettings tess_settings_unpack(float4 encoded)
   settings.max_level = clamp(bits & 15, 1, 15);
   settings.min_level = clamp((bits >> 4) & 15, 1, settings.max_level);
   settings.mode = (bits >> 8) & 3;
-  settings.max_expand = max((bits >> 10) & 15, 1);
+  settings.max_expand = clamp(tessellation_expand, 1, max((bits >> 10) & 15, 1));
   /* Quantized `Material::max_vertex_displacement` (1/32 unit steps, rounded up). 511 marks
    * unbounded displacement: culling is disabled. */
   settings.cull_margin =
@@ -282,9 +282,12 @@ bool tess_triangle_culled(TessSettings settings,
     /* The material displaces vertices without a declared bound. Nothing can be culled. */
     return false;
   }
-  float edge01 = distance(wP0, wP1);
-  float edge02 = distance(wP0, wP2);
-  float edge12 = distance(wP1, wP2);
+  float edge01 = 0.0f, edge02 = 0.0f, edge12 = 0.0f;
+  if (settings.phong > 0.0f || (settings.backface_cull && !shadow_view)) {
+    edge01 = distance(wP0, wP1);
+    edge02 = distance(wP0, wP2);
+    edge12 = distance(wP1, wP2);
+  }
   float margin = settings.cull_margin + settings.phong * max(edge01, max(edge02, edge12)) +
                  1e-4f;
 
@@ -351,18 +354,18 @@ TessVertex tess_vertex_get(TessSettings settings,
   tv.P0 = tess_pos_load(tv.indices.x);
   tv.P1 = tess_pos_load(tv.indices.y);
   tv.P2 = tess_pos_load(tv.indices.z);
-  tv.N0 = tess_nor_load(tv.indices.x);
-  tv.N1 = tess_nor_load(tv.indices.y);
-  tv.N2 = tess_nor_load(tv.indices.z);
 
   const float3 wP0 = (model * float4(tv.P0, 1.0f)).xyz;
   const float3 wP1 = (model * float4(tv.P1, 1.0f)).xyz;
   const float3 wP2 = (model * float4(tv.P2, 1.0f)).xyz;
 
   /* Mirrored object transforms flip the winding; keep the face normal front-facing. */
-  float3 face_nor = cross(wP1 - wP0, wP2 - wP0);
-  if (dot(cross(model[0].xyz, model[1].xyz), model[2].xyz) < 0.0f) {
-    face_nor = -face_nor;
+  float3 face_nor = float3(0.0f);
+  if (settings.backface_cull && !shadow_view && settings.cull_margin >= 0.0f) {
+    face_nor = cross(wP1 - wP0, wP2 - wP0);
+    if (dot(cross(model[0].xyz, model[1].xyz), model[2].xyz) < 0.0f) {
+      face_nor = -face_nor;
+    }
   }
   if (tess_triangle_culled(settings,
                            wP0,
@@ -382,34 +385,40 @@ TessVertex tess_vertex_get(TessSettings settings,
   }
 
   /* Edge `i` is opposite to corner `i`. Factors are computed using the canonical edge order. */
-  float3 edge_fac;
-  for (int i = 0; i < 3; i++) {
-    float3 wPa = tess_corner_get(wP0, wP1, wP2, (i + 1) % 3);
-    float3 wPb = tess_corner_get(wP0, wP1, wP2, (i + 2) % 3);
-    bool is_ordered = tess_point_less(wPa, wPb);
-    edge_fac[i] = tess_edge_factor(settings,
-                                   is_ordered ? wPa : wPb,
-                                   is_ordered ? wPb : wPa,
-                                   camera_position,
-                                   camera_persmat,
-                                   viewport_size);
-  }
-  /* View dependent modes use fractional-odd partitioning for smooth level transitions. */
   const bool fractional = settings.mode != TESS_MODE_FIXED &&
                           settings.min_level != settings.max_level;
+  float3 edge_fac = float3(settings.max_level);
+  if (fractional) {
+    for (int i = 0; i < 3; i++) {
+      float3 wPa = tess_corner_get(wP0, wP1, wP2, (i + 1) % 3);
+      float3 wPb = tess_corner_get(wP0, wP1, wP2, (i + 2) % 3);
+      bool is_ordered = tess_point_less(wPa, wPb);
+      edge_fac[i] = tess_edge_factor(settings,
+                                     is_ordered ? wPa : wPb,
+                                     is_ordered ? wPb : wPa,
+                                     camera_position,
+                                     camera_persmat,
+                                     viewport_size);
+    }
+  }
+  /* View dependent modes use fractional-odd partitioning for smooth level transitions. */
   const int3 edge_len = fractional ? int3(tess_odd_ceil(edge_fac.x),
                                           tess_odd_ceil(edge_fac.y),
                                           tess_odd_ceil(edge_fac.z)) :
-                                   int3(settings.max_level);
+                                     int3(settings.max_level);
   const int level = max(edge_len.x, max(edge_len.y, edge_len.z));
-  const float level_fac = fractional ? max(edge_fac.x, max(edge_fac.y, edge_fac.z)) :
-                                     float(level);
+  const float level_fac = fractional ? max(edge_fac.x, max(edge_fac.y, edge_fac.z)) : float(level);
   tv.is_degenerate = sub_triangle >= level * level;
   if (tv.is_degenerate) {
     tv.weights = float3(1.0f, 0.0f, 0.0f);
     tv.lP = tv.P0;
     return tv;
   }
+
+  /* Discarded vertices need neither normals nor material attributes/displacement. */
+  tv.N0 = tess_nor_load(tv.indices.x);
+  tv.N1 = tess_nor_load(tv.indices.y);
+  tv.N2 = tess_nor_load(tv.indices.z);
 
   int3 lattice = tess_lattice_corner(level, sub_triangle, corner);
 

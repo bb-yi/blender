@@ -1193,16 +1193,22 @@ inline void PassBase<T>::material_set(Manager &manager,
 
       ImageGPUTextures gputex;
       if (deferred_texture_loading) {
-        gputex = tex->use_3d_lut_strip ?
+        gputex = tex->use_cube_strip ?
+                     BKE_image_get_gpu_material_cube_texture(tex->ima, iuser, true) :
+
+                 tex->use_3d_lut_strip ?
                      BKE_image_get_gpu_material_3d_lut_texture_try(tex->ima,
-                                                                    iuser,
-                                                                    tex->lut_3d_width,
-                                                                    tex->lut_3d_height,
-                                                                    tex->lut_3d_depth) :
+                                                                   iuser,
+                                                                   tex->lut_3d_width,
+                                                                   tex->lut_3d_height,
+                                                                   tex->lut_3d_depth) :
                      BKE_image_get_gpu_material_texture_try(tex->ima, iuser, use_tile_mapping);
       }
       else {
-        gputex = tex->use_3d_lut_strip ?
+        gputex = tex->use_cube_strip ?
+                     BKE_image_get_gpu_material_cube_texture(tex->ima, iuser, false) :
+
+                 tex->use_3d_lut_strip ?
                      BKE_image_get_gpu_material_3d_lut_texture(tex->ima,
                                                                iuser,
                                                                tex->lut_3d_width,

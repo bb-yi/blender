@@ -198,6 +198,7 @@ static void gpu_node_input_link(GPUNode *node, GPUNodeLink *link, const GPUType 
       break;
     case GPU_NODE_LINK_UNIFORM:
       input->source = GPU_SOURCE_UNIFORM;
+      input->uniform_source_index = link->uniform_source_index;
       break;
     case GPU_NODE_LINK_DIFFERENTIATE_FLOAT_FN:
       input->source = GPU_SOURCE_FUNCTION_CALL;
@@ -285,7 +286,7 @@ static GPUNodeLink *gpu_uniformbuffer_link(GPUMaterial *mat,
     return nullptr;
   }
 
-  GPUNodeLink *link = GPU_uniform(stack->vec);
+  GPUNodeLink *link = GPU_uniform_from_socket(mat, socket, stack->vec);
 
   if (in_out == SOCK_IN) {
     GPU_link(mat,
@@ -304,7 +305,7 @@ static bool gpu_node_input_socket(
     gpu_node_input_link(node, sock->link, sock->type);
     return true;
   }
-  else if (ELEM(sock->type, GPU_TEX1D_ARRAY, GPU_TEX2D, GPU_TEX2D_ARRAY, GPU_TEX3D)) {
+  else if (ELEM(sock->type, GPU_TEX1D_ARRAY, GPU_TEX2D, GPU_TEX2D_ARRAY, GPU_TEX3D, GPU_TEXCUBE)) {
     BLI_assert_msg(0, "Sampler GPU socket requires a texture link");
     return false;
   }
@@ -571,7 +572,8 @@ static GPUMaterialTexture *gpu_node_graph_add_texture(GPUNodeGraph *graph,
                                                       int lut_3d_width,
                                                       int lut_3d_height,
                                                       int lut_3d_depth,
-                                                      GPUSamplerState sampler_state)
+                                                      GPUSamplerState sampler_state,
+                                                      bool use_cube_strip = false)
 {
   if (!use_3d_lut_strip) {
     lut_3d_width = 0;
@@ -589,10 +591,9 @@ static GPUMaterialTexture *gpu_node_graph_add_texture(GPUNodeGraph *graph,
   GPUMaterialTexture *tex = static_cast<GPUMaterialTexture *>(graph->textures.first);
   for (; tex; tex = tex->next) {
     if (tex->ima == ima && tex->colorband == colorband && tex->sky == sky &&
-        tex->use_3d_lut_strip == use_3d_lut_strip &&
+        tex->use_3d_lut_strip == use_3d_lut_strip && tex->use_cube_strip == use_cube_strip &&
         tex->lut_3d_width == lut_3d_width && tex->lut_3d_height == lut_3d_height &&
-        tex->lut_3d_depth == lut_3d_depth &&
-        tex->sampler_state == sampler_state)
+        tex->lut_3d_depth == lut_3d_depth && tex->sampler_state == sampler_state)
     {
       break;
     }
@@ -610,6 +611,7 @@ static GPUMaterialTexture *gpu_node_graph_add_texture(GPUNodeGraph *graph,
     tex->colorband = colorband;
     tex->sky = sky;
     tex->use_3d_lut_strip = use_3d_lut_strip;
+    tex->use_cube_strip = use_cube_strip;
     tex->lut_3d_width = lut_3d_width;
     tex->lut_3d_height = lut_3d_height;
     tex->lut_3d_depth = lut_3d_depth;
@@ -762,6 +764,15 @@ GPUNodeLink *GPU_uniform(const float *num)
   return link;
 }
 
+GPUNodeLink *GPU_uniform_from_socket(GPUMaterial *material,
+                                     const bNodeSocket *socket,
+                                     const float *num)
+{
+  GPUNodeLink *link = GPU_uniform(num);
+  link->uniform_source_index = GPU_material_uniform_source_register(material, socket);
+  return link;
+}
+
 GPUNodeLink *GPU_function_call(StringRefNull function_call)
 {
   GPUNodeLink *link = gpu_node_link_create();
@@ -789,6 +800,28 @@ GPUNodeLink *GPU_image(GPUMaterial *mat,
   link->link_type = GPU_NODE_LINK_IMAGE;
   link->texture = gpu_node_graph_add_texture(
       graph, ima, iuser, nullptr, nullptr, false, false, 0, 0, 0, sampler_state);
+  return link;
+}
+
+GPUNodeLink *GPU_image_cube_strip(GPUMaterial *mat,
+                                  Image *ima,
+                                  ImageUser *iuser,
+                                  GPUSamplerState sampler_state)
+{
+  GPUNodeLink *link = gpu_node_link_create();
+  link->link_type = GPU_NODE_LINK_IMAGE;
+  link->texture = gpu_node_graph_add_texture(gpu_material_node_graph(mat),
+                                             ima,
+                                             iuser,
+                                             nullptr,
+                                             nullptr,
+                                             false,
+                                             false,
+                                             0,
+                                             0,
+                                             0,
+                                             sampler_state,
+                                             true);
   return link;
 }
 

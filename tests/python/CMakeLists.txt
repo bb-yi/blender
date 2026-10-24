@@ -890,6 +890,60 @@ endif()
 # RENDER TESTS
 # ------------------------------------------------------------------------------
 
+if(WITH_GPU_RENDER_TESTS)
+  # Self-contained NPR material regressions. Keep user data and generated fixtures isolated.
+  set(npr_material_tests
+    glsl_sampler_cube
+    glsl_sampler_failure_memory
+    filter_free_resolution
+    filter_legacy_resolution
+    glsl_relative_image_cold_load
+    glsl_group_callback_capture
+    glsl_group_sampler_capture
+    glsl_static_sampler_branches
+    render_info_stages
+    tessellation_default_coordinates
+    filter_stage_pool
+    eevee_resource_lifetime
+    vulkan_failure_recovery
+  )
+  foreach(backend IN ITEMS opengl vulkan)
+    string(TOUPPER "${backend}" backend_upper)
+    if(WITH_${backend_upper}_BACKEND AND (backend STREQUAL "opengl" OR WITH_GPU_RENDER_TESTS_VULKAN))
+      foreach(test IN LISTS npr_material_tests)
+        if(test STREQUAL "vulkan_failure_recovery" AND NOT backend STREQUAL "vulkan")
+          continue()
+        endif()
+        set(test_name "npr_${test}_${backend}")
+        set(test_output "${TEST_OUT_DIR}/${test_name}")
+        file(MAKE_DIRECTORY
+          "${test_output}/user/config"
+          "${test_output}/user/scripts"
+          "${test_output}/user/datafiles"
+          "${test_output}/user/extensions"
+        )
+        set(test_environment
+          "BLENDER_TEST_OUTPUT_DIR=${test_output}"
+          "BLENDER_USER_RESOURCES=${test_output}/user"
+          "BLENDER_USER_CONFIG=${test_output}/user/config"
+          "BLENDER_USER_SCRIPTS=${test_output}/user/scripts"
+          "BLENDER_USER_DATAFILES=${test_output}/user/datafiles"
+          "BLENDER_USER_EXTENSIONS=${test_output}/user/extensions"
+        )
+        if(test STREQUAL "vulkan_failure_recovery")
+          list(APPEND test_environment "NPR_FAILURE_TEST_OUT=${test_output}")
+        endif()
+        add_blender_test_impl(${test_name} "${test_environment}" "${TEST_BLENDER_EXE}"
+          ${TEST_BLENDER_EXE_PARAMS}
+          "${TEST_BLENDER_EXE_PARAMS_NO_THUMB}"
+          --gpu-backend ${backend}
+          --python ${CMAKE_CURRENT_LIST_DIR}/npr/test_${test}.py
+        )
+      endforeach()
+    endif()
+  endforeach()
+endif()
+
 if((WITH_CYCLES OR WITH_GPU_RENDER_TESTS) AND TEST_SRC_DIR_EXISTS)
   set(render_tests
     attributes

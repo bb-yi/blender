@@ -291,7 +291,7 @@ void velocity_convert_frag([[resource_table]] const VelocityResources &resources
   const float depth = reverse_z::read(texelFetch(resources.depth_tx, guide_texel, 0).r);
   [[resource_table]] const CameraVelocity &camera = resources.camera;
   const float2 motion = camera.resolve(views, resources.velocity_tx, guide_texel, depth).xy;
-  /* EEVEE resolves previous-current UV motion. NR uses current-previous pixels.
+  /* EEVEE resolves previous-current UV motion. NR uses the same backward pixel motion.
    * Include overscan in the UV-to-pixel scale, then undo the EEVEE render scale. */
   frag_out.velocity = resources.motion_sign * motion *
                       float2(textureSize(resources.velocity_tx, 0)) / ratio;

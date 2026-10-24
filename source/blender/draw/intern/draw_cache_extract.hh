@@ -312,7 +312,9 @@ struct MeshBatchCache {
 
   VectorSet<std::string> attr_used, attr_needed, attr_used_over_time;
 
-  int lastmatch;
+  /* Independent last-use times for shaded layers and generic attributes. */
+  int cd_lastmatch = 0;
+  int attr_lastmatch = 0;
 
   /* Valid only if edge_detection is up to date. */
   bool is_manifold;
