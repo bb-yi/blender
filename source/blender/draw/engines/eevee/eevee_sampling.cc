@@ -61,7 +61,7 @@ void Sampling::init(const Scene *scene, const int viewport_pixel_size)
     }
   }
 
-  motion_blur_steps_ = !inst_.is_viewport() && scene_ref != nullptr &&
+  motion_blur_steps_ = !inst_.is_pre_fx_render && !inst_.is_viewport() && scene_ref != nullptr &&
                                ((scene_ref->r.mode & R_MBLUR) != 0) ?
                            scene_ref->eevee.motion_blur_steps :
                            1;

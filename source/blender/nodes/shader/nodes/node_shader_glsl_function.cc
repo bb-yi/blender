@@ -9,10 +9,17 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
-#include <cmath>
 #include <climits>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
+#include <iterator>
+#include <list>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string_view>
 #include <sstream>
 
 #include "node_exec.hh"
@@ -45,6 +52,7 @@
 
 #include "GPU_capabilities.hh"
 #include "GPU_context.hh"
+#include "GPU_material_profile.hh"
 #include "GPU_shader.hh"
 
 #include "IMB_imbuf_types.hh"
@@ -202,8 +210,7 @@ namespace blender
       }
     }
 
-    enum class GLSLBoundaryType
-    {
+    enum class GLSLBoundaryType {
       Unsupported = 0,
       Float,
       Int,
@@ -216,6 +223,7 @@ namespace blender
       Mat4,
       Sample2D,
       Sample3D,
+      SampleCube,
       Void,
     };
 
@@ -342,38 +350,53 @@ namespace blender
       std::optional<std::string> description;
     };
 
-    struct GLSLParseResult
+    /* Immutable, source-only analysis. No node, socket, evaluated ID or GPU resource pointers.
+     * Node-specific validation, identifiers and generated sources stay in GLSLParseResult. */
+    struct GLSLSourceAnalysis
     {
       bool ok = false;
-      bool keep_existing_sockets = false;
-      bool used_first_function = false;
       bool uses_geometry_access = false;
       bool uses_lightprobe_access = false;
       bool uses_eevee_light_access = false;
       bool uses_matrix_access = false;
       bool defines_parsed = false;
-
+      bool defines_panel_default_closed = false;
+      bool all_functions_valid = false;
       std::string error;
       std::string source;
       std::string source_hash_hex;
-      std::string source_filename;
-      std::string source_prefix;
-      std::string wrapper_filename;
-      std::string wrapper_name;
-      std::string resolved_function_name;
-      std::string library_source;
-      std::string wrapper_source;
-
+      std::string all_functions_error;
+      Vector<GLSLToken> tokens;
+      Vector<GLSLFunctionDefinition> all_functions;
       Vector<std::string> function_names;
       Vector<std::string> global_names;
       Vector<std::string> light_parameter_names;
       Vector<GLSLDefineMeta> defines;
       Vector<GLSLClosureCallback> closure_callbacks;
       GLSLFunctionDefinition function;
-      bool defines_panel_default_closed = false;
       int signature_hash = 0;
       int meta_hash = 0;
       int define_hash = 0;
+    };
+
+    static const std::shared_ptr<const GLSLSourceAnalysis> &empty_glsl_source_analysis()
+    {
+      static const auto empty = std::make_shared<const GLSLSourceAnalysis>();
+      return empty;
+    }
+
+    struct GLSLParseResult
+    {
+      std::shared_ptr<const GLSLSourceAnalysis> analysis = empty_glsl_source_analysis();
+      bool ok = false;
+      bool keep_existing_sockets = false;
+      std::string error;
+      std::string source_filename;
+      std::string source_prefix;
+      std::string wrapper_filename;
+      std::string wrapper_name;
+      std::string library_source;
+      std::string wrapper_source;
     };
 
     struct GLSLSample2DUsage
@@ -582,6 +605,9 @@ namespace blender
       {
         return GLSLBoundaryType::Sample2D;
       }
+      if (type_name == "samplerCube") {
+        return GLSLBoundaryType::SampleCube;
+      }
       if (type_name == "sampler3D")
       {
         return GLSLBoundaryType::Sample3D;
@@ -651,7 +677,10 @@ namespace blender
 
     static bool glsl_boundary_type_is_sampler(const GLSLBoundaryType type)
     {
-      return ELEM(type, GLSLBoundaryType::Sample2D, GLSLBoundaryType::Sample3D);
+      return ELEM(type,
+                  GLSLBoundaryType::Sample2D,
+                  GLSLBoundaryType::Sample3D,
+                  GLSLBoundaryType::SampleCube);
     }
 
     static bool glsl_boundary_type_uses_float_transport(const GLSLBoundaryType type)
@@ -671,6 +700,9 @@ namespace blender
 
     static StringRefNull sampler_type_name(const GLSLBoundaryType type)
     {
+      if (type == GLSLBoundaryType::SampleCube) {
+        return StringRefNull("samplerCube");
+      }
       return glsl_boundary_type_is_sample3d(type) ? StringRefNull("sampler3D") :
                                                     StringRefNull("sampler2D");
     }
@@ -993,6 +1025,10 @@ namespace blender
                                     GPU_SAMPLER_FILTERING_LINEAR :
                                     GPU_SAMPLER_FILTERING_ANISOTROPIC_ENABLE |
                                       GPU_SAMPLER_FILTERING_LINEAR | GPU_SAMPLER_FILTERING_MIPMAP;
+      }
+      else if (image_to_closure_texture_type(node) == IMA_IMAGE_TO_CLOSURE_TEXTURE_CUBE_STRIP) {
+        /* Explicit textureLod must still select a mip with nearest-neighbor filtering. */
+        sampler_state.filtering = GPU_SAMPLER_FILTERING_MIPMAP;
       }
 
       return sampler_state;
@@ -1883,6 +1919,10 @@ namespace blender
           }
           if (source_kind == GLSLSamplerSourceKind::ClosureOutput)
           {
+            if (param.type == GLSLBoundaryType::SampleCube) {
+              r_error = "samplerCube requires an Image to Closure Cube Strip source";
+              return false;
+            }
             std::string closure_error;
             if (!closure_output_has_required_sampler_signature(
                   *used_link->fromnode, param.type, closure_error))
@@ -1905,6 +1945,12 @@ namespace blender
           if (used_link->fromnode != nullptr)
           {
             const int texture_type = image_to_closure_texture_type(*used_link->fromnode);
+            if (param.type == GLSLBoundaryType::SampleCube &&
+                texture_type != IMA_IMAGE_TO_CLOSURE_TEXTURE_CUBE_STRIP)
+            {
+              r_error = "samplerCube parameter '" + param.name + "' requires Cube Strip";
+              return false;
+            }
             if (glsl_boundary_type_is_sample2d(param.type) &&
                 texture_type != IMA_IMAGE_TO_CLOSURE_TEXTURE_2D)
             {
@@ -1933,21 +1979,12 @@ namespace blender
             r_error = "Choose an image on the Image to Closure node connected to '" + param.name + "'";
             return false;
           }
-          if (glsl_boundary_type_is_sample3d(param.type))
-          {
-            std::string lut_error;
-            ResolvedLut3DStripDimensions dimensions;
-            if (!resolve_3d_lut_strip_dimensions(
-                  *used_link->fromnode, *image, dimensions, lut_error))
-            {
-              r_error = "sampler3D parameter '" + param.name + "': " + lut_error;
-              return false;
-            }
-            continue;
-          }
+          /* Image dimensions are checked when building the GPU resource. Do not acquire image
+           * buffers here: this runs while reading a new Main, before its relative path is active.
+           */
           if (image->source == IMA_SRC_TILED)
           {
-            r_error = "sampler2D parameter '" + param.name +
+            r_error = std::string(sampler_type_name(param.type)) + " parameter '" + param.name +
               "' does not support UDIM tiled images yet";
             return false;
           }
@@ -3606,7 +3643,7 @@ namespace blender
       {
         return;
       }
-      for (const GLSLDefineMeta& define : parse_result.defines)
+      for (const GLSLDefineMeta& define : parse_result.analysis->defines)
       {
         NodeShaderGLSLDefineValue* value = nullptr;
         for (const int i : IndexRange(storage.define_values_num))
@@ -3636,7 +3673,7 @@ namespace blender
     static void sync_glsl_define_values(bNode& node, const GLSLParseResult& parse_result)
     {
       NodeShaderGLSLFunction& storage = node_storage(node);
-      if (!parse_result.defines_parsed)
+      if (!parse_result.analysis->defines_parsed)
       {
         RNA_shader_node_glsl_define_value_choices_unregister(storage.define_values,
                                                              storage.define_values_num);
@@ -3644,8 +3681,8 @@ namespace blender
       }
 
       Vector<GLSLDefineValueState> new_values;
-      new_values.reserve(parse_result.defines.size());
-      for (const GLSLDefineMeta& define : parse_result.defines)
+      new_values.reserve(parse_result.analysis->defines.size());
+      for (const GLSLDefineMeta& define : parse_result.analysis->defines)
       {
         GLSLDefineValueState value;
         STRNCPY(value.name, define.name.c_str());
@@ -3696,7 +3733,7 @@ namespace blender
                                                      const GLSLParseResult& parse_result)
     {
       NodeShaderGLSLFunction& storage = node_storage(node);
-      if (!parse_result.defines_parsed || parse_result.defines.is_empty())
+      if (!parse_result.analysis->defines_parsed || parse_result.analysis->defines.is_empty())
       {
         return false;
       }
@@ -3704,7 +3741,7 @@ namespace blender
       sync_glsl_define_values(node, parse_result);
 
       bool changed = false;
-      for (const GLSLDefineMeta& define : parse_result.defines)
+      for (const GLSLDefineMeta& define : parse_result.analysis->defines)
       {
         NodeShaderGLSLDefineValue* value = nullptr;
         for (const int i : IndexRange(storage.define_values_num))
@@ -3825,7 +3862,7 @@ namespace blender
     static bool reset_glsl_input_defaults_to_meta(bNode& node, const GLSLParseResult& parse_result)
     {
       bool changed = false;
-      for (const GLSLFunctionParam& param : parse_result.function.params)
+      for (const GLSLFunctionParam& param : parse_result.analysis->function.params)
       {
         if (!glsl_param_has_input_socket(param) || !param.meta.has_default_value ||
             glsl_boundary_type_is_sampler(param.type) || glsl_boundary_type_is_matrix(param.type))
@@ -3937,6 +3974,277 @@ namespace blender
         }
       }
       return ss.str();
+    }
+
+    /* Resolve only conditions whose values are owned by this node/source. Unknown backend
+     * macros remain intact for the GPU preprocessor. Keep byte offsets and line numbers stable. */
+    static std::string specialize_glsl_static_branches(const bNode &node,
+                                                       const StringRef source,
+                                                       const Span<GLSLDefineMeta> defines)
+    {
+      Map<std::string, int64_t> values;
+      Set<std::string> defined;
+      for (const GLSLDefineMeta &item : defines) {
+        const int value = glsl_define_value_or_default(node, item);
+        values.add_overwrite(item.name, value);
+        if (item.type != SHD_GLSL_FUNCTION_DEFINE_BOOL || value != 0) {
+          defined.add(item.name);
+        }
+      }
+      std::function<std::optional<int64_t>(std::string)> evaluate;
+      evaluate = [&](std::string text) -> std::optional<int64_t> {
+        text = trim_copy(text);
+        if (text.empty()) {
+          return std::nullopt;
+        }
+        if (text.front() == '(' && text.back() == ')') {
+          int depth = 0;
+          bool encloses = true;
+          for (size_t i = 0; i + 1 < text.size(); i++) {
+            depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+            if (depth == 0) {
+              encloses = false;
+              break;
+            }
+          }
+          if (encloses) {
+            return evaluate(text.substr(1, text.size() - 2));
+          }
+        }
+        for (const StringRef op : {StringRef("||"),
+                                   StringRef("&&"),
+                                   StringRef("=="),
+                                   StringRef("!="),
+                                   StringRef(">="),
+                                   StringRef("<="),
+                                   StringRef(">"),
+                                   StringRef("<")})
+        {
+          if (op == "==") {
+            /* Leave chained comparisons and shifts to the backend preprocessor. */
+            int depth = 0, comparisons = 0;
+            for (size_t i = 0; i < text.size(); i++) {
+              depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+              if (depth != 0) {
+                continue;
+              }
+              if (text[i] == '<' || text[i] == '>' || text[i] == '=' ||
+                  (text[i] == '!' && i + 1 < text.size() && text[i + 1] == '='))
+              {
+                comparisons++;
+                if (i + 1 < text.size() && text[i + 1] == '=') {
+                  i++;
+                }
+              }
+            }
+            if (comparisons > 1) {
+              return std::nullopt;
+            }
+          }
+          int depth = 0;
+          for (size_t i = 0; i + op.size() <= text.size(); i++) {
+            depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+            if (depth != 0 || StringRef(text).substr(i, op.size()) != op) {
+              continue;
+            }
+            const auto a = evaluate(text.substr(0, i));
+            const auto b = evaluate(text.substr(i + op.size()));
+            if (!a || !b) {
+              return std::nullopt;
+            }
+            if (op == "||") {
+              return *a || *b;
+            }
+            if (op == "&&") {
+              return *a && *b;
+            }
+            if (op == "==") {
+              return *a == *b;
+            }
+            if (op == "!=") {
+              return *a != *b;
+            }
+            if (op == ">=") {
+              return *a >= *b;
+            }
+            if (op == "<=") {
+              return *a <= *b;
+            }
+            if (op == ">") {
+              return *a > *b;
+            }
+            return *a < *b;
+          }
+        }
+        if (text.front() == '!') {
+          const auto value = evaluate(text.substr(1));
+          return value ? std::optional<int64_t>(!*value) : std::nullopt;
+        }
+        if (StringRef(text).startswith("defined(") || StringRef(text).startswith("defined ") ||
+            StringRef(text).startswith("defined\t"))
+        {
+          std::string name = trim_copy(StringRef(text).substr(7));
+          if (!name.empty() && name.front() == '(' && name.back() == ')') {
+            name = trim_copy(StringRef(name).substr(1, name.size() - 2));
+          }
+          if (defined.contains(name)) {
+            return 1;
+          }
+          return values.contains(name) ? std::optional<int64_t>(0) : std::nullopt;
+        }
+        if (const int64_t *value = values.lookup_ptr(text)) {
+          return *value;
+        }
+        char *end = nullptr;
+        errno = 0;
+        const int64_t value = std::strtoll(text.c_str(), &end, 0);
+        /* GLSL preprocessors do not all evaluate wide/unsigned literals like host int64_t.
+         * Leave those expressions intact rather than choosing a potentially different branch. */
+        if (errno != ERANGE && end != text.c_str() && *end == '\0' && value >= INT_MIN &&
+            value <= INT_MAX)
+        {
+          return value;
+        }
+        return std::nullopt;
+      };
+      struct Line {
+        size_t start, end;
+        std::string directive, argument;
+      };
+      Vector<Line> lines;
+      std::string result(source);
+      for (size_t pos = 0; pos < result.size();) {
+        const size_t newline = result.find('\n', pos);
+        const size_t end = newline == std::string::npos ? result.size() : newline + 1;
+        std::string text = trim_copy(StringRef(result).substr(pos, end - pos));
+        Line line{pos, end, {}, {}};
+        if (!text.empty() && text[0] == '#') {
+          text = trim_copy(StringRef(text).substr(1));
+          size_t split = text.find_first_of(" \t(");
+          line.directive = text.substr(0, split);
+          if (split != std::string::npos) {
+            line.argument = trim_copy(StringRef(text).substr(split));
+          }
+        }
+        lines.append(std::move(line));
+        pos = end;
+      }
+      auto blank = [&](int begin, int end) {
+        for (int i = begin; i < end; i++) {
+          for (size_t c = lines[i].start; c < lines[i].end; c++) {
+            if (result[c] != '\n' && result[c] != '\r') {
+              result[c] = ' ';
+            }
+          }
+        }
+      };
+      std::function<void(int, int)> process;
+      process = [&](int begin, int end) {
+        for (int i = begin; i < end; i++) {
+          const Line &line = lines[i];
+          if (line.directive == "define") {
+            const size_t split = line.argument.find_first_of(" \t(");
+            const std::string name = line.argument.substr(0, split);
+            defined.add(name);
+            values.remove(name);
+            if (split != std::string::npos && line.argument[split] != '(') {
+              /* Macro replacements are expanded at use time. Never cache an alias/expression
+               * here: a referenced macro can be redefined after this directive. */
+              const std::string replacement = trim_copy(StringRef(line.argument).substr(split));
+              char *end = nullptr;
+              errno = 0;
+              const int64_t value = std::strtoll(replacement.c_str(), &end, 0);
+              if (errno != ERANGE && end != replacement.c_str() && *end == '\0' &&
+                  value >= INT_MIN && value <= INT_MAX)
+              {
+                values.add_overwrite(name, value);
+              }
+            }
+            continue;
+          }
+          if (line.directive == "undef") {
+            defined.remove(line.argument);
+            values.add_overwrite(line.argument, 0);
+            continue;
+          }
+          if (line.directive != "if" && line.directive != "ifdef" && line.directive != "ifndef") {
+            continue;
+          }
+          Vector<int> branches = {i};
+          int depth = 1, finish = i + 1;
+          for (; finish < end; finish++) {
+            const std::string &directive = lines[finish].directive;
+            if (directive == "if" || directive == "ifdef" || directive == "ifndef") {
+              depth++;
+            }
+            else if (directive == "endif") {
+              if (--depth == 0) {
+                break;
+              }
+            }
+            else if (depth == 1 && (directive == "else" || directive == "elif")) {
+              branches.append(finish);
+            }
+          }
+          if (finish == end) {
+            return;
+          }
+          int chosen = -1;
+          bool known = true;
+          for (int branch : branches) {
+            const Line &head = lines[branch];
+            std::optional<int64_t> condition;
+            if (head.directive == "else") {
+              condition = 1;
+            }
+            else if (head.directive == "ifdef" || head.directive == "ifndef") {
+              condition = evaluate("defined(" + head.argument + ")");
+              if (condition && head.directive == "ifndef") {
+                condition = !*condition;
+              }
+            }
+            else {
+              condition = evaluate(head.argument);
+            }
+            if (!condition) {
+              known = false;
+              break;
+            }
+            if (*condition) {
+              chosen = branch;
+              break;
+            }
+          }
+          if (known) {
+            branches.append(finish);
+            for (int b = 0; b + 1 < branches.size(); b++) {
+              const int head = branches[b], next = branches[b + 1];
+              blank(head, head + 1);
+              if (head == chosen) {
+                process(head + 1, next);
+              }
+              else {
+                blank(head + 1, next);
+              }
+            }
+            blank(finish, finish + 1);
+          }
+          else {
+            /* A conditional definition may change later conditions; do not guess its value. */
+            for (int j = i + 1; j < finish; j++) {
+              if (lines[j].directive == "define" || lines[j].directive == "undef") {
+                const std::string name = lines[j].argument.substr(
+                    0, lines[j].argument.find_first_of(" \t("));
+                values.remove(name);
+                defined.remove(name);
+              }
+            }
+          }
+          i = finish;
+        }
+      };
+      process(0, lines.size());
+      return result;
     }
 
     static bool validate_glsl_define_name_collisions(const Span<GLSLDefineMeta> defines,
@@ -5316,21 +5624,22 @@ namespace blender
       const StringRef param_name = identifiers.last()->text;
       const GLSLBoundaryType boundary_type = glsl_boundary_type_from_name(type_name);
       if (!ELEM(boundary_type,
-        GLSLBoundaryType::Float,
-        GLSLBoundaryType::Int,
-        GLSLBoundaryType::Bool,
-        GLSLBoundaryType::Vec2,
-        GLSLBoundaryType::Vec3,
-        GLSLBoundaryType::Vec4,
-        GLSLBoundaryType::Mat2,
-        GLSLBoundaryType::Mat3,
-        GLSLBoundaryType::Mat4,
-        GLSLBoundaryType::Sample2D,
-        GLSLBoundaryType::Sample3D))
+                GLSLBoundaryType::Float,
+                GLSLBoundaryType::Int,
+                GLSLBoundaryType::Bool,
+                GLSLBoundaryType::Vec2,
+                GLSLBoundaryType::Vec3,
+                GLSLBoundaryType::Vec4,
+                GLSLBoundaryType::Mat2,
+                GLSLBoundaryType::Mat3,
+                GLSLBoundaryType::Mat4,
+                GLSLBoundaryType::Sample2D,
+                GLSLBoundaryType::Sample3D,
+                GLSLBoundaryType::SampleCube))
       {
         r_error =
-          "Supported parameter types are float, int, bool, vec2, vec3, vec4, mat2, mat3, mat4, "
-          "sampler2D, and sampler3D";
+            "Supported parameter types are float, int, bool, vec2, vec3, vec4, mat2, mat3, mat4, "
+            "sampler2D, sampler3D, and samplerCube";
         return false;
       }
 
@@ -7122,7 +7431,7 @@ namespace blender
           }
           const GLSLToken& declared_type = tokens[lhs_token_index - 1];
           if (declared_type.kind == GLSLToken::Kind::Identifier &&
-              ELEM(declared_type.text, "sampler2D", "sampler3D"))
+              ELEM(declared_type.text, "sampler2D", "sampler3D", "samplerCube"))
           {
             replacements.append(
               {declared_type.source_start, declared_type.source_end, "float"});
@@ -7395,7 +7704,7 @@ namespace blender
 
       std::stringstream ss;
       ss << "GLSL Function material '" << glsl_function_material_name(mat) << "' node '"
-         << node.name << "' function '" << parse_result.function.name
+         << node.name << "' function '" << parse_result.analysis->function.name
          << "': Closure Output sampler2D downgraded ";
       bool need_separator = false;
       auto append_item = [&](const StringRef text)
@@ -8087,8 +8396,7 @@ vec3 glsl_ambient_lighting()
       {
         return StringRefNull("float");
       }
-      return glsl_boundary_type_is_sample3d(param.type) ? StringRefNull("sampler3D") :
-                                                          StringRefNull("sampler2D");
+      return sampler_type_name(param.type);
     }
 
     static StringRefNull emitted_type_name(const GLSLBoundaryType type, const StringRefNull type_name)
@@ -8222,7 +8530,7 @@ vec3 glsl_ambient_lighting()
       const GLSLParseResult& parse_result,
       const Map<std::string, GLSLSamplerSourceKind>& sampler_source_kinds)
     {
-      const GLSLFunctionDefinition& function = parse_result.function;
+      const GLSLFunctionDefinition& function = parse_result.analysis->function;
       const bool uses_expression_defaults = [&]()
         {
           for (const GLSLFunctionParam& param : function.params)
@@ -8238,11 +8546,11 @@ vec3 glsl_ambient_lighting()
       std::stringstream ss;
       if (uses_expression_defaults)
       {
-        for (const std::string& name : parse_result.global_names)
+        for (const std::string& name : parse_result.analysis->global_names)
         {
           ss << "#define " << name << " " << parse_result.source_prefix << name << "\n";
         }
-        for (const std::string& name : parse_result.function_names)
+        for (const std::string& name : parse_result.analysis->function_names)
         {
           ss << "#define " << name << " " << parse_result.source_prefix << name << "\n";
         }
@@ -8491,11 +8799,11 @@ vec3 glsl_ambient_lighting()
       ss << "}\n";
       if (uses_expression_defaults)
       {
-        for (const std::string& name : parse_result.function_names)
+        for (const std::string& name : parse_result.analysis->function_names)
         {
           ss << "#undef " << name << "\n";
         }
-        for (const std::string& name : parse_result.global_names)
+        for (const std::string& name : parse_result.analysis->global_names)
         {
           ss << "#undef " << name << "\n";
         }
@@ -8670,26 +8978,27 @@ vec3 glsl_ambient_lighting()
       std::string& r_wrapper_source,
       std::string& r_error)
     {
-      const std::string stripped_source = strip_glsl_comments(parse_result.source);
-      const Vector<GLSLToken> tokens = tokenize_glsl_source(stripped_source);
+      const GLSLSourceAnalysis &analysis = *parse_result.analysis;
+      const std::string &stripped_source = analysis.source;
+      const Vector<GLSLToken> &tokens = analysis.tokens;
+      const Vector<GLSLFunctionDefinition> &all_functions = analysis.all_functions;
       const Map<std::string, GLSLSamplerSourceKind> source_kinds = resolve_sampler_source_kinds(
-        node, parse_result.function, true);
-      Vector<GLSLFunctionDefinition> all_functions;
-      if (!find_all_top_level_glsl_function_definitions(
-        tokens, parse_result.function_names, all_functions, r_error))
+        node, analysis.function, true);
+      if (!analysis.all_functions_valid)
       {
+        r_error = analysis.all_functions_error;
         return false;
       }
 
       Vector<GLSLClosureFunctionBindings> bindings_by_function;
       if (!build_closure_sampler_bindings_by_function(
-        tokens, all_functions, parse_result.function, source_kinds, bindings_by_function, r_error))
+        tokens, all_functions, parse_result.analysis->function, source_kinds, bindings_by_function, r_error))
       {
         return false;
       }
       if (!validate_closure_sampler_bindings(tokens,
                                              all_functions,
-                                             parse_result.function,
+                                             parse_result.analysis->function,
                                              source_kinds,
                                              bindings_by_function,
                                              r_error))
@@ -8698,7 +9007,7 @@ vec3 glsl_ambient_lighting()
       }
 
       Vector<GLSLClosureSampleHelper> closure_helpers;
-      for (const GLSLFunctionParam& param : parse_result.function.params)
+      for (const GLSLFunctionParam& param : parse_result.analysis->function.params)
       {
         const GLSLSamplerSourceKind* source_kind = source_kinds.lookup_ptr(param.name);
         if (source_kind == nullptr ||
@@ -8710,8 +9019,9 @@ vec3 glsl_ambient_lighting()
         }
 
         GLSLClosureSampleHelper helper;
-        const std::string sampler_dimension = glsl_boundary_type_is_sample3d(param.type) ? "3d" :
-                                                                                        "2d";
+        const std::string sampler_dimension = param.type == GLSLBoundaryType::SampleCube ? "cube" :
+                                              glsl_boundary_type_is_sample3d(param.type) ? "3d" :
+                                                                                           "2d";
         const char* helper_prefix = *source_kind == GLSLSamplerSourceKind::FallbackWhite ?
           "glsl_sampler_fallback" :
           "glsl_sampler";
@@ -8723,7 +9033,8 @@ vec3 glsl_ambient_lighting()
         {
           helper.param_name = param.name;
           helper.helper_name = helper_name;
-          helper.coordinate_type = glsl_boundary_type_is_sample3d(param.type) ? GPU_VEC3 : GPU_VEC2;
+          helper.coordinate_type = !glsl_boundary_type_is_sample2d(param.type) ? GPU_VEC3 :
+                                                                                 GPU_VEC2;
           helper.is_fallback_white = true;
           closure_helpers.append(std::move(helper));
           continue;
@@ -8737,7 +9048,7 @@ vec3 glsl_ambient_lighting()
       }
 
       Vector<GLSLClosureCallbackHelper> callback_helpers;
-      for (const GLSLClosureCallback& callback : parse_result.closure_callbacks)
+      for (const GLSLClosureCallback& callback : parse_result.analysis->closure_callbacks)
       {
         const std::string socket_identifier = "closure." + callback.function.name;
         const bNodeSocket* callback_socket = find_node_input_socket_by_identifier(
@@ -8757,14 +9068,14 @@ vec3 glsl_ambient_lighting()
           return false;
         }
         const bool collides_with_user_name =
-          std::find(parse_result.function_names.begin(),
-                    parse_result.function_names.end(),
-                    helper.sub_function_name) != parse_result.function_names.end() ||
-          std::find(parse_result.global_names.begin(),
-                    parse_result.global_names.end(),
-                    helper.sub_function_name) != parse_result.global_names.end() ||
-          std::any_of(parse_result.defines.begin(),
-                      parse_result.defines.end(),
+          std::find(parse_result.analysis->function_names.begin(),
+                    parse_result.analysis->function_names.end(),
+                    helper.sub_function_name) != parse_result.analysis->function_names.end() ||
+          std::find(parse_result.analysis->global_names.begin(),
+                    parse_result.analysis->global_names.end(),
+                    helper.sub_function_name) != parse_result.analysis->global_names.end() ||
+          std::any_of(parse_result.analysis->defines.begin(),
+                      parse_result.analysis->defines.end(),
                       [&](const GLSLDefineMeta& define) {
                         return define.name == helper.sub_function_name;
                       });
@@ -8784,7 +9095,7 @@ vec3 glsl_ambient_lighting()
         stripped_source,
         tokens,
         all_functions,
-        parse_result.function,
+        parse_result.analysis->function,
         source_kinds,
         bindings_by_function,
         closure_helpers,
@@ -8798,8 +9109,8 @@ vec3 glsl_ambient_lighting()
 
       std::string callback_rewritten_source;
       if (!rewrite_glsl_source_for_closure_callbacks(sampler_rewritten_source,
-                                                     parse_result.function_names,
-                                                     parse_result.closure_callbacks,
+                                                     parse_result.analysis->function_names,
+                                                     parse_result.analysis->closure_callbacks,
                                                      callback_helpers,
                                                      callback_rewritten_source,
                                                      r_error))
@@ -8807,12 +9118,12 @@ vec3 glsl_ambient_lighting()
         return false;
       }
 
-      const std::string define_block = build_glsl_define_block(node, parse_result.defines);
+      const std::string define_block = build_glsl_define_block(node, parse_result.analysis->defines);
       r_library_source = build_namespaced_glsl_source(
         parse_result.source_prefix,
-        parse_result.function_names,
-        parse_result.global_names,
-        parse_result.defines,
+        parse_result.analysis->function_names,
+        parse_result.analysis->global_names,
+        parse_result.analysis->defines,
         define_block,
         callback_rewritten_source,
         closure_helpers,
@@ -8923,21 +9234,21 @@ vec3 glsl_ambient_lighting()
       return true;
     }
 
-    static GLSLParseResult parse_glsl_source_for_node(const bNode& node,
+    static std::shared_ptr<const GLSLSourceAnalysis> analyze_glsl_source(const bNode& node,
                                                       const std::string& original_source,
                                                       const StringRef function_name)
     {
-      GLSLParseResult result;
-      result.keep_existing_sockets = true;
+      auto analysis = std::make_shared<GLSLSourceAnalysis>();
+      GLSLSourceAnalysis &result = *analysis;
       std::string source = original_source;
       if (!rewrite_light_parameter_names(source, result.light_parameter_names, result.error)) {
-        return result;
+        return analysis;
       }
 
       if (trim_copy(source).empty())
       {
         result.error = "The GLSL source is empty";
-        return result;
+        return analysis;
       }
 
       Map<std::string, GLSLRawParamMeta> meta_by_key;
@@ -8945,26 +9256,28 @@ vec3 glsl_ambient_lighting()
       Map<std::string, GLSLRawClosureMeta> raw_closures;
       if (!extract_glsl_meta(source, meta_by_key, panels_by_function, result.error))
       {
-        return result;
+        return analysis;
       }
       if (!extract_glsl_closures(source, raw_closures, result.error))
       {
-        return result;
+        return analysis;
       }
       if (!extract_glsl_defines(
             source, result.defines, result.defines_panel_default_closed, result.error))
       {
-        return result;
+        return analysis;
       }
       result.defines_parsed = true;
 
-      const std::string stripped_source = strip_glsl_comments(source);
+      std::string stripped_source = specialize_glsl_static_branches(
+          node, strip_glsl_comments(source), result.defines);
       if (!validate_glsl_closure_function_like_macros(
             stripped_source, raw_closures, result.error))
       {
-        return result;
+        return analysis;
       }
-      const Vector<GLSLToken> tokens = tokenize_glsl_source(stripped_source);
+      result.tokens = tokenize_glsl_source(stripped_source);
+      const Vector<GLSLToken> &tokens = result.tokens;
       std::string deprecated_identifier;
       if (glsl_source_uses_deprecated_eevee_light_access(tokens, deprecated_identifier))
       {
@@ -8972,7 +9285,7 @@ vec3 glsl_ambient_lighting()
           "' was removed. Use glsl_light_get() to read GLSLLight.diffuse_color, "
           "GLSLLight.specular_color, and GLSLLight.attenuation, then combine them with "
           "glsl_light_shadow() manually.";
-        return result;
+        return analysis;
       }
       result.uses_geometry_access = glsl_source_uses_geometry_access(tokens);
       result.uses_lightprobe_access = glsl_source_uses_lightprobe_access(tokens);
@@ -8983,38 +9296,38 @@ vec3 glsl_ambient_lighting()
       result.uses_matrix_access = glsl_source_uses_matrix_access(tokens);
       if (!validate_no_top_level_conditional_glsl_code(stripped_source, tokens, result.error))
       {
-        return result;
+        return analysis;
       }
       result.function_names = find_top_level_glsl_function_names(tokens);
       if (result.function_names.is_empty())
       {
         result.error = "No top-level GLSL function definition was found";
-        return result;
+        return analysis;
       }
       if (!validate_top_level_glsl_declarations(tokens, result.error))
       {
-        return result;
+        return analysis;
       }
       result.global_names = find_top_level_glsl_global_names(tokens, result.function_names);
       if (!validate_glsl_define_name_collisions(
         result.defines, result.function_names, result.global_names, result.error))
       {
-        return result;
+        return analysis;
       }
 
       const StringRef requested_function_name = function_name;
       if (requested_function_name.is_empty())
       {
-        return result;
+        return analysis;
       }
       if (!find_glsl_function_definition(tokens, requested_function_name, result.function, result.error))
       {
-        return result;
+        return analysis;
       }
       if (!apply_glsl_meta_to_function(
         meta_by_key, panels_by_function, result.function, result.meta_hash, result.error))
       {
-        return result;
+        return analysis;
       }
       if (!build_glsl_closure_callbacks(tokens,
                                         result.function_names,
@@ -9023,7 +9336,7 @@ vec3 glsl_ambient_lighting()
                                         result.closure_callbacks,
                                         result.error))
       {
-        return result;
+        return analysis;
       }
       const std::string define_meta_signature_key = build_glsl_define_meta_signature_key(
         result.defines, result.defines_panel_default_closed);
@@ -9045,7 +9358,7 @@ vec3 glsl_ambient_lighting()
           "' was removed. Use glsl_light_get() to read GLSLLight.diffuse_color, "
           "GLSLLight.specular_color, and GLSLLight.attenuation, then combine them with "
           "glsl_light_shadow() manually.";
-        return result;
+        return analysis;
       }
       result.uses_geometry_access |= glsl_function_meta_uses_geometry_access(result.function);
       result.uses_lightprobe_access |= glsl_function_meta_uses_lightprobe_access(result.function);
@@ -9053,17 +9366,10 @@ vec3 glsl_ambient_lighting()
       result.uses_matrix_access |= glsl_function_meta_uses_matrix_access(result.function);
       if (!validate_generated_glsl_function_identifiers(result.function, result.error))
       {
-        return result;
+        return analysis;
       }
-      if (!validate_sampler_inputs(node, tokens, result.function, result.error))
-      {
-        return result;
-      }
-
       result.ok = true;
-      result.source = source;
-      result.resolved_function_name = result.function.name;
-      result.used_first_function = false;
+      result.source = std::move(stripped_source);
 
       const std::string signature_key = build_function_signature_key(result.function) +
         build_glsl_closure_signature_key(result.closure_callbacks);
@@ -9084,31 +9390,293 @@ vec3 glsl_ambient_lighting()
       }
       const uint source_hash = BLI_ghashutil_strhash_p(source_hash_key.c_str());
       char source_hash_hex[16];
+      SNPRINTF(source_hash_hex, "%08x", source_hash);
+      result.source_hash_hex = source_hash_hex;
+      /* Preserve the existing distinction: helper-signature errors are reported by GPU
+       * specialization, not while declaring the selected entry function's sockets. */
+      result.all_functions_valid = find_all_top_level_glsl_function_definitions(
+        tokens, result.function_names, result.all_functions, result.all_functions_error);
+      return analysis;
+    }
+
+    static size_t glsl_analysis_dynamic_bytes(const std::string &value)
+    {
+      /* Count capacity, terminator and allocator overhead. Counting small-string storage again
+       * is conservative and avoids relying on the standard library's small-string layout. */
+      return value.capacity() + 1 + 32;
+    }
+
+    static size_t glsl_analysis_dynamic_bytes(const std::optional<std::string> &value)
+    {
+      return value ? glsl_analysis_dynamic_bytes(*value) : 0;
+    }
+
+    template<typename T> static size_t glsl_analysis_dynamic_bytes(const Vector<T> &values)
+    {
+      size_t bytes = sizeof(T) * values.capacity() + 32;
+      for (const T &value : values) {
+        bytes += glsl_analysis_dynamic_bytes(value);
+      }
+      return bytes;
+    }
+
+    static size_t glsl_analysis_dynamic_bytes(const GLSLToken &value)
+    {
+      return glsl_analysis_dynamic_bytes(value.text);
+    }
+
+    static size_t glsl_analysis_dynamic_bytes(const GLSLFunctionParam::IntChoiceItem &value)
+    {
+      return glsl_analysis_dynamic_bytes(value.label);
+    }
+
+    static size_t glsl_analysis_dynamic_bytes(const GLSLFunctionParam::Meta &value)
+    {
+      return glsl_analysis_dynamic_bytes(value.default_expression) +
+             glsl_analysis_dynamic_bytes(value.panel_name) +
+             glsl_analysis_dynamic_bytes(value.description) +
+             glsl_analysis_dynamic_bytes(value.label) +
+             glsl_analysis_dynamic_bytes(value.int_choices);
+    }
+
+    static size_t glsl_analysis_dynamic_bytes(const GLSLFunctionParam &value)
+    {
+      return glsl_analysis_dynamic_bytes(value.type_name) +
+             glsl_analysis_dynamic_bytes(value.name) +
+             glsl_analysis_dynamic_bytes(value.identifier) +
+             glsl_analysis_dynamic_bytes(value.meta);
+    }
+
+    static size_t glsl_analysis_dynamic_bytes(const GLSLPanelMeta &value)
+    {
+      return glsl_analysis_dynamic_bytes(value.name);
+    }
+
+    static size_t glsl_analysis_dynamic_bytes(const GLSLDefineMeta &value)
+    {
+      return glsl_analysis_dynamic_bytes(value.name) +
+             glsl_analysis_dynamic_bytes(value.label) +
+             glsl_analysis_dynamic_bytes(value.description) +
+             glsl_analysis_dynamic_bytes(value.int_choices);
+    }
+
+    static size_t glsl_analysis_dynamic_bytes(const GLSLFunctionDefinition &value)
+    {
+      return glsl_analysis_dynamic_bytes(value.name) +
+             glsl_analysis_dynamic_bytes(value.return_type_name) +
+             glsl_analysis_dynamic_bytes(value.return_meta) +
+             glsl_analysis_dynamic_bytes(value.params) +
+             glsl_analysis_dynamic_bytes(value.panels);
+    }
+
+    static size_t glsl_analysis_dynamic_bytes(const GLSLClosureCallback &value)
+    {
+      return glsl_analysis_dynamic_bytes(value.function) +
+             glsl_analysis_dynamic_bytes(value.label) +
+             glsl_analysis_dynamic_bytes(value.description);
+    }
+
+    static size_t glsl_analysis_dynamic_bytes(const GLSLSourceAnalysis &value)
+    {
+      return glsl_analysis_dynamic_bytes(value.error) +
+             glsl_analysis_dynamic_bytes(value.source) +
+             glsl_analysis_dynamic_bytes(value.source_hash_hex) +
+             glsl_analysis_dynamic_bytes(value.all_functions_error) +
+             glsl_analysis_dynamic_bytes(value.tokens) +
+             glsl_analysis_dynamic_bytes(value.all_functions) +
+             glsl_analysis_dynamic_bytes(value.function_names) +
+             glsl_analysis_dynamic_bytes(value.global_names) +
+             glsl_analysis_dynamic_bytes(value.light_parameter_names) +
+             glsl_analysis_dynamic_bytes(value.defines) +
+             glsl_analysis_dynamic_bytes(value.closure_callbacks) +
+             glsl_analysis_dynamic_bytes(value.function);
+    }
+
+    class GLSLSourceAnalysisCache {
+      static constexpr size_t capacity_bytes = 64 * 1024 * 1024;
+
+      struct Entry {
+        size_t hash;
+        std::string source;
+        std::string function;
+        std::string defines;
+        std::shared_ptr<const GLSLSourceAnalysis> analysis;
+        size_t bytes;
+      };
+      using Entries = std::list<Entry>;
+      Entries entries_;
+      /* A tree index has no retained hash-bucket allocation after eviction. Hash collisions
+       * are resolved by comparing every byte of the three key components. */
+      std::multimap<size_t, Entries::iterator> index_;
+      std::mutex mutex_;
+      size_t resident_bytes_ = 0;
+
+      Entries::iterator find_locked(const size_t hash,
+                                    const std::string &source,
+                                    const StringRef function,
+                                    const std::string &defines)
+      {
+        const auto [first, last] = index_.equal_range(hash);
+        for (auto item = first; item != last; ++item) {
+          Entry &entry = *item->second;
+          if (entry.source == source && StringRef(entry.function) == function &&
+              entry.defines == defines)
+          {
+            entries_.splice(entries_.begin(), entries_, item->second);
+            return item->second;
+          }
+        }
+        return entries_.end();
+      }
+
+      void erase_locked(Entries::iterator entry)
+      {
+        const auto [first, last] = index_.equal_range(entry->hash);
+        for (auto item = first; item != last; ++item) {
+          if (item->second == entry) {
+            index_.erase(item);
+            break;
+          }
+        }
+        resident_bytes_ -= entry->bytes;
+        entries_.erase(entry);
+      }
+
+     public:
+      std::shared_ptr<const GLSLSourceAnalysis> get(const bNode &node,
+                                                   const std::string &source,
+                                                   const StringRef function)
+      {
+        /* The source includes defaults for defines not yet materialized in node storage.
+         * Preserve the exact stored name/type/value sequence as well: including obsolete or
+         * unclamped entries can only cause a conservative miss, never alias distinct inputs. */
+        std::string defines;
+        const NodeShaderGLSLFunction &storage = node_storage(node);
+        if (storage.define_values != nullptr) {
+          for (const int i : IndexRange(storage.define_values_num)) {
+            const NodeShaderGLSLDefineValue &value = storage.define_values[i];
+            defines += std::to_string(strlen(value.name));
+            defines += ':';
+            defines += value.name;
+            defines += ':';
+            defines += std::to_string(value.type);
+            defines += '=';
+            defines += std::to_string(value.value);
+            defines += ';';
+          }
+        }
+        const std::hash<std::string_view> string_hash;
+        const size_t hash = get_default_hash(
+            string_hash(source),
+            string_hash(std::string_view(function.data(), function.size())),
+            string_hash(defines));
+        GPU_material_profile_count(GPUMaterialProfileCounter::GLSLSourceBytes, source.size());
+        {
+          std::lock_guard lock(mutex_);
+          const auto found = find_locked(hash, source, function, defines);
+          if (found != entries_.end()) {
+            GPU_material_profile_count(GPUMaterialProfileCounter::GLSLCacheHits);
+            GPU_material_profile_max(GPUMaterialProfileCounter::GLSLCacheBytes, resident_bytes_);
+            return found->analysis;
+          }
+        }
+        GPU_material_profile_count(GPUMaterialProfileCounter::GLSLCacheMisses);
+        std::shared_ptr<const GLSLSourceAnalysis> analysis;
+        {
+          GPUMaterialProfileTimer timer(GPUMaterialProfileStage::GLSLParse);
+          analysis = analyze_glsl_source(node, source, function);
+        }
+        GPU_material_profile_count(GPUMaterialProfileCounter::GLSLTokens, analysis->tokens.size());
+
+        /* Charge actual container capacities and conservative list/map/control-block overhead.
+         * The per-call result of an oversized source remains usable but is never retained. */
+        const size_t analysis_bytes = sizeof(GLSLSourceAnalysis) +
+                                      glsl_analysis_dynamic_bytes(*analysis);
+        if (analysis_bytes + source.size() + function.size() + defines.size() > capacity_bytes) {
+          std::lock_guard lock(mutex_);
+          GPU_material_profile_max(GPUMaterialProfileCounter::GLSLCacheBytes, resident_bytes_);
+          return analysis;
+        }
+        Entry candidate{hash, source, std::string(function), std::move(defines), analysis, 0};
+        candidate.bytes = sizeof(Entry) + analysis_bytes + 256 +
+                          glsl_analysis_dynamic_bytes(candidate.source) +
+                          glsl_analysis_dynamic_bytes(candidate.function) +
+                          glsl_analysis_dynamic_bytes(candidate.defines);
+        std::lock_guard lock(mutex_);
+        /* Another thread may have completed the same analysis while this one parsed. */
+        const auto found = find_locked(hash, source, function, candidate.defines);
+        if (found != entries_.end()) {
+          GPU_material_profile_max(GPUMaterialProfileCounter::GLSLCacheBytes, resident_bytes_);
+          return found->analysis;
+        }
+        if (candidate.bytes <= capacity_bytes) {
+          auto eviction = entries_.end();
+          while (resident_bytes_ + candidate.bytes > capacity_bytes && eviction != entries_.begin()) {
+            --eviction;
+            if (eviction->analysis.use_count() != 1) {
+              /* Keep in-use entries charged to the budget until their callers release them.
+               * Eviction must not hide still-live allocations from the resident byte count. */
+              continue;
+            }
+            const auto next = std::next(eviction);
+            erase_locked(eviction);
+            eviction = next;
+          }
+          if (resident_bytes_ + candidate.bytes <= capacity_bytes) {
+            resident_bytes_ += candidate.bytes;
+            entries_.push_front(std::move(candidate));
+            index_.emplace(hash, entries_.begin());
+          }
+        }
+        GPU_material_profile_max(GPUMaterialProfileCounter::GLSLCacheBytes, resident_bytes_);
+        return analysis;
+      }
+    };
+
+    static std::shared_ptr<const GLSLSourceAnalysis> glsl_source_analysis_cached(
+        const bNode &node, const std::string &source, const StringRef function)
+    {
+      static GLSLSourceAnalysisCache cache;
+      return cache.get(node, source, function);
+    }
+
+    static GLSLParseResult parse_glsl_source_for_node(const bNode &node,
+                                                      const std::string &original_source,
+                                                      const StringRef function_name)
+    {
+      GLSLParseResult result;
+      result.keep_existing_sockets = true;
+      result.analysis = glsl_source_analysis_cached(node, original_source, function_name);
+      result.error = result.analysis->error;
+      if (!result.analysis->ok ||
+          !validate_sampler_inputs(node, result.analysis->tokens, result.analysis->function, result.error))
+      {
+        return result;
+      }
+      result.ok = true;
       char signature_hash_hex[16];
       char define_hash_hex[16];
-      SNPRINTF(source_hash_hex, "%08x", source_hash);
-      SNPRINTF(signature_hash_hex, "%08x", signature_hash);
-      SNPRINTF(define_hash_hex, "%08x", define_hash);
-      result.source_hash_hex = source_hash_hex;
+      SNPRINTF(signature_hash_hex, "%08x", uint(result.analysis->signature_hash));
+      SNPRINTF(define_hash_hex, "%08x", uint(result.analysis->define_hash));
       const std::string node_id_suffix = std::to_string(node.identifier);
-      result.source_prefix = "glsl_src_" + result.source_hash_hex + "_" + node_id_suffix + "_";
+      result.source_prefix = "glsl_src_" + result.analysis->source_hash_hex + "_" + node_id_suffix + "_";
       result.source_filename =
-        "glsl_function_source_" + result.source_hash_hex + "_" + node_id_suffix + ".glsl";
+        "glsl_function_source_" + result.analysis->source_hash_hex + "_" + node_id_suffix + ".glsl";
       result.wrapper_name = "glsl_fn_" + std::to_string(node.identifier) + "_" + signature_hash_hex;
-      if (!define_signature_key.empty())
+      if (!result.analysis->defines.is_empty())
       {
         result.wrapper_name += "_";
         result.wrapper_name += define_hash_hex;
       }
       result.wrapper_filename = result.wrapper_name + ".glsl";
-      const std::string define_block = build_glsl_define_block(node, result.defines);
+      const std::string define_block = build_glsl_define_block(node, result.analysis->defines);
       result.library_source = build_namespaced_glsl_source(
         result.source_prefix,
-        result.function_names,
-        result.global_names,
-        result.defines,
+        result.analysis->function_names,
+        result.analysis->global_names,
+        result.analysis->defines,
         define_block,
-        result.source,
+        result.analysis->source,
         Span<GLSLClosureSampleHelper>(),
         Span<GLSLClosureCallbackHelper>());
       result.wrapper_source = build_wrapper_glsl_source(
@@ -9233,7 +9801,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       if (parse_result.ok)
       {
         storage.parse_status = SHD_GLSL_FUNCTION_PARSE_READY;
-        storage.signature_hash = parse_result.signature_hash;
+        storage.signature_hash = parse_result.analysis->signature_hash;
       }
       else if (parse_result.error.empty())
       {
@@ -9627,7 +10195,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
     static void add_glsl_closure_declarations(DeclarationListBuilder& builder,
       const GLSLParseResult& parse_result)
     {
-      for (const GLSLClosureCallback& callback : parse_result.closure_callbacks)
+      for (const GLSLClosureCallback& callback : parse_result.analysis->closure_callbacks)
       {
         const ClosureSignature signature = build_glsl_closure_signature(callback);
         auto& decl = builder.add_input<decl::Closure>(
@@ -9684,7 +10252,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         return;
       }
 
-      for (const GLSLFunctionParam& param : parse_result.function.params)
+      for (const GLSLFunctionParam& param : parse_result.analysis->function.params)
       {
         if (param.type != GLSLBoundaryType::Int || param.meta.int_choices.is_empty())
         {
@@ -9709,7 +10277,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         return;
       }
       sync_glsl_param_int_choices(node, parse_result);
-      for (const GLSLClosureCallback& callback : parse_result.closure_callbacks)
+      for (const GLSLClosureCallback& callback : parse_result.analysis->closure_callbacks)
       {
         bNodeSocket* socket = find_node_input_socket_by_identifier(
           node, "closure." + callback.function.name);
@@ -9727,7 +10295,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
           socket->description[0] = '\0';
         }
       }
-      if (storage.meta_hash == parse_result.meta_hash)
+      if (storage.meta_hash == parse_result.analysis->meta_hash)
       {
         return;
       }
@@ -9735,7 +10303,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       /* Socket declarations already initialize defaults for newly created sockets. Re-applying
        * GLSL meta defaults here would overwrite user-edited values on refresh for unchanged
        * parameters with the same identifier. */
-      for (const GLSLFunctionParam& param : parse_result.function.params)
+      for (const GLSLFunctionParam& param : parse_result.analysis->function.params)
       {
         if (param.type != GLSLBoundaryType::Int || param.meta.int_choices.is_empty())
         {
@@ -9753,12 +10321,12 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
           value.value = param.meta.int_default_value.value_or(0);
         }
       }
-      storage.meta_hash = parse_result.meta_hash;
+      storage.meta_hash = parse_result.analysis->meta_hash;
     }
 
     static void draw_glsl_define_settings(ui::Layout& layout,
                                           PointerRNA* ptr,
-                                          const GLSLParseResult& parse_result);
+                                          Span<GLSLDefineMeta> defines);
 
     static void node_declare(NodeDeclarationBuilder& b)
     {
@@ -9776,9 +10344,9 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       }
 
       const bool code_mode = (node_storage(*node).flags & SHD_GLSL_FUNCTION_CODE_MODE) != 0;
-      const bool has_parameter_panels = !parse_result.function.panels.is_empty();
-      const bool has_define_panel = !parse_result.defines.is_empty();
-      const bool has_closure_panel = !parse_result.closure_callbacks.is_empty();
+      const bool has_parameter_panels = !parse_result.analysis->function.panels.is_empty();
+      const bool has_define_panel = !parse_result.analysis->defines.is_empty();
+      const bool has_closure_panel = !parse_result.analysis->closure_callbacks.is_empty();
       const bool use_declaration_panels = has_parameter_panels || has_define_panel ||
         has_closure_panel;
       if (code_mode || use_declaration_panels)
@@ -9788,17 +10356,17 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       }
 
       auto add_output_declarations = [&](DeclarationListBuilder& builder) {
-        if (parse_result.function.return_type != GLSLBoundaryType::Void)
+        if (parse_result.analysis->function.return_type != GLSLBoundaryType::Void)
         {
           GLSLFunctionParam output_param;
-          output_param.type = parse_result.function.return_type;
-          output_param.type_name = parse_result.function.return_type_name;
-          output_param.dimensions = glsl_boundary_dimensions(parse_result.function.return_type);
+          output_param.type = parse_result.analysis->function.return_type;
+          output_param.type_name = parse_result.analysis->function.return_type_name;
+          output_param.dimensions = glsl_boundary_dimensions(parse_result.analysis->function.return_type);
           add_glsl_socket_declaration(
             builder, output_param, true, "Result"_ustr, UString(result_socket_identifier));
         }
 
-        for (const GLSLFunctionParam& param : parse_result.function.params)
+        for (const GLSLFunctionParam& param : parse_result.analysis->function.params)
         {
           if (glsl_param_has_output_socket(param))
           {
@@ -9827,7 +10395,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
           b.add_panel("Interface"_ustr, make_code_interface_panel_identifier())
             .default_closed(true);
         add_output_declarations(interface_panel);
-        for (const GLSLFunctionParam& param : parse_result.function.params)
+        for (const GLSLFunctionParam& param : parse_result.analysis->function.params)
         {
           if (!glsl_param_has_input_socket(param))
           {
@@ -9853,19 +10421,21 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       {
         PanelDeclarationBuilder& defines_panel =
           b.add_panel("Defines"_ustr,
-                      make_defines_panel_identifier(parse_result.defines_panel_default_closed))
-            .default_closed(parse_result.defines_panel_default_closed);
-        defines_panel.add_layout([parse_result](ui::Layout& layout,
-                                                bContext* /*C*/,
-                                                PointerRNA* ptr) {
-          draw_glsl_define_settings(layout, ptr, parse_result);
+                      make_defines_panel_identifier(parse_result.analysis->defines_panel_default_closed))
+            .default_closed(parse_result.analysis->defines_panel_default_closed);
+        /* A declaration outlives parsing. Retain only its UI metadata, never the source/tokens
+         * shared with the bounded analysis cache (including oversized, uncached results). */
+        defines_panel.add_layout([defines = parse_result.analysis->defines](ui::Layout& layout,
+                                                                           bContext* /*C*/,
+                                                                           PointerRNA* ptr) {
+          draw_glsl_define_settings(layout, ptr, defines);
         });
       }
 
       Map<std::string, int> panel_indices;
-      for (const int panel_index : parse_result.function.panels.index_range())
+      for (const int panel_index : parse_result.analysis->function.panels.index_range())
       {
-        const GLSLPanelMeta& panel = parse_result.function.panels[panel_index];
+        const GLSLPanelMeta& panel = parse_result.analysis->function.panels[panel_index];
         panel_indices.add(panel.name, panel_index);
       }
       Map<std::string, PanelDeclarationBuilder*> panel_builders;
@@ -9879,7 +10449,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         {
           return nullptr;
         }
-        const GLSLPanelMeta& panel = parse_result.function.panels[*panel_index];
+        const GLSLPanelMeta& panel = parse_result.analysis->function.panels[*panel_index];
         PanelDeclarationBuilder& panel_builder =
           b.add_panel(UString(panel.name), make_panel_identifier(panel.name)).default_closed(
             panel.default_closed);
@@ -9887,7 +10457,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         return &panel_builder;
       };
 
-      for (const GLSLFunctionParam& param : parse_result.function.params)
+      for (const GLSLFunctionParam& param : parse_result.analysis->function.params)
       {
         if (glsl_param_has_input_socket(param))
         {
@@ -10005,10 +10575,10 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
 
       if (parse_result.ok)
       {
-        std::string label = "Using function: " + parse_result.resolved_function_name;
+        std::string label = "Using function: " + parse_result.analysis->function.name;
         layout.label(label.c_str(), ICON_NONE);
       }
-      else if (storage.function_name[0] == '\0' && !parse_result.function_names.is_empty())
+      else if (storage.function_name[0] == '\0' && !parse_result.analysis->function_names.is_empty())
       {
         layout.label(IFACE_("Choose a function"), ICON_NONE);
       }
@@ -10054,9 +10624,9 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
 
     static void draw_glsl_define_settings(ui::Layout& layout,
                                           PointerRNA* ptr,
-                                          const GLSLParseResult& parse_result)
+                                          Span<GLSLDefineMeta> defines)
     {
-      if (parse_result.defines.is_empty())
+      if (defines.is_empty())
       {
         return;
       }
@@ -10071,7 +10641,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       layout.use_property_split_set(true);
       layout.use_property_decorate_set(false);
 
-      for (const GLSLDefineMeta& define : parse_result.defines)
+      for (const GLSLDefineMeta& define : defines)
       {
         NodeShaderGLSLDefineValue* value = nullptr;
         for (const int i : IndexRange(storage.define_values_num))
@@ -10123,14 +10693,14 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
                                        const GLSLParseResult& parse_result,
                                        const char* panel_id)
     {
-      if (C == nullptr || !parse_result.ok || parse_result.defines.is_empty())
+      if (C == nullptr || !parse_result.ok || parse_result.analysis->defines.is_empty())
       {
         return;
       }
       if (ui::Layout* panel = layout.panel(
-            C, panel_id, parse_result.defines_panel_default_closed, IFACE_("Defines")))
+            C, panel_id, parse_result.analysis->defines_panel_default_closed, IFACE_("Defines")))
       {
-        draw_glsl_define_settings(*panel, ptr, parse_result);
+        draw_glsl_define_settings(*panel, ptr, parse_result.analysis->defines);
       }
     }
 
@@ -10158,7 +10728,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
                              C,
                              ptr,
                              parse_result,
-                             parse_result.defines_panel_default_closed ?
+                             parse_result.analysis->defines_panel_default_closed ?
                                "glsl_function_defines_closed" :
                                "glsl_function_defines");
     }
@@ -10173,8 +10743,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       const GLSLFunctionDefinition& function,
       GPUNodeStack* in)
     {
-      static float zero_value[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-
       if (in == nullptr || !glsl_function_has_sampler_inputs(function))
       {
         return true;
@@ -10278,13 +10846,36 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
                    GLSLSamplerSourceKind::FallbackWhite))
           {
             stack->type = GPU_FLOAT;
-            stack->link = GPU_constant(zero_value);
+            /* Let graph linking create the placeholder only when it is consumed. Helper
+             * specialization can fail before the wrapper is linked. */
+            stack->link = nullptr;
+            std::fill_n(stack->vec, 4, 0.0f);
             continue;
           }
 
           if (glsl_boundary_type_is_sample2d(param.type))
           {
             image = resolve_sample2d_image(param);
+          }
+          else if (param.type == GLSLBoundaryType::SampleCube) {
+            const bNodeLink *used_link = resolve_image_to_closure_link(param);
+            if (!used_link || !used_link->fromnode ||
+                image_to_closure_texture_type(*used_link->fromnode) !=
+                    IMA_IMAGE_TO_CLOSURE_TEXTURE_CUBE_STRIP)
+            {
+              return false;
+            }
+            image = resolve_image_to_closure_image(*used_link);
+            if (!image || image->source == IMA_SRC_TILED) {
+              return false;
+            }
+            stack->type = GPU_TEXCUBE;
+            stack->link = GPU_image_cube_strip(
+                mat,
+                image,
+                nullptr,
+                sampler_state_from_image_to_closure_node(*used_link->fromnode));
+            continue;
           }
           else if (glsl_boundary_type_is_sample3d(param.type))
           {
@@ -10475,8 +11066,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
             {
               for (int i = 0; !out[i].end; i++)
               {
-                if (out[i].type != GPU_NONE)
-                {
+                if (out[i].type != GPU_NONE && out[i].hasoutput) {
                   out[i].link = GPU_constant(zero_value);
                 }
               }
@@ -10511,26 +11101,25 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         {
           for (int i = 0; !out[i].end; i++)
           {
-            if (out[i].type != GPU_NONE)
-            {
+            if (out[i].type != GPU_NONE && out[i].hasoutput) {
               out[i].link = GPU_constant(zero_value);
             }
           }
         }
         return 1;
       }
-      if (parse_result.uses_eevee_light_access)
+      if (parse_result.analysis->uses_eevee_light_access)
       {
         GPU_material_flag_set(mat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
       }
-      for (const std::string &name : parse_result.light_parameter_names) {
+      for (const std::string &name : parse_result.analysis->light_parameter_names) {
         GPU_material_light_shader_parameter_ensure(mat, name.c_str());
       }
-      if (parse_result.uses_lightprobe_access)
+      if (parse_result.analysis->uses_lightprobe_access)
       {
         GPU_material_flag_set(mat, GPU_MATFLAG_LIGHTPROBE_ACCESS);
       }
-      if (!prepare_sampler_input_bindings(mat, *node, parse_result.function, in))
+      if (!prepare_sampler_input_bindings(mat, *node, parse_result.analysis->function, in))
       {
         if (const std::optional<std::string> helper_name =
               find_connected_glsl_closure_callback_name(*node, {}))
@@ -10554,8 +11143,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         {
           for (int i = 0; !out[i].end; i++)
           {
-            if (out[i].type != GPU_NONE)
-            {
+            if (out[i].type != GPU_NONE && out[i].hasoutput) {
               out[i].link = GPU_constant(zero_value);
             }
           }
@@ -10592,27 +11180,26 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         {
           for (int i = 0; !out[i].end; i++)
           {
-            if (out[i].type != GPU_NONE)
-            {
+            if (out[i].type != GPU_NONE && out[i].hasoutput) {
               out[i].link = GPU_constant(zero_value);
             }
           }
         }
         return 1;
       }
-      if (parse_result.uses_geometry_access)
+      if (parse_result.analysis->uses_geometry_access)
       {
         const std::string geometry_helper_source = build_glsl_geometry_helper_block();
         GPU_material_generated_source_add(
           mat, GPU_GLSL_FUNCTION_GEOMETRY_HELPER_FILENAME, {}, geometry_helper_source.c_str());
       }
-      if (parse_result.uses_matrix_access)
+      if (parse_result.analysis->uses_matrix_access)
       {
         const std::string matrix_helper_source = build_glsl_matrix_helper_block();
         GPU_material_generated_source_add(
           mat, GPU_GLSL_FUNCTION_MATRIX_HELPER_FILENAME, {}, matrix_helper_source.c_str());
       }
-      if (parse_result.uses_lightprobe_access)
+      if (parse_result.analysis->uses_lightprobe_access)
       {
         const std::string lightprobe_helper_source = build_glsl_lightprobe_helper_block();
         Vector<StringRefNull> lightprobe_helper_dependencies;
@@ -10630,7 +11217,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         library_source.c_str());
 
       Vector<StringRefNull> dependencies;
-      if (parse_result.uses_eevee_light_access)
+      if (parse_result.analysis->uses_eevee_light_access)
       {
         /* Share one helper library across all GLSL Function nodes in the material and let the
          * dependency resolver deduplicate Eevee light/shadow support code. */
@@ -10638,17 +11225,17 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       }
       dependencies.append(parse_result.source_filename.c_str());
       eGPUCustomNodeDependencyFlag dependency_flags = GPU_CUSTOM_NODE_DEPENDENCY_NONE;
-      if (parse_result.uses_geometry_access)
+      if (parse_result.analysis->uses_geometry_access)
       {
         dependency_flags = eGPUCustomNodeDependencyFlag(
           dependency_flags | GPU_CUSTOM_NODE_DEPENDENCY_GLSL_GEOMETRY_HELPERS);
       }
-      if (parse_result.uses_matrix_access)
+      if (parse_result.analysis->uses_matrix_access)
       {
         dependency_flags = eGPUCustomNodeDependencyFlag(
           dependency_flags | GPU_CUSTOM_NODE_DEPENDENCY_GLSL_MATRIX_HELPERS);
       }
-      if (parse_result.uses_lightprobe_access)
+      if (parse_result.analysis->uses_lightprobe_access)
       {
         dependency_flags = eGPUCustomNodeDependencyFlag(
           dependency_flags | GPU_CUSTOM_NODE_DEPENDENCY_GLSL_LIGHTPROBE_HELPERS);

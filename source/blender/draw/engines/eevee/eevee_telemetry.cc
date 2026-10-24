@@ -680,6 +680,21 @@ void TelemetryModule::snapshot_features()
   features.glsl_function_material_count = inst_.materials.glsl_function_material_count();
 }
 
+void TelemetryModule::object_update_add(const int recalc)
+{
+  if (!enabled() || !frame_active_) {
+    return;
+  }
+  const int relevant = recalc & (ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY | ID_RECALC_SHADING);
+  if (relevant) {
+    const int index = relevant == ID_RECALC_TRANSFORM ? 0 :
+                      relevant == ID_RECALC_GEOMETRY  ? 1 :
+                      relevant == ID_RECALC_SHADING   ? 2 :
+                                                        3;
+    current_frame_.object_updates[index]++;
+  }
+}
+
 bool TelemetryModule::frame_has_stage_samples(const TelemetryFrameRecord &record) const
 {
   for (const TelemetryStageSample &stage : record.stages) {
@@ -715,6 +730,60 @@ void TelemetryModule::frame_end()
     current_frame_.total_cpu_ms = (frame_end_time - frame_start_time_) * 1000.0;
   }
   snapshot_features();
+  {
+    const auto &updates = current_frame_.object_updates;
+    const auto &v = inst_.velocity.runtime_stats_get();
+    current_frame_.sync_details = fmt::format(
+        "  Object Updates: transform_only={} geometry_only={} shading_only={} mixed={}\n"
+        "  Sync Analysis: materials={} material_hits={} skipped_slots={} lights={} light_hits={} "
+        "attribute_sets={} attribute_hits={} mesh_requests={}\n"
+        "  Velocity Buffers: snapshot_vertices={} copy_bytes={} geometry_reallocations={} "
+        "geometry_shrinks={} indirection_reallocations={} indirection_shrinks={} upload_bytes={} "
+        "geometry_capacity_bytes={} indirection_capacity_bytes={} copy_cpu_ms={:.3f}\n",
+        updates[0],
+        updates[1],
+        updates[2],
+        updates[3],
+        inst_.materials.node_tree_info_count(),
+        inst_.materials.node_tree_info_hits(),
+        inst_.materials.skipped_material_slots(),
+        inst_.lights.node_tree_info_count(),
+        inst_.lights.node_tree_info_hits(),
+        inst_.sync.object_attribute_request_count(),
+        inst_.sync.object_attribute_request_hits(),
+        inst_.sync.mesh_attribute_requests(),
+        v.snapshot_vertices,
+        v.snapshot_copy_bytes,
+        v.geometry_reallocations,
+        v.geometry_shrinks,
+        v.indirection_reallocations,
+        v.indirection_shrinks,
+        v.upload_bytes,
+        v.geometry_capacity_bytes,
+        v.indirection_capacity_bytes,
+        v.snapshot_cpu_ms);
+    const DEGMaterialEvalStats eval = DEG_material_eval_profile_get(inst_.depsgraph);
+    current_frame_.sync_details += fmt::format(
+        "  Material Evaluation (last depsgraph evaluation): reused={} non_time={} "
+        "unsupported_material={} driver_nla={} action_layout={} socket={} sequence={} "
+        "external_id={} no_action={} value_changed={} generated_source={} referenced_object={} "
+        "shader_pending={} no_gpu_cache={} state_cpu_ms={:.3f}\n",
+        eval.reasons[0],
+        eval.reasons[1],
+        eval.reasons[2],
+        eval.reasons[3],
+        eval.reasons[4],
+        eval.reasons[5],
+        eval.reasons[6],
+        eval.reasons[7],
+        eval.reasons[8],
+        eval.reasons[9],
+        eval.reasons[10],
+        eval.reasons[11],
+        eval.reasons[12],
+        eval.reasons[13],
+        double(eval.state_nanoseconds) / 1e6);
+  }
   current_frame_.shadow_light_costs.clear();
   for (const TelemetryShadowLightCost &cost : inst_.lights.shadow_light_costs()) {
     current_frame_.shadow_light_costs.append(cost);
@@ -1699,6 +1768,38 @@ std::string TelemetryModule::format_material_sync_report(const TelemetryFrameRec
             });
 
   std::string result = "  Material Sync:\n";
+  result += record.sync_details;
+  const auto &prep = record.material_preparation;
+  static constexpr const char *stage_names[] = {"LookupWait",
+                                                "AnimationState",
+                                                "Inline",
+                                                "Preprocess",
+                                                "Execute",
+                                                "NPR",
+                                                "Textures",
+                                                "Codegen",
+                                                "CompileWait",
+                                                "Cleanup",
+                                                "GLSLParse"};
+  static_assert(ARRAY_SIZE(stage_names) == int(GPUMaterialProfileStage::Count));
+  result += "  Material Preparation CPU (inclusive subscopes):\n";
+  for (int i = 0; i < int(GPUMaterialProfileStage::Count); i++) {
+    result += fmt::format("    - {} {:.3f} ms\n", stage_names[i], prep.seconds[i] * 1000.0);
+  }
+  const auto count = [&](GPUMaterialProfileCounter key) { return prep.counts[int(key)]; };
+  result += fmt::format(
+      "    - material_hits={} builds={} pass_hits={} pass_misses={} glsl_hits={} glsl_misses={} "
+      "source_bytes={} tokens={} cache_bytes={} uniform_updates={}\n",
+      count(GPUMaterialProfileCounter::MaterialHits),
+      count(GPUMaterialProfileCounter::MaterialBuilds),
+      count(GPUMaterialProfileCounter::PassHits),
+      count(GPUMaterialProfileCounter::PassMisses),
+      count(GPUMaterialProfileCounter::GLSLCacheHits),
+      count(GPUMaterialProfileCounter::GLSLCacheMisses),
+      count(GPUMaterialProfileCounter::GLSLSourceBytes),
+      count(GPUMaterialProfileCounter::GLSLTokens),
+      count(GPUMaterialProfileCounter::GLSLCacheBytes),
+      count(GPUMaterialProfileCounter::UniformUpdates));
   result += fmt::format(
       "    - Total requests={} shader_queued={} optimize_queued={} fallbacks={} failed={}\n",
       total_requests,

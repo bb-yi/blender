@@ -143,6 +143,7 @@ set(SRC
   GPU_index_buffer.hh
   GPU_init_exit.hh
   GPU_material.hh
+  GPU_material_profile.hh
   GPU_matrix.hh
   GPU_pass.hh
   GPU_platform.hh

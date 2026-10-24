@@ -180,6 +180,8 @@ struct GPUSource {
         return GPU_TEX2D;
       case metadata::Type::sampler3D:
         return GPU_TEX3D;
+      case metadata::Type::samplerCube:
+        return GPU_TEXCUBE;
       case metadata::Type::Closure:
         return GPU_CLOSURE;
       case metadata::Type::TextureHandle:

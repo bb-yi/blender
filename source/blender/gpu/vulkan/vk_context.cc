@@ -179,9 +179,13 @@ TimelineValue VKContext::flush_render_graph(RenderGraphFlushFlags flags,
     }
   }
   VKDevice &device = VKBackend::get().device;
-  push_constants_pool.ensure_uploaded();
+  if (!device.submission_failed()) {
+    push_constants_pool.ensure_uploaded();
+  }
   push_constants_pool.discard();
-  descriptor_set_get().upload_descriptor_sets();
+  if (!device.submission_failed()) {
+    descriptor_set_get().upload_descriptor_sets();
+  }
   TimelineValue timeline = device.render_graph_submit(
       &render_graph_.value().get(),
       discard_pool,

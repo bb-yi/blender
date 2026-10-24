@@ -138,6 +138,9 @@ struct Render : public BaseRender {
   /* Owner pointer that uniquely identifiers the owner of this scene. */
   const void *owner = nullptr;
 
+  /* One RE_RenderAnim operation, independent of per-frame render_run_id. */
+  uint64_t animation_sequence_id = 0;
+
   /* state settings */
   short flag = 0;
   bool ok = false;

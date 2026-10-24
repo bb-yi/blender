@@ -443,6 +443,16 @@ void deg_evaluate_on_refresh(Depsgraph *graph)
 #endif
 
   graph->is_evaluating = true;
+  graph->material_eval_profile_enabled = (graph->scene->eevee.flag &
+                                          SCE_EEVEE_PERFORMANCE_PROFILER) != 0;
+  if (graph->material_eval_profile_enabled) {
+    for (auto &count : graph->material_eval_reasons) {
+      count.store(0, std::memory_order_relaxed);
+    }
+    graph->material_eval_state_nanoseconds.store(0, std::memory_order_relaxed);
+  }
+  graph->evaluation_update_sources = graph->pending_update_sources.exchange(
+      0, std::memory_order_relaxed);
   depsgraph_ensure_view_layer(graph);
 
   /* Set up evaluation state. */

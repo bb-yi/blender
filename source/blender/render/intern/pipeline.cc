@@ -8,6 +8,7 @@
 
 #include <fmt/format.h>
 
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
@@ -1104,6 +1105,8 @@ static void do_render_compositor_scene(Render *re, Scene *sce, int cfra)
   resc->scene = sce;
 
   RE_display_share(resc, re);
+  /* Composited scenes belong to the same output animation, with separate NR streams. */
+  resc->animation_sequence_id = re->animation_sequence_id;
 
   do_render_engine(resc);
 
@@ -1297,7 +1300,9 @@ static void do_render_compositor(Render *re)
                                 &compositor_render_context,
                                 needed_outputs);
         }
-        compositor_render_context.save_file_outputs(re->pipeline_scene_eval);
+        if (GPU_backend_get_error() == nullptr) {
+          compositor_render_context.save_file_outputs(re->pipeline_scene_eval);
+        }
       }
     }
   }
@@ -1908,6 +1913,10 @@ static void render_init_depsgraph(Render *re)
 /* Free data only needed during rendering operation. */
 static void render_pipeline_free(Render *re)
 {
+  if (const char *error = GPU_backend_get_error()) {
+    BKE_report(re->reports, RPT_ERROR, error);
+  }
+  re->animation_sequence_id = 0;
   if (re->engine && !RE_engine_use_persistent_data(re->engine)) {
     RE_engine_free(re->engine);
     re->engine = nullptr;
@@ -1936,6 +1945,7 @@ void RE_RenderFrame(Render *re,
                     const float subframe,
                     const bool write_still)
 {
+  re->animation_sequence_id = 0;
   CLOG_INFO(&LOG, "Rendering frame %d", frame);
 
   render_callback_exec_id(re, re->main, &scene->id, BKE_CB_EVT_RENDER_INIT);
@@ -1943,6 +1953,14 @@ void RE_RenderFrame(Render *re,
   /* Ugly global still...
    * is to prevent preview events and signal subdivision-surface etc to make full resolution. */
   G.is_rendering = true;
+
+  if (const char *error = GPU_backend_get_error()) {
+    BKE_report(re->reports, RPT_ERROR, error);
+    G.is_break = true;
+    G.is_rendering = false;
+    render_callback_exec_id(re, bmain, &scene->id, BKE_CB_EVT_RENDER_CANCEL);
+    return;
+  }
 
   scene->r.cfra = frame;
   scene->r.subframe = subframe;
@@ -1962,6 +1980,9 @@ void RE_RenderFrame(Render *re,
 
     do_render_full_pipeline(re);
 
+    if (GPU_backend_get_error() != nullptr) {
+      G.is_break = true;
+    }
     const bool should_write = write_still && !(re->flag & R_SKIP_WRITE);
     if (should_write && !G.is_break) {
       if (BKE_imtype_is_movie(rd.im_format.imtype)) {
@@ -2340,6 +2361,13 @@ void RE_RenderAnim(Render *re,
    * copying (e.g. alter the output path). */
   render_callback_exec_id(re, re->main, &scene->id, BKE_CB_EVT_RENDER_INIT);
 
+  if (const char *error = GPU_backend_get_error()) {
+    BKE_report(re->reports, RPT_ERROR, error);
+    G.is_break = true;
+    render_callback_exec_id(re, bmain, &scene->id, BKE_CB_EVT_RENDER_CANCEL);
+    return;
+  }
+
   RenderData rd = dna::shallow_copy(scene->r);
   const int cfra_old = rd.cfra;
   const float subframe_old = rd.subframe;
@@ -2406,6 +2434,8 @@ void RE_RenderAnim(Render *re,
    * to make full resolution is also set by caller renderwin.c */
   G.is_rendering = true;
 
+  static std::atomic<uint64_t> next_animation_sequence_id{1};
+  re->animation_sequence_id = next_animation_sequence_id.fetch_add(1, std::memory_order_relaxed);
   re->flag |= R_ANIMATION;
   DEG_graph_id_tag_update(re->main, re->pipeline_depsgraph, &re->scene->id, ID_RECALC_AUDIO_MUTE);
 

@@ -1219,9 +1219,8 @@ void ntreeGPULightShaderNodes(bNodeTree *localtree, GPUMaterial *mat)
   ntreeShaderEndExecTree(exec);
 }
 
-void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
+void ntreeGPUMaterialNodesPreprocess(bNodeTree *localtree, GPUMaterial *mat)
 {
-  bNodeTreeExec *exec;
   const bool is_filter_material = gpu_material_uses_filter_domain(mat);
   const bool is_outline_shell = GPU_material_is_outline_shell(mat);
 
@@ -1230,6 +1229,11 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
   bNode *output = is_outline_shell ? ntreeShaderOutlineShellOutputNode(localtree) :
                   is_filter_material ? ntreeShaderFilterOutputNode(localtree) :
                                        ntreeShaderOutputNode(localtree, SHD_OUTPUT_EEVEE);
+
+  /* Prune before implicit casts update the localized tree. Otherwise unreachable GLSL Function
+   * nodes have their declarations rebuilt and sources parsed for every material pass before
+   * being removed. Keep the later prune to also remove branches disconnected by the casts. */
+  ntree_shader_pruned_unused(localtree, output, !is_outline_shell);
 
   /* Tree is valid if it contains no undefined implicit socket type cast. */
   bool valid_tree = is_filter_material ? true : ntree_shader_implicit_closure_cast(localtree);
@@ -1243,8 +1247,19 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
       }
     }
   }
+}
 
-  exec = ntreeShaderBeginExecTree(localtree);
+void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat, const bool preprocessed)
+{
+  if (!preprocessed) {
+    ntreeGPUMaterialNodesPreprocess(localtree, mat);
+  }
+  const bool is_filter_material = gpu_material_uses_filter_domain(mat);
+  const bool is_outline_shell = GPU_material_is_outline_shell(mat);
+  bNode *output = is_outline_shell ? ntreeShaderOutlineShellOutputNode(localtree) :
+                  is_filter_material ? ntreeShaderFilterOutputNode(localtree) :
+                                       ntreeShaderOutputNode(localtree, SHD_OUTPUT_EEVEE);
+  bNodeTreeExec *exec = ntreeShaderBeginExecTree(localtree);
   if (is_filter_material) {
     if (output != nullptr) {
       ntreeExecGPUNodes(exec, mat, output);

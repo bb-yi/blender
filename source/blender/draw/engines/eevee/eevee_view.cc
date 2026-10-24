@@ -118,6 +118,38 @@ namespace blender::eevee
     inst_.uniform_data.pipeline.is_main_view_inverted = main_view_.is_inverted();
   }
 
+  void ShadingView::render_dlss_guides(Film &film)
+  {
+    if (!is_enabled_) {
+      return;
+    }
+    RenderBuffers &buffers = inst_.render_buffers;
+    buffers.acquire(extent_);
+    const bool raycast = inst_.pipelines.has_raycast;
+    const bool normals = raycast || inst_.outline.enabled() ||
+                         inst_.lights.needs_front_light_shader();
+    prepass_fb_.ensure(
+        GPU_ATTACHMENT_TEXTURE(buffers.depth_tx),
+        normals ? GPU_ATTACHMENT_TEXTURE(buffers.prepass_normal_tx) : GPU_ATTACHMENT_NONE,
+        raycast ? GPU_ATTACHMENT_TEXTURE(buffers.object_id_tx) : GPU_ATTACHMENT_NONE,
+        GPU_ATTACHMENT_TEXTURE(buffers.vector_tx));
+    prepass_fb_.bind();
+    GPU_framebuffer_clear_depth_stencil(prepass_fb_, inst_.film.depth.clear_value, 0xFFu);
+    const float4 invalid_motion(VELOCITY_INVALID);
+    GPU_texture_clear(buffers.vector_tx, GPU_DATA_FLOAT, &invalid_motion);
+    if (raycast) {
+      buffers.object_id_tx.clear(uint4(0));
+    }
+    if (normals) {
+      buffers.prepass_normal_tx.clear(float4(0.0f));
+    }
+    inst_.pipelines.deferred.render_dlss_guides(main_view_, prepass_fb_);
+    inst_.pipelines.forward.render_dlss_guides(main_view_, prepass_fb_);
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_FRAMEBUFFER);
+    film.process_dlss(main_view_, inst_);
+    buffers.release();
+  }
+
   void ShadingView::render()
   {
     if (!is_enabled_)

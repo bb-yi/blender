@@ -451,7 +451,9 @@ static int gpu_shader_closure_input(GPUMaterial *mat,
     }
     if (uv_source_type == GPU_VEC3) {
       const std::string uv_attr_expr = "$OUT = " + std::string(uv_source);
-      out[output_index].link = GPU_function_call(uv_attr_expr.c_str());
+      /* Own the expression through the graph even if its consumer cannot compile. */
+      GPUNodeLink *uv_attr_link = GPU_function_call(uv_attr_expr.c_str());
+      GPU_link(mat, "set_rgb", uv_attr_link, &out[output_index].link);
     }
     else {
       const std::string uv_attr_expr = "$OUT = float4(" + std::string(uv_source) + ", 0.0, 1.0)";

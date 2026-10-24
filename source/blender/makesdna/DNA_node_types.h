@@ -665,6 +665,7 @@ enum eNodeImage_Extension : short {
 enum {
   IMA_IMAGE_TO_CLOSURE_TEXTURE_2D = 0,
   IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP = 1,
+  IMA_IMAGE_TO_CLOSURE_TEXTURE_CUBE_STRIP = 2,
 };
 
 /* Image to Closure 3D LUT strip size mode. */
@@ -3304,7 +3305,9 @@ struct NodeShaderScriptExpressionVariable {
   char *name = nullptr;
   /** #eNodeSocketDatatype. */
   short socket_type = 0;
-  char _pad[2] = {};
+  /** Zero preserves the legacy three-dimensional vector. */
+  char vector_dimensions = 0;
+  char separate_alpha = 0;
   /** Generated unique identifier for sockets which stays stable when names or order change. */
   int identifier = 0;
 };
@@ -3316,7 +3319,8 @@ struct NodeShaderScriptExpression {
   NodeShaderScriptExpressionVariable *variables = nullptr;
   /** #eNodeSocketDatatype. */
   short output_socket_type = SOCK_FLOAT;
-  short _pad = 0;
+  /** Zero preserves the legacy three-dimensional vector. */
+  short output_vector_dimensions = 0;
   int variables_num = 0;
   int active_variable_index = 0;
   int next_identifier = 0;
@@ -3487,7 +3491,10 @@ struct NodeEeveeFilterGraphFilterMaterial {
   int active_index = 0;
   int next_identifier = 0;
   float resolution_scale = 1.0f;
-  char _pad[8] = {};
+  int resolution_basis = 0; /* 0: stage, 1: input, 2: fixed pixels. */
+  int resolution_input = 0; /* Stable socket item identifier, not its list index. */
+  int resolution_width = 256;
+  int resolution_height = 256;
 };
 
 struct NodeEeveeFilterGraphAOVInput {

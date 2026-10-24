@@ -178,6 +178,10 @@ class Manager {
   void extract_object_attributes(ResourceHandleRange handle,
                                  const ObjectRef &ref,
                                  Span<GPUMaterial *> materials);
+  /** Reuse a request schema while reading fresh values for this object and its instances. */
+  void extract_object_attributes(ResourceHandleRange handle,
+                                 const ObjectRef &ref,
+                                 Span<const GPUUniformAttr *> attributes);
 
   /**
    * Collect necessary View Layer attributes.
@@ -477,12 +481,23 @@ inline void Manager::extract_object_attributes(ResourceHandleRange handle,
     }
   }
 
+  Vector<const GPUUniformAttr *, 4> requests;
+  for (const GPUUniformAttr *attribute : attributes.values()) {
+    requests.append(attribute);
+  }
+  extract_object_attributes(handle, ref, requests.as_span());
+}
+
+inline void Manager::extract_object_attributes(ResourceHandleRange handle,
+                                               const ObjectRef &ref,
+                                               Span<const GPUUniformAttr *> attributes)
+{
   int instance_index = 0;
   for (ResourceID resource_id : handle.id_range()) {
     ObjectInfos &infos = infos_buf.current().get_or_resize(resource_id.index());
     infos.object_attrs_offset = attribute_len_;
     infos.object_attrs_len = 0;
-    for (const GPUUniformAttr *attr : attributes.values()) {
+    for (const GPUUniformAttr *attr : attributes) {
       if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *attr, instance_index)) {
         infos.object_attrs_len++;
         attribute_len_++;

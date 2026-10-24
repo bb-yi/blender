@@ -44,8 +44,10 @@ enum eGPUTextureTarget : int {
   TEXTARGET_2D = 0,
   TEXTARGET_2D_ARRAY = 1,
   TEXTARGET_TILE_MAPPING = 2,
-  TEXTARGET_COUNT = 3,
-  /* Cached separately from Image.runtime.gputexture because many dimensions can exist per image. */
+  TEXTARGET_CUBE = 3,
+  TEXTARGET_COUNT = 4,
+  /* Cached separately from Image.runtime.gputexture because many dimensions can exist per image.
+   */
   TEXTARGET_3D_LUT_STRIP = TEXTARGET_COUNT,
 };
 

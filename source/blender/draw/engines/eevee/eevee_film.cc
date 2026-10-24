@@ -286,6 +286,8 @@ inline bool operator!=(const FilmData &a, const FilmData &b)
 static eViewLayerEEVEEPassType enabled_passes(const ViewLayer *view_layer)
 {
   eViewLayerEEVEEPassType result = eViewLayerEEVEEPassType(view_layer->eevee.render_passes);
+  /* Pre-FX is written by a separate render instance, never accumulated with these passes. */
+  result &= ~EEVEE_RENDER_PASS_PRE_FX;
 
   /* We enforce the use of combined pass to be compliant with Cycles and EEVEE-Legacy (#122188). */
   result |= EEVEE_RENDER_PASS_COMBINED;
@@ -387,10 +389,17 @@ void Film::init(const int2 &extent, const rcti *output_rect)
 
   /* Compute the passes needed by the viewport compositor. */
   Set<std::string> passes_used_by_viewport_compositor;
+  viewport_compositor_enabled_passes_ = eViewLayerEEVEEPassType(0);
   if (inst_.is_viewport_compositor_enabled) {
     passes_used_by_viewport_compositor = bke::compositor::get_used_passes(scene, inst_.view_layer);
     viewport_compositor_enabled_passes_ = get_viewport_compositor_enabled_passes(
         passes_used_by_viewport_compositor, inst_.view_layer);
+  }
+  const bool pre_fx_requested =
+      (inst_.view_layer->eevee.render_passes & EEVEE_RENDER_PASS_PRE_FX) &&
+      passes_used_by_viewport_compositor.contains(Instance::pre_fx_pass_name);
+  if (assign_if_different(pre_fx_compositor_requested_, pre_fx_requested)) {
+    inst_.sampling.reset();
   }
 
   enabled_categories_ = PassCategory(0);
@@ -428,6 +437,9 @@ void Film::init(const int2 &extent, const rcti *output_rect)
           inst_.v3d->shading.render_pass);
       const eViewLayerEEVEEPassType scene_enabled_passes = enabled_passes(inst_.view_layer);
       needed_passes = viewport_compositor_enabled_passes_;
+      if (pre_fx_compositor_requested_) {
+        needed_passes |= EEVEE_RENDER_PASS_COMBINED;
+      }
 
       if (selected_pass == EEVEE_RENDER_PASS_STENCIL_VALUE) {
         needed_passes |= EEVEE_RENDER_PASS_COMBINED;
@@ -695,6 +707,10 @@ void Film::init(const int2 &extent, const rcti *output_rect)
       enabled_categories_ |= PASS_CATEGORY_CRYPTOMATTE;
     }
   }
+  /* Guides use Film metadata for camera/material setup, but never accumulate an image. */
+  if (inst_.is_dlss_guide_render) {
+    return;
+  }
   {
     int2 weight_extent = (data_.sr_active || inst_.camera.is_panoramic() ||
                           (data_.scaling_factor > 1)) ?
@@ -749,6 +765,9 @@ void Film::init(const int2 &extent, const rcti *output_rect)
 
 void Film::sync()
 {
+  if (inst_.is_dlss_guide_render) {
+    return;
+  }
   nr_mask_id_ = -1;
   if (nr_mask_aov_) {
     const uint hash = BLI_hash_string(nr_mask_aov_->name);
@@ -869,6 +888,11 @@ void Film::init_pass(PassSimple &pass, gpu::Shader *sh)
 
 void Film::end_sync()
 {
+  if (inst_.is_dlss_guide_render) {
+    /* Render Texture captures can still bind AOV metadata while producing guide dependencies. */
+    aovs_info.push_update();
+    return;
+  }
   use_reprojection_ = inst_.sampling.interactive_mode();
 
   if (inst_.is_viewport()) {
@@ -960,7 +984,7 @@ float2 Film::pixel_jitter_get() const
 
 eViewLayerEEVEEPassType Film::enabled_passes_get() const
 {
-  if (data_.sr_active || (inst_.is_viewport() && use_reprojection_)) {
+  if (inst_.is_dlss_guide_render || data_.sr_active || (inst_.is_viewport() && use_reprojection_)) {
     /* Enable motion vector rendering but not the accumulation buffer. */
     return enabled_passes_ | EEVEE_RENDER_PASS_VECTOR;
   }
@@ -1154,51 +1178,16 @@ void Film::accumulate(View &view,
   display_only_ = false;
   gpu::Texture *dlss_display_tx = nullptr;
   inst_.manager->submit(accumulate_ps_, view);
-  /* Viewport NR uses the Film/combined texture size (the pixels on screen), never
-   * Scene render resolution. Offline F12 runs NR once on the last accumulated
-   * sample — not 64 times at print resolution. */
   const bool dlss_live_viewport = inst_.is_viewport() && !inst_.is_image_render;
-  const bool dlss_final_render = inst_.is_image_render && inst_.sampling.finished();
-  if (dlss_live_viewport || dlss_final_render) {
-    gpu::Texture *color_tx = combined_output_tx_.gpu_texture();
-    gpu::Texture *depth_tx = inst_.render_buffers.depth_tx;
-    gpu::Texture *velocity_tx = inst_.render_buffers.vector_tx;
-    if (color_tx != nullptr && depth_tx != nullptr && velocity_tx != nullptr) {
-      const int2 color_extent(GPU_texture_width(color_tx), GPU_texture_height(color_tx));
-      const int2 guide_extent(GPU_texture_width(depth_tx), GPU_texture_height(depth_tx));
-      dlss_display_tx = inst_.dlss5.process(
-          {
-              color_tx,
-              color_tx,
-              depth_tx,
-              velocity_tx,
-              color_extent,
-              color_extent,
-              guide_extent,
-              data_.overscan,
-              data_.scaling_factor,
-              inst_.film.pixel_jitter_get(),
-              dlss_live_viewport ? inst_.dlss5_reset() : true,
-              dlss_live_viewport,
-              true,
-              true,
-              true,
-              false,
-              exp2f(inst_.scene->view_settings.exposure),
-              nr_mask_aov_ ? get_aov_texture(nr_mask_aov_) : nullptr,
-              !inst_.scene->eevee.dlss5_mask_aov[0] ||
-                  (nr_mask_aov_ && get_aov_texture(nr_mask_aov_)),
-              data_.sr_active ? data_.sr_render_ratio : float2(0.0f),
-          },
-          view);
-    }
+  /* Viewport image renders have no offline RenderEngine. Keep their single-frame path,
+   * and report the ordinary unsupported-backend status without allocating a guide instance. */
+  const bool dlss_legacy_image = inst_.is_image_render && inst_.sampling.finished() &&
+                                (inst_.is_viewport() || GPU_backend_get_type() != GPU_BACKEND_VULKAN);
+  if (dlss_live_viewport || dlss_legacy_image) {
+    dlss_display_tx = process_dlss(view, inst_);
   }
   const bool dlss_active = dlss_display_tx != nullptr &&
                            inst_.dlss5.display_texture() == dlss_display_tx;
-  if (inst_.is_image_render && dlss_active) {
-    GPU_texture_copy(combined_output_tx_.gpu_texture(), dlss_display_tx);
-    GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_TEXTURE_UPDATE);
-  }
   if (inst_.is_viewport()) {
     /* Conversion passes bind their own framebuffer. Present through the same Film
      * shader for active sampling and cached display, including borders and passes.
@@ -1225,6 +1214,43 @@ void Film::accumulate(View &view,
   if (data_.use_history == 0) {
     data_.use_history = 1;
   }
+}
+
+bool Film::dlss_mask_valid()
+{
+  return !inst_.scene->eevee.dlss5_mask_aov[0] ||
+         (nr_mask_aov_ && get_aov_texture(nr_mask_aov_));
+}
+
+gpu::Texture *Film::process_dlss(View &view, Instance &guides)
+{
+  gpu::Texture *color = combined_output_tx_.gpu_texture();
+  gpu::Texture *depth = guides.render_buffers.depth_tx;
+  gpu::Texture *velocity = guides.render_buffers.vector_tx;
+  if (!color || !depth || !velocity) {
+    return nullptr;
+  }
+  const bool viewport = inst_.is_viewport() && !inst_.is_image_render;
+  const int2 extent(GPU_texture_width(color), GPU_texture_height(color));
+  const int2 guide_extent(GPU_texture_width(depth), GPU_texture_height(depth));
+  const int2 guide_film_extent = guides.film.film_extent_get();
+  const float2 ratio = viewport && data_.sr_active ? data_.sr_render_ratio :
+                       float2(guide_film_extent) / float2(extent);
+  gpu::Texture *output = inst_.dlss5.process(
+      {color, color, depth, velocity, extent, extent, guide_extent,
+       guides.film.render_overscan_get(), guides.film.scaling_factor_get(),
+       viewport ? pixel_jitter_get() : float2(0.0f),
+       viewport ? inst_.dlss5_reset() : inst_.is_viewport(), viewport, true, true, true, false,
+       exp2f(inst_.scene->view_settings.exposure),
+       nr_mask_aov_ ? get_aov_texture(nr_mask_aov_) : nullptr,
+       dlss_mask_valid(),
+       viewport ? (data_.sr_active ? data_.sr_render_ratio : float2(0.0f)) : ratio},
+      view, guides.velocity);
+  if (inst_.is_image_render && output && inst_.dlss5.display_texture() == output) {
+    GPU_texture_copy(color, output);
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_TEXTURE_UPDATE);
+  }
+  return output;
 }
 
 void Film::display()
@@ -1360,8 +1386,35 @@ static eShaderType get_aov_write_pass_shader_type(const ViewLayerAOV *aov)
   return FILM_PASS_CONVERT_VALUE;
 }
 
+void Film::write_viewport_pre_fx()
+{
+  gpu::Texture *input = get_pass_texture(EEVEE_RENDER_PASS_COMBINED, 0);
+  if (!input) {
+    return;
+  }
+  draw::TextureFromPool &output = DRW_viewport_pass_texture_get(Instance::pre_fx_pass_name);
+  output.acquire_2d(display_extent, GPU_texture_format(input));
+  PassSimple pass = {"Film.WriteViewportPreFX"};
+  pass.shader_set(inst_.shaders.static_shader_get(FILM_PASS_CONVERT_COMBINED));
+  pass.push_constant("offset", data_.offset);
+  pass.bind_texture("input_tx", input);
+  pass.bind_image("output_img", output);
+  pass.barrier(GPU_BARRIER_TEXTURE_FETCH);
+  pass.dispatch(math::divide_ceil(display_extent, int2(FILM_GROUP_SIZE)));
+  inst_.manager->submit(pass);
+}
+
 void Film::write_viewport_compositor_passes()
 {
+  if (inst_.is_pre_fx_render) {
+    write_viewport_pre_fx();
+    return;
+  }
+  if (pre_fx_compositor_requested_ && !inst_.depth_of_field.enabled() &&
+      !inst_.motion_blur.postfx_enabled())
+  {
+    write_viewport_pre_fx();
+  }
   this->cryptomatte_sort();
 
   /* Write standard passes. */

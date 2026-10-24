@@ -44,6 +44,7 @@ struct Material;
 struct Object;
 struct Scene;
 struct bNode;
+struct bNodeSocket;
 struct bNodeTree;
 
 /**
@@ -200,6 +201,8 @@ struct GPUMaterialFromNodeTreeResult {
   Vector<Error> errors;
 };
 
+std::string GPU_material_error_message(GPUMaterial *material);
+
 /** WARNING: gpumaterials thread safety must be ensured by the caller. */
 GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     Material *ma,
@@ -231,6 +234,16 @@ GPUMaterial *GPU_material_from_callbacks(eGPUMaterialEngine engine,
 
 void GPU_material_free_single(GPUMaterial *material);
 void GPU_material_free(ListBaseT<LinkData> *gpumaterial);
+bool GPU_material_animation_state_matches(ListBaseT<LinkData> *gpumaterial,
+                                          Span<double> state,
+                                          int *r_reject_reason = nullptr);
+/** Queue validated CPU-only uniform changes; actual upload occurs during material sync. */
+bool GPU_material_animation_uniform_update(Material *material, Span<double> state);
+int GPU_material_uniform_source_register(GPUMaterial *material, const bNodeSocket *socket);
+void GPU_material_uniform_capture_input(GPUMaterial *material,
+                                        const GPUInput &input,
+                                        size_t byte_offset);
+void GPU_material_uniform_capture_data(GPUMaterial *material, const void *data, size_t size);
 
 void GPU_materials_free(Main *bmain);
 
@@ -353,6 +366,7 @@ enum GPUType {
   GPU_TEX2D = 1002,
   GPU_TEX2D_ARRAY = 1003,
   GPU_TEX3D = 1004,
+  GPU_TEXCUBE = 1005,
 
   /* GLSL Struct types */
   GPU_CLOSURE = 1007,
@@ -412,6 +426,7 @@ struct GPUMaterialTexture {
   ImageUser iuser = {};
   bool iuser_available = false;
   bool use_3d_lut_strip = false;
+  bool use_cube_strip = false;
   int lut_3d_width = 0;
   int lut_3d_height = 0;
   int lut_3d_depth = 0;
@@ -536,6 +551,9 @@ struct GPUCodegenOutput {
 
 GPUNodeLink *GPU_constant(const float *num);
 GPUNodeLink *GPU_uniform(const float *num);
+GPUNodeLink *GPU_uniform_from_socket(GPUMaterial *material,
+                                     const bNodeSocket *socket,
+                                     const float *num);
 GPUNodeLink *GPU_function_call(StringRefNull function_call);
 GPUNodeLink *GPU_attribute(GPUMaterial *mat, eCustomDataType type, const char *name);
 /**
@@ -561,6 +579,10 @@ GPUNodeLink *GPU_image(GPUMaterial *mat,
                        Image *ima,
                        ImageUser *iuser,
                        GPUSamplerState sampler_state);
+GPUNodeLink *GPU_image_cube_strip(GPUMaterial *mat,
+                                  Image *ima,
+                                  ImageUser *iuser,
+                                  GPUSamplerState sampler_state);
 GPUNodeLink *GPU_image_3d_lut_strip(GPUMaterial *mat,
                                     Image *ima,
                                     ImageUser *iuser,

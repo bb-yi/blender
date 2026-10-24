@@ -183,10 +183,15 @@ static void filter_graph_copy_pass_input_to_filter_pass(const bNode &source_node
       *static_cast<const NodeShaderFilterGraphInput *>(source_node.storage);
   NodeEeveeFilterGraphFilterMaterial &target_storage =
       *static_cast<NodeEeveeFilterGraphFilterMaterial *>(target_node.storage);
+  const bool initialize_reference = target_storage.items_num == 0 &&
+                                    target_storage.next_identifier == 0;
   filter_graph_copy_socket_items(
       ShaderFilterGraphInputItemsAccessor::get_items_from_node(const_cast<bNode &>(source_node)),
       EeveeFilterGraphMaterialItemsAccessor::get_items_from_node(target_node));
   target_storage.next_identifier = source_storage.next_identifier;
+  if (initialize_reference && target_storage.items_num > 0) {
+    target_storage.resolution_input = target_storage.items[0].identifier;
+  }
 }
 
 static bool filter_graph_pass_input_matches_filter_pass(const bNode &source_node,
@@ -586,9 +591,10 @@ static void node_init(bNodeTree * /*tree*/, bNode *node)
   data->active_index = -1;
   data->next_identifier = 0;
   data->resolution_scale = 1.0f;
+  data->resolution_basis = 1;
   node->storage = data;
   node->flag |= NODE_OPTIONS;
-  node->width = 240.0f;
+  node->width = 220.0f;
 }
 
 static void node_free_storage(bNode *node)
@@ -610,7 +616,28 @@ static void node_copy_storage(bNodeTree * /*dst_tree*/, bNode *dst_node, const b
 static void node_update(bNodeTree * /*tree*/, bNode *node)
 {
   node->flag |= NODE_OPTIONS;
-  node->width = std::max(node->width, 240.0f);
+  node->width = std::max(node->width, 200.0f);
+}
+
+static void draw_resolution(ui::Layout &layout, PointerRNA *ptr)
+{
+  ui::Layout &mode_row = layout.row(true);
+  mode_row.prop(ptr, "resolution_basis", ui::ITEM_R_EXPAND, std::nullopt, ICON_NONE);
+  const int basis = RNA_enum_get(ptr, "resolution_basis");
+  if (basis == 2) {
+    ui::Layout &row = layout.row(true);
+    row.prop(ptr, "resolution_width", ui::ITEM_R_SPLIT_EMPTY_NAME, IFACE_("Width"), ICON_NONE);
+    row.prop(ptr, "resolution_height", ui::ITEM_R_SPLIT_EMPTY_NAME, IFACE_("Height"), ICON_NONE);
+  }
+  else {
+    if (basis == 1) {
+      layout.prop(
+          ptr, "resolution_input", ui::ITEM_R_SPLIT_EMPTY_NAME, IFACE_("Reference"), ICON_NONE);
+    }
+    ui::Layout &row = layout.row(true);
+    row.prop(ptr, "resolution_scale", ui::ITEM_R_SPLIT_EMPTY_NAME, IFACE_("Scale"), ICON_NONE);
+    row.prop(ptr, "execution_resolution", ui::ITEM_R_ICON_ONLY, "", ICON_PRESET);
+  }
 }
 
 static void draw_buttons(ui::Layout &layout, bContext *C, PointerRNA *ptr)
@@ -619,7 +646,7 @@ static void draw_buttons(ui::Layout &layout, bContext *C, PointerRNA *ptr)
   layout.use_property_decorate_set(false);
   ui::Layout &material_row = layout.row(true);
   template_id(&material_row, C, ptr, "material", "node.filter_pass_new_material", nullptr, nullptr);
-  layout.prop(ptr, "execution_resolution", ui::ITEM_R_SPLIT_EMPTY_NAME, IFACE_("Res"), ICON_NONE);
+  draw_resolution(layout, ptr);
 }
 
 static void draw_buttons_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
@@ -628,7 +655,7 @@ static void draw_buttons_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
   layout.use_property_decorate_set(false);
   ui::Layout &material_row = layout.row(true);
   template_id(&material_row, C, ptr, "material", "node.filter_pass_new_material", nullptr, nullptr);
-  layout.prop(ptr, "execution_resolution", ui::ITEM_R_SPLIT_EMPTY_NAME, IFACE_("Resolution"), ICON_NONE);
+  draw_resolution(layout, ptr);
 
   bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
   bNode &node = *ptr->data_as<bNode>();

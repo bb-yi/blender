@@ -13,6 +13,7 @@
 
 #include <optional>
 #include <utility>
+#include "BLI_vector.hh"
 
 namespace blender {
 
@@ -36,6 +37,12 @@ class MutableAttributeAccessor;
 
 void BKE_materials_init();
 void BKE_materials_exit();
+
+/** Exact evaluated values of supported shader socket Actions. False for unsupported animation
+ * or external time-varying inputs; callers must then invalidate normally. */
+bool BKE_material_animation_state_get(const Material &material,
+                                      Vector<double> &r_state,
+                                      int *r_reject_reason = nullptr);
 
 /** \} */
 

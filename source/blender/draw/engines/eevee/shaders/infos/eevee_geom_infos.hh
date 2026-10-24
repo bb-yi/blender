@@ -157,6 +157,7 @@ GPU_SHADER_NAMED_INTERFACE_END(clip_interp)
  * Material attributes are added by the material code-generation. */
 GPU_SHADER_CREATE_INFO(eevee_geom_mesh_tess_data)
 TYPEDEF_SOURCE("eevee_defines.hh")
+PUSH_CONSTANT(int, tessellation_expand)
 PUSH_CONSTANT(bool, gpu_index_no_buffer)
 PUSH_CONSTANT(bool, gpu_index_16bit)
 PUSH_CONSTANT(int, gpu_index_base_index)

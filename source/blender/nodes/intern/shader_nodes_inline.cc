@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include <fmt/format.h>
+#include <algorithm>
 #include <type_traits>
 #include <variant>
 
@@ -106,7 +107,7 @@ struct LinkedSocketValue {
 
 /** References an input socket in the source node tree. */
 struct InputSocketValue {
-  const bNodeSocket *socket = nullptr;
+  SocketInContext socket;
 };
 
 struct ClosureZoneValue {
@@ -133,6 +134,9 @@ struct SocketValue {
                BundleSocketValuePtr,
                MultiInputValue>
       value;
+
+  /** Direct source only. CPU calculations deliberately do not propagate this identity. */
+  std::optional<SocketInContext> uniform_source = std::nullopt;
 
   /** Try to get the value as a primitive value. */
   std::optional<PrimitiveSocketValue> to_primitive(const bke::bNodeSocketType &type) const
@@ -259,6 +263,127 @@ class ShaderNodesInliner {
   /** This is used to generate unique names and ids. */
   int dst_node_counter_ = 0;
 
+  static uint32_t original_tree_uid(const bNodeTree &tree)
+  {
+    const ID &original = tree.id.orig_id ? *tree.id.orig_id : tree.id;
+    return original.session_uid;
+  }
+
+  static int uniform_socket_components(const bNodeSocket &socket)
+  {
+    if (socket.default_value == nullptr) {
+      return 0;
+    }
+    switch (socket.type) {
+      case SOCK_FLOAT:
+        return 1;
+      case SOCK_RGBA:
+        return 4;
+      case SOCK_VECTOR: {
+        const int dimensions = socket.default_value_typed<bNodeSocketValueVector>()->dimensions;
+        return dimensions == 0 ? 3 : dimensions;
+      }
+      default:
+        return 0;
+    }
+  }
+
+  std::optional<ShaderUniformSource> uniform_source_identity(const SocketInContext &socket)
+  {
+    const int components = uniform_socket_components(*socket);
+    if (components < 1 || components > 4) {
+      return std::nullopt;
+    }
+    ShaderUniformSource source;
+    source.tree_uid = original_tree_uid(socket->owner_tree());
+    source.node_identifier = socket->owner_node().identifier;
+    source.socket_identifier = socket->identifier;
+    source.in_out = eNodeSocketInOut(socket->in_out);
+    source.socket_type = eNodeSocketDatatype(socket->type);
+    source.components = components;
+    uint32_t expected_tree_uid = source.tree_uid;
+    if (source.tree_uid == 0) {
+      params_.r_uniform_tracking->unsupported_context = true;
+      return std::nullopt;
+    }
+    for (const ComputeContext *context = socket.context; context != nullptr;
+         context = context->parent())
+    {
+      const auto *group = dynamic_cast<const bke::GroupNodeComputeContext *>(context);
+      const bNode *group_node = group ? group->node() : nullptr;
+      if (!group || !group->tree() || !group_node || !group_node->id ||
+          GS(group_node->id->name) != ID_NT)
+      {
+        params_.r_uniform_tracking->unsupported_context = true;
+        return std::nullopt;
+      }
+      const uint32_t parent_uid = original_tree_uid(*group->tree());
+      const uint32_t child_uid = original_tree_uid(
+          *reinterpret_cast<const bNodeTree *>(group_node->id));
+      if (parent_uid == 0 || child_uid != expected_tree_uid) {
+        params_.r_uniform_tracking->unsupported_context = true;
+        return std::nullopt;
+      }
+      source.group_path.append({parent_uid, group->node_id(), child_uid});
+      expected_tree_uid = parent_uid;
+    }
+    if (expected_tree_uid != original_tree_uid(src_tree_)) {
+      params_.r_uniform_tracking->unsupported_context = true;
+      return std::nullopt;
+    }
+    std::reverse(source.group_path.begin(), source.group_path.end());
+    return source;
+  }
+
+  void uniform_source_unsafe(const SocketValue &value)
+  {
+    if (!params_.r_uniform_tracking || !value.uniform_source) {
+      return;
+    }
+    if (std::optional<ShaderUniformSource> source = uniform_source_identity(*value.uniform_source)) {
+      if (!params_.r_uniform_tracking->unsafe_sources.contains(*source)) {
+        params_.r_uniform_tracking->unsafe_sources.append(std::move(*source));
+      }
+    }
+  }
+
+  static bool uniform_input_supported(const bNode &node, const bNodeSocket &socket)
+  {
+    if (node.is_type("ShaderNodeEmission"_ustr) || node.is_type("ShaderNodeNormalMap"_ustr)) {
+      return (STREQ(socket.identifier, "Strength") && socket.type == SOCK_FLOAT) ||
+             (STREQ(socket.identifier, "Color") && socket.type == SOCK_RGBA);
+    }
+    return false;
+  }
+
+  static bool uniform_source_matches_target(const SocketValue &value, const bNodeSocket &target)
+  {
+    return value.uniform_source && value.uniform_source->socket->type == target.type &&
+           uniform_socket_components(*value.uniform_source->socket) ==
+               uniform_socket_components(target);
+  }
+
+  void track_uniform_target(const bNode &node, const bNodeSocket &socket, const SocketValue &value)
+  {
+    if (!params_.r_uniform_tracking || !value.uniform_source) {
+      return;
+    }
+    if (!uniform_source_matches_target(value, socket)) {
+      this->uniform_source_unsafe(value);
+      return;
+    }
+    if (std::optional<ShaderUniformSource> source = uniform_source_identity(*value.uniform_source)) {
+      params_.r_uniform_tracking->sources.add_overwrite(
+          &socket,
+          ShaderUniformTarget{std::move(*source),
+                              node.identifier,
+                              node.name,
+                              socket.identifier,
+                              eNodeSocketInOut(socket.in_out),
+                              eNodeSocketDatatype(socket.type)});
+    }
+  }
+
  public:
   ShaderNodesInliner(const bNodeTree &src_tree,
                      bNodeTree &dst_tree,
@@ -280,13 +405,11 @@ class ShaderNodesInliner {
         }
         for (const bNodeSocket *socket : node->input_sockets()) {
           const StringRef identifier(socket->identifier);
-          if (socket->type == SOCK_CLOSURE && identifier.startswith("closure.") &&
-              socket->is_directly_linked())
-          {
+          if (socket->type == SOCK_CLOSURE && socket->is_directly_linked()) {
             params_.r_error_messages.append(
                 {node,
                  fmt::format("GLSL closure callback '{}' is part of a cyclic shader dependency",
-                             identifier.drop_prefix(8))});
+                             identifier)});
           }
         }
       }
@@ -506,7 +629,7 @@ class ShaderNodesInliner {
         this->store_socket_value(socket, {DanglingValue{}});
       }
       else {
-        this->store_socket_value(socket, {InputSocketValue{socket.socket}});
+        this->store_socket_value(socket, {InputSocketValue{socket}});
       }
       return;
     }
@@ -520,7 +643,7 @@ class ShaderNodesInliner {
         }
         else {
           /* If the input value is dangling, use the value of the socket itself. */
-          this->store_socket_value(socket, {InputSocketValue{socket.socket}});
+          this->store_socket_value(socket, {InputSocketValue{socket}});
         }
         return;
       }
@@ -617,6 +740,22 @@ class ShaderNodesInliner {
   void handle_output_socket(const SocketInContext &socket)
   {
     const NodeInContext node = socket.owner_node();
+    if (params_.r_uniform_tracking &&
+        (node->type_legacy == SH_NODE_PORTAL_OUT ||
+         node->is_type("GeometryNodeRepeatOutput"_ustr) ||
+         node->is_type("GeometryNodeRepeatInput"_ustr) ||
+         node->is_type("ShaderNodeForeachLightOutput"_ustr) ||
+         node->is_type("ShaderNodeForeachLightInput"_ustr) ||
+         node->is_type("NodeClosureOutput"_ustr) || node->is_type("NodeClosureInput"_ustr) ||
+         node->is_type("NodeEvaluateClosure"_ustr) || node->is_type("NodeCombineBundle"_ustr) ||
+         node->is_type("NodeSeparateBundle"_ustr) || node->is_type("NodeJoinBundle"_ustr) ||
+         node->is_type("GeometryNodeMenuSwitch"_ustr) ||
+         node->is_type("FunctionNodeInputMenu"_ustr)))
+    {
+      /* These control/capture paths need separate provenance rules. Keep compiling them exactly
+       * as before, but never claim that their uniforms can be updated independently. */
+      params_.r_uniform_tracking->unsupported_context = true;
+    }
     if (node->is_reroute()) {
       this->handle_output_socket__reroute(socket);
       return;
@@ -1298,6 +1437,7 @@ class ShaderNodesInliner {
       this->schedule_socket(input_socket);
       return;
     }
+    this->uniform_source_unsafe(*socket_value);
     const SocketValue converted_value = this->handle_implicit_conversion(
         *socket_value, *socket->typeinfo, *socket->typeinfo);
     this->store_socket_value(socket, converted_value);
@@ -1332,8 +1472,9 @@ class ShaderNodesInliner {
 
   static bool is_glsl_closure_callback_input(const NodeInContext &node, const bNodeSocket &socket)
   {
-    return node->is_type("ShaderNodeGLSLFunction"_ustr) && socket.type == SOCK_CLOSURE &&
-           StringRef(socket.identifier).startswith("closure.");
+    /* Sampler closures also capture values from their creation context. Preserving their raw
+     * source zone loses group instance inputs when the GPU helper is compiled later. */
+    return node->is_type("ShaderNodeGLSLFunction"_ustr) && socket.type == SOCK_CLOSURE;
   }
 
   std::optional<SocketValue> ensure_glsl_closure_callback_localized(
@@ -1342,7 +1483,9 @@ class ShaderNodesInliner {
       const ClosureZoneValue closure_zone_value)
   {
     const StringRef socket_identifier(callback_socket.identifier);
-    const StringRef helper_name = socket_identifier.drop_prefix(StringRef("closure.").size());
+    const StringRef helper_name = socket_identifier.startswith("closure.") ?
+                                      socket_identifier.drop_prefix(8) :
+                                      socket_identifier;
 
     const bke::bNodeTreeZone *zone = closure_zone_value.zone;
     const bNode *closure_input_node = zone ? zone->input_node() : nullptr;
@@ -1503,8 +1646,9 @@ class ShaderNodesInliner {
         continue;
       }
       const SocketInContext input_socket_ctx = {node.context, input_socket};
-      const PrimitiveSocketValue value =
-          *value_by_socket_.lookup(input_socket_ctx).to_primitive(*input_socket->typeinfo);
+      const SocketValue &input_value = value_by_socket_.lookup(input_socket_ctx);
+      this->uniform_source_unsafe(input_value);
+      const PrimitiveSocketValue value = *input_value.to_primitive(*input_socket->typeinfo);
       params.add_readonly_single_input(
           GVArray::from_single(*input_socket->typeinfo->base_cpp_type, 1, value.buffer()));
     }
@@ -1530,9 +1674,16 @@ class ShaderNodesInliner {
         continue;
       }
       const void *value = output_values[current_output_i++];
-      this->store_socket_value(
-          {node.context, output_socket},
-          {PrimitiveSocketValue::from_value({output_socket->typeinfo->base_cpp_type, value})});
+      SocketValue output_value{
+          PrimitiveSocketValue::from_value({output_socket->typeinfo->base_cpp_type, value})};
+      if (params_.r_uniform_tracking && node->is_type("ShaderNodeValue"_ustr) &&
+          output_socket == node->outputs.first && output_socket->type == SOCK_FLOAT)
+      {
+        /* Value's multi-function only copies this socket default. All other CPU-folded outputs
+         * intentionally lose direct provenance, even when numerically equal to an input. */
+        output_value.uniform_source = SocketInContext{node.context, output_socket};
+      }
+      this->store_socket_value({node.context, output_socket}, std::move(output_value));
     }
   }
 
@@ -1582,8 +1733,14 @@ class ShaderNodesInliner {
       }
       bNodeSocket &dst_output_socket = *socket_map.lookup(src_output_socket);
       const SocketInContext output_socket_ctx = {node.context, src_output_socket};
-      this->store_socket_value(output_socket_ctx,
-                               {LinkedSocketValue{&copied_node, &dst_output_socket}});
+      SocketValue output_value{LinkedSocketValue{&copied_node, &dst_output_socket}};
+      if (params_.r_uniform_tracking && node->is_type("ShaderNodeRGB"_ustr) &&
+          src_output_socket == node->outputs.first && src_output_socket->type == SOCK_RGBA)
+      {
+        output_value.uniform_source = output_socket_ctx;
+        this->track_uniform_target(copied_node, dst_output_socket, output_value);
+      }
+      this->store_socket_value(output_socket_ctx, std::move(output_value));
     }
     return copied_node;
   }
@@ -1596,6 +1753,7 @@ class ShaderNodesInliner {
     if (from_socket_type.type == to_socket_type.type) {
       return src_value;
     }
+    this->uniform_source_unsafe(src_value);
     if (std::get_if<LinkedSocketValue>(&src_value.value)) {
       return src_value;
     }
@@ -1650,6 +1808,15 @@ class ShaderNodesInliner {
                               const SocketValue &value)
   {
     BLI_assert(dst_socket.is_input());
+    const bool track_direct_input = params_.r_uniform_tracking && value.uniform_source &&
+                                    uniform_input_supported(dst_node, dst_socket) &&
+                                    !(dst_socket.flag & SOCK_HIDE_VALUE) &&
+                                    uniform_source_matches_target(value, dst_socket);
+    if (params_.r_uniform_tracking && value.uniform_source && !track_direct_input) {
+      /* A second, untracked consumer (for example Mix factor pruning) invalidates the source,
+       * even if a different consumer already produced a valid uniform binding. */
+      this->uniform_source_unsafe(value);
+    }
     if (dst_socket.flag & SOCK_HIDE_VALUE) {
       if (const auto *input_socket_value = std::get_if<InputSocketValue>(&value.value)) {
         if (input_socket_value->socket->flag & SOCK_HIDE_VALUE) {
@@ -1675,6 +1842,9 @@ class ShaderNodesInliner {
       }
       else {
         this->set_primitive_value_on_socket(dst_socket, *primitive_value);
+        if (track_direct_input) {
+          this->track_uniform_target(dst_node, dst_socket, value);
+        }
       }
       return;
     }
@@ -1884,6 +2054,11 @@ class ShaderNodesInliner {
 
   void store_socket_value(const SocketInContext &socket, SocketValue value)
   {
+    if (params_.r_uniform_tracking && !value.uniform_source) {
+      if (const auto *input = std::get_if<InputSocketValue>(&value.value)) {
+        value.uniform_source = input->socket;
+      }
+    }
     value_by_socket_.add_new(socket, std::move(value));
   }
 

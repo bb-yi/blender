@@ -8,6 +8,7 @@ Run with Blender --background --factory-startup --python-exit-code 1 --python <t
 DLSS5_TEST_OUT selects an artifact directory outside the source repository.
 """
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -79,6 +80,13 @@ def parent_test():
     default_out = Path(__file__).resolve().parents[3] / 'test/dlss5/out/runtime-release'
     out = Path(os.environ.get('DLSS5_TEST_OUT', str(default_out)))
     out.mkdir(parents=True, exist_ok=True)
+    runtime_hash = hashlib.sha256((runtime / 'nvngx_dlssnr.dll').read_bytes()).hexdigest()
+    expected_hash = os.environ.get('DLSS5_TEST_RUNTIME_SHA256')
+    if expected_hash:
+        assert runtime_hash == expected_hash.lower(), (runtime_hash, expected_hash)
+    (out / 'runtime_identity.json').write_text(json.dumps({
+        'path': str(runtime / 'nvngx_dlssnr.dll'), 'sha256': runtime_hash,
+    }, indent=2), encoding='utf-8')
     modes = ('normal', 'dll_directory_collision', 'cache_error', 'missing_runtime',
              'sync_init', 'output_signal', 'completion_signal')
     results = []
@@ -107,8 +115,9 @@ def parent_test():
             isolated.mkdir(exist_ok=True)
             for name in ('nvngx_dlssnr.dll', 'nvngx.dll'):
                 link = isolated / name
-                if not link.exists():
-                    os.link(runtime / name, link)
+                # A previous run may still link the pre-upgrade file after installation replaced it.
+                link.unlink(missing_ok=True)
+                os.link(runtime / name, link)
             (isolated / 'ngx-data').write_text('DLL directory must not store cache', encoding='utf-8')
             env['DLSS5_RUNTIME_DIR'] = str(isolated)
         elif mode in ('sync_init', 'output_signal', 'completion_signal'):

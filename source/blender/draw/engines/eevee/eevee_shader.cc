@@ -34,7 +34,7 @@
 
 namespace blender::eevee {
 
-static bool material_output_has_depth_offset(bNodeTree *nodetree)
+bool material_output_has_depth_offset(bNodeTree *nodetree)
 {
   if (nodetree == nullptr) {
     return false;
@@ -2268,6 +2268,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                          << "vertices.x)" << swizzle << ") * weights.x + " << input.type << "("
                          << fetch << "vertices.y)" << swizzle << ") * weights.y + " << input.type
                          << "(" << fetch << "vertices.z)" << swizzle << ") * weights.z;\n";
+        if (input.name == "orco") {
+          /* An undeformed mesh has no ORCO VBO. Match the generic vertex attribute's W=1
+           * sentinel so attr_load_orco uses MeshVertex::orco_default instead of constant .5. */
+          tess_attr_interp << "  if (gpu_attr_" << slot << "_meta == 0) {\n"
+                           << "    orco = float4(0.0f, 0.0f, 0.0f, 1.0f);\n"
+                           << "  }\n";
+        }
         slot++;
       }
       vertex_inputs.clear();
@@ -3003,7 +3010,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
                                                bool deferred_compilation,
                                                blender::Material *default_mat,
                                                bool use_outline,
-                                               bool outline_shell)
+                                               bool outline_shell,
+                                               const MaterialNodeTreeInfo *node_tree_info)
 {
   eMaterialDisplacement displacement_type = outline_shell ?
                                                 MAT_DISPLACEMENT_VERTEX_WITH_BUMP :
@@ -3011,10 +3019,14 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
                                                     blender_mat->displacement_method);
   eMaterialThickness thickness_type = to_thickness_type(blender_mat->thickness_mode);
   const bool has_depth_offset_output = !outline_shell &&
-                                       material_output_has_depth_offset(nodetree) &&
+                                       (node_tree_info ?
+                                            node_tree_info->has_depth_offset :
+                                            material_output_has_depth_offset(nodetree)) &&
                                        material_pipeline_supports_depth_offset(pipeline_type,
                                                                                geometry_type);
-  bNodeTree *npr_tree = outline_shell ? nullptr : npr_tree_get(nodetree);
+  bNodeTree *npr_tree = outline_shell ?
+                            nullptr :
+                            (node_tree_info ? node_tree_info->npr_tree : npr_tree_get(nodetree));
   const bool compile_npr_graph = (pipeline_type == MAT_PIPE_DEFERRED_NPR) ||
                                  (pipeline_type == MAT_PIPE_BAKE_COLOR && npr_tree != nullptr);
   const uint64_t npr_tree_key = (compile_npr_graph && npr_tree != nullptr) ?
@@ -3036,9 +3048,13 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
   /* The tessellation settings are uniforms, so the normal mode doesn't change the node graph
    * code. It changes the generated shader and must be part of the shader key. */
   ShaderTessellationSettings tessellation_settings;
+  if (node_tree_info) {
+    tessellation_settings = node_tree_info->tessellation;
+  }
   const bool use_tessellation_geometry_normal =
       geometry_type == MAT_GEOM_MESH_TESS &&
-      material_tessellation_settings_get(blender_mat, tessellation_settings) &&
+      (node_tree_info ? node_tree_info->has_tessellation :
+                        material_tessellation_settings_get(blender_mat, tessellation_settings)) &&
       tessellation_settings.normal_mode == SHD_TESSELLATION_NORMAL_GEOMETRY;
 
   /* Shell modes are independent of the body's transparency settings. Shell graphs do not

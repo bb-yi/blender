@@ -26,6 +26,12 @@ struct GPUShaderCreateInfo;
 namespace blender {
 
 namespace gpu {
+/** Shared by a pass and its compiler, including asynchronous compilation. */
+struct ShaderCompileDiagnostics {
+  std::mutex mutex;
+  std::string message;
+};
+
 class VertBuf;
 class Shader;
 namespace shader {

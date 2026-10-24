@@ -37,6 +37,8 @@
 #include "GPU_batch.hh"
 #include "GPU_material.hh"
 
+#include "CLG_log.h"
+
 #include "DRW_render.hh"
 
 #include "draw_cache_extract.hh"
@@ -49,6 +51,8 @@
 #include "mesh_extractors/extract_mesh.hh"
 
 namespace blender::draw {
+
+static CLG_LogRef LOG_MESH_CACHE = {"draw.mesh_cache"};
 
 /* ---------------------------------------------------------------------- */
 /** \name Dependencies between buffer and batch
@@ -101,7 +105,10 @@ static void discard_buffers(MeshBatchCache &cache,
   }
 
   if (!cache.surface_per_mat.is_empty()) {
-    if (cache.surface_per_mat.first() && batch_contains_data(*cache.surface_per_mat.first())) {
+    if (std::any_of(cache.surface_per_mat.begin(),
+                    cache.surface_per_mat.end(),
+                    [&](gpu::Batch *batch) { return batch && batch_contains_data(*batch); }))
+    {
       /* The format for all `surface_per_mat` batches is the same, discard them all. */
       for (const int i : cache.surface_per_mat.index_range()) {
         GPU_BATCH_DISCARD_SAFE(cache.surface_per_mat[i]);
@@ -754,8 +761,8 @@ Span<gpu::Batch *> DRW_mesh_batch_cache_get_surface_shaded(
   MeshBatchCache &cache = *mesh_batch_cache_get(mesh);
   mesh_cd_calc_used_gpu_layers(object, mesh, materials, &cache.attr_needed, &cache.cd_needed);
 
-  BLI_assert(materials.size() == cache.mat_len);
-
+  /* Materials describe the union of shader attribute requirements, not batch slot indices.
+   * Several passes can draw the same surface_per_mat batches with different requirements. */
   mesh_batch_cache_request_surface_batches(mesh, cache);
   return cache.surface_per_mat;
 }
@@ -1037,16 +1044,70 @@ void DRW_mesh_batch_cache_free_old(Mesh *mesh, int ctime)
     return;
   }
 
+  /* Each buffer category ages independently. Idle generic attributes must not expire live
+   * UV/tangent buffers, and live generic attributes must not keep unused layers resident. */
   if (cache->cd_used_over_time == cache->cd_used) {
-    cache->lastmatch = ctime;
+    cache->cd_lastmatch = ctime;
   }
-
   if (drw_attributes_overlap(&cache->attr_used_over_time, &cache->attr_used)) {
-    cache->lastmatch = ctime;
+    cache->attr_lastmatch = ctime;
   }
 
-  if (ctime - cache->lastmatch > U.vbotimeout) {
+  if (ctime - cache->cd_lastmatch > U.vbotimeout) {
+    uint64_t uploaded_layer_bytes = 0;
+    if (CLOG_CHECK(&LOG_MESH_CACHE, CLG_LEVEL_DEBUG)) {
+      MeshBatchCache &batch_cache = *cache;
+      FOREACH_MESH_BUFFER_CACHE (batch_cache, mbc) {
+        for (const VBOType type : {VBOType::UVs, VBOType::Tangents, VBOType::Orco}) {
+          if (const auto *buffer = mbc->buff.vbos.lookup_ptr(type)) {
+            if ((*buffer)->flag & GPU_VERTBUF_DATA_UPLOADED) {
+              uploaded_layer_bytes += (*buffer)->size_alloc_get();
+            }
+          }
+        }
+      }
+    }
     mesh_batch_cache_discard_shaded_tri(*cache);
+    cache->cd_used = cache->cd_used_over_time;
+    cache->cd_lastmatch = ctime;
+    CLOG_DEBUG(&LOG_MESH_CACHE,
+               "mesh_gc_layers name=%s attributes_retained=%lld released_uploaded_layer_bytes=%llu",
+               mesh->id.name + 2,
+               static_cast<long long>(cache->attr_used.size()),
+               static_cast<unsigned long long>(uploaded_layer_bytes));
+  }
+
+  if (ctime - cache->attr_lastmatch > U.vbotimeout) {
+    /* Generic attributes can be much larger than UVs. Drop their batches together with the
+     * buffers before compacting the attribute-to-buffer index mapping. */
+    Vector<VBOType, GPU_MAX_ATTR> attributes;
+    for (const int i : cache->attr_used.index_range()) {
+      attributes.append(VBOType(int8_t(VBOType::Attr0) + i));
+    }
+    uint64_t uploaded_attribute_bytes = 0;
+    if (CLOG_CHECK(&LOG_MESH_CACHE, CLG_LEVEL_DEBUG)) {
+      MeshBatchCache &batch_cache = *cache;
+      FOREACH_MESH_BUFFER_CACHE (batch_cache, mbc) {
+        for (const VBOType type : attributes) {
+          if (const auto *buffer = mbc->buff.vbos.lookup_ptr(type)) {
+            if ((*buffer)->flag & GPU_VERTBUF_DATA_UPLOADED) {
+              uploaded_attribute_bytes += (*buffer)->size_alloc_get();
+            }
+          }
+        }
+      }
+    }
+    discard_buffers(*cache, attributes, {});
+    cache->attr_used = cache->attr_used_over_time;
+    cache->attr_lastmatch = ctime;
+    /* Driver reservation/residency can outlive these buffers. Report the released uploaded
+     * payload separately from process dedicated-memory usage. */
+    CLOG_DEBUG(&LOG_MESH_CACHE,
+               "mesh_gc name=%s attributes=%lld->%lld released_uploaded_attribute_bytes=%llu",
+               mesh->id.name + 2,
+               static_cast<long long>(attributes.size()),
+               static_cast<long long>(cache->attr_used.size()),
+               static_cast<unsigned long long>(uploaded_attribute_bytes));
   }
 
   cache->cd_used_over_time.clear();

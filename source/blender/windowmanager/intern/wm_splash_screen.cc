@@ -55,6 +55,8 @@
 namespace blender {
 
 extern "C" char build_hash[];
+extern "C" char build_date[];
+extern "C" char build_time[];
 
 /* -------------------------------------------------------------------- */
 /** \name Splash Screen
@@ -78,9 +80,11 @@ static const char *wm_block_splash_version_label()
 
   BLI_snprintf_utf8(splash_version_label,
                     sizeof(splash_version_label),
-                    "%s %s",
+                    "%s %s | %s %s",
                     BKE_blender_version_string(),
-                    wm_block_splash_npr_port_label());
+                    wm_block_splash_npr_port_label(),
+                    build_date,
+                    build_time);
   return splash_version_label;
 }
 

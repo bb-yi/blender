@@ -4,7 +4,7 @@
 
 /**
  * Vertex shader of tessellated meshes (#MAT_GEOM_MESH_TESS). See `eevee_geom_mesh_tess_lib.glsl`.
- * Must be drawn using primitive expansion of `max_level^2` triangles per mesh triangle.
+ * Must be drawn using primitive expansion of `tessellation_expand^2` triangles per mesh triangle.
  * Keep the outputs in sync with `eevee::geom_mesh`.
  */
 
@@ -104,8 +104,9 @@ struct GeomMeshTess {
   auto &disp_interp = interface_get(eevee_geom_disp_iface_info, disp_interp);
   disp_interp.P_base = interp.P;
 
-  /* Compute Original Coordinate (ORCO). */
-  float3 lP_orco = lP * ob_infos.orco_mul + ob_infos.orco_add;
+  /* Generated coordinates refer to the original triangle, just like an explicit ORCO layer.
+   * Phong smoothing must not change the result depending on whether that layer exists. */
+  float3 lP_orco = tv.lP * ob_infos.orco_mul + ob_infos.orco_add;
 
   init_globals(uni, view, true);
   tess_attr_interp(tv.indices, tv.weights);

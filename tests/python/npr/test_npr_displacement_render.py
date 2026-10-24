@@ -67,6 +67,46 @@ def make_plane(material):
     bpy.ops.mesh.primitive_plane_add(size=2.0, location=(0.0, 0.0, 0.0))
     plane = bpy.context.active_object
     plane.data.materials.append(material)
+    return plane
+
+
+def make_nonmesh_geometry(material, geometry_type):
+    """Keep curves/points as native geometry so their own vertex shaders are exercised."""
+    if geometry_type == "CURVES":
+        data = bpy.data.hair_curves.new("NPRCurvesHost")
+        # Native curves must enter the curves draw path. STRAND is a one-pixel line and can
+        # miss the center pixel at even resolutions; STRIP uses the declared nonzero radius.
+        bpy.context.scene.render.hair_type = "STRIP"
+    else:
+        data = bpy.data.meshes.new(f"{geometry_type}Host")
+    data.materials.append(material)
+    obj = bpy.data.objects.new(f"NPR{geometry_type}", data)
+    bpy.context.scene.collection.objects.link(obj)
+    tree = bpy.data.node_groups.new(f"NPR{geometry_type}Geometry", "GeometryNodeTree")
+    tree.interface.new_socket(name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    output = tree.nodes.new("NodeGroupOutput")
+    assign_material = tree.nodes.new("GeometryNodeSetMaterial")
+    assign_material.inputs["Material"].default_value = material
+    tree.links.new(assign_material.outputs["Geometry"], output.inputs["Geometry"])
+    if geometry_type == "CURVES":
+        assert obj.type == "CURVES"
+        line = tree.nodes.new("GeometryNodeCurvePrimitiveLine")
+        line.inputs["Start"].default_value = (-1.0, 0.0, 0.0)
+        line.inputs["End"].default_value = (1.0, 0.0, 0.0)
+        radius = tree.nodes.new("GeometryNodeSetCurveRadius")
+        radius.inputs["Radius"].default_value = 0.35
+        tree.links.new(line.outputs["Curve"], radius.inputs["Curve"])
+        tree.links.new(radius.outputs["Curve"], assign_material.inputs["Geometry"])
+    else:
+        assert geometry_type == "POINTCLOUD"
+        points = tree.nodes.new("GeometryNodePoints")
+        points.inputs["Count"].default_value = 1
+        points.inputs["Position"].default_value = (0.0, 0.0, 0.0)
+        points.inputs["Radius"].default_value = 0.65
+        tree.links.new(points.outputs[0], assign_material.inputs["Geometry"])
+    modifier = obj.modifiers.new("Native geometry", "NODES")
+    modifier.node_group = tree
+    return obj
 
 
 def render_center_pixel():
@@ -107,7 +147,7 @@ clear_scene()
 configure_scene()
 make_camera()
 material = make_material()
-make_plane(material)
+plane = make_plane(material)
 
 material.displacement_method = "BUMP"
 bump_pixel = render_center_pixel()
@@ -119,3 +159,34 @@ assert_green(displacement_pixel, "displacement")
 
 print(f"NPR_BUMP_CENTER={bump_pixel}")
 print(f"NPR_DISPLACEMENT_CENTER={displacement_pixel}")
+
+# Preserve the original mesh assertions above and also cover mixed displacement and the other
+# geometry entry points that include the same BSL nodetree library in their vertex stage.
+material.displacement_method = "BOTH"
+assert_green(render_center_pixel(), "mesh BOTH")
+nodes = material.node_tree.nodes
+output = next(node for node in nodes if node.bl_idname == "ShaderNodeOutputMaterial")
+tess = nodes.new("ShaderNodeTessellationControl")
+tess.inputs["Max Level"].default_value = 4
+material.node_tree.links.new(tess.outputs[0], output.inputs["Tessellation"])
+for mode in ("BUMP", "DISPLACEMENT", "BOTH"):
+    material.displacement_method = mode
+    pixel = render_center_pixel()
+    assert_green(pixel, f"mesh tessellation {mode}")
+    print(f"NPR_TESS_{mode}_CENTER={pixel}")
+nodes.remove(tess)
+bpy.data.objects.remove(plane, do_unlink=True)
+
+displacement = next(node for node in nodes if node.bl_idname == "ShaderNodeDisplacement")
+# Keep a nonzero displacement graph without moving the narrow curve outside the sampled pixel.
+displacement.inputs["Scale"].default_value = 0.05
+for geometry_type in ("CURVES", "POINTCLOUD"):
+    obj = make_nonmesh_geometry(material, geometry_type)
+    for mode in ("BUMP", "DISPLACEMENT", "BOTH"):
+        material.displacement_method = mode
+        pixel = render_center_pixel()
+        assert_green(pixel, f"{geometry_type} {mode}")
+        print(f"NPR_{geometry_type}_{mode}_CENTER={pixel}")
+    bpy.data.objects.remove(obj, do_unlink=True)
+
+print("NPR_DISPLACEMENT_GEOMETRIES_PASS mesh,tessellation,curves,pointcloud x BUMP,DISPLACEMENT,BOTH")

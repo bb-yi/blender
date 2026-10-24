@@ -31,12 +31,6 @@
 
 namespace blender::eevee {
 
-enum class LightShaderDependency {
-  Passthrough,
-  Uniform,
-  PointDependent,
-};
-
 static const bNode *light_nodetree_eevee_light_shader_output_get(const bNodeTree *nodetree)
 {
   if (nodetree == nullptr) {
@@ -812,6 +806,8 @@ void LightModule::add_world_sun_light(const ObjectKey &key, bool use_diffuse, bo
 
 void LightModule::begin_sync()
 {
+  node_tree_info_.clear();
+  node_tree_info_hits_ = 0;
   if (assign_if_different(use_scene_lights_, inst_.use_scene_lights())) {
     if (inst_.is_viewport()) {
       /* Catch lookdev viewport properties updates. */
@@ -879,8 +875,18 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
   Light &light = light_map_.lookup_or_add_default(ObjectKey(ob_ref));
   light_names_.add_overwrite(ObjectKey(ob_ref), ob_ref.object->id.name + 2);
   light.used = true;
-  const float light_shader_range_scale = light_nodetree_eevee_light_shader_range_scale_get(
-      la.nodetree);
+  const NodeTreeInfo *node_tree_info = node_tree_info_.lookup_ptr(&la);
+  if (node_tree_info != nullptr) {
+    node_tree_info_hits_++;
+  }
+  else {
+    node_tree_info = &node_tree_info_.lookup_or_add_cb(&la, [&]() {
+      return NodeTreeInfo{light_nodetree_eevee_light_shader_range_scale_get(la.nodetree),
+                          light_nodetree_eevee_light_shader_dependency_get(la.nodetree),
+                          light_nodetree_eevee_light_shader_uses_scene_time(la.nodetree)};
+    });
+  }
+  const float light_shader_range_scale = node_tree_info->range_scale;
   if (inst_.get_recalc_flags(ob_ref) != 0 || !light.initialized ||
       (is_local_light(light.type) && light.light_shader_range_scale != light_shader_range_scale))
   {
@@ -922,15 +928,14 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
       materials.append(gpumat);
       lights.append(static_cast<const LightData &>(light));
       const bool is_time_dependent = GPU_material_is_time_dependent(gpumat) ||
-                                     light_nodetree_eevee_light_shader_uses_scene_time(la.nodetree);
+                                     node_tree_info->uses_scene_time;
       has_time_dependent_light_shaders_ |= is_time_dependent;
       inst_.manager->register_material_resources(gpumat);
       return;
     }
     inst_.info_append_i18n(error_message);
   };
-  const LightShaderDependency light_shader_dependency =
-      light_nodetree_eevee_light_shader_dependency_get(la.nodetree);
+  const LightShaderDependency light_shader_dependency = node_tree_info->dependency;
   if (light_shader_dependency == LightShaderDependency::Uniform) {
     register_light_shader(eLightShaderPipeline::Uniform,
                           light.uniform_light_shader_index,

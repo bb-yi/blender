@@ -67,6 +67,7 @@ void RenderTextureModule::slot_reset(const int slot_index)
 {
   slots_[slot_index].uid = -1;
   slots_[slot_index].camera = nullptr;
+  slots_[slot_index].camera_orig = nullptr;
   slots_[slot_index].extent = int2(1);
   slots_[slot_index].source = SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR;
   slots_[slot_index].format = SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA16F;
@@ -96,7 +97,10 @@ void RenderTextureModule::slot_ensure_textures(const int slot_index)
 void RenderTextureModule::init()
 {
   for (int slot_index = 0; slot_index < RENDER_TEXTURE_SLOT_MAX; slot_index++) {
-    slot_reset(slot_index);
+    /* Keep active captures and their history across viewport redraws. */
+    if (slots_[slot_index].uid == -1) {
+      data_[slot_index] = slot_default_data();
+    }
     slot_ensure_textures(slot_index);
   }
   data_.push_update();
@@ -104,10 +108,6 @@ void RenderTextureModule::init()
 
 void RenderTextureModule::begin_sync()
 {
-  for (int slot_index = 0; slot_index < RENDER_TEXTURE_SLOT_MAX; slot_index++) {
-    slot_reset(slot_index);
-  }
-
   int slot_index = 0;
   for (SceneRenderTexture *render_texture = static_cast<SceneRenderTexture *>(
            inst_.scene->eevee.render_textures.first);
@@ -122,17 +122,36 @@ void RenderTextureModule::begin_sync()
     }
 
     RuntimeSlot &slot = slots_[slot_index];
+    const int2 extent(max_ii(render_texture->resolution_x, 1),
+                      max_ii(render_texture->resolution_y, 1));
+    const int source = render_texture_source_normalize(render_texture->source);
+    const bool reset_history = slot.uid != render_texture->uid ||
+                               slot.camera_orig != render_texture->camera ||
+                               slot.extent != extent || slot.source != source ||
+                               slot.format != render_texture->format;
     slot.uid = render_texture->uid;
     slot.camera = DEG_get_evaluated(inst_.depsgraph, render_texture->camera);
-    slot.extent = int2(max_ii(render_texture->resolution_x, 1),
-                       max_ii(render_texture->resolution_y, 1));
-    slot.source = render_texture_source_normalize(render_texture->source);
+    slot.camera_orig = render_texture->camera;
+    slot.extent = extent;
+    slot.source = source;
     slot.format = render_texture->format;
     slot.active = (slot.camera != nullptr);
+    slot_ensure_textures(slot_index);
+    if (reset_history) {
+      slot.color_tx.current().clear(float4(0.0f));
+      slot.color_tx.previous().clear(float4(0.0f));
+      data_[slot_index] = slot_default_data();
+    }
 
     data_[slot_index].info = int4(
         slot.uid, slot.extent.x, slot.extent.y, render_texture_info_flags(slot.source, slot.format));
     slot_index++;
+  }
+
+  /* Release inactive full-size captures, but retain valid dummy bindings. */
+  for (; slot_index < RENDER_TEXTURE_SLOT_MAX; slot_index++) {
+    slot_reset(slot_index);
+    slot_ensure_textures(slot_index);
   }
 
   data_.push_update();
@@ -180,6 +199,7 @@ void RenderTextureModule::slot_capture(const int slot_index)
   CameraData rt_camera;
   if (!camera_data_from_object(inst_.scene, slot.camera, slot.extent, rt_camera)) {
     slot_reset(slot_index);
+    slot_ensure_textures(slot_index);
     data_.push_update();
     return;
   }

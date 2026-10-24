@@ -277,6 +277,19 @@ GPUContext *GPU_context_active_get()
   return wrap(Context::get());
 }
 
+const char *GPU_backend_get_error()
+{
+#ifdef WITH_VULKAN_BACKEND
+  if (GPU_backend_get_type() == GPU_BACKEND_VULKAN && gpu::GPUBackend::get() != nullptr &&
+      gpu::VKBackend::get().device.submission_failed())
+  {
+    return "Vulkan GPU operation failed. Rendering stopped; restart Blender. See the console for "
+           "the first failing operation.";
+  }
+#endif
+  return nullptr;
+}
+
 GPUVulkanExternalSemaphore *GPU_vulkan_external_semaphore_create_from_d3d12_fence(
     const uint64_t handle)
 {
@@ -361,16 +374,16 @@ bool GPU_vulkan_external_semaphore_signal(GPUVulkanExternalSemaphore *semaphore,
     return false;
   }
   gpu::VKContext *context = gpu::VKContext::get();
-  context->flush_render_graph(gpu::RenderGraphFlushFlags::SUBMIT |
-                                  gpu::RenderGraphFlushFlags::WAIT_FOR_SUBMISSION |
-                                  gpu::RenderGraphFlushFlags::RENEW_RENDER_GRAPH,
-                              VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                              VK_NULL_HANDLE,
-                              semaphore->vk_semaphore,
-                              VK_NULL_HANDLE,
-                              0,
-                              value);
-  return true;
+  const gpu::TimelineValue timeline = context->flush_render_graph(
+      gpu::RenderGraphFlushFlags::SUBMIT | gpu::RenderGraphFlushFlags::WAIT_FOR_SUBMISSION |
+          gpu::RenderGraphFlushFlags::RENEW_RENDER_GRAPH,
+      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+      VK_NULL_HANDLE,
+      semaphore->vk_semaphore,
+      VK_NULL_HANDLE,
+      0,
+      value);
+  return timeline != 0;
 #else
   UNUSED_VARS(semaphore, value);
   return false;
@@ -387,16 +400,16 @@ bool GPU_vulkan_external_semaphore_wait(GPUVulkanExternalSemaphore *semaphore,
     return false;
   }
   gpu::VKContext *context = gpu::VKContext::get();
-  context->flush_render_graph(gpu::RenderGraphFlushFlags::SUBMIT |
-                                  gpu::RenderGraphFlushFlags::WAIT_FOR_SUBMISSION |
-                                  gpu::RenderGraphFlushFlags::RENEW_RENDER_GRAPH,
-                              VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                              semaphore->vk_semaphore,
-                              VK_NULL_HANDLE,
-                              VK_NULL_HANDLE,
-                              value,
-                              0);
-  return true;
+  const gpu::TimelineValue timeline = context->flush_render_graph(
+      gpu::RenderGraphFlushFlags::SUBMIT | gpu::RenderGraphFlushFlags::WAIT_FOR_SUBMISSION |
+          gpu::RenderGraphFlushFlags::RENEW_RENDER_GRAPH,
+      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+      semaphore->vk_semaphore,
+      VK_NULL_HANDLE,
+      VK_NULL_HANDLE,
+      value,
+      0);
+  return timeline != 0;
 #else
   UNUSED_VARS(semaphore, value);
   return false;

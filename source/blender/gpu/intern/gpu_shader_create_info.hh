@@ -25,6 +25,7 @@
 #  include "gpu_shader_create_info_pipeline.hh"
 
 #  include <iostream>
+#  include <memory>
 #endif
 
 #if !defined(GPU_SHADER)
@@ -755,6 +756,7 @@ using GeneratedSourceList = Vector<shader::GeneratedSource, 0>;
  *            #ShaderCreateInfo are not freed until it is consumed or deleted.
  */
 struct ShaderCreateInfo {
+  std::shared_ptr<gpu::ShaderCompileDiagnostics> compilation_diagnostics;
   /** Shader name for debugging. */
   std::string name_;
   /** True if the shader is static and can be pre-compiled at compile time. */
