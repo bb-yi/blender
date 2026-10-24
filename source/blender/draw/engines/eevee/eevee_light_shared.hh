@@ -213,7 +213,7 @@ struct [[host_shared]] LightData {
    * to zero after each sync cycle. */
   uint2 shadow_set_membership;
 
-  float shadow_map_scale;
+  float _pad_scale;
   float _pad7;
   float _pad8;
   float _pad9;
