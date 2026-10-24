@@ -357,8 +357,8 @@ class ShadowModule {
 
   /* Render setting that reduces the LOD for every light. */
   float global_lod_bias_ = 0.0f;
-  /** For now, needs to be hardcoded. */
-  int shadow_page_size_ = SHADOW_PAGE_RES;
+  /** Page pixel resolution LOD. Page resolution = 1 << shadow_page_lod_. */
+  int shadow_page_lod_ = SHADOW_PAGE_LOD;
   /** Maximum number of allocated pages. Maximum value is SHADOW_MAX_PAGE. */
   int shadow_page_len_ = SHADOW_MAX_PAGE;
   /** Requested and effectively allocated pool size in megabytes. */
@@ -455,6 +455,16 @@ class ShadowModule {
   float global_lod_bias() const
   {
     return global_lod_bias_;
+  }
+
+  int shadow_page_lod() const
+  {
+    return shadow_page_lod_;
+  }
+
+  const int *shadow_page_lod_push_ref() const
+  {
+    return &shadow_page_lod_;
   }
 
   bool viewport_history_invalidated() const

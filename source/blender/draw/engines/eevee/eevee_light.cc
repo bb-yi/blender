@@ -493,6 +493,8 @@ void Light::sync(ShadowModule &shadows,
   this->power[LIGHT_VOLUME] = la->volume_fac * point_power * volume_visibility;
 
   this->lod_bias = shadows.global_lod_bias();
+  this->shadow_page_lod = float(shadows.shadow_page_lod());
+  this->shadow_page_res = float(1 << shadows.shadow_page_lod());
   this->lod_min = shadow_lod_min_get(la);
   this->filter_radius = la->shadow_filter_radius;
   this->shadow_jitter = (la->mode & LA_SHADOW_JITTER) != 0;
@@ -526,7 +528,8 @@ float Light::shadow_lod_min_get(const blender::Light *la)
   /* Property is in mm. Convert to unit. */
   float max_res_unit = la->shadow_maximum_resolution;
   if (is_sun_light(this->type)) {
-    return log2f(max_res_unit * SHADOW_MAP_MAX_RES) - 1.0f;
+    float map_max_res = float((1 << int(this->shadow_page_lod)) * SHADOW_TILEMAP_RES);
+    return log2f(max_res_unit * map_max_res) - 1.0f;
   }
   /* Store absolute mode as negative. */
   return (la->mode & LA_SHAD_RES_ABSOLUTE) ? -max_res_unit : max_res_unit;
