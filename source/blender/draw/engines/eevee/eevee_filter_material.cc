@@ -1159,6 +1159,7 @@ bool FilterMaterialModule::sync_pass_entry(blender::Material *material, FilterPa
   }
 
   inst_.materials.queue_texture_loading(gpumat);
+  inst_.materials.expression_diagnostics_publish(gpumat);
 
   const GPUMaterialStatus status = GPU_material_status(gpumat);
   switch (status) {

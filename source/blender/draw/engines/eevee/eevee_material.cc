@@ -7,12 +7,14 @@
  */
 
 #include <algorithm>
+#include <atomic>
 
 #include "BLI_set.hh"
 #include "BLI_string.h"
 #include "BLI_time.h"
 #include "DNA_material_types.h"
 
+#include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_material.hh"
 #include "BKE_mesh.hh"
@@ -32,25 +34,6 @@
 #include "eevee_material.hh"
 
 namespace blender::eevee {
-
-static void store_expression_compile_errors(bNodeTree *tree,
-                                            const std::string &message,
-                                            Set<const bNodeTree *> &visited)
-{
-  if (!tree || !visited.add(tree)) {
-    return;
-  }
-  bNodeTree *original = DEG_get_original(tree);
-  for (bNode &node : tree->nodes) {
-    if (node.is_type("ShaderNodeScriptExpression"_ustr)) {
-      std::lock_guard lock(original->runtime->shader_node_errors_mutex);
-      original->runtime->shader_node_errors.lookup_or_add_default(node.identifier).add(message);
-    }
-    else if (node.is_group() && node.id) {
-      store_expression_compile_errors(reinterpret_cast<bNodeTree *>(node.id), message, visited);
-    }
-  }
-}
 
 bool material_tessellation_settings_get(blender::Material *mat,
                                         ShaderTessellationSettings &r_settings)
@@ -318,6 +301,29 @@ MaterialModule::~MaterialModule()
   BKE_id_free(nullptr, error_mat_);
 }
 
+void MaterialModule::expression_diagnostics_publish(GPUMaterial *material) const
+{
+  if (material) {
+    if (auto owner = expression_context_owner_.lock()) {
+      GPU_material_expression_diagnostics_publish(
+          material, expression_context_key_, owner, expression_sync_epoch_);
+    }
+  }
+}
+
+void MaterialModule::expression_diagnostics_begin_sync()
+{
+  static std::atomic<uint64_t> expression_sync_epoch{0};
+  expression_sync_epoch_ = ++expression_sync_epoch;
+  const auto &layer_context =
+      DEG_get_input_view_layer(inst_.depsgraph)->runtime->shader_diagnostics_context;
+  expression_context_owner_ = layer_context;
+  expression_context_key_ = std::to_string(DEG_get_original(inst_.scene)->id.session_uid) + "/" +
+                            std::to_string(BLI_session_uid_hash_uint64(layer_context.get())) +
+                            "/" + std::to_string(int(DEG_get_mode(inst_.depsgraph))) + "/" +
+                            std::to_string(int(GPU_backend_get_type()));
+}
+
 void MaterialModule::begin_sync()
 {
   const Scene *scene = inst_.scene;
@@ -575,6 +581,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
   queue_texture_loading(matpass.gpumat);
 
   const GPUMaterialStatus material_status = GPU_material_status(matpass.gpumat);
+  expression_diagnostics_publish(matpass.gpumat);
   bool shader_queued = false;
   bool optimize_queued = false;
   bool fallback_used = false;
@@ -625,12 +632,6 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
         inst_.info_append("Material {}: {}",
                           blender_mat->id.name + 2,
                           GPU_material_stencil_marker_error(matpass.gpumat).data());
-      }
-      {
-        Set<const bNodeTree *> visited;
-        std::string message = "Material shader compilation failed. Check the expression and connected nodes.\n";
-        message += GPU_material_error_message(matpass.gpumat);
-        store_expression_compile_errors(blender_mat->nodetree, message, visited);
       }
       if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell || stencil_marker) {
         inst_.telemetry.material_sync_add(shader_queued,

@@ -539,6 +539,7 @@ namespace blender::eevee
       pre_fx_viewport_->begin_sync();
     }
     update_eval_members();
+    materials.expression_diagnostics_begin_sync();
     telemetry.maybe_begin_viewport_frame();
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncBegin);
     GPUMaterialProfileContext material_profile(telemetry.material_profile_get());

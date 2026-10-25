@@ -21,6 +21,7 @@
 
 #include "GPU_common_types.hh"
 #include "GPU_shader_builtin.hh"
+#include "intern/gpu_shader_diagnostics.hh"
 
 struct GPUShaderCreateInfo;
 namespace blender {
@@ -30,6 +31,9 @@ namespace gpu {
 struct ShaderCompileDiagnostics {
   std::mutex mutex;
   std::string message;
+  std::vector<ShaderDiagnosticSource> sources;
+  std::vector<ShaderDiagnostic> errors;
+  size_t error_bytes = 0;
 };
 
 class VertBuf;

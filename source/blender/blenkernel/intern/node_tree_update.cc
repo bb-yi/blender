@@ -623,6 +623,9 @@ class NodeTreeMainUpdater {
     }
 
     result.output_changed = this->check_if_output_changed(ntree);
+    if (ntree.type == NTREE_SHADER && result.output_changed) {
+      bke::shader_node_compile_context_invalidate(ntree);
+    }
 
     this->update_socket_link_and_use(ntree);
     this->update_link_validation(ntree);

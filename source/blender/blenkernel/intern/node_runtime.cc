@@ -20,6 +20,80 @@
 
 namespace blender {
 
+namespace bke {
+
+std::shared_ptr<ShaderNodeCompileContext> shader_node_compile_context_get(bNodeTree &tree)
+{
+  std::lock_guard lock(tree.runtime->shader_node_errors_mutex);
+  if (!tree.runtime->shader_compile_context) {
+    tree.runtime->shader_compile_context = std::make_shared<ShaderNodeCompileContext>();
+  }
+  return tree.runtime->shader_compile_context;
+}
+
+void shader_node_compile_context_invalidate(bNodeTree &tree)
+{
+  std::lock_guard tree_lock(tree.runtime->shader_node_errors_mutex);
+  if (auto context = std::move(tree.runtime->shader_compile_context)) {
+    std::lock_guard context_lock(context->mutex);
+    context->valid = false;
+  }
+  tree.runtime->shader_compile_references.remove_if(
+      [&](const auto &item) { return tree.node_by_id(item.key) == nullptr; });
+}
+
+void shader_node_compile_reference_add(bNodeTree &tree,
+                                       const int32_t node_id,
+                                       const std::shared_ptr<ShaderNodeCompileContext> &context)
+{
+  std::lock_guard lock(tree.runtime->shader_node_errors_mutex);
+  auto &references = tree.runtime->shader_compile_references.lookup_or_add_default(node_id);
+  references.remove_if([](const auto &reference) { return reference.expired(); });
+  for (const auto &reference : references) {
+    if (reference.lock() == context) {
+      return;
+    }
+  }
+  references.append(context);
+}
+
+VectorSet<std::string> shader_node_compile_errors(const bNode &node, const StringRef signature)
+{
+  const bNodeTree &tree = node.owner_tree();
+  Vector<std::weak_ptr<ShaderNodeCompileContext>> references;
+  {
+    std::lock_guard lock(tree.runtime->shader_node_errors_mutex);
+    if (auto *stored = tree.runtime->shader_compile_references.lookup_ptr(node.identifier)) {
+      stored->remove_if([](const auto &reference) { return reference.expired(); });
+      references = *stored;
+    }
+  }
+  VectorSet<std::string> errors;
+  for (const auto &reference : references) {
+    if (auto context = reference.lock()) {
+      std::lock_guard lock(context->mutex);
+      if (!context->valid) {
+        continue;
+      }
+      context->snapshots.remove_if([](const auto &item) { return item.value.owner.expired(); });
+      for (const auto &snapshot : context->snapshots.values()) {
+        for (const auto &messages : snapshot.variants.values()) {
+          for (const auto &message : messages) {
+            if (message.tree_uid == tree.id.session_uid && message.node_id == node.identifier &&
+                message.signature == signature)
+            {
+              errors.add(message.text);
+            }
+          }
+        }
+      }
+    }
+  }
+  return errors;
+}
+
+}  // namespace bke
+
 namespace bke::node_tree_runtime {
 
 void preprocess_geometry_node_tree_for_evaluation(bNodeTree &tree_cow)

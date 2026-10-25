@@ -1300,22 +1300,25 @@ GLuint GLShader::create_shader_stage(GLenum gl_stage,
   GLint status;
   glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
   if (!status || (G.debug & G_DEBUG_GPU)) {
-    char log[5000] = "";
-    glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
+    GLint log_length = 0;
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_length);
+    std::vector<char> log_buffer(size_t(std::max(1, log_length)), '\0');
+    char *log = log_buffer.data();
+    glGetShaderInfoLog(shader, GLint(log_buffer.size()), nullptr, log);
     if (log[0] != '\0') {
       GLLogParser parser;
       switch (gl_stage) {
         case GL_VERTEX_SHADER:
-          this->print_log(sources, log, "VertShader", !status, &parser);
+          this->print_log(sources, log, "VertShader", !status, &parser, concat_source);
           break;
         case GL_GEOMETRY_SHADER:
-          this->print_log(sources, log, "GeomShader", !status, &parser);
+          this->print_log(sources, log, "GeomShader", !status, &parser, concat_source);
           break;
         case GL_FRAGMENT_SHADER:
-          this->print_log(sources, log, "FragShader", !status, &parser);
+          this->print_log(sources, log, "FragShader", !status, &parser, concat_source);
           break;
         case GL_COMPUTE_SHADER:
-          this->print_log(sources, log, "ComputeShader", !status, &parser);
+          this->print_log(sources, log, "ComputeShader", !status, &parser, concat_source);
           break;
       }
     }

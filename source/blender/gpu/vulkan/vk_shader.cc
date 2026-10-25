@@ -661,7 +661,8 @@ bool VKShader::finalize_shader_module(VKShaderModule &shader_module, const char 
               shader_module.compilation_result.GetErrorMessage().c_str(),
               stage_name,
               bool(shader_module.compilation_result.GetNumErrors()),
-              &parser);
+              &parser,
+              shader_module.combined_sources);
   }
 
   std::string full_name = std::string(name) + "_" + stage_name;

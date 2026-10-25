@@ -75,6 +75,32 @@ struct NodeLinkError {
   std::string tooltip;
 };
 
+/** A root shader tree owns this revision; group nodes only hold weak references to it. */
+struct ShaderNodeCompileContext {
+  struct Message {
+    uint32_t tree_uid;
+    int32_t node_id;
+    std::string signature;
+    std::string text;
+  };
+  Mutex mutex;
+  bool valid = true;
+  Map<uint64_t, std::string> signatures;
+  struct Snapshot {
+    std::weak_ptr<const void> owner;
+    uint64_t sync_epoch = 0;
+    Map<std::string, Vector<Message>> variants;
+  };
+  Map<std::string, Snapshot> snapshots;
+};
+
+std::shared_ptr<ShaderNodeCompileContext> shader_node_compile_context_get(bNodeTree &tree);
+void shader_node_compile_context_invalidate(bNodeTree &tree);
+void shader_node_compile_reference_add(bNodeTree &tree,
+                                       int32_t node_id,
+                                       const std::shared_ptr<ShaderNodeCompileContext> &context);
+VectorSet<std::string> shader_node_compile_errors(const bNode &node, StringRef signature);
+
 struct GLSLIntChoiceItem {
   int value = 0;
   std::string label;
@@ -210,6 +236,8 @@ class bNodeTreeRuntime : NonCopyable, NonMovable {
    */
   Map<int32_t, VectorSet<std::string>> shader_node_errors;
   Mutex shader_node_errors_mutex;
+  std::shared_ptr<ShaderNodeCompileContext> shader_compile_context;
+  Map<int32_t, Vector<std::weak_ptr<ShaderNodeCompileContext>>> shader_compile_references;
 
   /**
    * Protects access to all topology cache variables below. This is necessary so that the cache can

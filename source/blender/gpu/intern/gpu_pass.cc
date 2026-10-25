@@ -73,6 +73,7 @@ struct GPUPass {
   {
     BLI_assert(!is_optimization_pass || !should_optimize);
     create_info->compilation_diagnostics = diagnostics;
+    diagnostics->sources = create_info->expression_sources;
     if (is_optimization_pass && deferred_compilation) {
       // Defer until all non optimization passes are compiled.
       return;
@@ -184,6 +185,12 @@ std::string GPU_pass_error_message(GPUPass *pass)
 {
   std::lock_guard lock(pass->diagnostics->mutex);
   return pass->diagnostics->message;
+}
+
+std::vector<gpu::ShaderDiagnostic> GPU_pass_expression_errors(GPUPass *pass)
+{
+  std::lock_guard lock(pass->diagnostics->mutex);
+  return pass->diagnostics->errors;
 }
 
 bool GPU_pass_should_optimize(GPUPass *pass)
@@ -399,6 +406,7 @@ GPUPass *GPU_generate_pass(GPUMaterial *material,
   GPUCodegen codegen(material, graph, debug_name);
   codegen.generate_graphs();
   codegen.generate_cryptomatte();
+  codegen.create_info->expression_sources = GPU_material_expression_diagnostic_sources(material);
 
   GPUPass *pass = nullptr;
 

@@ -9,7 +9,10 @@
  */
 
 #include "BLI_cache_mutex.hh"
+#include "BLI_session_uid.h"
 #include "BLI_vector.hh"
+
+#include <memory>
 
 #include "BKE_collection.hh"
 
@@ -42,6 +45,10 @@ enum eViewLayerCopyMethod {
 };
 
 struct ViewLayerRuntime {
+  /* Stable across renames; weak diagnostic consumers expire when this layer is freed. */
+  std::shared_ptr<const SessionUID> shader_diagnostics_context =
+      std::make_shared<const SessionUID>(BLI_session_uid_generate());
+
   Vector<Base *> object_bases_array;
   CacheMutex object_bases_array_mutex;
 

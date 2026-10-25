@@ -971,7 +971,10 @@ endif()
 
 
 if(WITH_GTESTS)
-  set(TEST_SRC "")
+  set(TEST_SRC tests/shader_diagnostics_test.cc)
+  if(WITH_OPENGL_BACKEND)
+    list(APPEND TEST_SRC tests/shader_log_test.cc)
+  endif()
   set(TEST_INC "")
   set(TEST_LIB
     bf_intern_ghost

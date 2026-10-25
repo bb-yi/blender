@@ -554,6 +554,9 @@ class MaterialModule {
 
   uint64_t gpu_pass_last_update_ = 0;
   uint64_t gpu_pass_next_update_ = 0;
+  uint64_t expression_sync_epoch_ = 0;
+  std::string expression_context_key_;
+  std::weak_ptr<const void> expression_context_owner_;
 
   Vector<GPUMaterialTexture *> texture_loading_queue_;
 
@@ -563,6 +566,8 @@ class MaterialModule {
 
   void begin_sync();
   void end_sync();
+  void expression_diagnostics_begin_sync();
+  void expression_diagnostics_publish(GPUMaterial *material) const;
   bool has_time_dependent_materials() const
   {
     return has_time_dependent_materials_;

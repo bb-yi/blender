@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -202,6 +203,16 @@ struct GPUMaterialFromNodeTreeResult {
 };
 
 std::string GPU_material_error_message(GPUMaterial *material);
+void GPU_material_expression_source_add(GPUMaterial *material,
+                                        const bNode &node,
+                                        gpu::ShaderDiagnosticSource source,
+                                        std::string signature);
+const std::vector<gpu::ShaderDiagnosticSource> &GPU_material_expression_diagnostic_sources(
+    const GPUMaterial *material);
+void GPU_material_expression_diagnostics_publish(GPUMaterial *material,
+                                                 StringRef context_key,
+                                                 const std::shared_ptr<const void> &context_owner,
+                                                 uint64_t sync_epoch);
 
 /** WARNING: gpumaterials thread safety must be ensured by the caller. */
 GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(

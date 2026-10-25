@@ -99,6 +99,7 @@
 #include "NOD_node_extra_info.hh"
 #include "NOD_sync_sockets.hh"
 #include "NOD_trace_values.hh"
+#include "shader/include/NOD_sh_script_expression.hh"
 
 #include "GEO_fillet_curves.hh"
 
@@ -4717,6 +4718,15 @@ static void draw_nodetree(const bContext &C, ARegion &region, bNodeTree &ntree)
       /* Make a local copy to avoid mutex access for each node. Typically, there are only very few
        * error message. */
       tree_draw_ctx.shader_node_errors = ntree.runtime->shader_node_errors;
+    }
+    for (const bNode *node : nodes) {
+      if (node->is_type("ShaderNodeScriptExpression"_ustr)) {
+        const std::string error = nodes::script_expression_error_get(*node);
+        tree_draw_ctx.shader_node_errors.remove(node->identifier);
+        if (!error.empty()) {
+          tree_draw_ctx.shader_node_errors.lookup_or_add_default(node->identifier).add(error);
+        }
+      }
     }
   }
 

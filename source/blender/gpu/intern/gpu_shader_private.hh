@@ -157,7 +157,8 @@ class Shader {
                  const char *log,
                  const char *stage,
                  bool error,
-                 GPULogParser *parser);
+                 GPULogParser *parser,
+                 StringRefNull compiled_source = {});
 };
 
 class ShaderCompiler {

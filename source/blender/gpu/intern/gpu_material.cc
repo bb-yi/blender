@@ -75,6 +75,16 @@ static const Material *gpu_material_recompile_serial_key(const Material *materia
   return material->id.orig_id ? reinterpret_cast<const Material *>(material->id.orig_id) : material;
 }
 
+static std::weak_ptr<bke::ShaderNodeCompileContext> existing_expression_context(
+    const bNodeTree &tree)
+{
+  const bNodeTree &original = tree.id.orig_id ?
+                                  *reinterpret_cast<const bNodeTree *>(tree.id.orig_id) :
+                                  tree;
+  std::lock_guard lock(original.runtime->shader_node_errors_mutex);
+  return original.runtime->shader_compile_context;
+}
+
 struct MaterialUniformBinding {
   nodes::ShaderUniformSource source;
   size_t byte_offset = 0;
@@ -108,6 +118,16 @@ struct GPUMaterialClosureCallbackFrameStorage {
 };
 
 struct GPUMaterial {
+  struct ExpressionOrigin {
+    uint32_t tree_uid;
+    int32_t node_id;
+    std::string signature;
+  };
+  std::weak_ptr<bke::ShaderNodeCompileContext> expression_context;
+  /* Used only while generating nodes, cleared before asynchronous compilation starts. */
+  bNodeTree *expression_root = nullptr;
+  std::vector<gpu::ShaderDiagnosticSource> expression_sources;
+  Vector<ExpressionOrigin> expression_origins;
   /* Contains #gpu::Shader and source code for deferred compilation.
    * Can be shared between materials sharing same node-tree topology. */
   GPUPass *pass = nullptr;
@@ -580,6 +600,9 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
       animation_owner = mat;
     }
     if (mat->uuid == shader_uuid && mat->engine == engine) {
+      if (mat->expression_sources.empty()) {
+        mat->expression_context = existing_expression_context(*ntree);
+      }
       GPU_material_profile_count(GPUMaterialProfileCounter::MaterialHits);
       if (mat->uniform_update_pending) {
         BLI_assert(mat->ubo && !mat->uniform_cpu_data.is_empty());
@@ -623,6 +646,11 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   mat->is_outline_shell = outline_shell_root;
   mat->uuid = shader_uuid;
   mat->name = name;
+  bNodeTree *expression_root = ntree->id.orig_id ?
+                                   reinterpret_cast<bNodeTree *>(ntree->id.orig_id) :
+                                   ntree;
+  mat->expression_root = expression_root;
+  mat->expression_context = existing_expression_context(*expression_root);
   result.material = mat;
 
   bNodeTree *npr_localtree = nullptr;
@@ -735,6 +763,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     }
   }
 
+  mat->expression_root = nullptr;
   {
     GPUMaterialProfileTimer profile(GPUMaterialProfileStage::Textures);
     gpu_material_ramp_texture_build(mat);
@@ -1289,6 +1318,90 @@ std::string GPU_material_error_message(GPUMaterial *material)
     return material->stencil_value_error;
   }
   return GPU_pass_error_message(material->pass);
+}
+
+void GPU_material_expression_source_add(GPUMaterial *material,
+                                        const bNode &node,
+                                        gpu::ShaderDiagnosticSource source,
+                                        std::string signature)
+{
+  auto context = material->expression_context.lock();
+  if (!context && material->expression_root) {
+    context = bke::shader_node_compile_context_get(*material->expression_root);
+    material->expression_context = context;
+  }
+  if (!context) {
+    return;
+  }
+  const bNode &original = node.runtime->original ? *node.runtime->original : node;
+  const bNodeTree &owner = original.owner_tree();
+  bNodeTree &tree = owner.id.orig_id ? *reinterpret_cast<bNodeTree *>(owner.id.orig_id) :
+                                       const_cast<bNodeTree &>(owner);
+  {
+    std::lock_guard lock(context->mutex);
+    if (!context->valid) {
+      return;
+    }
+    const uint64_t origin_key = (uint64_t(tree.id.session_uid) << 32) |
+                                uint32_t(original.identifier);
+    context->signatures.add_overwrite(origin_key, signature);
+  }
+  bke::shader_node_compile_reference_add(tree, original.identifier, context);
+  material->expression_sources.push_back(std::move(source));
+  material->expression_origins.append(
+      {tree.id.session_uid, original.identifier, std::move(signature)});
+}
+
+const std::vector<gpu::ShaderDiagnosticSource> &GPU_material_expression_diagnostic_sources(
+    const GPUMaterial *material)
+{
+  return material->expression_sources;
+}
+
+void GPU_material_expression_diagnostics_publish(GPUMaterial *material,
+                                                 const StringRef context_key,
+                                                 const std::shared_ptr<const void> &context_owner,
+                                                 const uint64_t sync_epoch)
+{
+  auto context = material->expression_context.lock();
+  if (!context) {
+    return;
+  }
+  /* Copy under the pass lock, release it before taking the root revision lock. */
+  const auto errors = GPU_pass_expression_errors(material->pass);
+  Vector<bke::ShaderNodeCompileContext::Message> messages;
+  if (GPU_material_status(material) == GPU_MAT_FAILED) {
+    for (const auto &error : errors) {
+      for (size_t i = 0; i < material->expression_sources.size(); i++) {
+        if (material->expression_sources[i].function_name == error.function_name) {
+          const auto &origin = material->expression_origins[i];
+          messages.append({origin.tree_uid, origin.node_id, origin.signature, error.message});
+        }
+      }
+    }
+  }
+  const std::string variant = std::to_string(int(material->engine)) + "/" +
+                              std::to_string(material->uuid);
+  std::lock_guard lock(context->mutex);
+  if (!context->valid) {
+    return;
+  }
+  messages.remove_if([&](const auto &message) {
+    const uint64_t origin_key = (uint64_t(message.tree_uid) << 32) | uint32_t(message.node_id);
+    const std::string *signature = context->signatures.lookup_ptr(origin_key);
+    return signature == nullptr || *signature != message.signature;
+  });
+  context->snapshots.remove_if([](const auto &item) { return item.value.owner.expired(); });
+  auto &snapshot = context->snapshots.lookup_or_add_default(std::string(context_key));
+  if (sync_epoch < snapshot.sync_epoch) {
+    return;
+  }
+  if (sync_epoch != snapshot.sync_epoch) {
+    snapshot.variants.clear();
+    snapshot.sync_epoch = sync_epoch;
+  }
+  snapshot.owner = context_owner;
+  snapshot.variants.add_overwrite(variant, std::move(messages));
 }
 
 eGPUMaterialOptimizationStatus GPU_material_optimization_status(GPUMaterial *mat)

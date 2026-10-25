@@ -511,7 +511,7 @@ static void draw_expression_settings(ui::Layout &layout, PointerRNA *ptr)
   if (!error.empty()) {
     ui::Layout &box = layout.box();
     box.red_alert_set(true);
-    box.label(IFACE_("Expression / Shader Error"), ICON_ERROR);
+    box.label(IFACE_("Expression Error"), ICON_ERROR);
     /* Keep the node readable; the header warning tooltip and RNA expose the full log. */
     std::istringstream lines(error);
     std::string line;
@@ -662,6 +662,20 @@ static int node_shader_gpu_script_expression(GPUMaterial *mat,
                                     hash;
   const std::string filename = function_name + ".glsl";
   const std::string source = build_wrapper_source(*node, function_name.c_str());
+  const bool extra_vector = storage.output_socket_type == SOCK_VECTOR &&
+                            vector_dimensions(storage.output_vector_dimensions) != 3;
+  const int dimensions = storage.output_socket_type == SOCK_RGBA ?
+                             4 :
+                         storage.output_socket_type == SOCK_VECTOR ?
+                             vector_dimensions(storage.output_vector_dimensions) :
+                             1;
+  GPU_material_expression_source_add(
+      mat,
+      *node,
+      {function_name,
+       extra_vector ? "_script_expr_value" : "result",
+       dimensions == 1 ? "float" : "vec" + std::to_string(dimensions)},
+      build_wrapper_source(*node, "expression"));
   GPU_material_generated_source_add(mat, filename.c_str(), {}, source.c_str());
   return GPU_stack_link_custom(mat,
                                node,
@@ -696,16 +710,25 @@ std::string script_expression_error_get(const bNode &node)
     return validation.error;
   }
   const bNodeTree &tree = node.owner_tree();
-  std::lock_guard lock(tree.runtime->shader_node_errors_mutex);
-  const auto *errors = tree.runtime->shader_node_errors.lookup_ptr(node.identifier);
   std::string result;
-  if (errors) {
-    for (const std::string &error : *errors) {
-      if (!result.empty()) {
-        result += '\n';
+  {
+    std::lock_guard lock(tree.runtime->shader_node_errors_mutex);
+    if (const auto *errors = tree.runtime->shader_node_errors.lookup_ptr(node.identifier)) {
+      for (const std::string &error : *errors) {
+        if (!result.empty()) {
+          result += '\n';
+        }
+        result += error;
       }
-      result += error;
     }
+  }
+  for (const std::string &error : bke::shader_node_compile_errors(
+           node, node_shader_script_expression_cc::build_wrapper_source(node, "expression")))
+  {
+    if (!result.empty()) {
+      result += '\n';
+    }
+    result += error;
   }
   return result;
 }

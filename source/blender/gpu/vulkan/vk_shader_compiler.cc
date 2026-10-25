@@ -244,7 +244,9 @@ static bool compile_ex(shaderc::Compiler &compiler,
   }
 
   /* Removes line directive. */
-  std::string sources = patch_line_directives(shader_module.combined_sources);
+  shader_module.combined_sources = patch_line_directives(
+      std::move(shader_module.combined_sources));
+  const std::string &sources = shader_module.combined_sources;
 
   shader_module.compilation_result = compiler.CompileGlslToSpv(
       sources, stage, full_name.c_str(), options);

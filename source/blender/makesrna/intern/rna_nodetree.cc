@@ -9492,7 +9492,10 @@ static void def_sh_script_expression(BlenderRNA *brna, StructRNA *srna)
                                "rna_ShaderNodeScriptExpression_error_length",
                                nullptr);
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);
-  RNA_def_property_ui_text(prop, "Error Message", "Expression validation or material shader compiler diagnostics");
+  RNA_def_property_ui_text(
+      prop,
+      "Error Message",
+      "Validation errors or compiler diagnostics belonging to this expression");
 
   prop = RNA_def_property(srna, "expression", PROP_STRING, PROP_NONE);
   RNA_def_property_string_sdna(prop, nullptr, "expression");

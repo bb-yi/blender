@@ -757,6 +757,7 @@ using GeneratedSourceList = Vector<shader::GeneratedSource, 0>;
  */
 struct ShaderCreateInfo {
   std::shared_ptr<gpu::ShaderCompileDiagnostics> compilation_diagnostics;
+  std::vector<gpu::ShaderDiagnosticSource> expression_sources;
   /** Shader name for debugging. */
   std::string name_;
   /** True if the shader is static and can be pre-compiled at compile time. */

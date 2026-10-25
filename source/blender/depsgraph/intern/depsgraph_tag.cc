@@ -31,6 +31,7 @@
 #include "BKE_image.hh"
 #include "BKE_lib_override.hh"
 #include "BKE_node.hh"
+#include "BKE_node_runtime.hh"
 #include "BKE_scene.hh"
 #include "BKE_workspace.hh"
 
@@ -662,6 +663,12 @@ NodeType geometry_tag_to_component(const ID *id)
 
 void id_tag_update(Main *bmain, ID *id, uint flags, eUpdateSource update_source)
 {
+  /* A material setting can invalidate generated shaders without editing its node tree. */
+  if ((flags & ID_RECALC_SHADING) && ELEM(GS(id->name), ID_MA, ID_WO, ID_LA)) {
+    if (bNodeTree *tree = bke::node_tree_from_id(id)) {
+      bke::shader_node_compile_context_invalidate(*tree);
+    }
+  }
   graph_id_tag_update(bmain, nullptr, id, flags, update_source);
   for (deg::Depsgraph *depsgraph : deg::get_all_registered_graphs(bmain)) {
     graph_id_tag_update(bmain, depsgraph, id, flags, update_source);

@@ -21,6 +21,7 @@
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <sstream>
 
 namespace blender {
 
@@ -44,13 +45,59 @@ void Shader::print_log(Span<StringRefNull> sources,
                        const char *log,
                        const char *stage,
                        const bool error,
-                       GPULogParser *parser)
+                       GPULogParser *parser,
+                       const StringRefNull compiled_source)
 {
   if (error && compilation_diagnostics) {
     std::lock_guard lock(compilation_diagnostics->mutex);
     std::string &message = compilation_diagnostics->message;
     if (message.size() < 8192) {
       message += std::string(stage) + ":\n" + std::string(log).substr(0, 8192 - message.size());
+    }
+  }
+  if (error && compilation_diagnostics && !compiled_source.is_empty() &&
+      !compilation_diagnostics->sources.empty())
+  {
+    const auto &diagnostics = compilation_diagnostics;
+    const auto ranges = shader_diagnostics::evaluation_ranges(
+        std::string_view(compiled_source.c_str(), compiled_source.size()), diagnostics->sources);
+    const int line_count = 1 + std::count(compiled_source.begin(), compiled_source.end(), '\n');
+    std::istringstream log_lines(log);
+    std::string log_line;
+    while (std::getline(log_lines, log_line)) {
+      log_line += '\n';
+      GPULogItem item;
+      const char *message = parser->parse_line(compiled_source.c_str(), log_line.c_str(), item);
+      if (item.severity != Severity::Error || item.cursor.row < 1 ||
+          item.cursor.row > line_count || item.cursor.source > 0)
+      {
+        continue;
+      }
+      for (const auto &range : ranges) {
+        if (item.cursor.row < range.first_line || item.cursor.row > range.last_line) {
+          continue;
+        }
+        ShaderDiagnostic entry;
+        entry.function_name = diagnostics->sources[range.source].function_name;
+        entry.message = std::string(stage) + ": Expression line " +
+                        std::to_string(item.cursor.row - range.first_line + 1) + ": " +
+                        std::string(message).substr(0, 2048);
+        while (!entry.message.empty() && std::isspace(uchar(entry.message.back()))) {
+          entry.message.pop_back();
+        }
+        std::lock_guard lock(diagnostics->mutex);
+        const bool duplicate = std::any_of(
+            diagnostics->errors.begin(), diagnostics->errors.end(), [&](const auto &previous) {
+              return previous.function_name == entry.function_name &&
+                     previous.message == entry.message;
+            });
+        if (!duplicate && diagnostics->errors.size() < 64 &&
+            diagnostics->error_bytes + entry.message.size() <= 16384)
+        {
+          diagnostics->error_bytes += entry.message.size();
+          diagnostics->errors.push_back(std::move(entry));
+        }
+      }
     }
   }
   const char line_prefix[] = "      | ";
@@ -127,7 +174,7 @@ void Shader::print_log(Span<StringRefNull> sources,
     if (log_item.cursor.source >= sources.size()) {
       log_item.cursor.source = -1;
     }
-    if (log_item.cursor.row >= sources_end_line.last()) {
+    if (log_item.cursor.row > sources_end_line.last() + 1) {
       log_item.cursor.source = -1;
       log_item.cursor.row = -1;
     }
@@ -342,7 +389,7 @@ size_t GPULogParser::line_start_get(StringRefNull source_combined, size_t target
   size_t current_line = 1;
   for (char c : source_combined) {
     if (current_line >= target_line) {
-      return cursor + 1;
+      return cursor;
     }
     if (c == '\n') {
       current_line++;
@@ -354,6 +401,9 @@ size_t GPULogParser::line_start_get(StringRefNull source_combined, size_t target
 
 StringRef GPULogParser::filename_get(StringRefNull source_combined, size_t pos)
 {
+  if (pos > size_t(source_combined.size())) {
+    return {};
+  }
   StringRef sub_str = source_combined.substr(0, pos);
   StringRefNull directive = "#line 1 \"";
   size_t nearest_line_directive = sub_str.rfind(directive);
@@ -370,13 +420,20 @@ StringRef GPULogParser::filename_get(StringRefNull source_combined, size_t pos)
 /* Original source file line. Found by looking up #line directives. */
 size_t GPULogParser::source_line_get(StringRefNull source_combined, size_t pos)
 {
+  if (pos > size_t(source_combined.size())) {
+    return 0;
+  }
   StringRef sub_str = source_combined.substr(0, pos);
   StringRefNull directive = "#line ";
   size_t nearest_line_directive = sub_str.rfind(directive);
   size_t line_count = 1;
   if (nearest_line_directive != std::string::npos) {
     sub_str = sub_str.substr(nearest_line_directive + directive.size());
-    line_count = std::stoll(sub_str) - 1;
+    const long directive_line = strtol(sub_str.data(), nullptr, 10);
+    if (directive_line < 1) {
+      return 0;
+    }
+    line_count = directive_line - 1;
   }
   return line_count + std::count(sub_str.begin(), sub_str.end(), '\n');
 }
