@@ -11,11 +11,60 @@ on:
         required: true
 
 jobs:
+  release-state:
+    name: Check Existing Platform Assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      build_required: ${{ steps.state.outputs.build_required }}
+    steps:
+      - name: Check Tag and Existing Release Assets
+        id: state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.tag_name }}
+          RELEASE_EVENT: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          repo, tag = os.environ['GH_REPO'], os.environ['RELEASE_TAG']
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/{path}']))
+          ref = api(f'git/ref/tags/{tag}')['object']
+          for _ in range(4):
+              if ref['type'] == 'commit':
+                  break
+              if ref['type'] != 'tag':
+                  raise RuntimeError('Release tag does not resolve to a commit')
+              ref = api('git/tags/' + ref['sha'])['object']
+          assert ref['type'] == 'commit', 'Nested release tag did not resolve'
+          commit = ref['sha']
+          release = api(f'releases/tags/{tag}')
+          match = re.match(r'v(\d+\.\d+\.\d+)', tag)
+          expected = [('win64', '.zip'), ('linux64', '.tar.xz'), ('macos', '.dmg')]
+          complete = bool(match)
+          for platform, suffix in expected:
+              prefix = f'blender-{match[1] if match else "unknown"}-npr-port-{platform}-{commit[:12]}-'
+              assets = [a for a in release['assets'] if a['name'].startswith(prefix) and a['name'].endswith(suffix)]
+              complete &= len(assets) == 1 and assets[0]['state'] == 'uploaded' and assets[0]['size'] > 0 and bool(re.fullmatch(r'sha256:[0-9a-f]{64}', assets[0].get('digest') or ''))
+          required = os.environ['RELEASE_EVENT'] == 'workflow_dispatch' or not complete
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('build_required=' + str(required).lower(), file=output)
+          print(json.dumps({'commit': commit, 'platform_assets_complete': bool(complete), 'build_required': required}))
+          PY
+
   build-linux:
+    needs: release-state
+    if: needs.release-state.outputs.build_required == 'true'
     name: Build Linux x64
     runs-on: ubuntu-24.04
     container:
       image: rockylinux/rockylinux:9
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: read
       actions: write
@@ -52,7 +101,8 @@ jobs:
         working-directory: blender
         id: vars
         run: |
-          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "sha_short=$(git rev-parse --short=12 HEAD)" >> $GITHUB_OUTPUT
+          echo "sha_full=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "build_date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
 
       - name: Setup Git LFS
@@ -69,8 +119,8 @@ jobs:
       - name: Download Extra Assets
         working-directory: blender
         run: |
-          curl -L -o release/datafiles/splash.png https://github.com/bb-yi/blender/raw/refs/heads/main/release/datafiles/splash.png
-          curl -L -o assets/nodes/npr_node_groups.blend https://github.com/bb-yi/blender/raw/refs/heads/main/assets/nodes/npr_node_groups.blend
+          curl --fail --location --retry 3 --output release/datafiles/splash.png "https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.vars.outputs.sha_full }}/release/datafiles/splash.png"
+          curl --fail --location --retry 3 --output assets/nodes/npr_node_groups.blend "https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.vars.outputs.sha_full }}/assets/nodes/npr_node_groups.blend"
 
       - name: Build Blender Release
         working-directory: blender
@@ -99,6 +149,19 @@ jobs:
           cp -r "$BUILD_DIR"/* "$ASSET_NAME/"
           
           tar -cvJf "$TAR_FILE" "$ASSET_NAME"
+          tar -tJf "$TAR_FILE" >/dev/null
+          CHECK="$RUNNER_TEMP/npr-linux-package"
+          mkdir -p "$CHECK"
+          tar -xJf "$TAR_FILE" -C "$CHECK"
+          cmp "$BUILD_DIR/blender" "$CHECK/$ASSET_NAME/blender"
+          export NPR_RELEASE_EXPECTED_COMMIT="${{ steps.vars.outputs.sha_full }}"
+          test "$(git rev-parse HEAD)" = "$NPR_RELEASE_EXPECTED_COMMIT"
+          SANDBOX="$RUNNER_TEMP/npr-release-smoke"
+          mkdir -p "$SANDBOX"/{resources,config,scripts,datafiles,extensions,temp}
+          export BLENDER_USER_RESOURCES="$SANDBOX/resources" BLENDER_USER_CONFIG="$SANDBOX/config"
+          export BLENDER_USER_SCRIPTS="$SANDBOX/scripts" BLENDER_USER_DATAFILES="$SANDBOX/datafiles"
+          export BLENDER_USER_EXTENSIONS="$SANDBOX/extensions" TEMP="$SANDBOX/temp" TMP="$SANDBOX/temp" TMPDIR="$SANDBOX/temp"
+          "$CHECK/$ASSET_NAME/blender" --background --factory-startup --disable-autoexec --threads 2 --python-exit-code 1 --python .github/scripts/release_program_smoke.py
           echo "TAR_PATH=$TAR_FILE" >> $GITHUB_ENV
 
       - name: Upload Linux Artifact
@@ -108,6 +171,8 @@ jobs:
           path: blender/${{ env.TAR_PATH }}
 
   build-macos:
+    needs: release-state
+    if: needs.release-state.outputs.build_required == 'true'
     name: Build macOS
     runs-on: macos-latest
     permissions:
@@ -122,7 +187,8 @@ jobs:
       - name: Get Short Hash & Date
         id: vars
         run: |
-          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "sha_short=$(git rev-parse --short=12 HEAD)" >> $GITHUB_OUTPUT
+          echo "sha_full=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "build_date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
 
       - name: Setup Git LFS
@@ -136,8 +202,8 @@ jobs:
 
       - name: Download Extra Assets
         run: |
-          curl -L -o release/datafiles/splash.png https://github.com/bb-yi/blender/raw/refs/heads/main/release/datafiles/splash.png
-          curl -L -o assets/nodes/npr_node_groups.blend https://github.com/bb-yi/blender/raw/refs/heads/main/assets/nodes/npr_node_groups.blend
+          curl --fail --location --retry 3 --output release/datafiles/splash.png "https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.vars.outputs.sha_full }}/release/datafiles/splash.png"
+          curl --fail --location --retry 3 --output assets/nodes/npr_node_groups.blend "https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.vars.outputs.sha_full }}/assets/nodes/npr_node_groups.blend"
 
       - name: Build Blender Release
         run: make release ninja
@@ -163,7 +229,23 @@ jobs:
             echo "Blender.app not found!"
             exit 1
           fi
-          hdiutil create -format UDZO -srcfolder "$APP_BUNDLE" "$DMG_FILE"
+          STAGING="$RUNNER_TEMP/npr-dmg-root"
+          mkdir -p "$STAGING"
+          ditto "$APP_BUNDLE" "$STAGING/Blender.app"
+          hdiutil create -format UDZO -srcfolder "$STAGING" "$DMG_FILE"
+          hdiutil verify "$DMG_FILE"
+          MOUNT="$RUNNER_TEMP/npr-package-volume"
+          mkdir -p "$MOUNT"
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "$DMG_FILE"
+          trap 'hdiutil detach "$MOUNT"' EXIT
+          export NPR_RELEASE_EXPECTED_COMMIT="${{ steps.vars.outputs.sha_full }}"
+          test "$(git rev-parse HEAD)" = "$NPR_RELEASE_EXPECTED_COMMIT"
+          SANDBOX="$RUNNER_TEMP/npr-release-smoke"
+          mkdir -p "$SANDBOX"/{resources,config,scripts,datafiles,extensions,temp}
+          export BLENDER_USER_RESOURCES="$SANDBOX/resources" BLENDER_USER_CONFIG="$SANDBOX/config"
+          export BLENDER_USER_SCRIPTS="$SANDBOX/scripts" BLENDER_USER_DATAFILES="$SANDBOX/datafiles"
+          export BLENDER_USER_EXTENSIONS="$SANDBOX/extensions" TEMP="$SANDBOX/temp" TMP="$SANDBOX/temp" TMPDIR="$SANDBOX/temp"
+          "$MOUNT/Blender.app/Contents/MacOS/Blender" --background --factory-startup --disable-autoexec --threads 2 --python-exit-code 1 --python .github/scripts/release_program_smoke.py
           echo "DMG_PATH=$DMG_FILE" >> $GITHUB_ENV
 
       - name: Upload macOS Artifact
