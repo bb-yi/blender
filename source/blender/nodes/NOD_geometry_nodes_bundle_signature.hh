@@ -11,6 +11,7 @@
 
 #include "BKE_node.hh"
 
+#include "NOD_geometry_nodes_closure_signature.hh"
 #include "NOD_node_in_compute_context.hh"
 
 namespace blender::nodes {
@@ -44,6 +45,9 @@ struct BundleSignature {
     int dimensions = 0;
     std::shared_ptr<const BundleSignature> nested;
     bool optional = false;
+    /** Authoring data for explicit Sync; never part of the Bundle transport ABI. */
+    ClosureSignature::ItemUIData ui;
+    bool default_is_expression = false;
 
     friend bool operator==(const Item &a, const Item &b);
   };

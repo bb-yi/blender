@@ -2,9 +2,11 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <algorithm>
+#include <cstring>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <algorithm>
+#include <type_traits>
 
 #include "BKE_node_socket_value.hh"
 
@@ -509,6 +511,34 @@ std::optional<BundleSignature> LinkedBundleSignatures::get_merged_signature(
         merged.dimensions = std::max(dim_a, dim_b);
       }
       merged.optional = merged.optional && item.optional;
+      /* A shared source must not pick one consumer's default or UI arbitrarily. */
+      auto keep_common = [](auto &a, const auto &b) {
+        if (a != b) {
+          a.reset();
+        }
+      };
+      if (merged.ui.default_value && item.ui.default_value) {
+        const bool same_default = std::visit(
+            [&](const auto &value) {
+              const auto *other = std::get_if<std::decay_t<decltype(value)>>(
+                  &*item.ui.default_value);
+              /* Bitwise comparison also distinguishes +0.0 from -0.0. */
+              return other && std::memcmp(&value, other, sizeof(value)) == 0;
+            },
+            *merged.ui.default_value);
+        if (!same_default) {
+          merged.ui.default_value.reset();
+        }
+      }
+      else {
+        merged.ui.default_value.reset();
+      }
+      keep_common(merged.ui.label, item.ui.label);
+      keep_common(merged.ui.description, item.ui.description);
+      keep_common(merged.ui.subtype, item.ui.subtype);
+      keep_common(merged.ui.min_value, item.ui.min_value);
+      keep_common(merged.ui.max_value, item.ui.max_value);
+      merged.default_is_expression |= item.default_is_expression;
       if (merged.nested && item.nested) {
         LinkedBundleSignatures children;
         children.items.append({*merged.nested, true, {}});

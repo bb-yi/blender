@@ -44,7 +44,8 @@ void sync_sockets_separate_bundle(SpaceNode &snode,
 void sync_sockets_combine_bundle(SpaceNode &snode,
                                  bNode &combine_bundle_node,
                                  ReportList *reports,
-                                 const bNodeSocket *src_bundle_socket = nullptr);
+                                 const bNodeSocket *src_bundle_socket = nullptr,
+                                 bool include_optional_defaults = false);
 void sync_sockets_closure(SpaceNode &snode,
                           bNode &closure_input_node,
                           bNode &closure_output_node,

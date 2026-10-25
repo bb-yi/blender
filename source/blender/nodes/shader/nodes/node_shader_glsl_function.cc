@@ -10540,6 +10540,51 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         item.type = bke::node_socket_type_find_static(member.socket_type);
         item.dimensions = member.dimensions;
         item.optional = !output && member.is_optional();
+        item.default_is_expression = !output && member.default_expression &&
+                                     !member.literal_default;
+        if (!member.label.empty()) {
+          item.ui.label = member.label;
+        }
+        if (!member.description.empty()) {
+          item.ui.description = member.description;
+        }
+        item.ui.subtype = member.subtype;
+        if (member.int_min_value) {
+          item.ui.min_value = *member.int_min_value;
+        }
+        else if (member.min_value) {
+          item.ui.min_value = *member.min_value;
+        }
+        if (member.int_max_value) {
+          item.ui.max_value = *member.int_max_value;
+        }
+        else if (member.max_value) {
+          item.ui.max_value = *member.max_value;
+        }
+        if (!output && member.literal_default && member.members.is_empty()) {
+          switch (member.socket_type) {
+            case SOCK_FLOAT:
+              item.ui.default_value = member.default_value.x;
+              break;
+            case SOCK_INT:
+              item.ui.default_value = member.int_default;
+              break;
+            case SOCK_BOOLEAN:
+              item.ui.default_value = member.default_value.x != 0.0f;
+              break;
+            case SOCK_VECTOR:
+            case SOCK_RGBA: {
+              float4 value = member.default_value;
+              if (member.socket_type == SOCK_RGBA && member.dimensions == 3) {
+                value.w = 1.0f;
+              }
+              item.ui.default_value = value;
+              break;
+            }
+            default:
+              break;
+          }
+        }
         if (!member.members.is_empty()) {
           item.nested = bundle_signature(member, output);
         }
@@ -10593,17 +10638,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       decl.signature(bundle_signature(field, output));
       if (!field.description.empty()) {
         decl.description(field.description);
-      }
-      if (!output) {
-        decl.custom_draw(
-            [identifier = std::string(identifier.c_str())](CustomSocketDrawParams &params) {
-              params.draw_standard(params.layout);
-              if (!params.socket.is_directly_linked()) {
-                PointerRNA op = params.layout.op("node.glsl_bundle_input", "", ICON_ADD);
-                RNA_int_set(&op, "node_identifier", params.node.identifier);
-                RNA_string_set(&op, "socket_identifier", identifier.c_str());
-              }
-            });
       }
     }
 
@@ -11116,48 +11150,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
                                           PointerRNA* ptr,
                                           Span<GLSLDefineMeta> defines);
 
-    static void draw_bundle_interface(ui::Layout &layout,
-                                      const GLSLBundleField &field,
-                                      const std::string &path,
-                                      const std::string &identifier,
-                                      int node_identifier,
-                                      bool output,
-                                      int depth = 0)
-    {
-      ui::Layout &row = layout.row(false);
-      const std::string label = std::string(depth * 2, ' ') +
-                                (field.label.empty() ? field.name : field.label) + " : " +
-                                field.type_name;
-      row.label(label.c_str(), ICON_NONE);
-      if (field.default_expression && !output) {
-        const std::string value = "Default: " + field.default_expression->substr(0, 80);
-        ui::Layout &default_row = layout.row(false);
-        default_row.label(value.c_str(), ICON_NONE);
-        PointerRNA op = default_row.op("node.glsl_bundle_input", "Add Override", ICON_ADD);
-        RNA_int_set(&op, "node_identifier", node_identifier);
-        RNA_string_set(&op, "socket_identifier", identifier.c_str());
-        RNA_string_set(&op, "member_path", path.c_str());
-        if (!field.literal_default) {
-          layout.label("An override replaces this expression", ICON_INFO);
-        }
-      }
-      else if (field.members.is_empty() && !output) {
-        row.label("Required", ICON_NONE);
-      }
-      if (!field.description.empty()) {
-        layout.label(field.description.c_str(), ICON_NONE);
-      }
-      for (const auto &member : field.members) {
-        draw_bundle_interface(layout,
-                              member,
-                              path + "." + member.name,
-                              identifier,
-                              node_identifier,
-                              output,
-                              depth + 1);
-      }
-    }
-
     static void node_declare(NodeDeclarationBuilder& b)
     {
       const bNode* node = b.node_or_null();
@@ -11177,14 +11169,8 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       const bool has_parameter_panels = !parse_result.analysis->function.panels.is_empty();
       const bool has_define_panel = !parse_result.analysis->defines.is_empty();
       const bool has_closure_panel = !parse_result.analysis->closure_callbacks.is_empty();
-      const bool has_bundle = parse_result.analysis->function.return_bundle ||
-                              std::any_of(parse_result.analysis->function.params.begin(),
-                                          parse_result.analysis->function.params.end(),
-                                          [](const GLSLFunctionParam &param) {
-                                            return bool(param.bundle);
-                                          });
       const bool use_declaration_panels = has_parameter_panels || has_define_panel ||
-                                          has_closure_panel || has_bundle;
+                                          has_closure_panel;
       if (code_mode || use_declaration_panels)
       {
         b.use_custom_socket_order();
@@ -11231,44 +11217,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         add_glsl_closure_declarations(closures_panel, parse_result);
       };
 
-      auto add_bundle_panel = [&]() {
-        if (!has_bundle || node->runtime->glsl_bundle_lowering) {
-          return;
-        }
-        auto &panel = b.add_panel("Bundle Interface"_ustr,
-                                  int(BLI_ghashutil_strhash_p("glsl_bundle_interface")))
-                          .default_closed(true);
-        for (const GLSLFunctionParam &param : parse_result.analysis->function.params) {
-          if (!param.bundle) {
-            continue;
-          }
-          const auto schema = std::make_shared<const GLSLBundleField>(*param.bundle);
-          const bool output = glsl_param_has_output_socket(param);
-          panel.add_layout(
-              [schema, output, identifier = param.identifier, node_id = node->identifier](
-                  ui::Layout &layout, bContext *, PointerRNA *ptr) {
-                const bNode *owner = ptr ? static_cast<const bNode *>(ptr->data) : nullptr;
-                const bNodeSocket *socket = owner ?
-                                                owner->input_by_identifier(UString(identifier)) :
-                                                nullptr;
-                if (!output && socket && !socket->is_directly_linked()) {
-                  PointerRNA op = layout.op(
-                      "node.glsl_bundle_input", "Create Input Bundle", ICON_NODE);
-                  RNA_int_set(&op, "node_identifier", node_id);
-                  RNA_string_set(&op, "socket_identifier", identifier.c_str());
-                }
-                draw_bundle_interface(layout, *schema, schema->name, identifier, node_id, output);
-              });
-        }
-        if (parse_result.analysis->function.return_bundle) {
-          const auto schema = std::make_shared<const GLSLBundleField>(
-              *parse_result.analysis->function.return_bundle);
-          panel.add_layout([schema](ui::Layout &layout, bContext *, PointerRNA *) {
-            draw_bundle_interface(layout, *schema, "return", "", 0, true);
-          });
-        }
-      };
-
       if (code_mode)
       {
         b.add_default_layout();
@@ -11290,7 +11238,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
                                       node);
         }
         add_closure_panel();
-        add_bundle_panel();
         return;
       }
 
@@ -11361,7 +11308,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       }
 
       add_closure_panel();
-      add_bundle_panel();
 
       if (!use_declaration_panels)
       {
@@ -12408,6 +12354,10 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         STRNCPY_UTF8(combine->label, field.type_name.c_str());
         combine->location[0] = x;
         combine->location[1] = y;
+        /* Dynamic nodes have no sockets until their declaration is built. An all-optional
+         * interface adds no members below, but its empty Bundle still needs an output. */
+        update_node_declaration_and_sockets(tree, *combine);
+        tree.ensure_topology_cache();
       }
       int child_index = 0;
       for (const auto &member : field.members) {

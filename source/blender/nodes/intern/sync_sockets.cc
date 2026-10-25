@@ -263,14 +263,52 @@ static bool validate_raw_bundle_storage(const bNode &node, const bool input, std
                  validate(*static_cast<const NodeSeparateBundle *>(node.storage), node.outputs);
 }
 
+static bool optional_bundle_item_can_initialize(const BundleSignature::Item &item)
+{
+  if (item.default_is_expression) {
+    return false;
+  }
+  if (item.ui.default_value) {
+    if (const int *value = std::get_if<int>(&*item.ui.default_value)) {
+      /* Materializing a local GLSL default must not lose precision in float transport. */
+      return *value >= -16777216 && *value <= 16777216;
+    }
+    return true;
+  }
+  if (!item.nested) {
+    return false;
+  }
+  bool has_value = false;
+  for (const auto &child : item.nested->items) {
+    const bool can_initialize = optional_bundle_item_can_initialize(child);
+    /* A matrix default is atomic: all its required columns need a common constant. */
+    if (!child.optional && !can_initialize) {
+      return false;
+    }
+    has_value |= can_initialize;
+  }
+  return has_value;
+}
+
+static bool bundle_item_should_sync(const BundleSignature::Item &item,
+                                    const bool input,
+                                    const bool include_optional_defaults)
+{
+  if (!input || !item.optional) {
+    return true;
+  }
+  return include_optional_defaults && optional_bundle_item_can_initialize(item);
+}
+
 static bool strict_bundle_interface_matches(const BundleSignature &current,
                                             const BundleSignature &expected,
-                                            const bool input)
+                                            const bool input,
+                                            const bool include_optional_defaults = false)
 {
   for (const auto &item : expected.items) {
     const auto *old = current.items.lookup_key_ptr_as(item.key);
     if (!old) {
-      if (input && item.optional) {
+      if (!bundle_item_should_sync(item, input, include_optional_defaults)) {
         continue;
       }
       return false;
@@ -376,11 +414,89 @@ static bool validate_existing_strict_combine(const ComputeContext *context,
 }
 
 template<typename Accessor>
+static bool validate_strict_bundle_schema(const BundleSignature &signature,
+                                          const int tree_type,
+                                          const int depth = 0)
+{
+  if (depth > 32) {
+    return false;
+  }
+  for (const auto &item : signature.items) {
+    if (!item.type || !Accessor::supports_socket_type(item.type->type, tree_type) ||
+        socket_items::get_validated_name<Accessor>(item.key) != item.key ||
+        (item.type->type == SOCK_VECTOR && !ELEM(item.dimensions, 0, 2, 3, 4)) ||
+        (item.nested &&
+         !validate_strict_bundle_schema<Accessor>(*item.nested, tree_type, depth + 1)))
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+template<typename Accessor>
+static void append_strict_bundle_members(SpaceNode &snode,
+                                         bNode &node,
+                                         const BundleSignature &expected,
+                                         const BundleSignature &current,
+                                         const bool input,
+                                         const bool include_optional_defaults)
+{
+  Vector<std::pair<const BundleSignature::Item *, std::string>> added_items;
+  for (const auto &item : expected.items) {
+    if (current.items.contains_as(item.key) ||
+        !bundle_item_should_sync(item, input, include_optional_defaults))
+    {
+      continue;
+    }
+    auto &created = *socket_items::add_item_with_socket_type_and_name<Accessor>(
+        *snode.edittree,
+        node,
+        item.type->type,
+        item.key.c_str(),
+        item.type->type == SOCK_VECTOR ?
+            std::make_optional(normalized_vector_dimensions(item.dimensions)) :
+            std::nullopt);
+    created.structure_type = NodeSocketInterfaceStructureType::Single;
+    added_items.append({&item, Accessor::socket_identifier_for_item(created)});
+  }
+  /* Keep authored identifiers, values, extra fields and existing wires. */
+  update_node_declaration_and_sockets(*snode.edittree, node);
+  if (input) {
+    bNodeTree &tree = *snode.edittree;
+    int child_index = 0;
+    for (const auto &[item, identifier] : added_items) {
+      tree.ensure_topology_cache();
+      bNodeSocket &socket = *node.input_by_identifier(UString(identifier));
+      const ClosureSignature::Item ui_item{
+          item->key, item->type, item->structure_type, item->dimensions, item->ui};
+      apply_closure_item_ui_data(ui_item, socket, true);
+      if (item->nested) {
+        bNode &child = *bke::node_add_node(nullptr, tree, "NodeCombineBundle"_ustr);
+        child.parent = node.parent;
+        STRNCPY_UTF8(child.label, item->key.c_str());
+        child.location[0] = node.location[0] - 260.0f;
+        child.location[1] = node.location[1] - child_index++ * 160.0f;
+        update_node_declaration_and_sockets(tree, child);
+        tree.ensure_topology_cache();
+        bke::node_add_link(tree, child, child.output_socket(0), node, socket);
+        /* The entire schema was checked before any mutation. These sources are new and empty;
+         * do not introduce another fallible context/preflight step after changing the graph. */
+        append_strict_bundle_members<CombineBundleItemsAccessor>(
+            snode, child, *item->nested, BundleSignature{}, true, include_optional_defaults);
+      }
+    }
+  }
+  BKE_ntree_update_tag_node_property(snode.edittree, &node);
+}
+
+template<typename Accessor>
 static void synchronize_strict_bundle(SpaceNode &snode,
                                       bNode &node,
                                       const BundleSignature &expected,
                                       ReportList *reports,
-                                      bool input)
+                                      bool input,
+                                      const bool include_optional_defaults = false)
 {
   std::string raw_error;
   if (!validate_raw_bundle_storage(node, input, raw_error)) {
@@ -402,16 +518,14 @@ static void synchronize_strict_bundle(SpaceNode &snode,
       return;
     }
   }
+  if (!validate_strict_bundle_schema<Accessor>(expected, snode.edittree->type)) {
+    BKE_report(reports, RPT_ERROR, "Unsupported bundle field; no fields were changed");
+    return;
+  }
   int64_t additions = 0;
   for (const auto &item : expected.items) {
-    if (!Accessor::supports_socket_type(item.type->type, snode.edittree->type) ||
-        socket_items::get_validated_name<Accessor>(item.key) != item.key ||
-        (item.type->type == SOCK_VECTOR && !ELEM(item.dimensions, 0, 2, 3, 4)))
-    {
-      BKE_report(reports, RPT_ERROR, "Unsupported bundle field; no fields were changed");
-      return;
-    }
-    additions += !current.items.contains_as(item.key) && !(input && item.optional);
+    additions += !current.items.contains_as(item.key) &&
+                 bundle_item_should_sync(item, input, include_optional_defaults);
   }
   const auto storage_items = Accessor::get_items_from_node(node);
   const int current_count = *storage_items.items_num;
@@ -444,23 +558,8 @@ static void synchronize_strict_bundle(SpaceNode &snode,
       return;
     }
   }
-  for (const auto &item : expected.items) {
-    if (current.items.contains_as(item.key) || (input && item.optional)) {
-      continue;
-    }
-    auto &created = *socket_items::add_item_with_socket_type_and_name<Accessor>(
-        *snode.edittree,
-        node,
-        item.type->type,
-        item.key.c_str(),
-        item.type->type == SOCK_VECTOR ?
-            std::make_optional(normalized_vector_dimensions(item.dimensions)) :
-            std::nullopt);
-    created.structure_type = NodeSocketInterfaceStructureType::Single;
-  }
-  /* Keep authored identifiers, values, extra fields and existing wires. */
-  update_node_declaration_and_sockets(*snode.edittree, node);
-  BKE_ntree_update_tag_node_property(snode.edittree, &node);
+  append_strict_bundle_members<Accessor>(
+      snode, node, expected, current, input, include_optional_defaults);
 }
 
 static BundleSyncState get_sync_state_separate_bundle(
@@ -546,7 +645,8 @@ static LinkedBundleSignatures get_expected_combine_bundle_signatures(
 static BundleSyncState get_sync_state_combine_bundle(
     const SpaceNode &snode,
     const bNode &combine_bundle_node,
-    const bNodeSocket *src_bundle_socket = nullptr)
+    const bNodeSocket *src_bundle_socket = nullptr,
+    const bool include_optional_defaults = false)
 {
   std::string raw_error;
   if (!validate_raw_bundle_storage(combine_bundle_node, true, raw_error)) {
@@ -569,7 +669,8 @@ static BundleSyncState get_sync_state_combine_bundle(
   const nodes::BundleSignature &current_signature =
       nodes::BundleSignature::from_combine_bundle_node(combine_bundle_node, true);
   if (merged_signature->strict ?
-          !strict_bundle_interface_matches(current_signature, *merged_signature, true) :
+          !strict_bundle_interface_matches(
+              current_signature, *merged_signature, true, include_optional_defaults) :
           *merged_signature != current_signature)
   {
     return {NodeSyncState::CanBeSynced, std::move(merged_signature)};
@@ -738,10 +839,11 @@ void sync_sockets_separate_bundle(SpaceNode &snode,
 void sync_sockets_combine_bundle(SpaceNode &snode,
                                  bNode &combine_bundle_node,
                                  ReportList *reports,
-                                 const bNodeSocket *src_bundle_socket)
+                                 const bNodeSocket *src_bundle_socket,
+                                 const bool include_optional_defaults)
 {
   const BundleSyncState sync_state = get_sync_state_combine_bundle(
-      snode, combine_bundle_node, src_bundle_socket);
+      snode, combine_bundle_node, src_bundle_socket, include_optional_defaults);
   switch (sync_state.state) {
     case NodeSyncState::Synced:
       return;
@@ -759,8 +861,12 @@ void sync_sockets_combine_bundle(SpaceNode &snode,
   }
 
   if (sync_state.source_signature->strict) {
-    synchronize_strict_bundle<CombineBundleItemsAccessor>(
-        snode, combine_bundle_node, *sync_state.source_signature, reports, true);
+    synchronize_strict_bundle<CombineBundleItemsAccessor>(snode,
+                                                          combine_bundle_node,
+                                                          *sync_state.source_signature,
+                                                          reports,
+                                                          true,
+                                                          include_optional_defaults);
     return;
   }
 
@@ -1085,8 +1191,9 @@ static std::string get_bundle_sync_tooltip(const nodes::BundleSignature &old_sig
                                            const nodes::BundleSignature &new_signature)
 {
   if (new_signature.strict) {
-    return "Add missing required fields, preserving existing values and links. Optional fields "
-           "retain GLSL defaults until explicitly added. Incompatible types require a manual "
+    return "Add missing fields, preserving existing values and links. Explicit Sync initializes "
+           "common constant defaults. Expressions, differing consumer defaults and integers "
+           "outside the exact transport range stay in GLSL. Incompatible types require a manual "
            "correction.";
   }
   Vector<StringRef> added_items;
@@ -1235,7 +1342,7 @@ void sync_node(bContext &C, bNode &node, ReportList *reports)
     sync_sockets_separate_bundle(snode, node, reports);
   }
   else if (node.is_type("NodeCombineBundle"_ustr)) {
-    sync_sockets_combine_bundle(snode, node, reports);
+    sync_sockets_combine_bundle(snode, node, reports, nullptr, true);
   }
   else if (node.is_type("NodeClosureInput"_ustr)) {
     bNode &closure_input_node = node;
@@ -1278,7 +1385,7 @@ std::string sync_node_description_get(const bContext &C, const bNode &node)
     const nodes::BundleSignature old_signature = nodes::BundleSignature::from_combine_bundle_node(
         node, true);
     if (const std::optional<nodes::BundleSignature> new_signature =
-            get_sync_state_combine_bundle(*snode, node).source_signature)
+            get_sync_state_combine_bundle(*snode, node, nullptr, true).source_signature)
     {
       return get_bundle_sync_tooltip(old_signature, *new_signature);
     }
@@ -1328,7 +1435,8 @@ bool node_can_sync_sockets(const bContext &C, const bNodeTree & /*tree*/, const 
       return get_sync_state_closure_output(*snode, node).source_signature.has_value();
     }
     if (node.is_type("NodeCombineBundle"_ustr)) {
-      return get_sync_state_combine_bundle(*snode, node).source_signature.has_value();
+      return get_sync_state_combine_bundle(*snode, node, nullptr, true)
+          .source_signature.has_value();
     }
     if (node.is_type("NodeSeparateBundle"_ustr)) {
       return get_sync_state_separate_bundle(*snode, node).source_signature.has_value();
