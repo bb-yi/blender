@@ -821,6 +821,15 @@ LinkedClosureSignatures gather_linked_origin_closure_signatures(
                                socket});
           return true;
         }
+        if (socket->is_output()) {
+          if (const auto *decl = dynamic_cast<const decl::Closure *>(socket->runtime->declaration))
+          {
+            if (decl->create_signature) {
+              result.items.append({(*decl->create_signature)(node), true, socket});
+              return true;
+            }
+          }
+        }
         return false;
       },
       true);
@@ -851,6 +860,33 @@ std::optional<NodeInContext> find_origin_index_menu_switch(
       },
       false);
   return result;
+}
+
+Vector<const bNodeSocket *> find_shader_closure_sources(const bNodeSocket &socket)
+{
+  socket.owner_tree().ensure_topology_cache();
+  bke::ComputeContextCache context_cache;
+  Vector<const bNodeSocket *> sources;
+  find_origin_sockets_through_contexts(
+      {nullptr, &socket},
+      context_cache,
+      [&](const SocketInContext &candidate) {
+        if (!candidate->is_output()) {
+          return false;
+        }
+        const bNode &node = candidate->owner_node();
+        if (node.is_type("ShaderNodeImageToClosure"_ustr) ||
+            node.is_type("NodeClosureOutput"_ustr) ||
+            node.is_type("ShaderNodeGLSLFunction"_ustr) ||
+            (node.is_group_input() && candidate.context == nullptr))
+        {
+          sources.append_non_duplicates(candidate.socket);
+          return true;
+        }
+        return false;
+      },
+      true);
+  return sources;
 }
 
 }  // namespace blender::nodes

@@ -48,4 +48,8 @@ LinkedClosureSignatures gather_linked_origin_closure_signatures(
 std::optional<NodeInContext> find_origin_index_menu_switch(
     const SocketInContext &socket, bke::ComputeContextCache &compute_context_cache);
 
+/** Possible shader sampler sources before inlining groups and bundles. An empty or ambiguous
+ * result must be validated after inlining, when the calling group instance is known. */
+Vector<const bNodeSocket *> find_shader_closure_sources(const bNodeSocket &socket);
+
 }  // namespace blender::nodes

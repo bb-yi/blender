@@ -916,6 +916,25 @@ void sync_sockets_evaluate_closure(SpaceNode &snode,
   auto &storage = *static_cast<NodeEvaluateClosure *>(evaluate_closure_node.storage);
   const ClosureSignature old_signature = ClosureSignature::from_evaluate_closure_node(
       evaluate_closure_node, true);
+  const auto can_preserve_socket = [&](const ClosureSignature::Item &old_item,
+                                       const ClosureSignature::Item &new_item) {
+    if (old_item.has_same_abi(new_item)) {
+      return true;
+    }
+    /* Shader Auto sockets carry single values. Resolving that shape must not discard the
+     * identifiers (and links) of an existing group interface. Geometry field/list changes
+     * still require an exact ABI match. */
+    using Shape = NodeSocketInterfaceStructureType;
+    if (snode.edittree->type == NTREE_SHADER &&
+        ELEM(old_item.structure_type, Shape::Auto, Shape::Single) &&
+        ELEM(new_item.structure_type, Shape::Auto, Shape::Single))
+    {
+      ClosureSignature::Item resolved_old = old_item;
+      resolved_old.structure_type = new_item.structure_type;
+      return resolved_old.has_same_abi(new_item);
+    }
+    return false;
+  };
 
   Map<std::string, int> old_input_identifiers;
   Map<std::string, int> old_output_identifiers;
@@ -940,7 +959,7 @@ void sync_sockets_evaluate_closure(SpaceNode &snode,
             *snode.edittree, evaluate_closure_node, item.type->type, item.key.c_str());
     new_item.structure_type = item.structure_type;
     const int old_index = old_signature.inputs.index_of_try_as(item.key);
-    if (old_index != -1 && old_signature.inputs[old_index].has_same_abi(item)) {
+    if (old_index != -1 && can_preserve_socket(old_signature.inputs[old_index], item)) {
       if (const std::optional<int> old_identifier = old_input_identifiers.lookup_try(item.key)) {
         new_item.identifier = *old_identifier;
         preserved_inputs.add(item.key);
@@ -954,7 +973,7 @@ void sync_sockets_evaluate_closure(SpaceNode &snode,
             *snode.edittree, evaluate_closure_node, item.type->type, item.key.c_str());
     new_item.structure_type = item.structure_type;
     const int old_index = old_signature.outputs.index_of_try_as(item.key);
-    if (old_index != -1 && old_signature.outputs[old_index].has_same_abi(item)) {
+    if (old_index != -1 && can_preserve_socket(old_signature.outputs[old_index], item)) {
       if (const std::optional<int> old_identifier = old_output_identifiers.lookup_try(item.key)) {
         new_item.identifier = *old_identifier;
         preserved_outputs.add(item.key);

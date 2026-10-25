@@ -64,7 +64,7 @@ BundleTestOutput bundle_test(BundleTestInput data) {
     node.display_mode = 'NODE'
     assert node.parse_status == 'READY'
     assert len(node.inputs) == len(node.outputs) == 1
-    assert len(node.panel_states) == 0  # A struct adds sockets, not a second interface panel.
+    assert len(node.panel_states) == 1  # Only the shared Code Settings panel; no struct panel.
     tree.nodes.active = node
     with context():
         if not bpy.app.background:
@@ -95,7 +95,7 @@ BundleTestOutput bundle_test(BundleTestInput data) {
     assert len(node.panel_states) == 1
     assert node.inputs[0].links[0].from_node == root
     node.display_mode = 'NODE'
-    assert len(node.panel_states) == 0
+    assert len(node.panel_states) == 1
     tree.nodes.active = root
     with context():
         if not bpy.app.background:

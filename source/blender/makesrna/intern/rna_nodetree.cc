@@ -9432,7 +9432,11 @@ static void def_sh_glsl_function(BlenderRNA *brna, StructRNA *srna)
 
   prop = RNA_def_property(srna, "function_name", PROP_STRING, PROP_NONE);
   RNA_def_property_string_sdna(prop, nullptr, "function_name");
-  RNA_def_property_ui_text(prop, "Function", "Selected exported GLSL function name");
+  RNA_def_property_ui_text(
+      prop,
+      "Function",
+      "Exported GLSL function name; leave empty to automatically select the unique function "
+      "with metadata, or the unique entry function not called by other functions");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLFunction_update");
 
   prop = RNA_def_property(srna, "parse_status", PROP_ENUM, PROP_NONE);
@@ -14432,6 +14436,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeHoldout");
   define("ShaderNode", "ShaderNodeHueSaturation");
   define("ShaderNode", "ShaderNodeImageToClosure", def_sh_image_to_closure);
+  define("ShaderNode", "ShaderNodeImageClosureSample", nullptr);
   define("ShaderNode", "ShaderNodeInvert");
   define("ShaderNode", "ShaderNodeLayerWeight");
   define("ShaderNode", "ShaderNodeLightFalloff");

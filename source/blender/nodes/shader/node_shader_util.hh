@@ -48,6 +48,12 @@ namespace ui {
 class Layout;
 }
 
+/** Bind the original image resource, including 3D LUT and cube interpretation. */
+bool node_shader_image_to_closure_bind(GPUMaterial *mat,
+                                       const bNode &source,
+                                       GPUNodeStack &stack,
+                                       std::string &r_error);
+
 bool sh_node_poll_default(const bke::bNodeType *ntype,
                           const bNodeTree *ntree,
                           const char **r_disabled_hint);

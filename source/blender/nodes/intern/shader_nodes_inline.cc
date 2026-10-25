@@ -1194,6 +1194,62 @@ class ShaderNodesInliner {
     this->store_socket_value(socket, {ClosureZoneValue{zone, socket.context}});
   }
 
+  void handle_output_socket__evaluate_image(const SocketInContext &socket, const bNode &image_node)
+  {
+    const NodeInContext evaluate_node = socket.owner_node();
+    const auto &storage = *static_cast<const NodeEvaluateClosure *>(evaluate_node->storage);
+    std::optional<SocketInContext> uv_socket;
+    for (const int i : IndexRange(storage.input_items.items_num)) {
+      if (STREQ(storage.input_items.items[i].name, "UV")) {
+        uv_socket = evaluate_node.input_socket(i + 1);
+        if (!value_by_socket_.contains(*uv_socket)) {
+          this->schedule_socket(*uv_socket);
+          return;
+        }
+        break;
+      }
+    }
+
+    bNode &sample_node = *this->add_node("ShaderNodeImageClosureSample"_ustr);
+    MEM_delete(static_cast<NodeShaderImageToClosure *>(sample_node.storage));
+    sample_node.storage = MEM_new<NodeShaderImageToClosure>(
+        __func__,
+        dna::shallow_copy(*static_cast<const NodeShaderImageToClosure *>(image_node.storage)));
+    sample_node.id = image_node.id;
+    if (!(this->node_copy_flag() & LIB_ID_CREATE_NO_USER_REFCOUNT)) {
+      id_us_plus(sample_node.id);
+    }
+    if (uv_socket) {
+      /* The destination tree's topology cache is not built while nodes are being inserted. */
+      bNodeSocket &sample_input = *static_cast<bNodeSocket *>(sample_node.inputs.first);
+      const SocketValue uv = this->handle_implicit_conversion(
+          value_by_socket_.lookup(*uv_socket),
+          *(*uv_socket)->typeinfo,
+          *sample_input.typeinfo);
+      this->set_input_socket_value(*evaluate_node, sample_node, sample_input, uv);
+    }
+
+    for (const int i : IndexRange(storage.output_items.items_num)) {
+      const SocketInContext output = evaluate_node.output_socket(i);
+      if (value_by_socket_.contains(output)) {
+        continue;
+      }
+      const StringRef name = storage.output_items.items[i].name;
+      const int sample_index = name == "Color" ? 0 : name == "Alpha" ? 1 : -1;
+      if (sample_index == -1) {
+        this->store_socket_value_fallback(output);
+        continue;
+      }
+      bNodeSocket &sample_output = *static_cast<bNodeSocket *>(
+          BLI_findlink(&sample_node.outputs, sample_index));
+      this->store_socket_value(
+          output,
+          this->handle_implicit_conversion({LinkedSocketValue{&sample_node, &sample_output}},
+                                           *sample_output.typeinfo,
+                                           *output->typeinfo));
+    }
+  }
+
   void handle_output_socket__evaluate_closure(const SocketInContext &socket)
   {
     const NodeInContext evaluate_closure_node = socket.owner_node();
@@ -1204,6 +1260,12 @@ class ShaderNodesInliner {
        * evaluated. */
       this->schedule_socket(closure_input_socket);
       return;
+    }
+    if (const auto *image = std::get_if<LinkedSocketValue>(&closure_input_value->value)) {
+      if (image->node->is_type("ShaderNodeImageToClosure"_ustr)) {
+        this->handle_output_socket__evaluate_image(socket, *image->node);
+        return;
+      }
     }
     const ClosureZoneValue *closure_zone_value = std::get_if<ClosureZoneValue>(
         &closure_input_value->value);

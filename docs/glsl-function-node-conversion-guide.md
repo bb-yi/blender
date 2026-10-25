@@ -94,6 +94,10 @@
 - `Closure Output -> sampler3D` 使用 `Closure Input` 中名为 `UV` 的 `Vector` 传递完整 `vec3` 坐标；首版只保证 `texture(volume, vec3_coord)`，不支持 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 或 `textureGather`
 - sampler Closure 自动同步接口为 `UV: Vector`、`Color: RGBA`、`Alpha: Float`；新建 Alpha 默认 `1.0`，旧 Closure 没有 Alpha 时仍可继续使用
 - 如果函数依赖显式 `LOD`、`grad` 或尺寸查询等图像专用能力，应优先使用 `Image to Closure`
+- `Image to Closure` 可以经过转接点、捆包和嵌套节点组传递。接到 `GLSL Function` 的 sampler 参数时保留真实图像资源、尺寸和采样设置，不转换成程序化闭包近似。
+- 同一个图像闭包也可以连接 `Evaluate Closure`。连接空的解算节点或点击 **Sync** 后，接口为 `UV: Vector` 输入、`Color: Color` 和 `Alpha: Float` 输出；2D 使用 UV 的 XY 绝对坐标，3D LUT 使用 XYZ，Cube 使用 XYZ 方向。各个解算节点可以使用独立坐标；未连接 UV 时使用其数值默认值 `(0, 0, 0)`。
+- 解算的 Color 保留采样 RGBA，Alpha 同时单独输出；后续代码若组合这两个输出，应避免将同一个 Alpha 再乘一次。解算不会改变同一来源在 GLSL Function 中的 `textureLod`、`textureGrad`、`textureSize`、`texelFetch`、`textureGather` 等原生纹理操作。不同 sampler 类型仍须匹配 2D、3D LUT 或 Cube 模式。
+- 解算默认采样与 GLSL 的 `texture` 使用同一原生 sampler 行为，不额外套用普通 Image Texture 节点的 LOD 偏置或 Alpha 处理。当前图像闭包的 `Cubic` / `Smart` 仍沿用已有的线性过滤行为；本次连接与解算支持没有增加真正的三次插值或 UDIM 支持。
 - 导出函数边界当前已经支持 `int / bool`，适合直接作为模式开关、枚举值、`lightgroup_id` 这类参数
 - 默认情况下 `vec2/vec3/vec4` 仍然显示为“向量插口”
 - 只有显式写了 `subtype=color` 的 `vec3` 输入，才会显示为颜色插口
