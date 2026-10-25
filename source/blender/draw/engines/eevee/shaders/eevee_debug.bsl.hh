@@ -143,6 +143,9 @@ struct ShadowDebug {
 
   float3 debug_shadow_lod_palette(int lod) const
   {
+    if (lod < 0) {
+      return hue_gradient(fract(0.58f + float(lod) * 0.11f));
+    }
     switch (clamp(lod, 0, 7)) {
       case 0:
         return float3(0.0f, 0.35f, 1.0f);
@@ -179,7 +182,13 @@ struct ShadowDebug {
   {
     if (is_sun_light(light.type)) {
       float3 lP = light_world_to_local_direction(light, P);
-      return shadow_directional_coordinates(light, lP);
+      [[resource_table]] const ShadowRenderData &srd = shadow_data;
+      [[resource_table]] const Uniform &uni = srd.uniforms;
+      [[resource_table]] const draw::View &views = srd.views;
+      const ViewMatrices view = views.get(0);
+      float pixel_size = shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
+                                                  view.is_perspective(), view.z_distance(P));
+      return shadow_directional_coordinates(light, lP, pixel_size);
     }
 
     float3 lP = light_world_to_local_point(light, P);

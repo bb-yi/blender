@@ -152,7 +152,8 @@ struct ShadowRayDirectional {
 ShadowRayDirectional shadow_ray_generate_directional(LightData light,
                                                      float2 random_2d,
                                                      float3 lP,
-                                                     float texel_radius)
+                                                     float texel_radius,
+                                                     float receiver_pixel_size)
 {
   float clip_near = orderedIntBitsToFloat(light.clip_near);
   /* Assumed to be non-null. */
@@ -173,6 +174,14 @@ ShadowRayDirectional shadow_ray_generate_directional(LightData light,
   ray.origin = lP;
   ray.direction = direction;
   ray.light = light;
+  if (receiver_pixel_size > 0.0f) {
+    /* Coverage still selects a containing layer. Fold the per-receiver screen demand
+     * into the existing minimum before tracing, so it is constant across every step.
+     * The bias is already included in that demand and must not scale coverage. */
+    float requested_scale = receiver_pixel_size * (0.5f * SHADOW_MAP_MAX_RES) * exp2(light.lod_bias);
+    ray.light.lod_min = max(light.lod_min, float(shadow_directional_scale_level_ceil(requested_scale)));
+    ray.light.lod_bias = 0.0f;
+  }
   /* TODO(fclem): We can simplify this using the ray direction construction. */
   ray.local_ray_up = safe_normalize(
       cross(cross(float3(0.0f, 0.0f, -1.0f), ray.direction), ray.direction));
@@ -363,7 +372,10 @@ float shadow_texel_radius_at_position([[resource_table]] const Uniform &uni,
     lP -= light.position();
     LightSunData sun = light.sun();
     if (light.type == LIGHT_SUN) {
-      scale = shadow_directional_clipmap_scale(light, lP);
+      const ViewMatrices view = views.get(0);
+      float pixel_size = shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
+                                                  view.is_perspective(), view.z_distance(P));
+      scale = shadow_directional_clipmap_scale(light, lP, pixel_size);
     }
     else {
       /* Uniform distribution everywhere. No distance scaling.
@@ -493,6 +505,10 @@ float shadow_eval_stable([[resource_table]] ShadowRenderData &srd,
                     N, L, terminator_normal_offset, terminator_geometry_offset);
 
   float surface_hit = 0.0f;
+  const ViewMatrices receiver_view = views.get(0);
+  float receiver_pixel_size = is_directional ?
+      shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
+                               receiver_view.is_perspective(), receiver_view.z_distance(P)) : 0.0f;
   for (int ray_index = 0; ray_index < SHADOW_NODE_STABLE_MAX_RAY; ray_index++) {
     if (ray_index >= stable_ray_count) {
       break;
@@ -510,7 +526,8 @@ float shadow_eval_stable([[resource_table]] ShadowRenderData &srd,
     bool has_hit;
     if (is_directional) {
       ShadowRayDirectional clip_ray = shadow_ray_generate_directional(
-          light, ray_tap, lP, texel_radius);
+          light, ray_tap, lP, texel_radius,
+          receiver_pixel_size);
       has_hit = shadow_map_trace(srd, clip_ray, stable_step_count, 0.5f);
     }
     else {
@@ -587,13 +604,18 @@ float shadow_eval_seeded([[resource_table]] ShadowRenderData &srd,
                                light_world_to_local_point(light, P);
 
   float surface_hit = 0.0f;
+  const ViewMatrices receiver_view = views.get(0);
+  float receiver_pixel_size = is_directional ?
+      shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
+                               receiver_view.is_perspective(), receiver_view.z_distance(P)) : 0.0f;
   for (int ray_index = 0; ray_index < ray_count && ray_index < SHADOW_MAX_RAY; ray_index++) {
     float2 random_ray_2d = fract(hammersley_2d(ray_index, ray_count) + random_shadow_3d.xy);
 
     bool has_hit;
     if (is_directional) {
       ShadowRayDirectional clip_ray = shadow_ray_generate_directional(
-          light, random_ray_2d, lP, texel_radius);
+          light, random_ray_2d, lP, texel_radius,
+          receiver_pixel_size);
       has_hit = shadow_map_trace(srd, clip_ray, ray_step_count, random_shadow_3d.z);
     }
     else {
@@ -738,6 +760,10 @@ float3 shadow_caster_classification_seeded_ex([[resource_table]] ShadowRenderDat
   float self_hit = 0.0f;
   float cast_hit = 0.0f;
   float unknown_hit = 0.0f;
+  const ViewMatrices receiver_view = views.get(0);
+  float receiver_pixel_size = is_directional ?
+      shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
+                               receiver_view.is_perspective(), receiver_view.z_distance(P)) : 0.0f;
   for (int ray_index = 0; ray_index < SHADOW_MAX_RAY; ray_index++) {
     if (ray_index >= safe_ray_count) {
       break;
@@ -747,7 +773,8 @@ float3 shadow_caster_classification_seeded_ex([[resource_table]] ShadowRenderDat
     ShadowCasterTraceResult trace_result;
     if (is_directional) {
       ShadowRayDirectional clip_ray = shadow_ray_generate_directional(
-          light, random_ray_2d, lP, texel_radius);
+          light, random_ray_2d, lP, texel_radius,
+          receiver_pixel_size);
       trace_result = shadow_trace_caster_id(srd, clip_ray, safe_step_count, random_shadow_3d.z);
     }
     else {
@@ -966,5 +993,332 @@ float shadow_eval_stable(LightData light,
 }
 
 /** \} */
+
+
+#ifdef MAT_NODE_SOFT_SHADOW
+/* Stable, classified single-frame PCSS for directional and point lights. No frame seed,
+ * screen-space neighborhood reconstruction, or stochastic debanding is used here. */
+struct ShadowNodePCSS {
+  LightData light;
+  float3 P;
+  float3 Ng;
+  float pixel_size;
+  bool directional;
+  bool classify;
+  uint receiver_id;
+};
+
+float3 shadow_node_pcss_plane_point(ShadowNodePCSS ctx, float3 candidate)
+{
+  if (ctx.directional) {
+    if (abs(ctx.Ng.z) > 1e-4f) {
+      candidate.z = ctx.P.z - dot(ctx.Ng.xy, candidate.xy - ctx.P.xy) / ctx.Ng.z;
+    }
+    return candidate;
+  }
+  float denominator = dot(ctx.Ng, candidate);
+  if (abs(denominator) > 1e-8f) {
+    float scale = dot(ctx.Ng, ctx.P) / denominator;
+    if (scale > 0.0f && scale < 4.0f) {
+      return candidate * scale;
+    }
+  }
+  return candidate;
+}
+
+ShadowCoordinates shadow_node_pcss_coordinates(ShadowNodePCSS ctx, float3 lP)
+{
+  if (ctx.directional) {
+    return shadow_directional_coordinates(ctx.light, lP, ctx.pixel_size);
+  }
+  int face = shadow_punctual_face_index_get(lP);
+  return shadow_punctual_coordinates(
+      ctx.light, shadow_punctual_local_position_to_face_local(face, lP), face);
+}
+
+float shadow_node_pcss_reference(ShadowNodePCSS ctx, float3 lP)
+{
+  return ctx.directional ? -lP.z - orderedIntBitsToFloat(ctx.light.clip_near) : length(lP);
+}
+
+float4 shadow_node_pcss_compare([[resource_table]] ShadowRenderData &srd,
+                                ShadowNodePCSS ctx,
+                                float3 lP)
+{
+  ShadowCoordinates coord = shadow_node_pcss_coordinates(ctx, lP);
+  float depth = srd.read_depth(coord);
+  if (depth < 0.0f) {
+    return float4(-1.0f);
+  }
+  if (depth >= shadow_node_pcss_reference(ctx, lP)) {
+    return float4(1.0f, 0.0f, 0.0f, 0.0f);
+  }
+  if (!ctx.classify) {
+    return float4(0.0f, 0.0f, 0.0f, 1.0f);
+  }
+  uint caster = shadow_caster_id_read(srd, coord);
+  if (caster == SHADOW_CASTER_UNKNOWN_ID) {
+    return float4(0.0f, 0.0f, 0.0f, 1.0f);
+  }
+  return caster == ctx.receiver_id ? float4(0.0f, 1.0f, 0.0f, 0.0f) :
+                                    float4(0.0f, 0.0f, 1.0f, 0.0f);
+}
+
+float4 shadow_node_pcss_bilinear([[resource_table]] ShadowRenderData &srd,
+                                 ShadowNodePCSS ctx,
+                                 float3 lP)
+{
+  ShadowCoordinates center_coord = shadow_node_pcss_coordinates(ctx, lP);
+  ShadowSamplingTile tile = shadow_tile_load(
+      srd.shadow_tilemaps_tx, center_coord.tilemap_tile, center_coord.tilemap_index);
+  if (!tile.is_valid) {
+    return float4(-1.0f);
+  }
+  float stride = exp2(float(tile.lod));
+  float2 uv;
+  float3 face_P = lP;
+  int face = 0;
+  float texel_world;
+  if (ctx.directional) {
+    LightSunData sun = ctx.light.sun();
+    int level = shadow_directional_level(ctx.light, lP - ctx.light.position(), ctx.pixel_size);
+    int physical_level = ctx.light.type == LIGHT_SUN_ORTHO ? sun.clipmap_lod_min : level;
+    int2 offset = shadow_decompress_grid_offset(ctx.light.type, sun.clipmap_base_offset_neg,
+                                                sun.clipmap_base_offset_pos,
+                                                level - sun.clipmap_lod_min);
+    uv = (lP.xy - sun.clipmap_origin) * exp2(float(-physical_level)) -
+         float2(offset) / float(SHADOW_TILEMAP_RES) + 0.5f;
+    texel_world = exp2(float(physical_level)) * stride / float(SHADOW_MAP_MAX_RES);
+  }
+  else {
+    face = shadow_punctual_face_index_get(lP);
+    face_P = shadow_punctual_local_position_to_face_local(face, lP);
+    uv = face_P.xy / max(abs(face_P.z), 1e-8f) * 0.5f + 0.5f;
+    texel_world = 2.0f * abs(face_P.z) * stride / float(SHADOW_MAP_MAX_RES);
+  }
+  float2 fraction = fract(uv * (float(SHADOW_MAP_MAX_RES) / stride) - 0.5f);
+#if !defined(GPU_METAL)
+  /* Metal's emulated atomic samplers expose texelFetch only. Keep the reference path there. */
+  /* Fetch four comparison depths together only when all corners provably use this
+   * virtual page, physical LOD and light projection. Boundaries use the reference path. */
+  int2 grid_base = int2(floor(uv * (float(SHADOW_MAP_MAX_RES) / stride) - 0.5f));
+  int grid_size = int(float(SHADOW_MAP_MAX_RES) / stride);
+  uint2 fine_base = uint2(max(grid_base, int2(0))) * uint(stride);
+  uint2 fine_end = uint2(max(grid_base + 1, int2(0))) * uint(stride);
+  bool interior = all(greaterThanEqual(grid_base, int2(0))) &&
+                  all(lessThan(grid_base + 1, int2(grid_size))) &&
+                  all(equal(fine_base >> SHADOW_PAGE_LOD, center_coord.tilemap_tile)) &&
+                  all(equal(fine_end >> SHADOW_PAGE_LOD, center_coord.tilemap_tile));
+  /* World-space corner reconstruction must have enough mantissa to agree with the
+   * virtual grid. Preserve the reference path at extreme coordinate/texel ratios. */
+  interior = interior && reduce_max(abs(face_P.xy)) * 1.2e-7f < texel_world * 0.125f;
+  if (ctx.directional) {
+    float2 extent_near = max(abs(lP.xy - ctx.light.position().xy) - texel_world, float2(0.0f));
+    float2 extent_far = abs(lP.xy - ctx.light.position().xy) + texel_world;
+    int current_level = center_coord.tilemap_index - ctx.light.tilemap_index +
+                        ctx.light.sun().clipmap_lod_min;
+    interior = interior && ctx.light.type == LIGHT_SUN &&
+               shadow_directional_level(ctx.light, float3(extent_near, 0.0f), ctx.pixel_size) ==
+                   current_level &&
+               shadow_directional_level(ctx.light, float3(extent_far, 0.0f), ctx.pixel_size) ==
+                   current_level;
+  }
+  uint2 virtual_texel = fine_base + uint2(tile.lod_offset << SHADOW_PAGE_LOD);
+  uint2 page_texel = (virtual_texel >> tile.lod) & uint2(SHADOW_PAGE_RES - 1);
+  /* Gather must stay inside the resolved physical page even for nonzero LOD offsets. */
+  interior = interior && all(lessThan(page_texel, uint2(SHADOW_PAGE_RES - 1)));
+  if (interior) {
+    uint2 atlas_texel = (uint2(tile.page.xy) << SHADOW_PAGE_LOD) | page_texel;
+    float2 atlas_extent = float2(textureSize(srd.shadow_atlas_tx, 0).xy);
+    float3 gather_uv = float3((float2(atlas_texel) + 1.0f) / atlas_extent, float(tile.page.z));
+    /* Gather order is (01,11,10,00), reordered to the reference loop's (00,10,01,11). */
+    float4 depths = uintBitsToFloat(textureGather(srd.shadow_atlas_tx, gather_uv)).wzxy;
+    uint4 casters = uint4(SHADOW_CASTER_UNKNOWN_ID);
+    if (ctx.classify) {
+      casters = textureGather(srd.shadow_caster_atlas_tx, gather_uv).wzxy;
+    }
+    float4 sample_x = face_P.x + (float4(0.0f, 1.0f, 0.0f, 1.0f) - fraction.x) * texel_world;
+    float4 sample_y = face_P.y + (float4(0.0f, 0.0f, 1.0f, 1.0f) - fraction.y) * texel_world;
+    float4 references;
+    if (ctx.directional) {
+      float4 sample_z = float4(face_P.z);
+      if (abs(ctx.Ng.z) > 1e-4f) {
+        sample_z = ctx.P.z - (ctx.Ng.x * (sample_x - ctx.P.x) +
+                              ctx.Ng.y * (sample_y - ctx.P.y)) / ctx.Ng.z;
+      }
+      references = -sample_z - orderedIntBitsToFloat(ctx.light.clip_near);
+    }
+    else {
+      float3 face_N = shadow_punctual_local_position_to_face_local(face, ctx.Ng);
+      float4 denominator = face_N.x * sample_x + face_N.y * sample_y + face_N.z * face_P.z;
+      float4 scale = dot(ctx.Ng, ctx.P) / denominator;
+      float4 valid_scale = float4(greaterThan(abs(denominator), float4(1e-8f))) *
+                           float4(greaterThan(scale, float4(0.0f))) *
+                           float4(lessThan(scale, float4(4.0f)));
+      scale = mix(float4(1.0f), scale, greaterThan(valid_scale, float4(0.5f)));
+      references = sqrt(sample_x * sample_x + sample_y * sample_y + square(face_P.z)) * scale;
+    }
+    float4 occluded = float4(lessThan(depths, references));
+    float4 known = ctx.classify ? float4(notEqual(casters, uint4(SHADOW_CASTER_UNKNOWN_ID))) :
+                                 float4(0.0f);
+    float4 self = float4(equal(casters & 0xFFFFu, uint4(ctx.receiver_id))) * known * occluded;
+    float4 cast_occlusion = known * occluded - self;
+    float4 weights = float4(1.0f - fraction.x, fraction.x, 1.0f - fraction.x, fraction.x) *
+                     float4(1.0f - fraction.y, 1.0f - fraction.y, fraction.y, fraction.y);
+    return float4(dot(1.0f - occluded, weights), dot(self, weights), dot(cast_occlusion, weights),
+                   dot(occluded * (1.0f - known), weights));
+  }
+#endif
+  float4 sum = float4(0.0f);
+  float weight_sum = 0.0f;
+  for (int y = 0; y < 2; y++) {
+    for (int x = 0; x < 2; x++) {
+      float2 shift = (float2(x, y) - fraction) * texel_world;
+      float3 sample_P = face_P + float3(shift, 0.0f);
+      if (!ctx.directional) {
+        sample_P = shadow_punctual_face_local_to_local_position(face, sample_P);
+      }
+      sample_P = shadow_node_pcss_plane_point(ctx, sample_P);
+      float4 value = shadow_node_pcss_compare(srd, ctx, sample_P);
+      float2 weights = mix(1.0f - fraction, fraction, float2(x, y));
+      float weight = weights.x * weights.y;
+      if (value.x >= 0.0f) {
+        sum += value * weight;
+        weight_sum += weight;
+      }
+    }
+  }
+  return weight_sum > 1e-6f ? sum / weight_sum : float4(-1.0f);
+}
+
+float4 shadow_node_pcss([[resource_table]] ShadowRenderData &srd,
+                         LightData light,
+                         bool directional,
+                         float3 P,
+                         float3 Ng,
+                         float3 N,
+                         float normal_offset,
+                         float geometry_offset,
+                         int quality,
+                         bool classify,
+                         uint receiver_id)
+{
+  if (light.tilemap_index == LIGHT_NO_SHADOW) {
+    return float4(1.0f, 0.0f, 0.0f, 0.0f);
+  }
+  [[resource_table]] const Uniform &uni = srd.uniforms;
+  [[resource_table]] const draw::View &views = srd.views;
+  const ViewMatrices view = views.get(0);
+  float texel_radius = shadow_texel_radius_at_position(uni, views, light, directional, P);
+  float3 L = directional ? light.z_axis() :
+                            normalize(light.position() + light.local().local.shadow_position - P);
+  P = offset_ray(P, Ng) + Ng * shadow_normal_offset(Ng, L, texel_radius) +
+      N * shadow_terminator_offset(N, L, normal_offset, geometry_offset);
+  ShadowNodePCSS ctx;
+  ctx.light = light;
+  ctx.P = directional ? light_world_to_local_direction(light, P) :
+                        light_world_to_local_point(light, P) - light.local().local.shadow_position;
+  ctx.Ng = light_world_to_local_direction(light, Ng);
+  ctx.pixel_size = shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
+                                            view.is_perspective(), view.z_distance(P));
+  ctx.directional = directional;
+  ctx.classify = classify && bool(uni.uniform_buf.shadow.use_caster_atlas);
+  ctx.receiver_id = receiver_id & 0xFFFFu;
+  float4 center = shadow_node_pcss_bilinear(srd, ctx, ctx.P);
+  if (center.x < 0.0f) {
+    return center;
+  }
+  float source_radius = directional ? tan(light.sun().shadow_angle) :
+                                       light.local().local.shadow_radius;
+  if (source_radius <= 1e-8f) {
+    return center;
+  }
+  float receiver_depth = shadow_node_pcss_reference(ctx, ctx.P);
+  ShadowCoordinates center_coord = shadow_node_pcss_coordinates(ctx, ctx.P);
+  ShadowSamplingTile center_tile = shadow_tile_load(
+      srd.shadow_tilemaps_tx, center_coord.tilemap_tile, center_coord.tilemap_index);
+  float page_width;
+  if (directional) {
+    int level = light.type == LIGHT_SUN_ORTHO ? light.sun().clipmap_lod_min :
+        shadow_directional_level(light, ctx.P - light.position(), ctx.pixel_size);
+    page_width = exp2(float(level + int(center_tile.lod))) / float(SHADOW_TILEMAP_RES);
+  }
+  else {
+    int face = shadow_punctual_face_index_get(ctx.P);
+    float3 face_P = shadow_punctual_local_position_to_face_local(face, ctx.P);
+    page_width = 2.0f * abs(face_P.z) * exp2(float(center_tile.lod)) /
+                 float(SHADOW_TILEMAP_RES);
+  }
+  /* One page of padding is requested before allocation, not once per filter tap. Keep
+   * the bounded kernel inside that guaranteed footprint, including bilinear corners. */
+  float supported_radius = max(page_width * 0.75f, texel_radius);
+  float search_radius = directional ? source_radius * max(receiver_depth, 0.0f) :
+      min(source_radius * max(receiver_depth, 0.0f) /
+          max(intBitsToFloat(light.clip_near), 1e-4f), receiver_depth * 0.25f);
+  search_radius = min(search_radius, supported_radius);
+  float3 right = float3(1.0f, 0.0f, 0.0f), up = float3(0.0f, 1.0f, 0.0f);
+  if (!directional) {
+    make_orthonormal_basis(normalize(ctx.P), right, up);
+  }
+  float blocker_sum = 0.0f;
+  int blockers = 0;
+  int valid_search = 0;
+  int search_count = clamp(quality * 2, 8, 32);
+  for (int i = 0; i < 32; i++) {
+    if (i >= search_count) { break; }
+    /* Cover both contact-scale blockers and the outer search footprint. A uniform
+     * wide disk can miss a small ring entirely between its center and first radius. */
+    float2 search_sample = hammersley_2d(i, search_count);
+    search_sample.x = search_sample.x * search_sample.x * search_sample.x;
+    float2 disk = sample_disk(search_sample);
+    float3 sample_P = shadow_node_pcss_plane_point(
+        ctx, ctx.P + (right * disk.x + up * disk.y) * search_radius);
+    float depth = srd.read_depth(shadow_node_pcss_coordinates(ctx, sample_P));
+    if (depth < 0.0f) { continue; }
+    valid_search++;
+    if (depth < shadow_node_pcss_reference(ctx, sample_P)) {
+      blocker_sum += depth;
+      blockers++;
+    }
+  }
+  if (blockers == 0) {
+    return valid_search > 0 ? center : float4(-1.0f);
+  }
+  float blocker_depth = blocker_sum / float(blockers);
+  float separation = max(receiver_depth - blocker_depth, 0.0f);
+  float filter_radius = directional ? source_radius * separation :
+                         source_radius * separation / max(blocker_depth, 1e-6f);
+  filter_radius = max(filter_radius, texel_radius * light.filter_radius);
+  filter_radius = min(filter_radius, supported_radius);
+  if (filter_radius <= 1e-8f) { return center; }
+  /* No center/ring uniform-region shortcut: a thin blocker or hole can lie between
+   * probes. Every selected filter position contributes to the same classified kernel. */
+  int filter_count = clamp(quality * 8, 16, 256);
+  float4 total = float4(0.0f);
+  float total_weight = 0.0f;
+  for (int i = 0; i < 256; i++) {
+    if (i >= filter_count) { break; }
+    float2 disk = sample_disk(hammersley_2d(i, filter_count));
+    float3 sample_P = shadow_node_pcss_plane_point(
+        ctx, ctx.P + (right * disk.x + up * disk.y) * filter_radius);
+    float4 value = shadow_node_pcss_bilinear(srd, ctx, sample_P);
+    if (value.x >= 0.0f) {
+      total += value;
+      total_weight += 1.0f;
+    }
+  }
+  return total_weight > 0.0f ? saturate(total / total_weight) : center;
+}
+
+float4 shadow_node_pcss(LightData light, bool directional, float3 P, float3 Ng, float3 N,
+                         float normal_offset, float geometry_offset, int quality, bool classify,
+                         uint receiver_id)
+{
+  [[resource_table]] ShadowRenderData &srd = resource_table_get(eevee::ShadowRenderData);
+  return shadow_node_pcss(srd, light, directional, P, Ng, N, normal_offset, geometry_offset,
+                          quality, classify, receiver_id);
+}
+
+#endif
 
 }  // namespace eevee

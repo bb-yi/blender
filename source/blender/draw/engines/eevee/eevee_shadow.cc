@@ -575,7 +575,15 @@ ShadowDirectional::LevelSpan ShadowDirectional::clipmap_level_range(const Camera
 
   const CameraData &cam_data = cam.data_get();
   /* Covers the closest points of the view. */
-  int min_level = max_ii(0, floor(log2(max_ff(cam_data.clip_near, 1e-8f))));
+  int min_level = int(floor(log2(max_ff(finite_or_default(cam_data.clip_near, 0.1f), 1e-8f))));
+  /* Grid offsets are signed integers. Very small clipmaps far from the world origin must
+   * become coarser before their tile coordinates overflow. This also bounds negative levels
+   * without changing the physical page size or increasing the shadow atlas allocation. */
+  const float coordinate_bound = math::length(cam.position()) + cam.bound_radius() +
+                                 math::distance(cam.bound_center(), cam.position());
+  const float safe_grid_scale = max_ff(coordinate_bound, 1e-8f) * SHADOW_TILEMAP_RES /
+                                float(1 << 28);
+  min_level = max_ii(min_level, int(ceil(log2(safe_grid_scale))));
   /* Covers the farthest points of the view. */
   int max_level = ceil(log2(cam.bound_radius() + distance(cam.bound_center(), cam.position())));
 
@@ -1004,6 +1012,7 @@ void ShadowModule::init()
 void ShadowModule::begin_sync()
 {
   use_caster_atlas_next_ = false;
+  node_soft_shadow_next_ = false;
 
   past_casters_updated_.clear();
   curr_casters_updated_.clear();
@@ -1142,6 +1151,7 @@ void ShadowModule::sync_bake_receiver_bounds(const ResourceHandleRange &resource
 
 void ShadowModule::end_sync()
 {
+  node_soft_shadow_enabled_ = int(node_soft_shadow_next_);
   const bool previous_use_caster_atlas = use_caster_atlas_;
   const bool requested_use_caster_atlas = use_caster_atlas_next_ && enabled_ &&
                                           ShadowModule::shadow_technique ==
@@ -1295,6 +1305,17 @@ void ShadowModule::end_sync()
             1));
         sub.barrier(GPU_BARRIER_SHADER_STORAGE);
       }
+      if (inst_.lights.sun_lights_len_ > 0) {
+        PassSimple::Sub &sub = pass.sub("StabilizeDirectionalBounds");
+        sub.shader_set(inst_.shaders.static_shader_get(SHADOW_TILEMAP_BOUNDS_STABILIZE));
+        sub.bind_ssbo("tilemaps_buf", tilemap_pool.tilemaps_data);
+        sub.bind_ssbo("tilemaps_clip_buf", tilemap_pool.tilemaps_clip);
+        sub.bind_ssbo("light_buf_write", &inst_.lights.culling_light_buf_);
+        sub.bind_resources(inst_.lights);
+        sub.dispatch(int3(divide_ceil_u(uint(inst_.lights.sun_lights_len_),
+                                       SHADOW_CLIPMAP_GROUP_SIZE), 1, 1));
+        sub.barrier(GPU_BARRIER_SHADER_STORAGE);
+      }
       {
         /* Clear usage bits. Tag update from the tile-map for sun shadow clip-maps shifting. */
         PassSimple::Sub &sub = pass.sub("Init");
@@ -1409,10 +1430,20 @@ void ShadowModule::end_sync()
       PassSimple &pass = tilemap_update_ps_;
       pass.init();
       {
+        /* Only opted-in node soft shadows request the neighboring virtual pages. */
+        if (node_soft_shadow_enabled_) {
+          PassSimple::Sub &dilate = pass.sub("NodeSoftFootprint");
+          dilate.shader_set(inst_.shaders.static_shader_get(SHADOW_PAGE_DILATE));
+          dilate.bind_ssbo("tilemaps_buf", tilemap_pool.tilemaps_data);
+          dilate.bind_ssbo("tiles_buf", tilemap_pool.tiles_data);
+          dilate.dispatch(int3(1, 1, tilemap_pool.tilemaps_data.size()));
+          dilate.barrier(GPU_BARRIER_SHADER_STORAGE);
+        }
         /* Mark tiles that are redundant in the mipmap chain as unused. */
         PassSimple::Sub &sub = pass.sub("MaskLod");
         sub.shader_set(inst_.shaders.static_shader_get(SHADOW_PAGE_MASK));
         sub.push_constant("max_view_per_tilemap", &max_view_per_tilemap_);
+        sub.push_constant("node_soft_shadow", &node_soft_shadow_enabled_);
         sub.bind_ssbo("tilemaps_buf", tilemap_pool.tilemaps_data);
         sub.bind_ssbo("tiles_buf", tilemap_pool.tiles_data);
         sub.dispatch(int3(1, 1, tilemap_pool.tilemaps_data.size()));

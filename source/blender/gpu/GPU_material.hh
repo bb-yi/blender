@@ -312,6 +312,7 @@ bool GPU_material_has_filter_output(GPUMaterial *mat);
 bool GPU_material_has_light_shader_output(GPUMaterial *mat);
 bool GPU_material_has_glsl_light_shader_eval(const GPUMaterial *mat);
 bool GPU_material_has_shader_info_shadow_classification(const GPUMaterial *mat);
+bool GPU_material_has_node_soft_shadow(const GPUMaterial *mat);
 bool GPU_material_principled_npr_v2_has(const GPUMaterial *mat);
 bool GPU_material_surface_diffusion_has(const GPUMaterial *mat);
 void GPU_material_surface_diffusion_set(GPUMaterial *mat);
@@ -694,6 +695,7 @@ void GPU_material_output_filter_item(GPUMaterial *material, int identifier, GPUN
 void GPU_material_output_light_shader(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_glsl_light_shader_eval_set(GPUMaterial *material);
 void GPU_material_shader_info_shadow_classification_set(GPUMaterial *material);
+void GPU_material_node_soft_shadow_set(GPUMaterial *material);
 void GPU_material_principled_npr_v2_set(GPUMaterial *material);
 void GPU_material_npr_features_add(GPUMaterial *material, eGPUMaterialNPRFeature features);
 void GPU_material_hiz_data_set(GPUMaterial *material);

@@ -148,14 +148,36 @@ int shadow_directional_tilemap_index(LightData light, float3 lP)
 
 #endif
 
-float shadow_directional_clipmap_scale(LightData light, float3 lP)
+float shadow_screen_pixel_size(float film_pixel_radius, bool perspective, float view_depth)
+{
+#ifdef MAT_BAKE_COLOR
+  /* UV receivers are tagged from bounds, independently of a camera pixel footprint. */
+  return 0.0f;
+#else
+  return max(film_pixel_radius, 0.0f) * (perspective ? max(abs(view_depth), 1e-8f) : 1.0f) *
+         M_SQRT1_2;
+#endif
+}
+
+float shadow_directional_clipmap_footprint(LightData light,
+                                          float3 lP,
+                                          float pixel_size = 0.0f)
 {
   /* Directional clipmap coverage is orthographic in light-space XY.
    * Light-space depth must not select a coarser clipmap. */
-  float scale = reduce_max(abs(lP.xy)) * 2.0f;
-  scale = max(scale * exp2(light.lod_bias), exp2(light.lod_min));
-  return clamp(
-      scale, exp2(float(light.sun().clipmap_lod_min)), exp2(float(light.sun().clipmap_lod_max)));
+  constexpr float narrowing = float(SHADOW_TILEMAP_RES) / float(SHADOW_TILEMAP_RES - 1);
+  float coverage = reduce_max(abs(lP.xy)) * (2.0f * narrowing);
+  /* The coarsest level whose texel fits within a screen pixel. Half compensates for the
+   * selector's ceil; coverage always wins when a finer clipmap would not contain the point. */
+  float requested = pixel_size > 0.0f ? pixel_size * (0.5f * SHADOW_MAP_MAX_RES) : coverage;
+  return max(max(coverage, requested * exp2(light.lod_bias)), exp2(light.lod_min));
+}
+
+float shadow_directional_clipmap_scale(LightData light, float3 lP, float pixel_size = 0.0f)
+{
+  return clamp(shadow_directional_clipmap_footprint(light, lP, pixel_size),
+               exp2(float(light.sun().clipmap_lod_min)),
+               exp2(float(light.sun().clipmap_lod_max)));
 }
 
 /**
@@ -164,16 +186,18 @@ float shadow_directional_clipmap_scale(LightData light, float3 lP)
  * \a lP shading point position in light space, relative to the to camera position snapped to
  * the smallest clip-map level (`shadow_world_to_local(light, P) - light_position_get(light)`).
  */
-float shadow_directional_level_fractional(LightData light, float3 lP)
+float shadow_directional_level_fractional(LightData light, float3 lP, float pixel_size = 0.0f)
 {
   float lod;
   if (light.type == LIGHT_SUN) {
     /* We need to hide one tile worth of data to hide the moving transition. */
-    constexpr float narrowing = float(SHADOW_TILEMAP_RES) / (float(SHADOW_TILEMAP_RES) - 1.0001f);
     /* Since the distance is centered around the camera (and thus by extension the tile-map),
      * we need to multiply by 2 to get the lod level which covers the following range:
      * [-coverage_get(lod)/2..coverage_get(lod)/2] */
-    lod = log2(shadow_directional_clipmap_scale(light, lP) * narrowing);
+    /* Coverage narrowing is applied before the scale clamp, so the innermost level remains
+     * usable. Bound the log input as well: this avoids excessive driver optimization during
+     * linking of the unrolled shadow traces. The final level clamp is still authoritative. */
+    lod = log2(shadow_directional_clipmap_scale(light, lP, pixel_size));
 
     lod = max(lod, light.lod_min);
   }
@@ -190,11 +214,25 @@ float shadow_directional_level_fractional(LightData light, float3 lP)
   return clamp(lod, float(light.sun().clipmap_lod_min), float(light.sun().clipmap_lod_max));
 }
 
-int shadow_directional_level(LightData light, float3 lP)
+int shadow_directional_scale_level_ceil(float scale)
 {
+  /* IEEE exponent/mantissa give an exact ceil(log2) for positive normal scales. GPU log2
+   * approximations can round an exact power of two upwards before ceil skips a whole level. */
+  uint bits = floatBitsToUint(max(scale, 1e-30f));
+  int exponent = int((bits >> 23u) & 0xFFu) - 127;
+  return exponent + int((bits & 0x7FFFFFu) != 0u);
+}
+
+int shadow_directional_level(LightData light, float3 lP, float pixel_size = 0.0f)
+{
+  if (light.type == LIGHT_SUN) {
+    float scale = shadow_directional_clipmap_scale(light, lP, pixel_size);
+    return clamp(shadow_directional_scale_level_ceil(scale),
+                 light.sun().clipmap_lod_min, light.sun().clipmap_lod_max);
+  }
   /* The level can be negative and is increasing with the distance.
    * So we have to ceil instead of flooring. */
-  return int(ceil(shadow_directional_level_fractional(light, lP)));
+  return int(ceil(shadow_directional_level_fractional(light, lP, pixel_size)));
 }
 
 /**
@@ -310,9 +348,9 @@ ShadowCoordinates shadow_directional_coordinates_at_level(LightData light, float
 /**
  * \a lP shading point position in light space (`shadow_world_to_local(light, P)`).
  */
-ShadowCoordinates shadow_directional_coordinates(LightData light, float3 lP)
+ShadowCoordinates shadow_directional_coordinates(LightData light, float3 lP, float pixel_size = 0.0f)
 {
-  int level = shadow_directional_level(light, lP - light.position());
+  int level = shadow_directional_level(light, lP - light.position(), pixel_size);
   return shadow_directional_coordinates_at_level(light, lP, level);
 }
 

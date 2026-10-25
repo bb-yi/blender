@@ -117,6 +117,12 @@ bool shader_info_shadow_is_soft_filtered(float shadow_mode)
   return abs(shadow_mode - SHADER_INFO_SHADOW_MODE_SOFT_FILTERED) < 0.25f;
 }
 
+bool shader_info_shadow_pcss_supported(LightData light)
+{
+  return is_sun_light(light.type) || light.type == LIGHT_OMNI_SPHERE ||
+         light.type == LIGHT_OMNI_DISK;
+}
+
 int shader_info_shadow_stable_ray_count(float stable_shadow_samples)
 {
   return clamp(
@@ -739,6 +745,16 @@ float shader_info_shadow_visibility(LightData light,
                                     float shadow_mode,
                                     float stable_shadow_samples)
 {
+#ifdef MAT_NODE_SOFT_SHADOW
+  if (shader_info_shadow_is_soft_filtered(shadow_mode) &&
+      shader_info_shadow_pcss_supported(light)) {
+    float4 value = eevee_shadow_node_pcss(light, is_directional, position, geometry_normal,
+                                         shading_normal, normal_offset, geometry_offset,
+                                         int(stable_shadow_samples), false, 0u);
+    if (value.x >= 0.0f) { return value.x; }
+  }
+#endif
+
   if (shader_info_shadow_is_builtin(shadow_mode)) {
     return shader_info_shadow_visibility_single(light,
                                                 is_directional,
@@ -794,6 +810,22 @@ ShaderInfoShadowClassification shader_info_shadow_classified_visibility(
     float shadow_mode,
     float stable_shadow_samples)
 {
+#ifdef MAT_NODE_SOFT_SHADOW
+  if (shader_info_shadow_is_soft_filtered(shadow_mode) &&
+      shader_info_shadow_pcss_supported(light)) {
+    float4 value = eevee_shadow_node_pcss(light, is_directional, position, geometry_normal,
+                                         shading_normal, normal_offset, geometry_offset,
+                                         int(stable_shadow_samples), true, resource_id_get());
+    if (value.x >= 0.0f) {
+      ShaderInfoShadowClassification filtered;
+      filtered.visibility = value.x;
+      filtered.self_shadow = value.y;
+      filtered.cast_shadow = value.z;
+      return filtered;
+    }
+  }
+#endif
+
   ShaderInfoShadowClassification result = shader_info_shadow_classification(light,
                                                                             is_directional,
                                                                             light_vector,

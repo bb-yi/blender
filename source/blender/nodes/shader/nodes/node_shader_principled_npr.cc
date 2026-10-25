@@ -1235,6 +1235,11 @@ static int node_gpu(GPUMaterial *mat,
     return 0;
   }
   const NodeShaderPrincipledNPR &storage = node_storage(*node);
+  if (storage.model_version >= 2 && storage.shadow_mode != SHD_PRINCIPLED_NPR_SHADOW_NONE &&
+      storage.shadow_quality == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED)
+  {
+    GPU_material_node_soft_shadow_set(mat);
+  }
   if (storage.model_version >= 2) {
     return node_gpu_v2(mat, node, in, out);
   }

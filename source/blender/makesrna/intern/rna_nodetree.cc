@@ -10232,8 +10232,8 @@ static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
        "SOFT_FILTERED",
        0,
        "Soft Filtered",
-       "Use deterministic shadow sampling and filter nearby screen-space samples to turn black "
-       "and white shadow hits into smoother grayscale penumbra"},
+       "Use fixed blocker search and contact-hardening filtering for sun and point lights; "
+       "other lights use spatial filtering"},
       {SHD_SHADER_INFO_SHADOW_TEMPORAL,
        "TEMPORAL",
        0,
@@ -10258,7 +10258,7 @@ static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_ui_range(prop, 1, 32, 1, 3);
   RNA_def_property_ui_text(prop,
                            "Shadow Samples",
-                           "Number of fixed shadow rays used by the Soft Filtered mode");
+                           "Quality of fixed blocker-search and filter sampling in Soft Filtered mode");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 
   RNA_def_struct_sdna_from(srna, "NodeShaderShaderInfo", "storage");
@@ -10460,7 +10460,7 @@ static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
        "SOFT_FILTERED",
        0,
        "Soft Filtered",
-       "Use Shader Info's spatially filtered shadow classification"},
+       "Use Shader Info's single-frame filtered shadow classification"},
       {0, nullptr, 0, nullptr, nullptr},
   };
   static const EnumPropertyItem mapping_interpolation_items[] = {

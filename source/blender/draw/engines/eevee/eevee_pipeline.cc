@@ -2401,6 +2401,12 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
     has_raycast = true;
   }
   const bool hide_from_raycast = ob->visibility_flag & OB_HIDE_RAYCAST;
+  if (GPU_material_has_node_soft_shadow(gpumat) &&
+      (pipeline_type == MAT_PIPE_DEFERRED || pipeline_type == MAT_PIPE_DEFERRED_NPR ||
+       pipeline_type == MAT_PIPE_FORWARD))
+  {
+    inst_.shadows.tag_node_soft_shadow_needed();
+  }
   if (GPU_material_has_shader_info_shadow_classification(gpumat) &&
       (pipeline_type == MAT_PIPE_DEFERRED || pipeline_type == MAT_PIPE_DEFERRED_NPR ||
        pipeline_type == MAT_PIPE_FORWARD))

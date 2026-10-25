@@ -283,6 +283,8 @@ class ShadowModule {
   gpu::Texture *caster_atlas_ref_ = nullptr;
   bool use_caster_atlas_ = false;
   bool use_caster_atlas_next_ = false;
+  bool node_soft_shadow_next_ = false;
+  int node_soft_shadow_enabled_ = 0;
   bool caster_atlas_allocation_failed_ = false;
   int use_caster_atlas_push_ = 0;
 
@@ -415,6 +417,11 @@ class ShadowModule {
   void tag_caster_atlas_needed()
   {
     use_caster_atlas_next_ = true;
+  }
+
+  void tag_node_soft_shadow_needed()
+  {
+    node_soft_shadow_next_ = true;
   }
 
   bool use_caster_atlas() const

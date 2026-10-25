@@ -42,6 +42,7 @@ struct PageMask {
   [[shared]] uint levels_rendered;
   [[shared]] uint force_base_page;
   [[push_constant]] int max_view_per_tilemap;
+  [[push_constant]] int node_soft_shadow;
   [[storage(1, read_write)]] uint (&tiles_buf)[];
 };
 
@@ -60,7 +61,7 @@ void mask([[resource_table]] PageMask &srt,
     /* Check if any page is allocated in this tilemap. Force base page if that's the case to avoid
      * artifact during shadow tracing. */
     if (local_tile_index == 0u) {
-      srt.force_base_page = 0u;
+      srt.force_base_page = uint(srt.node_soft_shadow != 0 && is_point_light(tilemap.light_type));
     }
     barrier();
 
@@ -227,5 +228,48 @@ void mask([[resource_table]] PageMask &srt,
 }
 
 PipelineCompute page_mask(mask);
+
+
+struct PageDilate {
+  [[storage(1, read_write)]] uint (&tiles_buf)[];
+  [[shared]] uint usage[SHADOW_TILEDATA_PER_TILEMAP];
+};
+
+[[compute, local_size(SHADOW_TILEMAP_RES, SHADOW_TILEMAP_RES)]]
+void dilate([[resource_table]] PageDilate &srt,
+             [[resource_table]] TileMaps &tilemaps,
+             [[global_invocation_id]] const uint3 global_id)
+{
+  ShadowTileMapData map = tilemaps.tilemaps_buf[global_id.z];
+  if (!is_sun_light(map.light_type) && !is_point_light(map.light_type)) { return; }
+  int2 p = int2(global_id.xy);
+  int max_lod = map.projection_type == SHADOW_PROJECTION_CUBEFACE ? SHADOW_TILEMAP_LOD : 0;
+  for (int lod = 0; lod <= max_lod; lod++) {
+    if (all(lessThan(p, int2(SHADOW_TILEMAP_RES >> lod)))) {
+      int local = shadow_tile_offset(uint2(p), 0, lod);
+      srt.usage[local] = srt.tiles_buf[map.tiles_index + local] & SHADOW_IS_USED;
+    }
+  }
+  barrier();
+  for (int lod = 0; lod <= max_lod; lod++) {
+    int dim = SHADOW_TILEMAP_RES >> lod;
+    if (all(lessThan(p, int2(dim)))) {
+      uint used = 0u;
+      for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+          int2 n = p + int2(x, y);
+          if (all(greaterThanEqual(n, int2(0))) && all(lessThan(n, int2(dim)))) {
+            used |= srt.usage[shadow_tile_offset(uint2(n), 0, lod)];
+          }
+        }
+      }
+      if (used != 0u) {
+        atomicOr(srt.tiles_buf[shadow_tile_offset(uint2(p), map.tiles_index, lod)], SHADOW_IS_USED);
+      }
+    }
+  }
+}
+
+PipelineCompute page_dilate(dilate);
 
 }  // namespace eevee::shadow

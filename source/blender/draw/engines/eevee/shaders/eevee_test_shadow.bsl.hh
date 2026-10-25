@@ -22,6 +22,7 @@ void set_clipmap_data(LightData &light,
   sun_data.clipmap_lod_max = clipmap_lod_max;
   light.sun() = sun_data;
   light.shadow_map_scale = 1.0f;
+  light.lod_min = -100.0f;
 }
 
 void set_clipmap_base_offset(LightData &light, int2 clipmap_base_offset)
@@ -75,6 +76,32 @@ void main()
     /* Produces NaN / Inf, Undefined behavior. */
     // EXPECT_EQ(shadow_directional_level(light, float3(FLT_MAX)),
     // light.sun().clipmap_lod_max);
+  }
+
+  TEST(eevee_shadow, DirectionalSignedScreenLevel)
+  {
+    LightData light;
+    light.type = LIGHT_SUN;
+    set_clipmap_data(light, -12, 8, 0.0f, 0.0f);
+    light.lod_bias = 0.0f;
+    float pixel_size = exp2(-3.0f) * (2.0f / float(SHADOW_MAP_MAX_RES));
+    EXPECT_EQ(shadow_directional_level(light, float3(0.0f), pixel_size), -3);
+    EXPECT_EQ(shadow_directional_level(light, float3(0.0f), pixel_size * 4.0f), -1);
+    EXPECT_EQ(shadow_directional_level(light, float3(0.0f), pixel_size / 4.0f), -5);
+    /* Geometric coverage and explicit resolution limits still constrain screen demand. */
+    EXPECT_EQ(shadow_directional_level(light, float3(0.2f, 0.0f, 100.0f), pixel_size), -1);
+    light.lod_min = 0.0f;
+    EXPECT_EQ(shadow_directional_level(light, float3(0.0f), pixel_size), 0);
+    light.lod_min = -100.0f;
+    EXPECT_EQ(shadow_directional_level(light, float3(0.0f)), -12);
+    EXPECT_EQ(shadow_directional_level(light, float3(0.00001f, 0.0f, 0.0f)), -12);
+    EXPECT_EQ(shadow_directional_level(light, float3(1e30f), 1e30f),
+              light.sun().clipmap_lod_max);
+    /* Perspective footprint follows distance; orthographic footprint remains constant. */
+    EXPECT_NEAR(shadow_screen_pixel_size(0.01f, true, 2.0f),
+                2.0f * shadow_screen_pixel_size(0.01f, true, 1.0f), 1e-7f);
+    EXPECT_NEAR(shadow_screen_pixel_size(0.01f, false, 2.0f),
+                shadow_screen_pixel_size(0.01f, false, 1.0f), 1e-7f);
   }
 
   TEST(eevee_shadow, DirectionalCascadeLevel)

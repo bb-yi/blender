@@ -68,7 +68,12 @@ struct ShadowRenderData {
   float directional_sample_get(LightData light, float3 P) const
   {
     float3 lP = transform_direction_transposed(light.object_to_world, P);
-    ShadowCoordinates coord = shadow_directional_coordinates(light, lP);
+    [[resource_table]] const Uniform &uni = uniforms;
+    [[resource_table]] const draw::View &view_data = views;
+    const ViewMatrices view = view_data.get(0);
+    float pixel_size = shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
+                                                view.is_perspective(), view.z_distance(P));
+    ShadowCoordinates coord = shadow_directional_coordinates(light, lP, pixel_size);
 
     float depth = read_depth(coord);
     if (depth == -1.0f) {

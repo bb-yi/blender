@@ -575,10 +575,12 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        SHADOW_PAGE_DEFRAG,
                                        SHADOW_PAGE_FREE,
                                        SHADOW_PAGE_MASK,
+                                       SHADOW_PAGE_DILATE,
                                        SHADOW_MASK_FILTER,
                                        SHADOW_MASK_FILTER_LAYERED,
                                        SHADOW_TILEMAP_AMEND,
                                        SHADOW_TILEMAP_BOUNDS,
+                                       SHADOW_TILEMAP_BOUNDS_STABILIZE,
                                        SHADOW_TILEMAP_FINALIZE,
                                        SHADOW_TILEMAP_RENDERMAP,
                                        SHADOW_TILEMAP_INIT,
@@ -924,10 +926,14 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_shadow_page_free";
     case SHADOW_PAGE_MASK:
       return "eevee_shadow_page_mask";
+    case SHADOW_PAGE_DILATE:
+      return "eevee_shadow_page_dilate";
     case SHADOW_TILEMAP_AMEND:
       return "eevee_shadow_tilemap_amend";
     case SHADOW_TILEMAP_BOUNDS:
       return "eevee_shadow_tilemap_bounds";
+    case SHADOW_TILEMAP_BOUNDS_STABILIZE:
+      return "eevee_shadow_tilemap_bounds_stabilize";
     case SHADOW_TILEMAP_FINALIZE:
       return "eevee_shadow_tilemap_finalize";
     case SHADOW_TILEMAP_RENDERMAP:
@@ -1937,6 +1943,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   /* Classification is requested by Shader Info Self/Cast outputs and by native nodes such as
    * Principled NPR Cast Only. It must not require GPU_MATFLAG_SHADER_INFO. */
+  if (GPU_material_has_node_soft_shadow(gpumat) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+  {
+    info.define("MAT_NODE_SOFT_SHADOW");
+  }
   if (use_shader_info_shadow_classification) {
     info.define("SHADOW_CASTER_CLASSIFY");
     if (!has_bsl_light_eval_resources && !use_npr_foreach_shadow) {

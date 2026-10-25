@@ -76,8 +76,14 @@ struct TagUsage {
 
     LightSunData sun = light.sun();
 
+    [[resource_table]] const Uniform &uni = uniforms;
+    [[resource_table]] const draw::View &views = views_;
+    const ViewMatrices view = views.get(0);
+    float pixel_size = shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
+                                                view.is_perspective(), view.z_distance(P));
+
     if (radius == 0.0f) {
-      int level = shadow_directional_level(light, lP - light.position());
+      int level = shadow_directional_level(light, lP - light.position(), pixel_size);
       level = clamp(level + lod_bias, sun.clipmap_lod_min, sun.clipmap_lod_max);
       ShadowCoordinates coord = shadow_directional_coordinates_at_level(light, lP, level);
       tag_usage_tile(light, coord.tilemap_tile, 0, coord.tilemap_index);
@@ -85,8 +91,8 @@ struct TagUsage {
     else {
       float3 start_lP = light_world_to_local_direction(light, P - V * radius);
       float3 end_lP = light_world_to_local_direction(light, P + V * radius);
-      int min_level = shadow_directional_level(light, start_lP - light.position());
-      int max_level = shadow_directional_level(light, end_lP - light.position());
+      int min_level = shadow_directional_level(light, start_lP - light.position(), pixel_size);
+      int max_level = shadow_directional_level(light, end_lP - light.position(), pixel_size);
       min_level = clamp(min_level + lod_bias, sun.clipmap_lod_min, sun.clipmap_lod_max);
       max_level = clamp(max_level + lod_bias, sun.clipmap_lod_min, sun.clipmap_lod_max);
 
