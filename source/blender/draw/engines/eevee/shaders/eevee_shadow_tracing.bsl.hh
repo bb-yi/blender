@@ -1010,7 +1010,7 @@ float shadow_eval_stable(LightData light,
 struct ShadowNodePCSS {
   LightData light;
   float3 P;
-  float3 Ng;
+  float3 plane_normal;
   float pixel_size;
   bool directional;
   bool classify;
@@ -1020,14 +1020,15 @@ struct ShadowNodePCSS {
 float3 shadow_node_pcss_plane_point(ShadowNodePCSS ctx, float3 candidate)
 {
   if (ctx.directional) {
-    if (abs(ctx.Ng.z) > 1e-4f) {
-      candidate.z = ctx.P.z - dot(ctx.Ng.xy, candidate.xy - ctx.P.xy) / ctx.Ng.z;
+    if (abs(ctx.plane_normal.z) > 1e-4f) {
+      candidate.z = ctx.P.z -
+                    dot(ctx.plane_normal.xy, candidate.xy - ctx.P.xy) / ctx.plane_normal.z;
     }
     return candidate;
   }
-  float denominator = dot(ctx.Ng, candidate);
+  float denominator = dot(ctx.plane_normal, candidate);
   if (abs(denominator) > 1e-8f) {
-    float scale = dot(ctx.Ng, ctx.P) / denominator;
+    float scale = dot(ctx.plane_normal, ctx.P) / denominator;
     if (scale > 0.0f && scale < 4.0f) {
       return candidate * scale;
     }
@@ -1152,16 +1153,17 @@ float4 shadow_node_pcss_bilinear([[resource_table]] ShadowRenderData &srd,
     float4 references;
     if (ctx.directional) {
       float4 sample_z = float4(face_P.z);
-      if (abs(ctx.Ng.z) > 1e-4f) {
-        sample_z = ctx.P.z -
-                   (ctx.Ng.x * (sample_x - ctx.P.x) + ctx.Ng.y * (sample_y - ctx.P.y)) / ctx.Ng.z;
+      if (abs(ctx.plane_normal.z) > 1e-4f) {
+        sample_z = ctx.P.z - (ctx.plane_normal.x * (sample_x - ctx.P.x) +
+                              ctx.plane_normal.y * (sample_y - ctx.P.y)) /
+                                 ctx.plane_normal.z;
       }
       references = -sample_z - orderedIntBitsToFloat(ctx.light.clip_near);
     }
     else {
-      float3 face_N = shadow_punctual_local_position_to_face_local(face, ctx.Ng);
+      float3 face_N = shadow_punctual_local_position_to_face_local(face, ctx.plane_normal);
       float4 denominator = face_N.x * sample_x + face_N.y * sample_y + face_N.z * face_P.z;
-      float4 scale = dot(ctx.Ng, ctx.P) / denominator;
+      float4 scale = dot(ctx.plane_normal, ctx.P) / denominator;
       float4 valid_scale = float4(greaterThan(abs(denominator), float4(1e-8f))) *
                            float4(greaterThan(scale, float4(0.0f))) *
                            float4(lessThan(scale, float4(4.0f)));
@@ -1277,7 +1279,10 @@ float4 shadow_node_pcss_core([[resource_table]] ShadowRenderData &srd,
   ctx.light = light;
   ctx.P = directional ? light_world_to_local_direction(light, P) :
                         light_world_to_local_point(light, P) - light.local().local.shadow_position;
-  ctx.Ng = light_world_to_local_direction(light, Ng);
+  /* Depth extrapolation is a virtual receiver surface, not a geometric ray offset. Face
+   * normals make its reference depths and blocker radius jump at every triangle edge on a
+   * smooth mesh. Use the continuous shading normal here, retaining Ng for the offsets above. */
+  ctx.plane_normal = light_world_to_local_direction(light, N);
   ctx.pixel_size = shadow_screen_pixel_size(
       uni.uniform_buf.shadow.film_pixel_radius, view.is_perspective(), view.z_distance(P));
   ctx.directional = directional;
