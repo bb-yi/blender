@@ -264,6 +264,10 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
             poll=object_shader_nodes_poll(context)
         )
         if eevee_shader_nodes_poll(context):
+            self.node_operator(
+                layout, "ShaderNodeStencilValue",
+                poll=object_or_npr_eevee_shader_nodes_poll(context),
+            )
             self.node_operator_with_outputs(
                 context, layout, "ShaderNodeRenderInfo",
                 ["Width", "Height"],

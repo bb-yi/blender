@@ -762,6 +762,8 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_deferred_tile_classify";
     case STENCIL_VALUE_VISUALIZE:
       return "eevee_stencil_value_visualize";
+    case STENCIL_SNAPSHOT_VISUALIZE:
+      return "eevee_stencil_snapshot_visualize";
     case HIZ_DEBUG:
       return "eevee_hiz_debug";
     case HIZ_UPDATE:
@@ -874,6 +876,8 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_ray_tile_compact";
     case RENDERPASS_CLEAR:
       return "eevee_renderpass_clear";
+    case STENCIL_SNAPSHOT:
+      return "eevee_stencil_snapshot";
     case RENDER_TEXTURE_EXTRACT_RGBA16F:
       return "eevee_render_texture_extract_rgba16f";
     case RENDER_TEXTURE_EXTRACT_RGBA32F:
@@ -1790,6 +1794,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   if (material_codegen_uses_render_info(codegen)) {
     add_create_info_and_reserve(info, slots, "eevee_sampling_data");
   }
+  if (GPU_material_stencil_value_used(gpumat) && probe_capture == MAT_PROBE_NONE &&
+      !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+  {
+    GPU_material_stencil_value_readable_set(gpumat);
+    info.define("MAT_STENCIL_VALUE");
+  }
   if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
     reserve_deferred_npr_pass_samplers(slots);
   }
@@ -1961,6 +1972,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
       add_create_info_and_reserve(info, slots, "eevee_LightprobePlaneRenderData");
     }
+  }
+
+  if (GPU_material_stencil_value_readable(gpumat)) {
+    /* Use the same allocator as material textures, after all engine resources are known. A high
+     * fixed binding can exceed the OpenGL texture-binding API limit even with few samplers. */
+    slots.reserve_slots(info);
+    info.sampler(slots.get_next_sampler(), ImageType::Uint2D, "stencil_value_tx");
   }
 
   for (auto &resource : info.batch_resources_) {
@@ -3098,6 +3116,14 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       &thunk,
       is_default_material ? nullptr : pass_replacement_cb,
       outline_shell);
+  /* A cached GPUPass bypasses create-info amendment. Resource demand belongs to every material
+   * instance/lookup, not just the first shader compilation. */
+  if (GPU_material_stencil_value_used(material_from_tree.material) &&
+      probe_capture == MAT_PROBE_NONE && !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+  {
+    GPU_material_stencil_value_readable_set(material_from_tree.material);
+  }
   store_node_tree_errors(material_from_tree);
   return material_from_tree.material;
 }

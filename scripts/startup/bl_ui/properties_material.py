@@ -279,6 +279,7 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
             draw_material_stencil_settings(panel, mat)
 
         col = layout.column()
+        col.enabled = mat.stencil_mode != 'MARKER_ONLY'
         col.prop(mat, "use_color_write", text="Color Write")
         col.prop(mat, "use_depth_write", text="Depth Write")
 
@@ -313,7 +314,17 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
 
 
 def draw_material_stencil_settings(layout, mat):
+    layout.prop(mat, "stencil_mode", text="Mode")
     layout.prop(mat, "use_stencil", text="Enabled")
+    if mat.stencil_mode != 'STANDARD':
+        layout.label(text="Marker writes no color or depth")
+        if any(op in {'INCREMENT_CLAMP', 'DECREMENT_CLAMP'} for op in (
+                mat.stencil_pass_op, mat.stencil_fail_op, mat.stencil_zfail_op)):
+            row = layout.row()
+            row.alert = True
+            row.label(text="Clamp operations are unsupported for early markers", icon='ERROR')
+    if mat.stencil_mode == 'MARKER_ONLY' and not mat.use_stencil:
+        layout.label(text="Marker disabled; surface stays hidden", icon='INFO')
     sub = layout.column(align=True)
     sub.active = mat.use_stencil
     sub.prop(mat, "stencil_order", text="Order")

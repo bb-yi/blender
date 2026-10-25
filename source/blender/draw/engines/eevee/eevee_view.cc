@@ -42,6 +42,24 @@ namespace blender::eevee
 
   void ShadingView::render_stencil_value_preview()
   {
+    if (inst_.v3d->shading.stencil_preview_source == V3D_STENCIL_PREVIEW_SNAPSHOT) {
+      RenderBuffers &buffers = inst_.render_buffers;
+      /* Depth is sampled only to distinguish untouched background. Keep it off the target
+       * framebuffer so OpenGL and Vulkan never read an attached texture. */
+      stencil_preview_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(buffers.combined_tx));
+      PassSimple pass("StencilSnapshotPreview");
+      pass.framebuffer_set(&stencil_preview_fb_);
+      pass.state_set(DRW_STATE_WRITE_COLOR);
+      pass.shader_set(inst_.shaders.static_shader_get(STENCIL_SNAPSHOT_VISUALIZE));
+      pass.bind_texture("stencil_value_tx", &buffers.stencil_value_tx);
+      pass.bind_texture("depth_tx", &buffers.depth_tx);
+      pass.push_constant("background_depth", inst_.film.depth.clear_value);
+      pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+      inst_.manager->submit(pass, render_view_);
+      GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+      return;
+    }
+
     GPU_framebuffer_bind(combined_fb_);
 
     PassSimple pass("StencilValuePreview");

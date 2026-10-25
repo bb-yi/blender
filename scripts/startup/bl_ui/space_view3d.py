@@ -6964,6 +6964,8 @@ class VIEW3D_PT_shading_render_pass(Panel):
 
         layout = self.layout
         layout.prop(shading, "render_pass", text="")
+        if shading.render_pass == 'STENCIL_VALUE':
+            layout.prop(shading, "stencil_preview_source", text="Source")
 
 
 class VIEW3D_PT_shading_compositor(Panel):

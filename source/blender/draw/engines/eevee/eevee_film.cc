@@ -379,6 +379,13 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     const View3DShading &shading = inst_.v3d->shading;
     int update = 0;
     update += assign_if_different(ui_render_pass_, eViewLayerEEVEEPassType(shading.render_pass));
+    if (ui_render_pass_ == EEVEE_RENDER_PASS_STENCIL_VALUE) {
+      if (assign_if_different(ui_stencil_preview_source_, int(shading.stencil_preview_source))) {
+        update++;
+        /* Do not blend labels from different stages, even during interactive reprojection. */
+        data_.use_history = false;
+      }
+    }
     update += assign_if_different(ui_aov_name_, std::string(shading.aov_name));
     if (update) {
       inst_.sampling.reset();

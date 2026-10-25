@@ -1554,6 +1554,26 @@ void RNA_def_material(BlenderRNA *brna)
       "Additionally helps rejecting probes inside the object to avoid light leaks.");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 
+  static const EnumPropertyItem stencil_mode_items[] = {
+      {MA_STENCIL_STANDARD, "STANDARD", 0, "Standard", "Use the existing surface stencil pass"},
+      {MA_STENCIL_EARLY_MARKER,
+       "EARLY_MARKER",
+       0,
+       "Early Marker",
+       "Write stencil before opaque shading, then render the surface normally"},
+      {MA_STENCIL_MARKER_ONLY,
+       "MARKER_ONLY",
+       0,
+       "Marker Only",
+       "Only draw the early stencil marker; disabling stencil keeps the surface hidden"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "stencil_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "stencil_mode");
+  RNA_def_property_enum_items(prop, stencil_mode_items);
+  RNA_def_property_ui_text(prop, "Stencil Mode", "When this material contributes user stencil");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
   prop = RNA_def_property(srna, "use_stencil", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "stencil_enabled", 1);
   RNA_def_property_ui_text(prop, "Stencil", "Enable Eevee material stencil test and write state");
@@ -1565,10 +1585,10 @@ void RNA_def_material(BlenderRNA *brna)
   RNA_def_property_ui_text(
       prop,
       "Stencil Order",
-      "Submission order for Eevee material stencil writers. Lower values are "
-      "submitted first within the stencil pass, so writers must use a smaller "
-      "order than any reader that relies on the value they write (the default "
-      "0 leaves the order unspecified between equal values)");
+      "Order within the selected stencil stage; lower values execute first. "
+      "Standard and early stages have fixed positions in the pipeline. "
+      "Stencil Value reads the completed snapshot and needs no order. "
+      "Equal orders do not define a winner for overlapping writes");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 
   prop = RNA_def_property(srna, "stencil_reference", PROP_INT, PROP_UNSIGNED);

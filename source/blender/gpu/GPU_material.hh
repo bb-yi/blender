@@ -287,6 +287,12 @@ gpu::UniformBuf *GPU_material_uniform_buffer_get(GPUMaterial *material);
 void GPU_material_uniform_buffer_create(GPUMaterial *material, ListBaseT<LinkData> *inputs);
 
 bool GPU_material_has_surface_output(GPUMaterial *mat);
+/* Separate metadata: eGPUMaterialFlag already occupies all 32 bits. */
+void GPU_material_stencil_value_used_set(GPUMaterial *mat);
+bool GPU_material_stencil_value_used(const GPUMaterial *mat);
+void GPU_material_stencil_value_readable_set(GPUMaterial *mat);
+bool GPU_material_stencil_value_readable(const GPUMaterial *mat);
+StringRef GPU_material_stencil_marker_error(const GPUMaterial *mat);
 bool GPU_material_has_volume_output(GPUMaterial *mat);
 bool GPU_material_has_displacement_output(GPUMaterial *mat);
 bool GPU_material_has_depth_offset_output(GPUMaterial *mat);

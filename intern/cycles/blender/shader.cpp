@@ -434,6 +434,11 @@ static ShaderNode *add_node(Scene *scene,
     value->set_value(get_node_output_value(b_node, "Value"));
     node = value;
   }
+  else if (b_node.is_type("ShaderNodeStencilValue"_ustr)) {
+    ValueNode *value = graph->create_node<ValueNode>();
+    value->set_value(0.0f);
+    node = value;
+  }
   else if (b_node.is_type("FunctionNodeInputBool"_ustr)) {
     ValueNode *value = graph->create_node<ValueNode>();
     const auto &storage = *static_cast<const blender::NodeInputBool *>(b_node.storage);

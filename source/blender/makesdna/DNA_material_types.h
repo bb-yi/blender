@@ -245,6 +245,13 @@ enum eMaterialZTestMode {
   MA_ZTEST_NEVER = 7,
 };
 
+/** #Material::stencil_mode */
+enum eMaterialStencilMode {
+  MA_STENCIL_STANDARD = 0,
+  MA_STENCIL_EARLY_MARKER = 1,
+  MA_STENCIL_MARKER_ONLY = 2,
+};
+
 /** #Material::stencil_test */
 enum eMaterialStencilTest {
   MA_STENCIL_ALWAYS = 0,
@@ -550,7 +557,8 @@ struct Material {
   char outline_shell_flag = 0;
   eMaterial_OutlineShellTransparencyMethod outline_shell_transparency_method =
       MA_OUTLINE_SHELL_DITHERED;
-  char _pad4[2] = {};
+  char stencil_mode = MA_STENCIL_STANDARD;
+  char _pad4[1] = {};
   float outline_shell_alpha_threshold = 0.5f;
 };
 

@@ -686,6 +686,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_npr.glsl
   shaders/material/gpu_shader_material_outline_control.glsl
   shaders/material/gpu_shader_material_render_info.glsl
+  shaders/material/gpu_shader_material_stencil_value.glsl
   shaders/material/gpu_shader_material_world_environment.glsl
   shaders/material/gpu_shader_material_light_probe_color.glsl
   shaders/material/gpu_shader_material_world_to_tangent.glsl

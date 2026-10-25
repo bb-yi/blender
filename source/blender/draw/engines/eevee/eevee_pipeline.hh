@@ -602,7 +602,8 @@ class DeferredLayer : DeferredLayerBase {
                        int2 extent,
                        RayTraceBuffer &rt_buffer,
                        gpu::Texture *radiance_behind_tx,
-                       bool &volume_compute_done);
+                       bool &volume_compute_done,
+                       bool early_stencil_stage = false);
 };
 
 class DeferredPipeline {
@@ -618,6 +619,14 @@ class DeferredPipeline {
 
   PassSimple debug_draw_ps_ = {"debug_gbuffer"};
 
+  PassSortable early_stencil_ps_ = {"Stencil.EarlyMarkers"};
+  PassSimple stencil_snapshot_ps_ = {"Stencil.Snapshot"};
+  Framebuffer early_stencil_fb_ = {"Stencil.EarlyMarkers"};
+  Framebuffer stencil_snapshot_fb_ = {"Stencil.Snapshot"};
+  gpu::Texture *stencil_source_tx_ = nullptr;
+  bool has_early_stencil_ = false;
+  bool has_stencil_readers_ = false;
+
   bool use_combined_lightprobe_eval = false;
 
  public:
@@ -626,6 +635,9 @@ class DeferredPipeline {
 
   void begin_sync();
   void end_sync();
+
+  PassMain::Sub *early_stencil_add(blender::Material *material, GPUMaterial *gpumat);
+  void bind_stencil_read_resources(PassMain::Sub &pass, GPUMaterial *gpumat);
 
   PassMain::Sub *prepass_add(blender::Material *blender_mat,
                              const SurfaceDrawState &state,
@@ -705,6 +717,7 @@ class DeferredPipeline {
 
  private:
   void debug_pass_sync();
+  void render_early_stencil(View &view, Framebuffer &prepass_fb);
   DeferredLayer &get_refraction_layer(short index);
 };
 

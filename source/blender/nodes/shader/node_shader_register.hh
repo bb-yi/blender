@@ -87,6 +87,7 @@ void register_node_type_sh_portal_in();
 void register_node_type_sh_portal_out();
 void register_node_type_sh_render_texture();
 void register_node_type_sh_render_info();
+void register_node_type_sh_stencil_value();
 void register_node_type_sh_world_environment();
 void register_node_type_sh_light_probe_color();
 void register_node_type_sh_world_to_tangent();

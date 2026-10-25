@@ -38,6 +38,7 @@
 #include "BKE_main.hh"
 #include "BKE_material.hh"
 #include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "RNA_access.hh"
 #include "RNA_path.hh"
@@ -120,6 +121,10 @@ struct GPUMaterial {
   /* Some flags about the nodetree & the needed resources. */
   eGPUMaterialFlag flag = GPU_MATFLAG_UPDATED;
   bool is_time_dependent = false;
+  bool uses_stencil_value = false;
+  bool reads_stencil_value = false;
+  std::string stencil_value_error;
+  std::string stencil_marker_error;
   /* The engine type this material is compiled for. */
   eGPUMaterialEngine engine;
   /* Identify shader variations (shadow, probe, world background...) */
@@ -267,6 +272,284 @@ static bool uniform_tracking_animation_safe(const Material &material,
                                             Span<double> state,
                                             const nodes::ShaderUniformTracking &tracking);
 
+/* Validate the expanded graph before closure/weight preprocessing. Arbitrary function outputs
+ * conservatively depend on every input; no GLSL semantic analysis is required. */
+static void gpu_material_validate_stencil_dependencies(GPUMaterial &mat, bNodeTree &tree)
+{
+  if (mat.engine != GPU_MAT_EEVEE || mat.source_material == nullptr) {
+    return;
+  }
+  bool needs_validation = mat.source_material->stencil_mode != MA_STENCIL_STANDARD;
+  for (const bNode &node : tree.nodes) {
+    needs_validation |= node.type_legacy == SH_NODE_STENCIL_VALUE;
+  }
+  if (!needs_validation) {
+    return;
+  }
+
+  /* Prove opacity before propagating dependencies: an initially unknown branch must not leave
+   * permanent coverage taint after a later iteration proves it opaque. Work on the authored
+   * closure graph, before Mix factors are inverted into internal BSDF Weight inputs. */
+  Set<const bNode *> opaque_closures;
+  auto constant_input_is = [](const bNode &node, StringRef name, float value) {
+    for (const bNodeSocket &input : node.inputs) {
+      if (StringRef(input.name) == name) {
+        return input.type == SOCK_FLOAT && !input.link && input.default_value &&
+               input.default_value_typed<bNodeSocketValueFloat>()->value == value;
+      }
+    }
+    return false;
+  };
+  bool opacity_changed = true;
+  while (opacity_changed) {
+    opacity_changed = false;
+    for (const bNode &node : tree.nodes) {
+      if (opaque_closures.contains(&node)) {
+        continue;
+      }
+      bool opaque = ELEM(node.type_legacy,
+                         SH_NODE_EMISSION,
+                         SH_NODE_BSDF_DIFFUSE,
+                         SH_NODE_BSDF_GLOSSY,
+                         SH_NODE_BSDF_REFRACTION,
+                         SH_NODE_BSDF_GLASS,
+                         SH_NODE_BSDF_TOON,
+                         SH_NODE_BSDF_TRANSLUCENT,
+                         SH_NODE_BSDF_SHEEN,
+                         SH_NODE_SUBSURFACE_SCATTERING,
+                         SH_NODE_BSDF_HAIR,
+                         SH_NODE_BSDF_HAIR_PRINCIPLED,
+                         SH_NODE_BSDF_METALLIC);
+      if (ELEM(node.type_legacy, SH_NODE_BSDF_PRINCIPLED, SH_NODE_PRINCIPLED_NPR)) {
+        opaque = constant_input_is(node, "Alpha", 1.0f);
+      }
+      else if (node.type_legacy == SH_NODE_EEVEE_SPECULAR) {
+        opaque = constant_input_is(node, "Transparency", 0.0f);
+      }
+      else if (ELEM(node.type_legacy,
+                    SH_NODE_MIX_SHADER,
+                    SH_NODE_ADD_SHADER,
+                    SH_NODE_NPR_SURFACE_DIFFUSION))
+      {
+        opaque = true;
+        for (const bNodeSocket &input : node.inputs) {
+          if (input.type == SOCK_SHADER) {
+            opaque &= input.link && input.link->fromsock->type == SOCK_SHADER &&
+                      opaque_closures.contains(input.link->fromnode);
+          }
+        }
+      }
+      for (const bNodeSocket &input : node.inputs) {
+        /* Authored weights are not the internal, unconnected defaults initialized later. */
+        if (StringRef(input.name) == "Weight" && input.link) {
+          opaque = false;
+        }
+      }
+      if (opaque) {
+        opaque_closures.add_new(&node);
+        opacity_changed = true;
+      }
+    }
+  }
+
+  enum { SNAPSHOT = 1, LATE_SURFACE = 2 };
+  Map<const bNode *, int> source_dependencies;
+  for (const bNode &node : tree.nodes) {
+    std::string source;
+    if (node.type_legacy == SH_NODE_GLSL_FUNCTION) {
+      std::string error;
+      if (!node_shader_glsl_function_source_get(node, source, error)) {
+        source_dependencies.add(&node, LATE_SURFACE);
+        continue;
+      }
+    }
+    else if (node.type_legacy == SH_NODE_SCRIPT_EXPRESSION && node.storage != nullptr) {
+      source = static_cast<const NodeShaderScriptExpression *>(node.storage)->expression;
+    }
+    int dependency = 0;
+    for (const char *symbol : {"node_stencil_value", "stencil_value_tx"}) {
+      if (source.find(symbol) != std::string::npos) {
+        dependency |= SNAPSHOT;
+      }
+    }
+    /* Keep early uniform light parameters usable; only evaluated lighting/screen resources
+     * are late. This deliberately conservatively includes helpers present in callback sources. */
+    for (const char *symbol : {"glsl_ambient_lighting",
+                               "glsl_light_shadow",
+                               "glsl_light_eval",
+                               "glsl_light_probe_color",
+                               "closure_to_rgba",
+                               "node_scene_color",
+                               "npr_refraction",
+                               "ambient_occlusion_eval",
+                               "node_ambient_occlusion",
+                               "hiz_tx",
+                               "gbuf_",
+                               "radiance_"})
+    {
+      if (source.find(symbol) != std::string::npos) {
+        dependency |= LATE_SURFACE;
+      }
+    }
+    if (dependency != 0) {
+      source_dependencies.add(&node, dependency);
+    }
+  }
+  struct Dependency {
+    int value = 0;
+    int coverage = 0;
+  };
+  Map<const bNodeSocket *, Dependency> dependencies;
+  auto input_dependency = [&](const bNodeSocket &input) {
+    return input.link ? dependencies.lookup_default(input.link->fromsock, Dependency{}) :
+                        Dependency{};
+  };
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (const bNode &node : tree.nodes) {
+      int value = source_dependencies.lookup_default(&node, 0);
+      int coverage = 0;
+      for (const bNodeSocket &input : node.inputs) {
+        const Dependency dep = input_dependency(input);
+        value |= dep.value;
+        if (input.type == SOCK_SHADER) {
+          coverage |= dep.coverage;
+        }
+        if (ELEM(StringRef(input.name), "Alpha", "Weight", "Transparency") ||
+            (node.type_legacy == SH_NODE_MIX_SHADER && input.type != SOCK_SHADER &&
+             !opaque_closures.contains(&node)) ||
+            node.type_legacy == SH_NODE_BSDF_TRANSPARENT)
+        {
+          coverage |= dep.value;
+        }
+      }
+      if (node.type_legacy == SH_NODE_STENCIL_VALUE) {
+        value |= SNAPSHOT;
+      }
+      if (ELEM(node.type_legacy,
+               SH_NODE_SCENE_COLOR,
+               SH_NODE_SCREENSPACE_INFO,
+               SH_NODE_SHADER_INFO,
+               SH_NODE_NPR_REFRACTION,
+               SH_NODE_RAYCAST,
+               SH_NODE_NPR_INPUT,
+               SH_NODE_INPUT_AOV,
+               SH_NODE_LIGHT_PROBE_COLOR,
+               SH_NODE_AMBIENT_OCCLUSION))
+      {
+        value |= LATE_SURFACE;
+      }
+      const bool known_closure = ELEM(node.type_legacy,
+                                      SH_NODE_BSDF_PRINCIPLED,
+                                      SH_NODE_PRINCIPLED_NPR,
+                                      SH_NODE_ADD_SHADER,
+                                      SH_NODE_MIX_SHADER,
+                                      SH_NODE_BSDF_TRANSPARENT,
+                                      SH_NODE_EMISSION,
+                                      SH_NODE_HOLDOUT,
+                                      SH_NODE_BSDF_DIFFUSE,
+                                      SH_NODE_BSDF_GLOSSY,
+                                      SH_NODE_BSDF_REFRACTION,
+                                      SH_NODE_BSDF_GLASS,
+                                      SH_NODE_BSDF_TOON,
+                                      SH_NODE_BSDF_TRANSLUCENT) ||
+                                 ELEM(node.type_legacy,
+                                      SH_NODE_BSDF_SHEEN,
+                                      SH_NODE_EEVEE_SPECULAR,
+                                      SH_NODE_SUBSURFACE_SCATTERING,
+                                      SH_NODE_NPR_SURFACE_DIFFUSION,
+                                      SH_NODE_BSDF_HAIR,
+                                      SH_NODE_BSDF_HAIR_PRINCIPLED,
+                                      SH_NODE_BSDF_METALLIC);
+      for (const bNodeSocket &output : node.outputs) {
+        Dependency &dep = dependencies.lookup_or_add_default(&output);
+        int output_value = value;
+        if (node.type_legacy == SH_NODE_SHADERTORGB) {
+          output_value = StringRef(output.name) == "Alpha" ? coverage : value | LATE_SURFACE;
+        }
+        if (node.type_legacy == SH_NODE_PRINCIPLED_NPR && StringRef(output.name) == "Alpha") {
+          output_value = coverage;
+        }
+        const int output_coverage = output.type == SOCK_SHADER ?
+                                        (known_closure ? coverage : value) :
+                                        0;
+        changed |= (dep.value | output_value) != dep.value ||
+                   (dep.coverage | output_coverage) != dep.coverage;
+        dep.value |= output_value;
+        dep.coverage |= output_coverage;
+      }
+    }
+  }
+
+  /* The inliner retains inactive outputs until preprocessing. Use the same active/engine
+   * selection as execution, including the output flags it establishes for the outline shell. */
+  const bNode *material_output = ntreeShaderOutputNode(&tree, SHD_OUTPUT_EEVEE);
+  int early_dependency = 0;
+  for (const bNode &node : tree.nodes) {
+    if (node.type_legacy == SH_NODE_OUTPUT_MATERIAL && &node != material_output) {
+      continue;
+    }
+    if (node.type_legacy == SH_NODE_OUTPUT_OUTLINE_SHELL &&
+        (!(node.flag & NODE_DO_OUTPUT) ||
+         mat.source_material->stencil_mode == MA_STENCIL_MARKER_ONLY))
+    {
+      continue;
+    }
+    if (ELEM(node.type_legacy, SH_NODE_OUTPUT_MATERIAL, SH_NODE_OUTPUT_OUTLINE_SHELL)) {
+      for (const bNodeSocket &input : node.inputs) {
+        const Dependency dep = input_dependency(input);
+        const StringRef name(input.name);
+        if (name == "Surface") {
+          early_dependency |= dep.coverage;
+        }
+        else if (ELEM(name,
+                      "Displacement",
+                      "Depth Offset",
+                      "Tessellation",
+                      "Alpha",
+                      "Offset",
+                      "Strength",
+                      "Vertex Offset"))
+        {
+          early_dependency |= dep.value;
+        }
+      }
+    }
+  }
+  if (early_dependency & SNAPSHOT) {
+    mat.stencil_value_error =
+        "Stencil Value cannot affect opacity, transparent shader mixing, displacement, "
+        "tessellation or depth offset: those must be evaluated before the stencil snapshot";
+    mat.stencil_marker_error = mat.stencil_value_error;
+  }
+  else if (early_dependency & LATE_SURFACE) {
+    mat.stencil_marker_error =
+        "Early stencil marker coverage and geometry cannot depend on scene color, refraction, "
+        "screen raycasts or lighting results";
+  }
+}
+
+static void gpu_material_stencil_errors_append(const GPUMaterial &mat,
+                                               const bNodeTree &source_tree,
+                                               GPUMaterialFromNodeTreeResult &result)
+{
+  const bool marker = mat.source_material &&
+                      mat.source_material->stencil_mode != MA_STENCIL_STANDARD;
+  const std::string &message = marker ? mat.stencil_marker_error : mat.stencil_value_error;
+  if (message.empty()) {
+    return;
+  }
+  for (const bNode &node : source_tree.nodes) {
+    if ((node.flag & NODE_DO_OUTPUT) &&
+        ELEM(node.type_legacy, SH_NODE_OUTPUT_MATERIAL, SH_NODE_OUTPUT_OUTLINE_SHELL))
+    {
+      result.errors.append({&node, message});
+    }
+  }
+}
+
 GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     Material *ma,
     bNodeTree *ntree,
@@ -289,6 +572,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
                              engine == GPU_MAT_EEVEE && compile_surface_graph &&
                              !compile_light_shader_graph && !outline_shell_root;
   bNodeTree *cached_surface = nullptr;
+  const GPUMaterial *cached_surface_owner = nullptr;
   const GPUMaterial *animation_owner = nullptr;
   for (LinkData &link : *gpumaterials) {
     GPUMaterial *mat = static_cast<GPUMaterial *>(link.data);
@@ -308,10 +592,13 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
         GPUMaterialProfileTimer profile(GPUMaterialProfileStage::LookupWait);
         GPU_pass_ensure_its_ready(mat->pass);
       }
-      return {mat};
+      GPUMaterialFromNodeTreeResult cached_result{mat};
+      gpu_material_stencil_errors_append(*mat, *ntree, cached_result);
+      return cached_result;
     }
     if (cache_surface && mat->surface_source_tree == ntree) {
       cached_surface = mat->surface_preprocessed_tree;
+      cached_surface_owner = mat;
     }
   }
 
@@ -354,6 +641,10 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   }
   if (cached_surface != nullptr) {
     localtree = cached_surface;
+    /* Preprocessing has inverted Mix factors into BSDF weights. Reuse the validation of the
+     * original closure graph, not the rewritten weights, which no longer express coverage. */
+    mat->stencil_value_error = cached_surface_owner->stencil_value_error;
+    mat->stencil_marker_error = cached_surface_owner->stencil_marker_error;
     owns_localtree = false;
     /* Begin/EndExecTree rebuild and discard the per-pass stacks. Preprocessing is the only
      * step shared here; GPU nodes, resources, flags and uniforms still belong to this mat. */
@@ -411,6 +702,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     }
 
     if (compile_surface_graph) {
+      gpu_material_validate_stencil_dependencies(*mat, *localtree);
       {
         GPUMaterialProfileTimer profile(GPUMaterialProfileStage::Preprocess);
         ntreeGPUMaterialNodesPreprocess(localtree, mat);
@@ -494,6 +786,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   link->data = mat;
   BLI_addtail(gpumaterials, link);
 
+  gpu_material_stencil_errors_append(*mat, *ntree, result);
   return result;
 }
 
@@ -977,6 +1270,9 @@ gpu::Shader *GPU_material_get_shader(GPUMaterial *material)
 
 GPUMaterialStatus GPU_material_status(GPUMaterial *mat)
 {
+  if (!mat->stencil_value_error.empty()) {
+    return GPU_MAT_FAILED;
+  }
   switch (GPU_pass_status(mat->pass)) {
     case GPU_PASS_SUCCESS:
       return GPU_MAT_SUCCESS;
@@ -989,6 +1285,9 @@ GPUMaterialStatus GPU_material_status(GPUMaterial *mat)
 
 std::string GPU_material_error_message(GPUMaterial *material)
 {
+  if (!material->stencil_value_error.empty()) {
+    return material->stencil_value_error;
+  }
   return GPU_pass_error_message(material->pass);
 }
 
@@ -1051,6 +1350,31 @@ void GPU_material_recompile_serial_clear(const Material *material)
 
   std::lock_guard lock(g_material_recompile_serials_mutex);
   g_material_recompile_serials.erase(material);
+}
+
+void GPU_material_stencil_value_used_set(GPUMaterial *mat)
+{
+  mat->uses_stencil_value = true;
+}
+
+bool GPU_material_stencil_value_used(const GPUMaterial *mat)
+{
+  return mat != nullptr && mat->uses_stencil_value;
+}
+
+void GPU_material_stencil_value_readable_set(GPUMaterial *mat)
+{
+  mat->reads_stencil_value = true;
+}
+
+bool GPU_material_stencil_value_readable(const GPUMaterial *mat)
+{
+  return mat != nullptr && mat->reads_stencil_value;
+}
+
+StringRef GPU_material_stencil_marker_error(const GPUMaterial *mat)
+{
+  return mat ? StringRef(mat->stencil_marker_error) : StringRef();
 }
 
 bool GPU_material_has_surface_output(GPUMaterial *mat)

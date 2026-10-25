@@ -87,6 +87,7 @@ class Film {
 
   /** Copy of v3d->shading properties used to detect viewport settings update. */
   eViewLayerEEVEEPassType ui_render_pass_ = eViewLayerEEVEEPassType(0);
+  int ui_stencil_preview_source_ = -1;
   std::string ui_aov_name_;
 
   /**

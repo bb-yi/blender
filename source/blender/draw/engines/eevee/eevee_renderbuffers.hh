@@ -31,6 +31,7 @@ class RenderBuffers {
   static constexpr gpu::TextureFormat prepass_normal_format = gpu::TextureFormat::UNORM_10_10_10_2;
 
   Texture depth_tx;
+  TextureFromPool stencil_value_tx;
   TextureFromPool combined_tx;
 
   // TextureFromPool mist_tx; /* Derived from depth_tx during accumulation. */

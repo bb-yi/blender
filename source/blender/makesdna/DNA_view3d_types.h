@@ -591,6 +591,11 @@ struct View3DCursor {
 #endif
 };
 
+enum eView3DStencilPreviewSource : char {
+  V3D_STENCIL_PREVIEW_SNAPSHOT = 0,
+  V3D_STENCIL_PREVIEW_FINAL = 1,
+};
+
 /** 3D Viewport Shading settings. */
 struct View3DShading {
   eDrawType type = OB_SOLID;
@@ -610,7 +615,7 @@ struct View3DShading {
   /** When to preview the compositor output in the viewport. */
   View3DShadingUseCompositor use_compositor = V3D_SHADING_USE_COMPOSITOR_DISABLED;
 
-  char _pad = {};
+  eView3DStencilPreviewSource stencil_preview_source = V3D_STENCIL_PREVIEW_SNAPSHOT;
 
   char studio_light[/*FILE_MAXFILE*/ 256] = "";
   char lookdev_light[/*FILE_MAXFILE*/ 256] = "";

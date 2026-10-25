@@ -93,24 +93,27 @@ static bool material_depth_offset_disables_shadow(const blender::Material &mater
 static void material_surface_stencil_state_set(PassMain::Sub &pass,
                                                const blender::Material *blender_mat,
                                                eMaterialPipeline pipeline_type,
-                                               eMaterialProbe probe_capture)
+                                               eMaterialProbe probe_capture,
+                                               const bool outline_shell)
 {
   if (probe_capture != MAT_PROBE_NONE) {
     return;
   }
 
-  const MaterialStencilState stencil = material_stencil_state_get(blender_mat);
+  const MaterialStencilState stencil = !outline_shell &&
+                                               blender_mat->stencil_mode == MA_STENCIL_STANDARD ?
+                                           material_stencil_state_get(blender_mat) :
+                                           MaterialStencilState{};
   if (pipeline_type == MAT_PIPE_DEFERRED) {
     uint8_t material_stencil_bits = 0u;
-    if (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) {
+    if (!outline_shell && (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW)) {
       material_stencil_bits |= uint8_t(DeferredLayerBase::StencilBits::THICKNESS_FROM_SHADOW);
     }
     /* Keep deferred shading gated by the same user stencil bits that the stencil prepass used.
      * The shared GBuffer pass cannot hold per-material user stencil state, so this is applied on
      * the concrete material sub-pass. */
-    if (material_stencil_bits == 0u && !stencil.enabled) {
-      return;
-    }
+    /* Siblings can share one ShaderKey and mutate stencil state. Explicitly restore the disabled
+     * user test too, or a previous Standard material can reject this surface/shell. */
     const uint8_t reference = material_stencil_bits | (stencil.enabled ? stencil.reference : 0u);
     const uint8_t compare_mask = stencil.enabled ? stencil.read_mask : EEVEE_STENCIL_INTERNAL_MASK;
 
@@ -123,6 +126,9 @@ static void material_surface_stencil_state_set(PassMain::Sub &pass,
 
   if (ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_DEFERRED_NPR)) {
     if (!stencil.enabled) {
+      pass.state_stencil_op(GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP);
+      pass.state_stencil(0u, 0u, 0u);
+      pass.state_stencil_test(GPU_STENCIL_NONE);
       return;
     }
     pass.state_stencil_op(GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP);
@@ -525,7 +531,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                                eMaterialProbe probe_capture,
                                                const bool register_pass,
                                                const SurfaceDrawState *state_override,
-                                               const bool outline_shell)
+                                               const bool outline_shell,
+                                               const bool stencil_marker)
 {
   if (blender_mat->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
     /* Filter materials are evaluated as a dedicated fullscreen post pass. */
@@ -592,7 +599,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     case GPU_MAT_QUEUED:
       queued_shaders_count++;
       shader_queued = true;
-      if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell) {
+      if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell || stencil_marker) {
         inst_.telemetry.material_sync_add(shader_queued,
                                           optimize_queued,
                                           false,
@@ -614,13 +621,18 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     case GPU_MAT_FAILED:
     default:
       material_failed = true;
+      if (!GPU_material_stencil_marker_error(matpass.gpumat).is_empty()) {
+        inst_.info_append("Material {}: {}",
+                          blender_mat->id.name + 2,
+                          GPU_material_stencil_marker_error(matpass.gpumat).data());
+      }
       {
         Set<const bNodeTree *> visited;
         std::string message = "Material shader compilation failed. Check the expression and connected nodes.\n";
         message += GPU_material_error_message(matpass.gpumat);
         store_expression_compile_errors(blender_mat->nodetree, message, visited);
       }
-      if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell) {
+      if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell || stencil_marker) {
         inst_.telemetry.material_sync_add(shader_queued,
                                           optimize_queued,
                                           false,
@@ -706,6 +718,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       matpass.sub_pass = &shader_sub->sub(GPU_material_get_name(matpass.gpumat));
       matpass.sub_pass->material_set(
           *inst_.manager, matpass.gpumat, true, inst_.anisotropic_filtering);
+      inst_.pipelines.deferred.bind_stencil_read_resources(*matpass.sub_pass, matpass.gpumat);
       if (pipeline_type == MAT_PIPE_FORWARD ||
           (pipeline_type == MAT_PIPE_DEFERRED &&
            (GPU_material_flag_get(matpass.gpumat, GPU_MATFLAG_SHADER_TO_RGBA) ||
@@ -730,10 +743,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       {
         matpass.sub_pass->push_constant("surface_cull_mode", int(state.cull_method));
       }
-      if (!state.is_outline_shell) {
-        material_surface_stencil_state_set(
-            *matpass.sub_pass, blender_mat, pipeline_type, probe_capture);
-      }
+      material_surface_stencil_state_set(
+          *matpass.sub_pass, blender_mat, pipeline_type, probe_capture, state.is_outline_shell);
       if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
         matpass.sub_pass->bind_resources(inst_.gbuffer);
         matpass.sub_pass->bind_resources(inst_.uniform_data);
@@ -776,6 +787,10 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                              inst_.scene->eevee.use_outline != 0);
     Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
       Material mat = {};
+      /* Native volumes cannot emit surface markers, but Marker Only must still hide the slot. */
+      if (blender_mat->stencil_mode == MA_STENCIL_MARKER_ONLY) {
+        return mat;
+      }
       mat.uses_outline_control = material_uses_outline_control(blender_mat);
       mat.volume_occupancy = material_pass_get(
           ob, blender_mat, MAT_PIPE_VOLUME_OCCUPANCY, MAT_GEOM_VOLUME);
@@ -836,6 +851,33 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
     }
     if (is_filter_material) {
       /* Filter-domain materials are scene fullscreen passes, not object surface materials. */
+      material_telemetry_features_update(mat);
+      return mat;
+    }
+    if (blender_mat->stencil_mode == MA_STENCIL_MARKER_ONLY) {
+      /* Keep only the geometry shader for attribute/instancing/tessellation setup. No normal,
+       * shadow, shell, volume or capture pass may be registered for this slot. */
+      if (!inst_.is_baking() && geometry_type_has_surface(geometry_type)) {
+        SurfaceDrawState marker_state = surface_draw_state_body(*blender_mat);
+        marker_state.color_write = false;
+        marker_state.depth_write = false;
+        MaterialPass marker = material_pass_get(ob,
+                                                blender_mat,
+                                                MAT_PIPE_PREPASS_DEFERRED,
+                                                geometry_type,
+                                                MAT_PROBE_NONE,
+                                                false,
+                                                &marker_state,
+                                                false,
+                                                true);
+        mat.shading.gpumat = marker.gpumat;
+        mat.has_surface = marker.gpumat != nullptr;
+        if (!hide_on_camera && blender_mat->stencil_enabled) {
+          mat.stencil = marker;
+          mat.stencil.sub_pass = inst_.pipelines.deferred.early_stencil_add(blender_mat,
+                                                                            marker.gpumat);
+        }
+      }
       material_telemetry_features_update(mat);
       return mat;
     }
@@ -998,7 +1040,8 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                   material_has_flag(mat.shading, GPU_MATFLAG_TRANSPARENT);
 
     MaterialStencilState stencil = material_stencil_state_get(blender_mat);
-    if (!hide_on_camera && mat.has_surface && stencil.enabled && !mat.is_alpha_blend_transparent &&
+    if (blender_mat->stencil_mode == MA_STENCIL_STANDARD && !hide_on_camera && mat.has_surface &&
+        stencil.enabled && !mat.is_alpha_blend_transparent &&
         mat.prepass.gpumat != nullptr)
     {
       const bool use_forward_stencil_pipeline = blender_mat->surface_render_method ==
@@ -1027,6 +1070,26 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
          * writes depth, prepass attachments, and user stencil in stencil_order before HiZ/shadows. */
         mat.prepass.sub_pass = nullptr;
       }
+    }
+
+    if (!inst_.is_baking() && !hide_on_camera && stencil.enabled &&
+        blender_mat->stencil_mode == MA_STENCIL_EARLY_MARKER &&
+        geometry_type_has_surface(geometry_type))
+    {
+      SurfaceDrawState marker_state = surface_draw_state_body(*blender_mat);
+      marker_state.color_write = false;
+      marker_state.depth_write = false;
+      mat.stencil = material_pass_get(ob,
+                                      blender_mat,
+                                      MAT_PIPE_PREPASS_DEFERRED,
+                                      geometry_type,
+                                      MAT_PROBE_NONE,
+                                      false,
+                                      &marker_state,
+                                      false,
+                                      true);
+      mat.stencil.sub_pass = inst_.pipelines.deferred.early_stencil_add(blender_mat,
+                                                                        mat.stencil.gpumat);
     }
 
     if (!inst_.is_baking() && !is_filter_material && geometry_type_is_mesh(geometry_type))

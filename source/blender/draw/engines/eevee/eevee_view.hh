@@ -54,6 +54,7 @@ class ShadingView {
   Framebuffer combined_fb_ = {"combined_fb_"};
   Framebuffer gbuffer_fb_ = {"gbuffer_fb_"};
   Framebuffer transparent_fb_ = {"transparent"};
+  Framebuffer stencil_preview_fb_ = {"stencil_preview"};
   TextureFromPool postfx_tx_;
   TextureFromPool outline_postfx_tx_;
 

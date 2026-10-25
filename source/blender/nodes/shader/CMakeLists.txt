@@ -96,6 +96,7 @@ set(SRC
   nodes/node_shader_portal_out.cc
   nodes/node_shader_render_texture.cc
   nodes/node_shader_render_info.cc
+  nodes/node_shader_stencil_value.cc
   nodes/node_shader_world_environment.cc
   nodes/node_shader_light_probe_color.cc
   nodes/node_shader_world_to_tangent.cc

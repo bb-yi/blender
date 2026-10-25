@@ -390,6 +390,11 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
     }
 
     GPUMaterial *gpu_material = material->shading.gpumat;
+    /* Marker Only has no surface shader while its marker is compiling/failed, or when baking.
+     * Curves and point clouds still reach this shared sync path in those states. */
+    if (gpu_material == nullptr) {
+      continue;
+    }
     blender::Material *bl_material = GPU_material_get_material(gpu_material);
 
     const bool has_displacement = GPU_material_has_displacement_output(gpu_material) &&

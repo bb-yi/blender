@@ -367,6 +367,7 @@ struct MaterialKey {
     options = (options << 3) | uint64_t(material_ztest_mode_get(*mat_));
     options = (options << 1) | uint64_t(material_color_write_get(*mat_));
     options = (options << 1) | uint64_t(material_depth_write_get(*mat_));
+    options = (options << 2) | uint64_t(mat_->stencil_mode);
     const uint64_t stencil_enabled = mat_->stencil_enabled != 0;
     stencil_order = stencil_enabled ? mat_->stencil_order : 0;
     stencil_options = uint32_t(stencil_enabled);
@@ -628,7 +629,8 @@ class MaterialModule {
                                  eMaterialProbe probe_capture = MAT_PROBE_NONE,
                                  bool register_pass = true,
                                  const SurfaceDrawState *state = nullptr,
-                                 bool outline_shell = false);
+                                 bool outline_shell = false,
+                                 bool stencil_marker = false);
 
   ShaderGroups default_materials_load(bool block_until_ready = false);
 };

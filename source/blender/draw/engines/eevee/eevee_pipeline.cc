@@ -276,9 +276,7 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
                                                  bool force_write_id,
                                                  bool clear_deferred_prepass_marker)
 {
-  BLI_assert_msg(draw_state.is_outline_shell ||
-                     GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) == false,
-                 "Transparent stencil writers are not supported in v1.");
+  BLI_assert(gpumat != nullptr);
 
   MaterialStencilState stencil = material_stencil_state_get(blender_mat);
   if (!stencil.enabled) {
@@ -366,6 +364,9 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
 static void material_stencil_test_only_state_set(PassMain::Sub &pass,
                                                  const blender::Material *blender_mat)
 {
+  if (blender_mat->stencil_mode != MA_STENCIL_STANDARD) {
+    return;
+  }
   const MaterialStencilState stencil = material_stencil_state_get(blender_mat);
   if (!stencil.enabled) {
     return;
@@ -1188,6 +1189,7 @@ void ForwardPipeline::transparent_add(const Object *ob,
       pass->bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
     }
     r_prepass_subpass = pass;
+    inst_.pipelines.deferred.bind_stencil_read_resources(*pass, gpumat);
   }
 
   /* Material */
@@ -1207,6 +1209,7 @@ void ForwardPipeline::transparent_add(const Object *ob,
       pass->bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
     }
     r_material_subpass = pass;
+    inst_.pipelines.deferred.bind_stencil_read_resources(*pass, gpumat);
     bind_npr_shadow_surface(*pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
   }
 }
@@ -2014,9 +2017,13 @@ gpu::Texture *DeferredLayer::render(View &main_view,
                                     int2 extent,
                                     RayTraceBuffer &rt_buffer,
                                     gpu::Texture *radiance_behind_tx,
-                                    bool &volume_compute_done)
+                                    bool &volume_compute_done,
+                                    const bool early_stencil_stage)
 {
-  if (this->is_empty()) {
+  const bool run_early_stencil = early_stencil_stage &&
+                                 (inst_.pipelines.deferred.has_early_stencil_ ||
+                                  inst_.pipelines.deferred.has_stencil_readers_);
+  if (this->is_empty() && !run_early_stencil) {
     return radiance_behind_tx;
   }
 
@@ -2052,6 +2059,13 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     if (!clear_aovs_ps_.is_empty() && !preserve_npr_aov_input) {
       inst_.manager->submit(clear_aovs_ps_);
     }
+  }
+
+  if (run_early_stencil) {
+    inst_.pipelines.deferred.render_early_stencil(render_view, prepass_fb);
+  }
+  if (this->is_empty()) {
+    return radiance_behind_tx;
   }
 
   if (closure_count_ == 0) {
@@ -2209,8 +2223,100 @@ gpu::Texture *DeferredLayer::render(View &main_view,
  * Closure data are written to intermediate buffer allowing screen space processing.
  * \{ */
 
+PassMain::Sub *DeferredPipeline::early_stencil_add(blender::Material *material,
+                                                   GPUMaterial *gpumat)
+{
+  const MaterialStencilState stencil = material_stencil_state_get(material);
+  if (!stencil.enabled || gpumat == nullptr || GPU_material_status(gpumat) != GPU_MAT_SUCCESS) {
+    return nullptr;
+  }
+  if (!GPU_material_stencil_marker_error(gpumat).is_empty()) {
+    inst_.info_append("Material {}: {}",
+                      material->id.name + 2,
+                      GPU_material_stencil_marker_error(gpumat).data());
+    return nullptr;
+  }
+  for (const int op :
+       {material->stencil_pass_op, material->stencil_fail_op, material->stencil_zfail_op})
+  {
+    if (ELEM(op, MA_STENCIL_OP_INCREMENT_CLAMP, MA_STENCIL_OP_DECREMENT_CLAMP)) {
+      inst_.info_append("Material {}: Clamp stencil operations are unsupported for early markers",
+                        material->id.name + 2);
+      return nullptr;
+    }
+  }
+
+  has_early_stencil_ = true;
+  PassMain::Sub &pass = early_stencil_ps_.sub(GPU_material_get_name(gpumat),
+                                              material_stencil_order(material));
+  DRWState state = DRW_STATE_WRITE_STENCIL | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                   inst_.film.depth.test_state | stencil.test_state |
+                   material_surface_cull_state(material_surface_cull_method(material));
+  state = material_ztest_state_replace(
+      state, material_ztest_mode(material), inst_.film.depth.test_state);
+  pass.state_set(state);
+  /* The marker framebuffer has no color attachments. Do not insert a subpass transition here:
+   * OpenGL transitions also set the depth write mask, bypassing the draw state cache. */
+  pass.state_stencil_op(stencil.fail, stencil.zfail, stencil.pass);
+  pass.state_stencil(stencil.write_mask, stencil.reference, stencil.read_mask);
+  pass.state_stencil_test(stencil.test);
+  pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+  pass.bind_resources(inst_.uniform_data);
+  pass.bind_resources(inst_.velocity);
+  pass.bind_resources(inst_.sampling);
+  pass.bind_resources(inst_.render_textures);
+  pass.bind_resources(inst_.lights);
+  pass.material_set(*inst_.manager, gpumat, true);
+  pass.push_constant("surface_cull_mode", int(material_surface_cull_method(material)));
+  return &pass;
+}
+
+void DeferredPipeline::bind_stencil_read_resources(PassMain::Sub &pass, GPUMaterial *gpumat)
+{
+  if (GPU_material_stencil_value_readable(gpumat)) {
+    has_stencil_readers_ = true;
+    pass.bind_texture("stencil_value_tx",
+                      &inst_.render_buffers.stencil_value_tx,
+                      GPUSamplerState::default_sampler());
+  }
+}
+
+void DeferredPipeline::render_early_stencil(View &view, Framebuffer &prepass_fb)
+{
+  if (has_early_stencil_) {
+    early_stencil_fb_.ensure(GPU_ATTACHMENT_TEXTURE(inst_.render_buffers.depth_tx));
+    early_stencil_fb_.bind();
+    inst_.manager->submit(early_stencil_ps_, view);
+  }
+  if (has_stencil_readers_) {
+    /* Allocate for an actual Surface view, including Render Texture captures inside an NR
+     * guide instance. The depth/velocity-only guide path never runs this stage. */
+    RenderBuffers &buffers = inst_.render_buffers;
+    buffers.stencil_value_tx.acquire_2d(buffers.extent_get(),
+                                       gpu::TextureFormat::UINT_8,
+                                       GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_ATTACHMENT);
+    buffers.stencil_value_tx.clear(uint4(0));
+    /* Acquire the view after the current render-buffer allocation, never across resizes. */
+    stencil_source_tx_ = inst_.render_buffers.depth_tx.stencil_view();
+    stencil_snapshot_fb_.ensure(GPU_ATTACHMENT_NONE,
+                                GPU_ATTACHMENT_TEXTURE(inst_.render_buffers.stencil_value_tx));
+    stencil_snapshot_fb_.bind();
+    GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+    inst_.manager->submit(stencil_snapshot_ps_);
+    GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+  }
+  prepass_fb.bind();
+}
+
 void DeferredPipeline::begin_sync()
 {
+  has_early_stencil_ = false;
+  /* A viewport preview is a reader too, even when no material contains a Stencil Value node. */
+  has_stencil_readers_ = inst_.is_viewport() && inst_.v3d != nullptr &&
+                         inst_.v3d->shading.render_pass == EEVEE_RENDER_PASS_STENCIL_VALUE &&
+                         inst_.v3d->shading.stencil_preview_source == V3D_STENCIL_PREVIEW_SNAPSHOT;
+  early_stencil_ps_.init();
+  stencil_snapshot_ps_.init();
   use_combined_lightprobe_eval = !inst_.raytracing.use_raytracing();
   opaque_layer_.begin_sync();
   refraction_layers_.clear();
@@ -2218,6 +2324,13 @@ void DeferredPipeline::begin_sync()
 
 void DeferredPipeline::end_sync()
 {
+  if (has_stencil_readers_) {
+    stencil_snapshot_ps_.state_set(DRW_STATE_WRITE_COLOR);
+    stencil_snapshot_ps_.shader_set(inst_.shaders.static_shader_get(STENCIL_SNAPSHOT));
+    stencil_snapshot_ps_.bind_texture(
+        "stencil_source_tx", &stencil_source_tx_, GPUSamplerState::default_sampler());
+    stencil_snapshot_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+  }
   opaque_layer_.end_sync(true, refraction_layers_.empty(), !refraction_layers_.empty());
 
   if (!refraction_layers_.empty()) {
@@ -2473,7 +2586,8 @@ void DeferredPipeline::render(View &main_view,
                                        extent,
                                        rt_buffer_opaque_layer,
                                        feedback_tx,
-                                       volume_compute_done);
+                                       volume_compute_done,
+                                       true);
   }
   GPU_debug_group_end();
 

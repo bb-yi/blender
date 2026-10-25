@@ -165608,3 +165608,21 @@ msgstr "原画幅"
 
 msgid "Fixed Pixels"
 msgstr "固定像素"
+
+msgid "Material Snapshot"
+msgstr "材质快照"
+
+msgid "Final Stencil"
+msgstr "最终模板"
+
+msgid "Stencil Source"
+msgstr "模板数据来源"
+
+msgid "Which stage's user stencil values to preview"
+msgstr "选择要预览哪个阶段的用户模板值"
+
+msgid "Show the current-frame user stencil values available to the Stencil Value shader node"
+msgstr "显示本帧 Stencil Value 着色器节点实际可读取的用户模板值"
+
+msgid "Show the native user stencil values after surface and Forward rendering"
+msgstr "显示表面着色及前向渲染结束后的原生用户模板值"

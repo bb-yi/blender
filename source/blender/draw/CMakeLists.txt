@@ -349,6 +349,7 @@ set(GLSL_SRC
   engines/eevee/shaders/infos/eevee_lightprobe_infos.hh
   engines/eevee/shaders/infos/eevee_native_postfx_output_infos.hh
   engines/eevee/shaders/infos/eevee_nodetree_infos.hh
+  engines/eevee/shaders/infos/eevee_stencil_infos.hh
   engines/eevee/shaders/infos/eevee_outline_infos.hh
   engines/eevee/shaders/infos/eevee_render_texture_infos.hh
   engines/eevee/shaders/infos/eevee_sampling_infos.hh
@@ -509,6 +510,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_reverse_z_lib.glsl
   engines/eevee/shaders/eevee_render_texture_extract_comp.glsl
   engines/eevee/shaders/eevee_renderpass_clear.bsl.hh
+  engines/eevee/shaders/eevee_stencil_snapshot_frag.glsl
   engines/eevee/shaders/eevee_renderpass.bsl.hh
   engines/eevee/shaders/eevee_renderpass_lib.glsl
   engines/eevee/shaders/eevee_sampling_lib.bsl.hh

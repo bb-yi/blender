@@ -5050,6 +5050,26 @@ static void rna_def_space_view3d_shading(BlenderRNA *brna)
   RNA_def_property_flag(prop, PROP_HIDDEN);
   RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
 
+  static const EnumPropertyItem stencil_preview_source_items[] = {
+      {V3D_STENCIL_PREVIEW_SNAPSHOT,
+       "SNAPSHOT",
+       0,
+       "Material Snapshot",
+       "Show the current-frame user stencil values available to the Stencil Value shader node"},
+      {V3D_STENCIL_PREVIEW_FINAL,
+       "FINAL",
+       0,
+       "Final Stencil",
+       "Show the native user stencil values after surface and Forward rendering"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "stencil_preview_source", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "stencil_preview_source");
+  RNA_def_property_enum_items(prop, stencil_preview_source_items);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Stencil Source", "Which stage's user stencil values to preview");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D | NS_VIEW3D_SHADING, nullptr);
+
   prop = RNA_def_property(srna, "use_compositor", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "use_compositor");
   RNA_def_property_enum_items(prop, use_compositor_items);
