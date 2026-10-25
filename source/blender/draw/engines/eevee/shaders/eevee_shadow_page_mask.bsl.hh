@@ -61,7 +61,9 @@ void mask([[resource_table]] PageMask &srt,
     /* Check if any page is allocated in this tilemap. Force base page if that's the case to avoid
      * artifact during shadow tracing. */
     if (local_tile_index == 0u) {
-      srt.force_base_page = uint(srt.node_soft_shadow != 0 && is_point_light(tilemap.light_type));
+      srt.force_base_page = uint(srt.node_soft_shadow != 0 &&
+                                (is_point_light(tilemap.light_type) ||
+                                 is_area_light(tilemap.light_type)));
     }
     barrier();
 
@@ -198,7 +200,8 @@ void mask([[resource_table]] PageMask &srt,
        * Only do this in for final render or if all the main levels were already rendered.
        * This last heuristic avoids very low quality shadows during viewport animation, transform
        * or jittered shadows. */
-      if ((srt.force_base_page != 0u) && ((srt.levels_rendered == 0u) || is_render)) {
+      if ((srt.force_base_page != 0u) &&
+          (srt.node_soft_shadow != 0 || (srt.levels_rendered == 0u) || is_render)) {
         int tile_offset = shadow_tile_offset_lds(int2(0), SHADOW_TILEMAP_LOD);
         /* Tag as modified so that we can amend it inside the `tiles_buf`. */
         srt.tiles_local[tile_offset] |= SHADOW_TILE_AMENDED;
@@ -241,7 +244,8 @@ void dilate([[resource_table]] PageDilate &srt,
              [[global_invocation_id]] const uint3 global_id)
 {
   ShadowTileMapData map = tilemaps.tilemaps_buf[global_id.z];
-  if (!is_sun_light(map.light_type) && !is_point_light(map.light_type)) { return; }
+  if (!is_sun_light(map.light_type) && !is_point_light(map.light_type) &&
+      !is_area_light(map.light_type)) { return; }
   int2 p = int2(global_id.xy);
   int max_lod = map.projection_type == SHADOW_PROJECTION_CUBEFACE ? SHADOW_TILEMAP_LOD : 0;
   for (int lod = 0; lod <= max_lod; lod++) {

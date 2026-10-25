@@ -99,6 +99,7 @@ struct GeomMeshTess {
 
   float3 lP = tess_phong(tv, tv.lP, tv.weights, settings.phong);
   interp.P = obj.point_object_to_world(lP);
+  interp.P_relative = to_float3x3(obj.model) * lP;
   interp.N = safe_normalize(obj.normal_object_to_world(tess_normal_interpolate(tv, tv.weights)));
   /* Used by #MAT_DISPLACEMENT_GEOM_NORMAL to evaluate the displacement in the fragment shader. */
   auto &disp_interp = interface_get(eevee_geom_disp_iface_info, disp_interp);
@@ -112,7 +113,9 @@ struct GeomMeshTess {
   tess_attr_interp(tv.indices, tv.weights);
   attrib_load(MeshVertex{lP, to_float3x3(obj.model_inverse), lP_orco});
 
-  interp.P += nodetree_displacement();
+  float3 displacement = nodetree_displacement();
+  interp.P += displacement;
+  interp.P_relative += displacement;
 
   if (pipe.use_velocity) [[static_branch]] {
     /* clang-format off */ /* Multi-line define messes up line index. */

@@ -120,7 +120,7 @@ bool shader_info_shadow_is_soft_filtered(float shadow_mode)
 bool shader_info_shadow_pcss_supported(LightData light)
 {
   return is_sun_light(light.type) || light.type == LIGHT_OMNI_SPHERE ||
-         light.type == LIGHT_OMNI_DISK;
+         light.type == LIGHT_OMNI_DISK || is_area_light(light.type);
 }
 
 int shader_info_shadow_stable_ray_count(float stable_shadow_samples)

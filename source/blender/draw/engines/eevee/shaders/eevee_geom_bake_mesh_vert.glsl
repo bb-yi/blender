@@ -23,6 +23,7 @@ void main()
   drw_ResourceID_iface.resource_id = resource_id_raw;
 
   interp.P = drw_point_object_to_world(pos);
+  interp.P_relative = to_float3x3(drw_modelmat()) * pos;
   interp.N = normalize(drw_normal_object_to_world(nor));
   bake_interp.Ng = normalize(drw_normal_object_to_world(geom_nor));
   bake_interp.primitive_id = primitive_id;
@@ -31,7 +32,9 @@ void main()
   attrib_load(MeshVertex{pos, to_float3x3(drw_modelinv()), drw_object_orco(pos)});
 
   disp_interp.P_base = interp.P;
-  interp.P += nodetree_displacement();
+  float3 displacement = nodetree_displacement();
+  interp.P += displacement;
+  interp.P_relative += displacement;
 
   gl_Position = float4(bake_uv * 2.0f - 1.0f, 0.0f, 1.0f);
 }

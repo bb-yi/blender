@@ -518,6 +518,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_shadow.bsl.hh
   engines/eevee/shaders/eevee_shadow_filter_frag.glsl
   engines/eevee/shaders/eevee_shadow_tag_usage_bounds.bsl.hh
+  engines/eevee/shaders/eevee_shadow_node_cache.bsl.hh
   engines/eevee/shaders/eevee_shadow_tracing.bsl.hh
   engines/eevee/shaders/eevee_shadow_page_allocate.bsl.hh
   engines/eevee/shaders/eevee_shadow_page_clear.bsl.hh

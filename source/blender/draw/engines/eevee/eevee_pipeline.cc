@@ -1348,6 +1348,7 @@ void ForwardPipeline::render(View &view,
                                            TelemetryStageId::MainForwardShadowSetup);
     inst_.shadows.set_view(view, extent, TelemetryShadowContext::MainView);
     inst_.shadows.render(view, extent);
+    inst_.shadows.invalidate_node_cache();
   }
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
@@ -1941,6 +1942,9 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat,
   PassMain::Sub *pass = get_gbuffer_subpass(draw_state, gpumat, uses_hybrid_pipeline);
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   bind_npr_shadow_surface(*material_pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
+  if (GPU_material_has_node_shadow_cache(gpumat)) {
+    inst_.shadows.bind_node_cache(*material_pass, gpumat);
+  }
   if (!draw_state.is_outline_shell && inst_.scene->eevee.use_outline &&
       GPU_material_has_outline_output(gpumat))
   {
@@ -2002,6 +2006,9 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   if (inst_.scene->eevee.use_outline && GPU_material_has_outline_output(gpumat)) {
     material_pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
     material_pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
+  }
+  if (GPU_material_has_node_shadow_cache(gpumat)) {
+    inst_.shadows.bind_node_cache(*material_pass, gpumat);
   }
   material_pass->push_constant("use_split_radiance", &use_split_radiance_);
   material_pass->push_constant("use_radiance_input_for_combined", false);
@@ -2098,6 +2105,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
                                            TelemetryStageId::MainDeferredShadowSetup);
     inst_.shadows.set_view(render_view, extent, TelemetryShadowContext::MainView);
     inst_.shadows.render(render_view, extent);
+    inst_.shadows.render_node_cache(render_view, extent);
   }
   inst_.lights.eval_uniform_light_shaders(render_view);
   inst_.lights.eval_front_light_shaders(render_view, extent);
@@ -2406,6 +2414,14 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
        pipeline_type == MAT_PIPE_FORWARD))
   {
     inst_.shadows.tag_node_soft_shadow_needed();
+    if (GPU_material_has_node_shadow_cache(gpumat) && probe_capture == MAT_PROBE_NONE &&
+        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR) && ob->type == OB_MESH &&
+        !GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) &&
+        !GPU_material_has_depth_offset_output(gpumat) && draw_state.depth_write &&
+        draw_state.color_write && !draw_state.is_outline_shell)
+    {
+      inst_.shadows.tag_node_cache_needed(GPU_material_node_shadow_cache_quality(gpumat));
+    }
   }
   if (GPU_material_has_shader_info_shadow_classification(gpumat) &&
       (pipeline_type == MAT_PIPE_DEFERRED || pipeline_type == MAT_PIPE_DEFERRED_NPR ||
@@ -2948,6 +2964,9 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
       surface_draw_state_body(*blender_mat), gpumat, uses_hybrid_pipeline);
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   bind_npr_shadow_surface(*material_pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
+  if (GPU_material_has_node_shadow_cache(gpumat)) {
+    inst_.shadows.bind_node_cache(*material_pass, gpumat);
+  }
   if (needs_front_light_shader) {
     material_pass->bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(*material_pass);
@@ -3157,6 +3176,9 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
       surface_draw_state_body(*blender_mat), gpumat, uses_hybrid_pipeline);
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   bind_npr_shadow_surface(*material_pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
+  if (GPU_material_has_node_shadow_cache(gpumat)) {
+    inst_.shadows.bind_node_cache(*material_pass, gpumat);
+  }
   if (needs_front_light_shader) {
     material_pass->bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(*material_pass);

@@ -449,6 +449,16 @@ float shadow_terminator_offset(float3 N,
 
 #define SHADOW_NODE_STABLE_MAX_RAY 32
 
+/** Keep numerical ray offsets smaller than nearby features at fine shadow resolutions. */
+float3 shadow_ray_offset(float3 P, float3 Ng, float texel_radius)
+{
+  /* The generic ray offset advances by up to 256 ULP. At tiny scene scales that can move the
+   * receiver through an entire blocker. Keep its established offset for ordinary scenes, but
+   * bound each component by the shadow footprint and a world-coordinate error allowance. */
+  float3 offset_bound = max(float3(4.0f * texel_radius), abs(P) * (4.0f * FLT_EPSILON));
+  return P + clamp(offset_ray(P, Ng) - P, -offset_bound, offset_bound);
+}
+
 float2 shadow_stable_hammersley_2d(int sample_index, int sample_count, float2 rotation)
 {
   return fract(hammersley_2d(sample_index, sample_count) + rotation);
@@ -499,7 +509,7 @@ float shadow_eval_stable([[resource_table]] ShadowRenderData &srd,
               L;
   }
 
-  P_base = offset_ray(P_base, N_bias);
+  P_base = shadow_ray_offset(P_base, N_bias, texel_radius);
   P_base += N_bias * shadow_normal_offset(Ng, L, texel_radius);
   P_base += N * shadow_terminator_offset(
                     N, L, terminator_normal_offset, terminator_geometry_offset);
@@ -591,7 +601,7 @@ float shadow_eval_seeded([[resource_table]] ShadowRenderData &srd,
          L;
   }
   /* Avoid self intersection with respect to numerical precision. */
-  P = offset_ray(P, N_bias);
+  P = shadow_ray_offset(P, N_bias, texel_radius);
   /* Stochastic Percentage Closer Filtering. */
   P += (light.filter_radius * texel_radius) * shadow_pcf_offset(L, Ng, random_pcf_2d);
   /* Add normal bias to avoid aliasing artifacts. */
@@ -749,7 +759,7 @@ float3 shadow_caster_classification_seeded_ex([[resource_table]] ShadowRenderDat
     P += abs(is_directional ? thickness.value() :
                              min(thickness.value(), distance_to_shadow - 0.01f)) * L;
   }
-  P = offset_ray(P, N_bias);
+  P = shadow_ray_offset(P, N_bias, texel_radius);
   P += (light.filter_radius * texel_radius) * shadow_pcf_offset(L, Ng, random_pcf_2d);
   P += N_bias * shadow_normal_offset(Ng, L, texel_radius);
   P += N * shadow_terminator_offset(N, L, terminator_normal_offset, terminator_geometry_offset);
@@ -994,9 +1004,8 @@ float shadow_eval_stable(LightData light,
 
 /** \} */
 
-
-#ifdef MAT_NODE_SOFT_SHADOW
-/* Stable, classified single-frame PCSS for directional and point lights. No frame seed,
+#if defined(MAT_NODE_SOFT_SHADOW) || defined(CREATE_INFO_eevee_shadow_node_cache_Surface)
+/* Stable, classified single-frame PCSS for directional, point and area lights. No frame seed,
  * screen-space neighborhood reconstruction, or stochastic debanding is used here. */
 struct ShadowNodePCSS {
   LightData light;
@@ -1061,7 +1070,7 @@ float4 shadow_node_pcss_compare([[resource_table]] ShadowRenderData &srd,
     return float4(0.0f, 0.0f, 0.0f, 1.0f);
   }
   return caster == ctx.receiver_id ? float4(0.0f, 1.0f, 0.0f, 0.0f) :
-                                    float4(0.0f, 0.0f, 1.0f, 0.0f);
+                                     float4(0.0f, 0.0f, 1.0f, 0.0f);
 }
 
 float4 shadow_node_pcss_bilinear([[resource_table]] ShadowRenderData &srd,
@@ -1083,7 +1092,8 @@ float4 shadow_node_pcss_bilinear([[resource_table]] ShadowRenderData &srd,
     LightSunData sun = ctx.light.sun();
     int level = shadow_directional_level(ctx.light, lP - ctx.light.position(), ctx.pixel_size);
     int physical_level = ctx.light.type == LIGHT_SUN_ORTHO ? sun.clipmap_lod_min : level;
-    int2 offset = shadow_decompress_grid_offset(ctx.light.type, sun.clipmap_base_offset_neg,
+    int2 offset = shadow_decompress_grid_offset(ctx.light.type,
+                                                sun.clipmap_base_offset_neg,
                                                 sun.clipmap_base_offset_pos,
                                                 level - sun.clipmap_lod_min);
     uv = (lP.xy - sun.clipmap_origin) * exp2(float(-physical_level)) -
@@ -1097,7 +1107,7 @@ float4 shadow_node_pcss_bilinear([[resource_table]] ShadowRenderData &srd,
     texel_world = 2.0f * abs(face_P.z) * stride / float(SHADOW_MAP_MAX_RES);
   }
   float2 fraction = fract(uv * (float(SHADOW_MAP_MAX_RES) / stride) - 0.5f);
-#if !defined(GPU_METAL)
+#  if !defined(GPU_METAL)
   /* Metal's emulated atomic samplers expose texelFetch only. Keep the reference path there. */
   /* Fetch four comparison depths together only when all corners provably use this
    * virtual page, physical LOD and light projection. Boundaries use the reference path. */
@@ -1143,8 +1153,8 @@ float4 shadow_node_pcss_bilinear([[resource_table]] ShadowRenderData &srd,
     if (ctx.directional) {
       float4 sample_z = float4(face_P.z);
       if (abs(ctx.Ng.z) > 1e-4f) {
-        sample_z = ctx.P.z - (ctx.Ng.x * (sample_x - ctx.P.x) +
-                              ctx.Ng.y * (sample_y - ctx.P.y)) / ctx.Ng.z;
+        sample_z = ctx.P.z -
+                   (ctx.Ng.x * (sample_x - ctx.P.x) + ctx.Ng.y * (sample_y - ctx.P.y)) / ctx.Ng.z;
       }
       references = -sample_z - orderedIntBitsToFloat(ctx.light.clip_near);
     }
@@ -1160,15 +1170,17 @@ float4 shadow_node_pcss_bilinear([[resource_table]] ShadowRenderData &srd,
     }
     float4 occluded = float4(lessThan(depths, references));
     float4 known = ctx.classify ? float4(notEqual(casters, uint4(SHADOW_CASTER_UNKNOWN_ID))) :
-                                 float4(0.0f);
+                                  float4(0.0f);
     float4 self = float4(equal(casters & 0xFFFFu, uint4(ctx.receiver_id))) * known * occluded;
     float4 cast_occlusion = known * occluded - self;
     float4 weights = float4(1.0f - fraction.x, fraction.x, 1.0f - fraction.x, fraction.x) *
                      float4(1.0f - fraction.y, 1.0f - fraction.y, fraction.y, fraction.y);
-    return float4(dot(1.0f - occluded, weights), dot(self, weights), dot(cast_occlusion, weights),
-                   dot(occluded * (1.0f - known), weights));
+    return float4(dot(1.0f - occluded, weights),
+                  dot(self, weights),
+                  dot(cast_occlusion, weights),
+                  dot(occluded * (1.0f - known), weights));
   }
-#endif
+#  endif
   float4 sum = float4(0.0f);
   float weight_sum = 0.0f;
   for (int y = 0; y < 2; y++) {
@@ -1191,17 +1203,64 @@ float4 shadow_node_pcss_bilinear([[resource_table]] ShadowRenderData &srd,
   return weight_sum > 1e-6f ? sum / weight_sum : float4(-1.0f);
 }
 
-float4 shadow_node_pcss([[resource_table]] ShadowRenderData &srd,
-                         LightData light,
-                         bool directional,
-                         float3 P,
-                         float3 Ng,
-                         float3 N,
-                         float normal_offset,
-                         float geometry_offset,
-                         int quality,
-                         bool classify,
-                         uint receiver_id)
+/* Compare a blocker at the center of its actual stored texel. Comparing the depth of a
+ * neighboring texel with the unsnapped receiver can mistake a sloped receiver for a blocker. */
+float2 shadow_node_pcss_blocker([[resource_table]] ShadowRenderData &srd,
+                                ShadowNodePCSS ctx,
+                                float3 lP)
+{
+  ShadowCoordinates coord = shadow_node_pcss_coordinates(ctx, lP);
+  ShadowSamplingTile tile = shadow_tile_load(
+      srd.shadow_tilemaps_tx, coord.tilemap_tile, coord.tilemap_index);
+  if (!tile.is_valid) {
+    return float2(-1.0f);
+  }
+  float stride = exp2(float(tile.lod));
+  float2 uv;
+  float3 face_P = lP;
+  float texel_world;
+  int face = 0;
+  if (ctx.directional) {
+    LightSunData sun = ctx.light.sun();
+    int level = shadow_directional_level(ctx.light, lP - ctx.light.position(), ctx.pixel_size);
+    int physical_level = ctx.light.type == LIGHT_SUN_ORTHO ? sun.clipmap_lod_min : level;
+    int2 offset = shadow_decompress_grid_offset(ctx.light.type,
+                                                sun.clipmap_base_offset_neg,
+                                                sun.clipmap_base_offset_pos,
+                                                level - sun.clipmap_lod_min);
+    uv = (lP.xy - sun.clipmap_origin) * exp2(float(-physical_level)) -
+         float2(offset) / float(SHADOW_TILEMAP_RES) + 0.5f;
+    texel_world = exp2(float(physical_level)) * stride / float(SHADOW_MAP_MAX_RES);
+  }
+  else {
+    face = shadow_punctual_face_index_get(lP);
+    face_P = shadow_punctual_local_position_to_face_local(face, lP);
+    uv = face_P.xy / max(abs(face_P.z), 1e-8f) * 0.5f + 0.5f;
+    texel_world = 2.0f * abs(face_P.z) * stride / float(SHADOW_MAP_MAX_RES);
+  }
+  float2 fraction = fract(uv * (float(SHADOW_MAP_MAX_RES) / stride));
+  face_P.xy += (0.5f - fraction) * texel_world;
+  float3 sample_P = ctx.directional ? face_P :
+                                      shadow_punctual_face_local_to_local_position(face, face_P);
+  sample_P = shadow_node_pcss_plane_point(ctx, sample_P);
+  return float2(srd.read_depth(coord), shadow_node_pcss_reference(ctx, sample_P));
+}
+
+float4 shadow_node_pcss_core([[resource_table]] ShadowRenderData &srd,
+                             LightData light,
+                             bool directional,
+                             float3 P,
+                             float3 Ng,
+                             float3 N,
+                             float normal_offset,
+                             float geometry_offset,
+                             int quality,
+                             bool classify,
+                             uint receiver_id,
+                             float radius_override,
+                             bool estimate_only,
+                             float2 filter_rotation,
+                             int filter_multiplier)
 {
   if (light.tilemap_index == LIGHT_NO_SHADOW) {
     return float4(1.0f, 0.0f, 0.0f, 0.0f);
@@ -1211,16 +1270,16 @@ float4 shadow_node_pcss([[resource_table]] ShadowRenderData &srd,
   const ViewMatrices view = views.get(0);
   float texel_radius = shadow_texel_radius_at_position(uni, views, light, directional, P);
   float3 L = directional ? light.z_axis() :
-                            normalize(light.position() + light.local().local.shadow_position - P);
-  P = offset_ray(P, Ng) + Ng * shadow_normal_offset(Ng, L, texel_radius) +
+                           normalize(light.position() + light.local().local.shadow_position - P);
+  P = shadow_ray_offset(P, Ng, texel_radius) + Ng * shadow_normal_offset(Ng, L, texel_radius) +
       N * shadow_terminator_offset(N, L, normal_offset, geometry_offset);
   ShadowNodePCSS ctx;
   ctx.light = light;
   ctx.P = directional ? light_world_to_local_direction(light, P) :
                         light_world_to_local_point(light, P) - light.local().local.shadow_position;
   ctx.Ng = light_world_to_local_direction(light, Ng);
-  ctx.pixel_size = shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
-                                            view.is_perspective(), view.z_distance(P));
+  ctx.pixel_size = shadow_screen_pixel_size(
+      uni.uniform_buf.shadow.film_pixel_radius, view.is_perspective(), view.z_distance(P));
   ctx.directional = directional;
   ctx.classify = classify && bool(uni.uniform_buf.shadow.use_caster_atlas);
   ctx.receiver_id = receiver_id & 0xFFFFu;
@@ -1229,76 +1288,125 @@ float4 shadow_node_pcss([[resource_table]] ShadowRenderData &srd,
     return center;
   }
   float source_radius = directional ? tan(light.sun().shadow_angle) :
-                                       light.local().local.shadow_radius;
+                                      light.local().local.shadow_radius;
+  bool area_light = !directional && is_area_light(light.type);
+  float2 area_size = float2(0.0f);
+  if (area_light) {
+    area_size = light.area().size * light.area().shadow_scale;
+    source_radius = reduce_max(area_size);
+  }
   if (source_radius <= 1e-8f) {
+    return estimate_only ? float4(0.0f, 1.0f, 0.0f, 0.0f) : center;
+  }
+  /* A cached zero means the blocker search found none, matching the direct path's early return. */
+  if (!estimate_only && radius_override == 0.0f) {
     return center;
   }
   float receiver_depth = shadow_node_pcss_reference(ctx, ctx.P);
-  ShadowCoordinates center_coord = shadow_node_pcss_coordinates(ctx, ctx.P);
-  ShadowSamplingTile center_tile = shadow_tile_load(
-      srd.shadow_tilemaps_tx, center_coord.tilemap_tile, center_coord.tilemap_index);
-  float page_width;
+  float supported_radius = max(receiver_depth, source_radius);
   if (directional) {
-    int level = light.type == LIGHT_SUN_ORTHO ? light.sun().clipmap_lod_min :
-        shadow_directional_level(light, ctx.P - light.position(), ctx.pixel_size);
-    page_width = exp2(float(level + int(center_tile.lod))) / float(SHADOW_TILEMAP_RES);
+    ShadowCoordinates center_coord = shadow_node_pcss_coordinates(ctx, ctx.P);
+    ShadowSamplingTile center_tile = shadow_tile_load(
+        srd.shadow_tilemaps_tx, center_coord.tilemap_tile, center_coord.tilemap_index);
+    int level = light.type == LIGHT_SUN_ORTHO ?
+                    light.sun().clipmap_lod_min :
+                    shadow_directional_level(light, ctx.P - light.position(), ctx.pixel_size);
+    float page_width = exp2(float(level + int(center_tile.lod))) / float(SHADOW_TILEMAP_RES);
+    /* Directional maps reserve one page of padding around the visible footprint. */
+    supported_radius = max(page_width * 0.75f, texel_radius);
   }
-  else {
-    int face = shadow_punctual_face_index_get(ctx.P);
-    float3 face_P = shadow_punctual_local_position_to_face_local(face, ctx.P);
-    page_width = 2.0f * abs(face_P.z) * exp2(float(center_tile.lod)) /
-                 float(SHADOW_TILEMAP_RES);
-  }
-  /* One page of padding is requested before allocation, not once per filter tap. Keep
-   * the bounded kernel inside that guaranteed footprint, including bilinear corners. */
-  float supported_radius = max(page_width * 0.75f, texel_radius);
+  /* Local lights have a complete coarse cubemap behind the visible fine pages. A filter's
+   * physical extent must not change when the center crosses a fine/coarse page boundary. */
   float search_radius = directional ? source_radius * max(receiver_depth, 0.0f) :
-      min(source_radius * max(receiver_depth, 0.0f) /
-          max(intBitsToFloat(light.clip_near), 1e-4f), receiver_depth * 0.25f);
+                                      min(source_radius * max(receiver_depth, 0.0f) /
+                                              max(intBitsToFloat(light.clip_near), 1e-4f),
+                                          receiver_depth * 0.25f);
   search_radius = min(search_radius, supported_radius);
   float3 right = float3(1.0f, 0.0f, 0.0f), up = float3(0.0f, 1.0f, 0.0f);
-  if (!directional) {
+  if (area_light) {
+    right = float3(area_size.x / source_radius, 0.0f, 0.0f);
+    up = float3(0.0f, area_size.y / source_radius, 0.0f);
+  }
+  else if (!directional) {
     make_orthonormal_basis(normalize(ctx.P), right, up);
   }
-  float blocker_sum = 0.0f;
+  float blocker_radius_sum = 0.0f;
+  float blocker_weight_sum = 0.0f;
   int blockers = 0;
   int valid_search = 0;
   int search_count = clamp(quality * 2, 8, 32);
-  for (int i = 0; i < 32; i++) {
-    if (i >= search_count) { break; }
-    /* Cover both contact-scale blockers and the outer search footprint. A uniform
-     * wide disk can miss a small ring entirely between its center and first radius. */
-    float2 search_sample = hammersley_2d(i, search_count);
-    search_sample.x = search_sample.x * search_sample.x * search_sample.x;
-    float2 disk = sample_disk(search_sample);
-    float3 sample_P = shadow_node_pcss_plane_point(
-        ctx, ctx.P + (right * disk.x + up * disk.y) * search_radius);
-    float depth = srd.read_depth(shadow_node_pcss_coordinates(ctx, sample_P));
-    if (depth < 0.0f) { continue; }
-    valid_search++;
-    if (depth < shadow_node_pcss_reference(ctx, sample_P)) {
-      blocker_sum += depth;
-      blockers++;
+  float filter_radius = radius_override;
+  if (radius_override < 0.0f) {
+    for (int i = 0; i < 32; i++) {
+      if (i >= search_count) {
+        break;
+      }
+      /* Cover both contact-scale blockers and the outer search footprint. A uniform
+       * wide disk can miss a small ring entirely between its center and first radius. */
+      float2 search_sample = hammersley_2d(i, search_count);
+      search_sample.x = search_sample.x * search_sample.x * search_sample.x;
+      float2 disk = sample_disk(search_sample);
+      float3 sample_P = shadow_node_pcss_plane_point(
+          ctx, ctx.P + (right * disk.x + up * disk.y) * search_radius);
+      float2 blocker = shadow_node_pcss_blocker(srd, ctx, sample_P);
+      if (blocker.x < 0.0f) {
+        continue;
+      }
+      valid_search++;
+      if (blocker.x < blocker.y) {
+        float separation = blocker.y - blocker.x;
+        /* Each search tap has its own receiver depth on the tangent plane. Accumulating
+         * center_depth - tap_depth creates false penumbra changes on oblique receivers. */
+        /* Nearly coincident depths must not count as a full blocker: doing so makes tiny
+         * receiver-depth errors abruptly change the normalization of the penumbra. */
+        float weight = separation / (separation + 2.0f * texel_radius);
+        blocker_radius_sum += weight * (directional ?
+                                            source_radius * separation :
+                                            source_radius * separation / max(blocker.x, 1e-6f));
+        blocker_weight_sum += weight;
+        blockers++;
+      }
     }
+    if (blockers == 0) {
+      if (estimate_only) {
+        return valid_search > 0 ? float4(0.0f) : float4(-1.0f);
+      }
+      return valid_search > 0 ? center : float4(-1.0f);
+    }
+    filter_radius = blocker_radius_sum / max(blocker_weight_sum, 1e-8f);
   }
-  if (blockers == 0) {
-    return valid_search > 0 ? center : float4(-1.0f);
-  }
-  float blocker_depth = blocker_sum / float(blockers);
-  float separation = max(receiver_depth - blocker_depth, 0.0f);
-  float filter_radius = directional ? source_radius * separation :
-                         source_radius * separation / max(blocker_depth, 1e-6f);
   filter_radius = max(filter_radius, texel_radius * light.filter_radius);
   filter_radius = min(filter_radius, supported_radius);
-  if (filter_radius <= 1e-8f) { return center; }
+  if (estimate_only) {
+    return float4(filter_radius, blocker_weight_sum / float(search_count), 0.0f, 0.0f);
+  }
+  if (filter_radius <= 1e-8f) {
+    return center;
+  }
   /* No center/ring uniform-region shortcut: a thin blocker or hole can lie between
    * probes. Every selected filter position contributes to the same classified kernel. */
-  int filter_count = clamp(quality * 8, 16, 256);
+  int filter_count = clamp(quality * filter_multiplier, 16, 256);
   float4 total = float4(0.0f);
   float total_weight = 0.0f;
   for (int i = 0; i < 256; i++) {
-    if (i >= filter_count) { break; }
-    float2 disk = sample_disk(hammersley_2d(i, filter_count));
+    if (i >= filter_count) {
+      break;
+    }
+    float2 filter_sample = hammersley_2d(i, filter_count);
+    if (light.type == LIGHT_RECT && filter_multiplier < 8) {
+      /* Translate the square sequence rather than rotating the rectangular emitter itself. */
+      filter_sample = fract(filter_sample + filter_rotation * 0.5f + 0.5f);
+    }
+    /* Opposite Vogel pairs cover the disk without Hammersley's repeated angular spokes.
+     * Pairing also keeps the filter centered with the same fixed sample budget. */
+    float2 disk_sample = float2((float(i / 2) + 0.5f) / float(filter_count / 2),
+                                fract(float(i / 2) * 0.61803398875f + float(i & 1) * 0.5f));
+    float2 disk = light.type == LIGHT_RECT ? filter_sample * 2.0f - 1.0f :
+                                             sample_disk(disk_sample);
+    if (light.type != LIGHT_RECT) {
+      disk = float2(disk.x * filter_rotation.x - disk.y * filter_rotation.y,
+                    disk.x * filter_rotation.y + disk.y * filter_rotation.x);
+    }
     float3 sample_P = shadow_node_pcss_plane_point(
         ctx, ctx.P + (right * disk.x + up * disk.y) * filter_radius);
     float4 value = shadow_node_pcss_bilinear(srd, ctx, sample_P);
@@ -1310,13 +1418,33 @@ float4 shadow_node_pcss([[resource_table]] ShadowRenderData &srd,
   return total_weight > 0.0f ? saturate(total / total_weight) : center;
 }
 
-float4 shadow_node_pcss(LightData light, bool directional, float3 P, float3 Ng, float3 N,
-                         float normal_offset, float geometry_offset, int quality, bool classify,
-                         uint receiver_id)
+float4 shadow_node_pcss(LightData light,
+                        bool directional,
+                        float3 P,
+                        float3 Ng,
+                        float3 N,
+                        float normal_offset,
+                        float geometry_offset,
+                        int quality,
+                        bool classify,
+                        uint receiver_id)
 {
   [[resource_table]] ShadowRenderData &srd = resource_table_get(eevee::ShadowRenderData);
-  return shadow_node_pcss(srd, light, directional, P, Ng, N, normal_offset, geometry_offset,
-                          quality, classify, receiver_id);
+  return shadow_node_pcss_core(srd,
+                               light,
+                               directional,
+                               P,
+                               Ng,
+                               N,
+                               normal_offset,
+                               geometry_offset,
+                               quality,
+                               classify,
+                               receiver_id,
+                               -1.0f,
+                               false,
+                               float2(1.0f, 0.0f),
+                               8);
 }
 
 #endif

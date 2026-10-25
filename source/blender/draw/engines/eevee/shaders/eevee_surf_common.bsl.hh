@@ -58,7 +58,7 @@ ViewMatrices surface_view_matrices_get()
 #if defined(USE_BARYCENTRICS) && defined(GPU_FRAGMENT_SHADER) && defined(MAT_GEOM_MESH)
 float3 barycentric_distances_get()
 {
-  float wp_delta = length(gpu_dfdx(interp.P)) + length(gpu_dfdy(interp.P));
+  float wp_delta = length(gpu_dfdx(interp.P_relative)) + length(gpu_dfdy(interp.P_relative));
   float bc_delta = length(gpu_dfdx(gpu_BaryCoord)) + length(gpu_dfdy(gpu_BaryCoord));
   float rate_of_change = wp_delta / bc_delta;
   return rate_of_change * (1.0f - gpu_BaryCoord);
@@ -126,7 +126,16 @@ void init_globals([[resource_table]] const eevee::Uniform &uni,
   g_data.N = (front_face) ? g_data.N : -g_data.N;
   g_data.Ni = (front_face) ? g_data.Ni : -g_data.Ni;
 #ifdef GPU_FRAGMENT_SHADER
-  g_data.Ng = safe_normalize(cross(gpu_dfdx(g_data.P), gpu_dfdy(g_data.P)));
+#  if defined(MAT_GEOM_MESH)
+  /* Interpolating world coordinates loses subpixel differences for small meshes away from the
+   * origin. Apply the model's linear transform before interpolation, without its translation. */
+  float3 dPdx = gpu_dfdx(interp.P_relative);
+  float3 dPdy = gpu_dfdy(interp.P_relative);
+#  else
+  float3 dPdx = gpu_dfdx(g_data.P);
+  float3 dPdy = gpu_dfdy(g_data.P);
+#  endif
+  g_data.Ng = safe_normalize(cross(dPdx, dPdy));
   if (uni.pipeline_buf.is_main_view_inverted) {
     g_data.Ng = -g_data.Ng;
   }
@@ -146,6 +155,7 @@ void init_interface([[maybe_unused]] uint resource_id_raw)
   auto &interp = interface_get(eevee_geom_iface_info, interp);
   auto &interp_flat = interface_get(eevee_geom_iface_info, interp_flat);
   interp.P = float3(0.0f);
+  interp.P_relative = float3(0.0f);
   interp.N = float3(0.0f);
   interp_flat.resource_id_raw = resource_id_raw;
 #endif

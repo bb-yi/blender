@@ -46,6 +46,7 @@ struct GeomWorld {
 
   /* Pass view position to keep accuracy. */
   interp.P = views.get(0).point_ndc_to_view(out_position.xyz);
+  interp.P_relative = float3(0.0f);
   interp.N = float3(1);
 
   out_position = reverse_z::transform(out_position);

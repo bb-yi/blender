@@ -33,6 +33,8 @@
 GPU_SHADER_NAMED_INTERFACE_INFO(eevee_surf_iface, interp)
 /* World Position. */
 SMOOTH(float3, P)
+/* Translation-free world position for mesh surface derivatives. */
+SMOOTH(float3, P_relative)
 /* World Normal. */
 SMOOTH(float3, N)
 GPU_SHADER_NAMED_INTERFACE_END(interp)

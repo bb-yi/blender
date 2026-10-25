@@ -213,6 +213,7 @@ struct GPUMaterial {
   bool has_glsl_light_shader_eval = false;
   bool has_shader_info_shadow_classification = false;
   bool has_node_soft_shadow = false;
+  int node_shadow_cache_quality = 0;
   bool has_principled_npr_v2 = false;
   bool has_surface_diffusion = false;
   eGPUMaterialNPRFeature npr_features = GPU_MAT_NPR_FEATURE_NONE;
@@ -1593,6 +1594,16 @@ bool GPU_material_has_node_soft_shadow(const GPUMaterial *mat)
   return mat != nullptr && mat->has_node_soft_shadow;
 }
 
+bool GPU_material_has_node_shadow_cache(const GPUMaterial *mat)
+{
+  return mat != nullptr && mat->node_shadow_cache_quality != 0;
+}
+
+int GPU_material_node_shadow_cache_quality(const GPUMaterial *mat)
+{
+  return mat != nullptr ? mat->node_shadow_cache_quality : 0;
+}
+
 bool GPU_material_principled_npr_v2_has(const GPUMaterial *mat)
 {
   return mat != nullptr && mat->has_principled_npr_v2;
@@ -2272,7 +2283,19 @@ void GPU_material_shader_info_shadow_classification_set(GPUMaterial *material)
 
 void GPU_material_node_soft_shadow_set(GPUMaterial *material)
 {
-  if (material != nullptr) { material->has_node_soft_shadow = true; }
+  if (material != nullptr) {
+    material->has_node_soft_shadow = true;
+  }
+}
+
+void GPU_material_node_shadow_cache_set(GPUMaterial *material, int quality)
+{
+  if (material != nullptr) {
+    material->node_shadow_cache_quality = material->node_shadow_cache_quality == 0 ?
+                                              quality :
+                                              std::min(material->node_shadow_cache_quality,
+                                                       quality);
+  }
 }
 
 void GPU_material_principled_npr_v2_set(GPUMaterial *material)

@@ -61,6 +61,7 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                                        GPUNodeStack *in,
                                        GPUNodeStack *out)
 {
+  const bool default_surface = !in[0].link && !in[1].link;
   if (!in[0].link) {
     GPU_link(mat, "world_position_get", &in[0].link);
   }
@@ -85,6 +86,12 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
     GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
     GPU_material_hiz_data_set(mat);
   }
+  const float cache_eligible = float(default_surface &&
+                                     (out[1].hasoutput || out[5].hasoutput || out[6].hasoutput) &&
+                                     node->custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED);
+  if (cache_eligible != 0.0f) {
+    GPU_material_node_shadow_cache_set(mat, shadow_sample_count);
+  }
   return GPU_stack_link(mat,
                         node,
                         "node_shader_info",
@@ -92,7 +99,8 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                         out,
                         GPU_constant(&shadow_mode),
                         GPU_constant(&stable_shadow_samples),
-                        GPU_constant(&lightgroup_id_value));
+                        GPU_constant(&lightgroup_id_value),
+                        GPU_constant(&cache_eligible));
 }
 
 }  // namespace nodes::node_shader_shader_info_cc

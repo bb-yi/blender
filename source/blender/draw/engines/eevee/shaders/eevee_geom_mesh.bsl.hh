@@ -72,6 +72,7 @@ struct GeomMeshVertIn {
   init_interface(id.raw_id);
 
   interp.P = obj.point_object_to_world(vert_in.pos);
+  interp.P_relative = to_float3x3(obj.model) * vert_in.pos;
   interp.N = normalize(obj.normal_object_to_world(vert_in.nor));
   if (pipe.use_velocity) [[static_branch]] {
     /* clang-format off */ /* Multi-line define messes up line index. */
@@ -99,7 +100,9 @@ struct GeomMeshVertIn {
   /* Used by #MAT_DISPLACEMENT_GEOM_NORMAL to evaluate the displacement in the fragment shader. */
   auto &disp_interp = interface_get(eevee_geom_disp_iface_info, disp_interp);
   disp_interp.P_base = interp.P;
-  interp.P += nodetree_displacement();
+  float3 displacement = nodetree_displacement();
+  interp.P += displacement;
+  interp.P_relative += displacement;
 
   if (pipe.use_clip_plane) [[static_branch]] {
     auto &clip_interp = interface_get(eevee_clip_plane, clip_interp);

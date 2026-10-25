@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cstdlib>
 #include <unordered_map>
 
 namespace blender::eevee {
@@ -1009,10 +1010,124 @@ void ShadowModule::init()
   }
 }
 
+void ShadowModule::invalidate_node_cache()
+{
+  const float4 invalid(-1.0f);
+  node_cache_dummy_tx_.ensure_2d_array(gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                       int2(1),
+                                       1,
+                                       GPU_TEXTURE_USAGE_SHADER_READ,
+                                       &invalid.x);
+  node_cache_ref_ = node_cache_dummy_tx_.gpu_texture();
+}
+
+void ShadowModule::render_node_cache(View &view, int2 extent)
+{
+  invalidate_node_cache();
+  if (!node_cache_needed_ || !enabled_ || inst_.is_baking() || inst_.lights.light_count() == 0 ||
+      extent.x <= 0 || extent.y <= 0 || std::getenv("BLENDER_NPR_SHADOW_CACHE_DISABLE") != nullptr)
+  {
+    return;
+  }
+  /* Scratch images are shared by all lights. Count all images in the fixed budget, including
+   * the full-resolution statistics and reconstruction inputs. Excess lights use direct PCSS. */
+  constexpr int64_t budget = 256LL * 1024 * 1024;
+  const int64_t pixels = int64_t(extent.x) * extent.y;
+  int lights = 0;
+  for (const auto &item : inst_.lights.light_map_.items()) {
+    const Light &light = item.value;
+    /* LightModule::end_sync() already removed inactive entries and cleared their transient
+     * `used` flags for the next sync. Names distinguish object lights from extracted world suns.
+     */
+    if (!inst_.lights.light_names_.contains(item.key) || light.tilemap_index == LIGHT_NO_SHADOW ||
+        (light.color.x == 0.0f && light.color.y == 0.0f && light.color.z == 0.0f))
+    {
+      continue;
+    }
+    const bool soft = is_sun_light(light.type) ?
+                          light.sun().shadow_angle > 0.0f :
+                      is_area_light(light.type) ?
+                          light.area().shadow_scale > 0.0f :
+                          ELEM(light.type, LIGHT_OMNI_SPHERE, LIGHT_OMNI_DISK) &&
+                              light.local().local.shadow_radius > 0.0f;
+    lights += int(soft);
+  }
+  const int64_t cache_pixels = int64_t(extent.x + 1) * extent.y;
+  const int64_t scratch_bytes = pixels * 8 + int64_t(extent.x + 4) * (extent.y + 4) * 8;
+  const int layers = int(std::min<int64_t>(
+      std::min(lights, 8), std::max<int64_t>(0, (budget - scratch_bytes) / (cache_pixels * 8))));
+  if (layers == 0) {
+    return;
+  }
+  /* Optional node reconstruction must not add shader compilation to ordinary EEVEE scenes. */
+  if (!(inst_.shaders.static_shaders_wait_ready(NODE_SHADOW_CACHE_SHADERS) &
+        NODE_SHADOW_CACHE_SHADERS))
+  {
+    return;
+  }
+  node_cache_stats_tx_.ensure_2d(
+      gpu::TextureFormat::SFLOAT_32_32, extent, GPU_TEXTURE_USAGE_GENERAL);
+  node_cache_raw_tx_.ensure_2d(
+      gpu::TextureFormat::SFLOAT_16_16_16_16, extent + int2(4), GPU_TEXTURE_USAGE_GENERAL);
+  node_cache_result_tx_.ensure_2d_array(gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                        extent + int2(1, 0),
+                                        layers,
+                                        GPU_TEXTURE_USAGE_GENERAL);
+  if (!node_cache_stats_tx_.is_valid() || !node_cache_raw_tx_.is_valid() ||
+      !node_cache_result_tx_.is_valid())
+  {
+    return;
+  }
+  PassSimple pass = {"Shadow.NodeCache"};
+  pass.init();
+  auto bind_surface = [&](PassSimple::Sub &sub, eShaderType shader, int layer) {
+    gpu::Shader *program = inst_.shaders.static_shader_get(shader);
+    sub.shader_set(program);
+    sub.push_constant("cache_layer", layer);
+    sub.push_constant("cache_quality", node_cache_quality_);
+    sub.bind_texture(0, &inst_.render_buffers.depth_tx);
+    sub.bind_texture(1, &inst_.render_buffers.prepass_normal_tx);
+    sub.bind_texture(3, &inst_.render_buffers.object_id_tx);
+    sub.bind_resources(inst_.uniform_data);
+    sub.bind_resources(inst_.lights);
+    sub.bind_resources(inst_.sampling);
+    sub.bind_resources(*this);
+    sub.bind_texture(RBUFS_UTILITY_TEX_SLOT, &inst_.pipelines.utility_tx);
+  };
+  const int3 groups(math::divide_ceil(extent, int2(8)), 1);
+  for (int layer = 0; layer < layers; layer++) {
+    PassSimple::Sub &estimate = pass.sub("Estimate");
+    bind_surface(estimate, SHADOW_NODE_CACHE_ESTIMATE, layer);
+    estimate.bind_image(0, &node_cache_stats_tx_);
+    estimate.dispatch(groups);
+    estimate.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+
+    PassSimple::Sub &resolve = pass.sub("Resolve");
+    bind_surface(resolve,
+                 use_caster_atlas_ ? SHADOW_NODE_CACHE_RESOLVE_CLASSIFIED : SHADOW_NODE_CACHE_RESOLVE,
+                 layer);
+    resolve.bind_texture(12, &node_cache_stats_tx_);
+    resolve.bind_image(0, &node_cache_raw_tx_);
+    resolve.dispatch(int3(math::divide_ceil(extent + int2(4), int2(8)), 1));
+    resolve.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+
+    PassSimple::Sub &filter = pass.sub("Reconstruct");
+    bind_surface(filter, SHADOW_NODE_CACHE_FILTER, layer);
+    filter.bind_texture(12, &node_cache_raw_tx_);
+    filter.bind_image(0, &node_cache_result_tx_);
+    filter.dispatch(groups);
+    filter.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+  }
+  inst_.manager->submit(pass, view);
+  node_cache_ref_ = node_cache_result_tx_.gpu_texture();
+}
+
 void ShadowModule::begin_sync()
 {
   use_caster_atlas_next_ = false;
   node_soft_shadow_next_ = false;
+  node_cache_needed_next_ = false;
+  node_cache_quality_next_ = 0;
 
   past_casters_updated_.clear();
   curr_casters_updated_.clear();
@@ -1152,6 +1267,14 @@ void ShadowModule::sync_bake_receiver_bounds(const ResourceHandleRange &resource
 void ShadowModule::end_sync()
 {
   node_soft_shadow_enabled_ = int(node_soft_shadow_next_);
+  node_cache_needed_ = node_cache_needed_next_;
+  node_cache_quality_ = std::max(1, node_cache_quality_next_);
+  invalidate_node_cache();
+  if (!node_cache_needed_) {
+    node_cache_stats_tx_.free();
+    node_cache_raw_tx_.free();
+    node_cache_result_tx_.free();
+  }
   const bool previous_use_caster_atlas = use_caster_atlas_;
   const bool requested_use_caster_atlas = use_caster_atlas_next_ && enabled_ &&
                                           ShadowModule::shadow_technique ==

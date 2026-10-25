@@ -16,6 +16,7 @@
 #include "BLI_vector.hh"
 
 #include "GPU_batch.hh"
+#include "GPU_shader.hh"
 
 #include "eevee_camera.hh"
 #include "eevee_material.hh"
@@ -285,6 +286,15 @@ class ShadowModule {
   bool use_caster_atlas_next_ = false;
   bool node_soft_shadow_next_ = false;
   int node_soft_shadow_enabled_ = 0;
+  bool node_cache_needed_next_ = false;
+  bool node_cache_needed_ = false;
+  int node_cache_quality_next_ = 0;
+  int node_cache_quality_ = 8;
+  Texture node_cache_stats_tx_ = {"Shadow.NodeCache.Statistics"};
+  Texture node_cache_raw_tx_ = {"Shadow.NodeCache.Raw"};
+  Texture node_cache_result_tx_ = {"Shadow.NodeCache.Result"};
+  Texture node_cache_dummy_tx_ = {"Shadow.NodeCache.Dummy"};
+  gpu::Texture *node_cache_ref_ = nullptr;
   bool caster_atlas_allocation_failed_ = false;
   int use_caster_atlas_push_ = 0;
 
@@ -410,6 +420,26 @@ class ShadowModule {
    * to check any new opaque surfaces.
    * Needs to be called after `LightModule::set_view();` and after `ShadowModule::set_view();`. */
   void render(View &view, int2 extent);
+
+  void render_node_cache(View &view, int2 extent);
+  void invalidate_node_cache();
+  void tag_node_cache_needed(int quality)
+  {
+    node_cache_needed_next_ = true;
+    node_cache_quality_next_ = node_cache_quality_next_ == 0 ?
+                                   quality :
+                                   std::min(node_cache_quality_next_, quality);
+  }
+  template<typename PassType> void bind_node_cache(PassType &pass, GPUMaterial *material)
+  {
+    gpu::Shader *shader = GPU_pass_shader_get(GPU_material_get_pass(material));
+    if (shader != nullptr) {
+      int slot = GPU_shader_get_sampler_binding(shader, "node_shadow_cache_tx");
+      if (slot >= 0) {
+        pass.bind_texture(slot, &node_cache_ref_);
+      }
+    }
+  }
 
   void debug_end_sync();
   void debug_draw(View &view, gpu::FrameBuffer *view_fb);
