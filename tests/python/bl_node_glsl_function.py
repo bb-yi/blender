@@ -1258,8 +1258,10 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertTrue(result_socket.is_linked)
         self.assertEqual(result_socket.links[0].from_node, value_node)
 
-        self.assertEqual(len(glsl_node.panel_states), 1)
+        # Code Settings and the callback interface have independent persistent states.
+        self.assertEqual(len(glsl_node.panel_states), 2)
         glsl_node.panel_states[0].is_collapsed = True
+        glsl_node.panel_states[1].is_collapsed = False
         panel_identifier = glsl_node.panel_states[0].identifier
         glsl_node_name = glsl_node.name
         closure_input_name = closure_input.name
@@ -1298,9 +1300,10 @@ class GLSLFunctionNodeTest(unittest.TestCase):
             self.assertAlmostEqual(loaded_value.default_value, 0.75)
             self.assertTrue(loaded_result.is_linked)
             self.assertEqual(loaded_result.links[0].from_node.name, value_node_name)
-            self.assertEqual(len(loaded_glsl.panel_states), 1)
-            self.assertEqual(loaded_glsl.panel_states[0].identifier, panel_identifier)
+            self.assertEqual(len(loaded_glsl.panel_states), 2)
             self.assertTrue(loaded_glsl.panel_states[0].is_collapsed)
+            self.assertEqual(loaded_glsl.panel_states[0].identifier, panel_identifier)
+            self.assertFalse(loaded_glsl.panel_states[1].is_collapsed)
 
     def test_typed_closure_callback_muted_link_state_survives_refresh(self):
         _, tree = self.make_material_tree()
@@ -2174,7 +2177,7 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual(node.display_mode, 'CODE')
         self.assertAlmostEqual(node.width, 180.0)
         self.assertIsNotNone(node.script)
-        self.assertEqual(node.function_name, "glsl_function")
+        self.assertEqual(node.function_name, "")  # Keep automatic entry selection enabled.
         self.assertIn("vec4 glsl_function(vec4 color)", node.script.as_string())
         self.assertEqual(node.parse_status, 'READY')
         self.assertEqual(find_socket(node.inputs, "In_color").type, 'VECTOR')
@@ -2206,8 +2209,9 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         node.display_mode = 'CODE'
 
         self.assertIsNotNone(node.script)
-        self.assertEqual(node.function_name, "glsl_function")
+        self.assertEqual(node.function_name, "")
         self.assertIn("vec4 glsl_function(vec4 color)", node.script.as_string())
+        self.assertEqual(node.parse_status, 'READY')
 
     def test_new_text_operator_creates_template(self):
         _, tree = self.make_material_tree()
@@ -2217,8 +2221,9 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(result, {'FINISHED'})
         self.assertIsNotNone(node.script)
-        self.assertEqual(node.function_name, "glsl_function")
+        self.assertEqual(node.function_name, "")
         self.assertIn("return color;", node.script.as_string())
+        self.assertEqual(node.parse_status, 'READY')
 
     def test_code_mode_populates_assigned_empty_text(self):
         _, tree = self.make_material_tree()
@@ -2230,8 +2235,9 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(result, {'FINISHED'})
         self.assertEqual(node.display_mode, 'CODE')
-        self.assertEqual(node.function_name, "glsl_function")
+        self.assertEqual(node.function_name, "")
         self.assertIn("vec4 glsl_function(vec4 color)", text.as_string())
+        self.assertEqual(node.parse_status, 'READY')
 
     def test_code_mode_edits_the_assigned_text_directly(self):
         _, tree = self.make_material_tree()

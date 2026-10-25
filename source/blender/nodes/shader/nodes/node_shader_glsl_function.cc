@@ -821,9 +821,18 @@ namespace blender
       const bNodeSocket *local_socket = find_node_input_socket_by_identifier(node, param.identifier);
       if (node.runtime->original && local_socket && !local_socket->is_directly_linked()) {
         /* Inlining resolves empty group/bundle inputs to unlinked sockets. Do not resurrect
-         * the original routing wire: this particular instance has no sampler source. */
-        r_link = nullptr;
-        return GLSLSamplerSourceKind::FallbackWhite;
+         * those routing wires. Legacy shader compilation also leaves procedural closure zones
+         * unlinked locally; their active Closure Output is consumed by the sampler compiler. */
+        const bNodeSocket *original_socket = find_node_input_socket_by_identifier(
+            *node.runtime->original, param.identifier);
+        const bNodeLink *original_link = original_socket ?
+                                            find_used_direct_link(*original_socket) : nullptr;
+        if (!original_link || !original_link->fromnode ||
+            !original_link->fromnode->is_type("NodeClosureOutput"_ustr))
+        {
+          r_link = nullptr;
+          return GLSLSamplerSourceKind::FallbackWhite;
+        }
       }
       const bNodeSocket* sample_socket = find_linked_sampler_input_socket(node, param);
       if (sample_socket == nullptr && fallback_node != nullptr)
@@ -10366,9 +10375,9 @@ vec3 glsl_ambient_lighting()
         }
         const std::hash<std::string_view> string_hash;
         const size_t hash = get_default_hash(
-            string_hash(source),
-            string_hash(std::string_view(function.data(), function.size())),
-            string_hash(defines));
+            uint64_t(string_hash(source)),
+            uint64_t(string_hash(std::string_view(function.data(), function.size()))),
+            uint64_t(string_hash(defines)));
         GPU_material_profile_count(GPUMaterialProfileCounter::GLSLSourceBytes, source.size());
         {
           std::lock_guard lock(mutex_);
