@@ -86,6 +86,7 @@ struct InlineShaderNodeTreeParams {
      * yet. */
     const bNode *node;
     std::string message;
+    bool fatal = false;
   };
   Vector<ErrorMessage> r_error_messages;
 };

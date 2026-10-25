@@ -829,6 +829,12 @@ BundleBuilder &BundleBuilder::pass_through_input_index(const std::optional<int> 
   return *this;
 }
 
+BundleBuilder &BundleBuilder::signature(std::shared_ptr<const BundleSignature> signature)
+{
+  decl_->signature = std::move(signature);
+  return *this;
+}
+
 /** \} */
 
 /* -------------------------------------------------------------------- */

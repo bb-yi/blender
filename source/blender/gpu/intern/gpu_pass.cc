@@ -199,7 +199,7 @@ bool GPU_pass_should_optimize(GPUPass *pass)
    * initial codegen.
    * NOTE: Only enabled on Metal, since it doesn't seem to yield any performance improvements for
    * other backends. */
-  return (GPU_backend_get_type() == GPU_BACKEND_METAL) && pass->should_optimize;
+  return pass && (GPU_backend_get_type() == GPU_BACKEND_METAL) && pass->should_optimize;
 }
 
 gpu::Shader *GPU_pass_shader_get(GPUPass *pass)

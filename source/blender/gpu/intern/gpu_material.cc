@@ -45,6 +45,8 @@
 #include "GPU_context.hh"
 
 #include "NOD_shader.h"
+#include "NOD_shader_glsl_bundle.hh"
+#include "CLG_log.h"
 #include "NOD_shader_nodes_inline.hh"
 
 #include "GPU_material.hh"
@@ -61,6 +63,8 @@
 #include "atomic_ops.h"
 
 namespace blender {
+
+static CLG_LogRef LOG_BUNDLE = {"gpu.material.bundle"};
 
 thread_local GPUMaterialProfile *gpu_material_profile_active = nullptr;
 
@@ -128,6 +132,7 @@ struct GPUMaterial {
   bNodeTree *expression_root = nullptr;
   std::vector<gpu::ShaderDiagnosticSource> expression_sources;
   Vector<ExpressionOrigin> expression_origins;
+  Vector<bke::ShaderNodeCompileContext::Message> inline_diagnostics;
   /* Contains #gpu::Shader and source code for deferred compilation.
    * Can be shared between materials sharing same node-tree topology. */
   GPUPass *pass = nullptr;
@@ -145,6 +150,8 @@ struct GPUMaterial {
   bool reads_stencil_value = false;
   std::string stencil_value_error;
   std::string stencil_marker_error;
+  /** Fatal schema errors are retained independently of shader/pass replacement. */
+  std::string inline_node_error;
   /* The engine type this material is compiled for. */
   eGPUMaterialEngine engine;
   /* Identify shader variations (shadow, probe, world background...) */
@@ -284,6 +291,24 @@ static void gpu_material_force_glsl_closure_callback_inline_error(
   {
     GPU_material_output_surface(material, failure_output[0].link);
   }
+}
+
+
+/** Publish through the same revision/owner mechanism as asynchronous compiler diagnostics. */
+static bool gpu_material_bundle_error_record(GPUMaterial *material, const bNode &node, StringRef message)
+{
+  CLOG_ERROR(&LOG_BUNDLE, "GLSL Bundle '%s': %.*s", material->name.c_str(), int(message.size()), message.data());
+  if (!ELEM(node.type_legacy, SH_NODE_GLSL_FUNCTION, NODE_SEPARATE_BUNDLE)) { return false; }
+  const int previous_count = material->expression_origins.size();
+  GPU_material_expression_source_add(material, node,
+      {"glsl_bundle_inline_" + std::to_string(node.identifier), "", ""},
+      nodes::shader_glsl_bundle_error_signature(node));
+  if (material->expression_origins.size() != previous_count) {
+    const auto &origin = material->expression_origins.last();
+    material->inline_diagnostics.append({origin.tree_uid, origin.node_id, origin.signature, std::string(message)});
+  }
+  /* An expired revision must not fall back to the unversioned warning map. */
+  return true;
 }
 
 /* Public API */
@@ -696,6 +721,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     }
 
     std::string callback_inline_failure_helper;
+    bool fatal_inline_error = false;
     if (track_uniforms) {
       mat->uniform_tracking_supported = inline_success &&
                                         inline_params.r_error_messages.is_empty() &&
@@ -715,6 +741,10 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
       mat->uniform_unsafe_sources = mat->uniform_tracking->unsafe_sources;
     }
     for (nodes::InlineShaderNodeTreeParams::ErrorMessage &error : inline_params.r_error_messages) {
+      fatal_inline_error |= error.fatal;
+      if (error.fatal && mat->inline_node_error.empty()) {
+        mat->inline_node_error = error.message;
+      }
       if (!inline_success && callback_inline_failure_helper.empty()) {
         const StringRef message(error.message);
         static constexpr StringRef prefix = "GLSL closure callback '";
@@ -726,7 +756,9 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
           }
         }
       }
-      result.errors.append({error.node, std::move(error.message)});
+      if (!error.fatal || !gpu_material_bundle_error_record(mat, *error.node, error.message)) {
+        result.errors.append({error.node, std::move(error.message)});
+      }
     }
 
     if (compile_surface_graph) {
@@ -736,7 +768,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
         ntreeGPUMaterialNodesPreprocess(localtree, mat);
       }
       if (cache_surface && !mat->uniform_tracking_supported && inline_success &&
-          result.errors.is_empty() && gpu_material_can_cache_surface_tree(*localtree))
+          result.errors.is_empty() && mat->inline_node_error.empty() && gpu_material_can_cache_surface_tree(*localtree))
       {
         mat->surface_source_tree = ntree;
         mat->surface_preprocessed_tree = localtree;
@@ -748,7 +780,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     if (compile_light_shader_graph) {
       ntreeGPULightShaderNodes(localtree, mat);
     }
-    if (!inline_success && !callback_inline_failure_helper.empty()) {
+    if (!fatal_inline_error && !inline_success && !callback_inline_failure_helper.empty()) {
       gpu_material_force_glsl_closure_callback_inline_error(
           mat, callback_inline_failure_helper);
     }
@@ -759,7 +791,16 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     }
     if (GPU_material_flag_get(mat, GPU_MATFLAG_NPR)) {
       GPUMaterialProfileTimer profile(GPUMaterialProfileStage::NPR);
-      npr_localtree = ntreeGPUNPRNodes(ntree, mat);
+      nodes::InlineShaderNodeTreeParams inline_params;
+      npr_localtree = ntreeGPUNPRNodes(ntree, mat, inline_params);
+      for (auto &error : inline_params.r_error_messages) {
+        if (error.fatal && mat->inline_node_error.empty()) {
+          mat->inline_node_error = error.message;
+        }
+        if (!error.fatal || !gpu_material_bundle_error_record(mat, *error.node, error.message)) {
+          result.errors.append({error.node, std::move(error.message)});
+        }
+      }
     }
   }
 
@@ -771,7 +812,11 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   }
 
   /* Use default material pass when possible. */
-  if (GPUPass *default_pass = pass_replacement_cb ? pass_replacement_cb(thunk, mat) : nullptr) {
+  if (!mat->inline_node_error.empty()) {
+    /* A valid fallback pass must not hide an invalid authored Bundle interface. */
+    mat->pass = nullptr;
+  }
+  else if (GPUPass *default_pass = pass_replacement_cb ? pass_replacement_cb(thunk, mat) : nullptr) {
     mat->pass = default_pass;
     GPU_pass_acquire(mat->pass);
     /** WORKAROUND:
@@ -1299,7 +1344,7 @@ gpu::Shader *GPU_material_get_shader(GPUMaterial *material)
 
 GPUMaterialStatus GPU_material_status(GPUMaterial *mat)
 {
-  if (!mat->stencil_value_error.empty()) {
+  if (!mat->stencil_value_error.empty() || !mat->inline_node_error.empty()) {
     return GPU_MAT_FAILED;
   }
   switch (GPU_pass_status(mat->pass)) {
@@ -1314,6 +1359,9 @@ GPUMaterialStatus GPU_material_status(GPUMaterial *mat)
 
 std::string GPU_material_error_message(GPUMaterial *material)
 {
+  if (!material->inline_node_error.empty()) {
+    return material->inline_node_error;
+  }
   if (!material->stencil_value_error.empty()) {
     return material->stencil_value_error;
   }
@@ -1368,14 +1416,18 @@ void GPU_material_expression_diagnostics_publish(GPUMaterial *material,
     return;
   }
   /* Copy under the pass lock, release it before taking the root revision lock. */
-  const auto errors = GPU_pass_expression_errors(material->pass);
-  Vector<bke::ShaderNodeCompileContext::Message> messages;
+  const auto errors = material->pass ? GPU_pass_expression_errors(material->pass) :
+                                      std::vector<gpu::ShaderDiagnostic>{};
+  Vector<bke::ShaderNodeCompileContext::Message> messages = material->inline_diagnostics;
   if (GPU_material_status(material) == GPU_MAT_FAILED) {
     for (const auto &error : errors) {
       for (size_t i = 0; i < material->expression_sources.size(); i++) {
         if (material->expression_sources[i].function_name == error.function_name) {
           const auto &origin = material->expression_origins[i];
-          messages.append({origin.tree_uid, origin.node_id, origin.signature, error.message});
+          const auto &source = material->expression_sources[i];
+          const std::string message = source.constructor.empty() && !source.evaluation_target.empty() ?
+              source.evaluation_target + ": " + error.message : error.message;
+          messages.append({origin.tree_uid, origin.node_id, origin.signature, message});
         }
       }
     }

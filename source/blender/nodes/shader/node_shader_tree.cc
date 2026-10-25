@@ -1180,7 +1180,8 @@ static void ntree_shader_to_rgba_depth_count_of_type(bNodeTree *tree,
   }
 }
 
-bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
+bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat,
+                              nodes::InlineShaderNodeTreeParams &inline_params)
 {
   bNodeTree *npr_tree = npr_tree_get(material_tree);
   if (npr_tree == nullptr) {
@@ -1188,7 +1189,6 @@ bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
   }
 
   bNodeTree *localtree = bke::node_tree_add_tree(nullptr, "NPRShaderTree Inlined", npr_tree->idname);
-  nodes::InlineShaderNodeTreeParams inline_params;
   inline_params.allow_preserving_repeat_zones = true;
   nodes::inline_shader_node_tree(*npr_tree, *localtree, inline_params);
 

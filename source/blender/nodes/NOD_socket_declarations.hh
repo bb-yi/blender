@@ -316,6 +316,9 @@ class Bundle : public SocketDeclaration {
 
   std::optional<BundleType> bundle_type;
 
+  /** Local schema; it does not register a global geometry bundle type. */
+  std::shared_ptr<const BundleSignature> signature;
+
   friend BundleBuilder;
 
   using Builder = BundleBuilder;
@@ -329,6 +332,8 @@ class Bundle : public SocketDeclaration {
 class BundleBuilder : public SocketDeclarationBuilder<Bundle> {
  public:
   BundleBuilder &bundle_type(BundleType bundle_type);
+
+  BundleBuilder &signature(std::shared_ptr<const BundleSignature> signature);
 
   /** On output sockets, indicate that the bundle structure is passed through from an input. */
   BundleBuilder &pass_through_input_index(std::optional<int> index);

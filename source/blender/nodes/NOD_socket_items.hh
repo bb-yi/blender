@@ -37,6 +37,7 @@ struct SocketItemsAccessorDefaults {
   static constexpr bool has_name_validation = false;
   static constexpr bool has_custom_initial_name = false;
   static constexpr bool has_vector_dimensions = false;
+  static constexpr bool shader_vector_dimensions_only = false;
   static constexpr bool has_post_item_change = false;
   static constexpr bool can_have_empty_name = false;
   static constexpr char unique_name_separator = '.';
@@ -233,6 +234,11 @@ inline typename Accessor::ItemT *add_item_with_socket_type_and_name(
   UNUSED_VARS_NDEBUG(ntree);
   ItemT &new_item = detail::add_item_to_array<Accessor>(node);
   if constexpr (Accessor::has_vector_dimensions) {
+    if constexpr (Accessor::shader_vector_dimensions_only) {
+      if (socket_type == SOCK_VECTOR && ntree.type != NTREE_SHADER) {
+        dimensions = 3;
+      }
+    }
     Accessor::init_with_socket_type_and_name(node, new_item, socket_type, name, dimensions);
   }
   else {

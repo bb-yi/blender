@@ -611,6 +611,7 @@ void NODE_OT_shader_script_update(wmOperatorType *ot);
 void NODE_OT_glsl_function_refresh(wmOperatorType *ot);
 void NODE_OT_glsl_function_new_text(wmOperatorType *ot);
 void NODE_OT_glsl_function_reset_defaults(wmOperatorType *ot);
+void NODE_OT_glsl_bundle_input(wmOperatorType *ot);
 void NODE_OT_glsl_function_toggle_code_mode(wmOperatorType *ot);
 void NODE_OT_glsl_function_make_internal(wmOperatorType *ot);
 

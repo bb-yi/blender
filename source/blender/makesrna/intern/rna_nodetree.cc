@@ -48,6 +48,7 @@
 #include "NOD_common.hh"
 #include "NOD_principled_npr.hh"
 #include "NOD_socket.hh"
+#include "NOD_shader_glsl_bundle.hh"
 #include "NOD_socket_items.hh"
 
 #include "rna_internal.hh"
@@ -4798,6 +4799,19 @@ static void rna_Node_ItemArray_item_color_get(PointerRNA *ptr, float *values)
   ED_node_type_draw_color(socket_type_idname.c_str(), values);
 }
 
+template<typename Accessor> int rna_BundleItem_dimensions_get(PointerRNA *ptr)
+{
+  const auto &item = *static_cast<const typename Accessor::ItemT *>(ptr->data);
+  return item.vector_socket_dimensions == 0 ? 3 : item.vector_socket_dimensions;
+}
+
+template<typename Accessor> void rna_BundleItem_dimensions_set(PointerRNA *ptr, int dimensions)
+{
+  auto &item = *static_cast<typename Accessor::ItemT *>(ptr->data);
+  const bNodeTree &tree = *reinterpret_cast<const bNodeTree *>(ptr->owner_id);
+  item.vector_socket_dimensions = tree.type == NTREE_SHADER ? std::clamp(dimensions, 2, 4) : 3;
+}
+
 template<typename Accessor>
 typename Accessor::ItemT *rna_Node_ItemArray_new_with_socket_and_name(
     ID *id, bNode *node, Main *bmain, ReportList *reports, int socket_type, const char *name)
@@ -5277,6 +5291,17 @@ static int rna_ShaderNodeGLSLFunction_parse_status_get(PointerRNA *ptr)
 {
   NodeShaderGLSLFunction *data = rna_ShaderNodeGLSLFunction_ensure_parsed(ptr);
   return data != nullptr ? data->parse_status : SHD_GLSL_FUNCTION_PARSE_DIRTY;
+}
+
+static void rna_ShaderNodeGLSLFunction_error_message_get(PointerRNA *ptr, char *value)
+{
+  const std::string error = nodes::shader_glsl_bundle_error_get(*ptr->data_as<bNode>());
+  memcpy(value, error.c_str(), error.size() + 1);
+}
+
+static int rna_ShaderNodeGLSLFunction_error_message_length(PointerRNA *ptr)
+{
+  return int(nodes::shader_glsl_bundle_error_get(*ptr->data_as<bNode>()).size());
 }
 
 static int rna_ShaderNodeGLSLFunction_signature_hash_get(PointerRNA *ptr)
@@ -9417,6 +9442,15 @@ static void def_sh_glsl_function(BlenderRNA *brna, StructRNA *srna)
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);
   RNA_def_property_ui_text(prop, "Parse Status", "Cached state of the GLSL function metadata");
 
+  prop = RNA_def_property(srna, "error_message", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop,
+                                "rna_ShaderNodeGLSLFunction_error_message_get",
+                                "rna_ShaderNodeGLSLFunction_error_message_length",
+                                nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(
+      prop, "Error", "Current source or revision-owned bundle interface diagnostic");
+
   prop = RNA_def_property(srna, "signature_hash", PROP_INT, PROP_UNSIGNED);
   RNA_def_property_int_sdna(prop, nullptr, "signature_hash");
   RNA_def_property_int_funcs(prop, "rna_ShaderNodeGLSLFunction_signature_hash_get", nullptr, nullptr);
@@ -12324,6 +12358,18 @@ static void rna_def_combine_bundle_item(BlenderRNA *brna)
 
   rna_def_node_item_array_socket_item_common(srna, "CombineBundleItemsAccessor", true);
 
+  prop = RNA_def_property(srna, "vector_socket_dimensions", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, nullptr, "vector_socket_dimensions");
+  RNA_def_property_int_funcs(prop,
+                             "rna_BundleItem_dimensions_get<CombineBundleItemsAccessor>",
+                             "rna_BundleItem_dimensions_set<CombineBundleItemsAccessor>",
+                             nullptr);
+  RNA_def_property_range(prop, 2, 4);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Dimensions", "Vector dimensions (Shader nodes only)");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_Node_ItemArray_item_update<CombineBundleItemsAccessor>");
+
   prop = RNA_def_property(srna, "structure_type", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, rna_enum_node_socket_structure_type_items);
   RNA_def_property_enum_funcs(
@@ -12392,6 +12438,18 @@ static void rna_def_separate_bundle_item(BlenderRNA *brna)
   RNA_def_struct_ui_text(srna, "Separate Bundle Item", "");
 
   rna_def_node_item_array_socket_item_common(srna, "SeparateBundleItemsAccessor", true);
+
+  prop = RNA_def_property(srna, "vector_socket_dimensions", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, nullptr, "vector_socket_dimensions");
+  RNA_def_property_int_funcs(prop,
+                             "rna_BundleItem_dimensions_get<SeparateBundleItemsAccessor>",
+                             "rna_BundleItem_dimensions_set<SeparateBundleItemsAccessor>",
+                             nullptr);
+  RNA_def_property_range(prop, 2, 4);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Dimensions", "Vector dimensions (Shader nodes only)");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_Node_ItemArray_item_update<SeparateBundleItemsAccessor>");
 
   prop = RNA_def_property(srna, "structure_type", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, rna_enum_node_socket_structure_type_items);

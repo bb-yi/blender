@@ -15,6 +15,7 @@ namespace blender::gpu {
 struct ShaderDiagnosticSource {
   std::string function_name;
   std::string evaluation_target;
+  /** Empty for a generated helper whose entire body belongs to evaluation_target. */
   std::string constructor;
 };
 
@@ -111,11 +112,13 @@ inline std::vector<EvaluationRange> evaluation_ranges(
   int brackets = 0;
   for (size_t i = 0; i < tokens.size(); i++) {
     const auto text = tokens[i].text;
-    if (text == "void" && depth == 0 && parentheses == 0 && brackets == 0 &&
-        i + 2 < tokens.size() &&
+    if (depth == 0 && parentheses == 0 && brackets == 0 && i + 2 < tokens.size() &&
         (i == 0 || tokens[i - 1].text == ";" || tokens[i - 1].text == "}"))
     {
       for (size_t source = 0; source < sources.size(); source++) {
+        if (!sources[source].constructor.empty() && text != "void") {
+          continue;
+        }
         if (tokens[i + 1].text != sources[source].function_name || tokens[i + 2].text != "(") {
           continue;
         }
@@ -137,6 +140,10 @@ inline std::vector<EvaluationRange> evaluation_ranges(
           body_end++;
         }
         if (closing_depth != 0) {
+          continue;
+        }
+        if (sources[source].constructor.empty()) {
+          ranges.push_back({source, tokens[body].line, tokens[body_end - 1].line});
           continue;
         }
         int body_depth = 1;

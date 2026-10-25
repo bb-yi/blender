@@ -79,6 +79,7 @@
 #include "NOD_composite.hh"
 #include "NOD_geometry.hh"
 #include "NOD_shader.h"
+#include "NOD_shader_glsl_bundle.hh"
 #include "NOD_socket.hh"
 #include "NOD_texture.h"
 #include "node_intern.hh" /* own include */
@@ -2223,6 +2224,50 @@ void NODE_OT_glsl_function_refresh(wmOperatorType *ot)
   ot->poll = node_glsl_function_refresh_poll;
 
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+static wmOperatorStatus node_glsl_bundle_input_exec(bContext *C, wmOperator *op)
+{
+  SpaceNode *snode = CTX_wm_space_node(C);
+  if (!snode || !snode->edittree) {
+    return OPERATOR_CANCELLED;
+  }
+  bNodeTree &tree = *snode->edittree;
+  tree.ensure_topology_cache();
+  bNode *node = tree.node_by_id(RNA_int_get(op->ptr, "node_identifier"));
+  if (!node) {
+    node = bke::node_get_active(tree);
+  }
+  if (!node || !node->is_type("ShaderNodeGLSLFunction"_ustr)) {
+    return OPERATOR_CANCELLED;
+  }
+  const std::string identifier = RNA_string_get(op->ptr, "socket_identifier");
+  const std::string path = RNA_string_get(op->ptr, "member_path");
+  std::string error;
+  if (!nodes::shader_glsl_bundle_create_input(
+          *CTX_data_main(C), tree, *node, identifier, path, error))
+  {
+    BKE_report(op->reports, RPT_ERROR, error.c_str());
+    return OPERATOR_CANCELLED;
+  }
+  WM_event_add_notifier(C, NC_NODE | NA_EDITED, &tree);
+  return OPERATOR_FINISHED;
+}
+
+void NODE_OT_glsl_bundle_input(wmOperatorType *ot)
+{
+  ot->name = "Create GLSL Input Bundle";
+  ot->idname = "NODE_OT_glsl_bundle_input";
+  ot->description =
+      "Create required fields or explicitly override a GLSL default; changes to a shared source "
+      "bundle affect all its consumers";
+  ot->poll = ED_operator_node_editable;
+  ot->exec = node_glsl_bundle_input_exec;
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+  RNA_def_int(ot->srna, "node_identifier", 0, 0, INT_MAX, "Node", "", 0, INT_MAX);
+  RNA_def_string(ot->srna, "socket_identifier", nullptr, 0, "Input", "Bundle input identifier");
+  RNA_def_string(
+      ot->srna, "member_path", nullptr, 0, "Override", "Optional member path to override");
 }
 
 void NODE_OT_glsl_function_reset_defaults(wmOperatorType *ot)

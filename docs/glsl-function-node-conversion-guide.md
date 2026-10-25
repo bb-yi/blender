@@ -61,13 +61,21 @@
   - `mat3`
   - `mat4`
 
+### 1A. 结构体与 Bundle 扩展
+
+具名纯数据 `struct` 可以作为输入、返回值和 `out` 参数，每个对应一个原生 Bundle 插口，支持嵌套。
+字段支持 float/int/bool、vec2/3/4 与 mat2/3/4。结构体内 vec4 保留完整 4D，矩阵映射为按列的子捆包。
+成员默认值通过 `@glsl_meta v2` 的 `参数.成员` 路径声明；缺失字段无默认值时必须报错。
+完整语法、创建/覆盖/同步及兼容边界见 [GLSL Function：结构体与捆包](glsl-function-bundles.md)。
+普通参数的 v1、vec4 XYZ/W 和矩阵插口保持原样；typed Closure callback 的接口限制也保持原样。
+
 ### 2. 当前不支持的函数接口写法
 
 - `inout`
 - `out sampler2D` / `out sampler3D` / `out samplerCube`
-- `struct` / `array` 作为函数边界类型
+- `array` 作为函数边界类型；具名纯数据 `struct` 已支持 Bundle 接口，见 [结构体与捆包](glsl-function-bundles.md)
 - 非方阵矩阵（例如 `mat2x3`）作为函数边界类型
-- 多返回值结构体
+- 含 sampler、Closure 或数组成员的结构体接口
 - 递归
 - 依赖外部运行时注入的全局 uniform 体系
 - 历史 `sample2D` 旧写法不再作为公开函数边界类型，统一改写为 `sampler2D`
@@ -997,7 +1005,7 @@ mat4 matrix_boundary_example(mat4 transform, out mat3 out_basis)
 但仍然不要把下列类型作为公开边界：
 
 - `mat2x3`、`mat3x2`、`mat4x3` 等非方阵矩阵
-- `struct` / `array`
+- 数组，以及含资源、数组或递归成员的结构体
 - 方向语义很难读清的混合矩阵边界
 
 这类情况应改成：
@@ -1006,15 +1014,9 @@ mat4 matrix_boundary_example(mat4 transform, out mat3 out_basis)
 - 或把矩阵保留在函数内部/辅助函数内部构造
 - 或用 `dot(...)` helper 明确表达投影方向
 
-### 3. 多返回值不要用结构体
+### 3. 多返回值与结构体的选择
 
-错误：
-
-```glsl
-ResultData effect(...)
-```
-
-应该改成：
+独立的输出可以继续使用返回值加 `out`：
 
 ```glsl
 float effect(vec2 uv, out vec3 color)
@@ -1022,6 +1024,9 @@ float effect(vec2 uv, out vec3 color)
   ...
 }
 ```
+
+需要作为整体传递时，可以声明具名纯数据 `ResultData`，返回该结构体或使用 `out ResultData`。
+它会生成 Bundle 输出；成员类型、嵌套和 Meta v2 规则见结构体与捆包指南。
 
 ### 4. `void` 返回值不是“没有输出”
 
@@ -1514,7 +1519,7 @@ vec2 triangle_unproject(vec3 v)
 9. 如果来源是 HLSL 或 ShaderLab，去掉语义、Pass、Properties、pragma 和引擎包装层。
 10. 贴图采样优先改成 `texture(tex, uv)`；如果原算法明确依赖显式 `LOD`，可以保留为 `textureLod(tex, uv, lod)`，并说明这更适合配合 `Image to Closure`。
 11. 如果存在宏开关、死代码、未使用辅助函数、反向 `smoothstep`、运行时别名宏、共享可变全局状态、布尔到数值隐式转换、非方阵矩阵双向乘法这类不稳定写法，要收敛成稳定版本。
-12. 如果需要多个输出，用 out 参数，不要用 struct 返回。
+12. 独立输出使用 out 参数；需要整体传递时使用具名纯数据 struct 返回或 out struct，并遵循 Bundle 与 Meta v2 合同。
 13. 如果原 shader 的 alpha 有意义，要明确说明是保留、拆分还是省略。
 14. 在结果最后明确说明转换是 success / partial / failed，并列出不支持、删除、近似、替代、alpha 处理、Meta 情况、验证情况。
 15. 在当前 NPR 工作区，完整候选必须通过 `python tools\validate_glsl_function.py <file> --function <name> --require-blender --json`，并满足 valid=true、blender=READY、findings=[]；涉及 Closure callback、sampler 重写、Eevee helper 或 Filter/World 行为时还要运行对应 GPU/render 回归。
@@ -1939,7 +1944,7 @@ vec3 shader(
 - 不支持 `inout`
 - `sampler2D` / `sampler3D` 只支持 `label`、`description` 和 panel 分组，不支持默认值、范围、隐藏值或 subtype
 - `mat2/mat3/mat4` 边界参数的 Meta 只建议写 `label/description/panel`，不要写 `default/min/max/subtype`
-- 不支持 `struct` / `array` 边界参数 Meta
+- 结构体成员 Meta 使用 `@glsl_meta v2` 的参数成员路径；数组边界仍不支持
 - panel 只支持一级，不支持嵌套
 - panel 必须显式 `@end_panel` 关闭
 - 表达式默认值当前只支持输入参数 `float / vec2 / vec3 / vec4`

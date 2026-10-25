@@ -35,6 +35,7 @@ struct bNodeTree;
 
 namespace nodes {
 struct EvalDependencies;
+struct GLSLBundleLowering;
 struct GeneratedTreeSrnaData;
 class NodeDeclaration;
 struct GeometryNodesLazyFunctionGraphInfo;
@@ -403,6 +404,9 @@ class bNodeRuntime : NonCopyable, NonMovable {
 
   /** The original node in the tree (for localized tree). */
   bNode *original = nullptr;
+
+  /** GLSL struct leaf bindings. Localized shader trees only; never serialized. */
+  std::shared_ptr<const nodes::GLSLBundleLowering> glsl_bundle_lowering;
 
   /** Calculated bounding box of node in the view space of the node editor (including UI scale). */
   rctf draw_bounds{};

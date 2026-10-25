@@ -13,6 +13,9 @@
 #include "BKE_node.hh"
 
 namespace blender {
+namespace nodes {
+struct InlineShaderNodeTreeParams;
+}
 
 extern struct bke::bNodeTreeType *ntreeType_Shader;
 
@@ -78,7 +81,9 @@ void node_shader_tessellation_settings_pack(const ShaderTessellationSettings &se
 
 struct bNodeTree *npr_tree_get(struct bNodeTree *ntree);
 struct bNodeTree *npr_tree_get_from_mat(struct Material *material);
-struct bNodeTree *ntreeGPUNPRNodes(struct bNodeTree *material_tree, struct GPUMaterial *mat);
+struct bNodeTree *ntreeGPUNPRNodes(struct bNodeTree *material_tree,
+                                   struct GPUMaterial *mat,
+                                   nodes::InlineShaderNodeTreeParams &inline_params);
 void ntreeGPULightShaderNodes(struct bNodeTree *localtree, struct GPUMaterial *mat);
 
 /**

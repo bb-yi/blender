@@ -47,9 +47,63 @@ static void node_declare(NodeDeclarationBuilder &b)
       const eNodeSocketDatatype socket_type = item.socket_type;
       const UString name(item.name);
       const UString identifier(CombineBundleItemsAccessor::socket_identifier_for_item(item));
+      /* Snapshot authored shader UI data before declarations can replace sockets. */
+      std::string label, description;
+      std::optional<bNodeSocketValueFloat> float_ui;
+      std::optional<bNodeSocketValueInt> int_ui;
+      std::optional<bNodeSocketValueVector> vector_ui;
+      if (tree->type == NTREE_SHADER) {
+        for (const bNodeSocket &socket : node->inputs) {
+          if (socket.identifier_ustr() != identifier || socket.type != socket_type) {
+            continue;
+          }
+          label = socket.label;
+          description = socket.description;
+          if (socket.default_value) {
+            if (socket_type == SOCK_FLOAT) {
+              float_ui = *socket.default_value_typed<bNodeSocketValueFloat>();
+            }
+            else if (socket_type == SOCK_INT) {
+              int_ui = *socket.default_value_typed<bNodeSocketValueInt>();
+            }
+            else if (socket_type == SOCK_VECTOR) {
+              vector_ui = *socket.default_value_typed<bNodeSocketValueVector>();
+            }
+          }
+          break;
+        }
+      }
       auto &decl = b.add_input(socket_type, name, identifier)
                        .socket_name_ptr(
                            &tree->id, *CombineBundleItemsAccessor::item_srna, &item, "name");
+      if (!label.empty()) {
+        decl.label_fn([label](const bNode &) -> StringRefNull { return label; });
+      }
+      if (!description.empty()) {
+        decl.description(description);
+      }
+      if (float_ui) {
+        static_cast<decl::FloatBuilder &>(decl)
+            .min(float_ui->min)
+            .max(float_ui->max)
+            .subtype(PropertySubType(float_ui->subtype));
+      }
+      if (int_ui) {
+        static_cast<decl::IntBuilder &>(decl)
+            .min(int_ui->min)
+            .max(int_ui->max)
+            .subtype(PropertySubType(int_ui->subtype));
+      }
+      if (vector_ui) {
+        static_cast<decl::VectorBuilder &>(decl)
+            .min(vector_ui->min)
+            .max(vector_ui->max)
+            .subtype(PropertySubType(vector_ui->subtype));
+      }
+      if (socket_type == SOCK_VECTOR && tree->type == NTREE_SHADER) {
+        static_cast<decl::VectorBuilder &>(decl).dimensions(
+            item.vector_socket_dimensions == 0 ? 3 : item.vector_socket_dimensions);
+      }
       if (item.structure_type != NodeSocketInterfaceStructureType::Auto) {
         decl.structure_type(StructureType(item.structure_type));
       }
@@ -129,6 +183,13 @@ static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *node_ptr
           panel->use_property_split_set(true);
           panel->use_property_decorate_set(false);
           panel->prop(item_ptr, "socket_type", UI_ITEM_NONE, IFACE_("Type"), ICON_NONE);
+          if (ntree.type == NTREE_SHADER && RNA_enum_get(item_ptr, "socket_type") == SOCK_VECTOR) {
+            panel->prop(item_ptr,
+                        "vector_socket_dimensions",
+                        UI_ITEM_NONE,
+                        IFACE_("Dimensions"),
+                        ICON_NONE);
+          }
           panel->prop(item_ptr, "structure_type", UI_ITEM_NONE, IFACE_("Shape"), ICON_NONE);
         });
   }

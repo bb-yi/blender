@@ -91,6 +91,30 @@ TEST(shader_diagnostics, ambiguous_macro_expansion)
             0);
 }
 
+TEST(shader_diagnostics, bundle_default_helpers)
+{
+  const std::vector<ShaderDiagnosticSource> bundle_sources = {
+      {"bundle_default_normal", "Bundle default 'data.normal'", ""},
+      {"script_expr_17_77", "result", "float"}};
+  const auto ranges = shader_diagnostics::evaluation_ranges(
+      "vec3 bundle_default_normal()\n{\n return missing_normal;\n}\n"
+      "float unrelated() { return missing_elsewhere; }\n"
+      "void script_expr_17_77(out float result) { result = float(value); }\n",
+      bundle_sources);
+  ASSERT_EQ(ranges.size(), 2);
+  EXPECT_EQ(ranges[0].source, 0);
+  EXPECT_EQ(ranges[0].first_line, 2);
+  EXPECT_EQ(ranges[0].last_line, 4);
+  EXPECT_EQ(ranges[1].source, 1);
+  EXPECT_EQ(ranges[1].first_line, 6);
+  EXPECT_EQ(ranges[1].last_line, 6);
+  EXPECT_EQ(shader_diagnostics::evaluation_ranges(
+                "vec3 bundle_default_normal();\nvoid call() { bundle_default_normal(); }",
+                bundle_sources)
+                .size(),
+            0);
+}
+
 }  // namespace blender::gpu::tests
 
 #ifdef GPU_DIAGNOSTICS_STANDALONE
@@ -102,5 +126,6 @@ int main()
   comments_and_strings();
   result_adapter_excluded();
   ambiguous_macro_expansion();
+  bundle_default_helpers();
 }
 #endif

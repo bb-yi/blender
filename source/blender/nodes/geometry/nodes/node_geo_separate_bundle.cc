@@ -45,6 +45,10 @@ static void node_declare(NodeDeclarationBuilder &b)
                        .socket_name_ptr(
                            &tree->id, *SeparateBundleItemsAccessor::item_srna, &item, "name")
                        .propagate_all();
+      if (socket_type == SOCK_VECTOR && tree->type == NTREE_SHADER) {
+        static_cast<decl::VectorBuilder &>(decl).dimensions(
+            item.vector_socket_dimensions == 0 ? 3 : item.vector_socket_dimensions);
+      }
       if (item.structure_type != NodeSocketInterfaceStructureType::Auto) {
         decl.structure_type(StructureType(item.structure_type));
       }
@@ -113,6 +117,13 @@ static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *node_ptr
           panel->use_property_split_set(true);
           panel->use_property_decorate_set(false);
           panel->prop(item_ptr, "socket_type", UI_ITEM_NONE, IFACE_("Type"), ICON_NONE);
+          if (ntree.type == NTREE_SHADER && RNA_enum_get(item_ptr, "socket_type") == SOCK_VECTOR) {
+            panel->prop(item_ptr,
+                        "vector_socket_dimensions",
+                        UI_ITEM_NONE,
+                        IFACE_("Dimensions"),
+                        ICON_NONE);
+          }
           panel->prop(item_ptr, "structure_type", UI_ITEM_NONE, IFACE_("Shape"), ICON_NONE);
         });
   }

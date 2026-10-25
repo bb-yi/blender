@@ -1181,6 +1181,26 @@ void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
     FOREACH_NODETREE_END;
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 56)) {
+    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+      for (bNode &node : ntree->nodes) {
+        if (STREQ(node.idname, "NodeCombineBundle") && node.storage) {
+          auto &storage = *static_cast<NodeCombineBundle *>(node.storage);
+          for (int i = 0; i < storage.items_num; i++) {
+            storage.items[i].vector_socket_dimensions = 3;
+          }
+        }
+        if (STREQ(node.idname, "NodeSeparateBundle") && node.storage) {
+          auto &storage = *static_cast<NodeSeparateBundle *>(node.storage);
+          for (int i = 0; i < storage.items_num; i++) {
+            storage.items[i].vector_socket_dimensions = 3;
+          }
+        }
+      }
+    }
+    FOREACH_NODETREE_END;
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.

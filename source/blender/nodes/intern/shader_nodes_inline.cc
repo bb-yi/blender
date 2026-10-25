@@ -4,6 +4,7 @@
 
 #include <fmt/format.h>
 #include <algorithm>
+#include <functional>
 #include <type_traits>
 #include <variant>
 
@@ -26,6 +27,7 @@
 #include "NOD_node_declaration.hh"
 #include "NOD_node_in_compute_context.hh"
 #include "NOD_shader_nodes_inline.hh"
+#include "NOD_shader_glsl_bundle.hh"
 
 namespace blender::nodes {
 namespace {
@@ -35,6 +37,12 @@ struct BundleSocketValue;
 using BundleSocketValuePtr = std::shared_ptr<BundleSocketValue>;
 
 struct FallbackValue {};
+
+/** An authored but invalid Bundle link must not activate optional GLSL defaults. */
+struct InvalidBundleValue {
+  std::string message;
+  bool reported = false;
+};
 
 /** This indicates that the value should be ignored when it is linked to an input socket. */
 struct DanglingValue {};
@@ -126,6 +134,7 @@ struct SocketValue {
    * constant-folded.
    */
   std::variant<FallbackValue,
+               InvalidBundleValue,
                DanglingValue,
                LinkedSocketValue,
                InputSocketValue,
@@ -201,9 +210,11 @@ struct BundleSocketValue {
     std::string key;
     SocketValue value;
     const bke::bNodeSocketType *socket_type = nullptr;
+    int dimensions = 0;
   };
 
   Vector<Item> items;
+  bool strict = false;
 };
 
 struct PreservedZone {
@@ -618,6 +629,14 @@ class ShaderNodesInliner {
 
     const bNodeLink *used_link = nullptr;
     for (const bNodeLink *link : socket->directly_linked_links()) {
+      if (socket->type == SOCK_BUNDLE && !(link->flag & NODE_LINK_MUTED) &&
+          (!(link->flag & NODE_LINK_VALID) || !link->fromnode || link->fromnode->is_undefined()))
+      {
+        this->store_socket_value(socket,
+                                 {InvalidBundleValue{"Invalid connection to bundle socket '" +
+                                                     std::string(socket->name) + "'"}});
+        return;
+      }
       if (!link->is_used() || link->fromnode == nullptr || link->fromnode->is_undefined()) {
         continue;
       }
@@ -1295,7 +1314,11 @@ class ShaderNodesInliner {
       const NodeCombineBundleItem &item = storage.items[i];
       const StringRef key = item.name;
       const auto &socket_value = value_by_socket_.lookup(input_socket);
-      bundle_value->items.append({key, socket_value, input_socket->typeinfo});
+      const int dimensions =
+          input_socket->type == SOCK_VECTOR ?
+              input_socket->default_value_typed<bNodeSocketValueVector>()->dimensions :
+              0;
+      bundle_value->items.append({key, socket_value, input_socket->typeinfo, dimensions});
     }
     this->store_socket_value(socket, {bundle_value});
   }
@@ -1314,6 +1337,11 @@ class ShaderNodesInliner {
     }
     const auto *bundle_value_ptr = std::get_if<BundleSocketValuePtr>(&socket_value->value);
     if (!bundle_value_ptr) {
+      if (const auto *invalid = std::get_if<InvalidBundleValue>(&socket_value->value);
+          invalid && !invalid->reported)
+      {
+        params_.r_error_messages.append({node.node, invalid->message, true});
+      }
       /* The bundle is empty. Use the fallback value. */
       this->store_socket_value_fallback(socket);
       return;
@@ -1325,13 +1353,45 @@ class ShaderNodesInliner {
       if (key != item.key) {
         continue;
       }
+      if (bundle_value.strict) {
+        const int dimensions =
+            socket->type == SOCK_VECTOR ?
+                socket->default_value_typed<bNodeSocketValueVector>()->dimensions :
+                0;
+        const bool color_alias = (item.socket_type->type == SOCK_RGBA &&
+                                  socket->type == SOCK_VECTOR && ELEM(dimensions, 3, 4)) ||
+                                 (item.socket_type->type == SOCK_VECTOR &&
+                                  socket->type == SOCK_RGBA && ELEM(item.dimensions, 3, 4));
+        const bool same = item.socket_type->type == socket->type &&
+                          (socket->type != SOCK_VECTOR ||
+                           (item.dimensions == 0 ? 3 : item.dimensions) ==
+                               (dimensions == 0 ? 3 : dimensions));
+        if (!same && !color_alias) {
+          params_.r_error_messages.append(
+              {node.node,
+               fmt::format("GLSL bundle field '{}' has an incompatible Separate Bundle type or "
+                           "dimension; synchronize its interface",
+                           key),
+               true});
+          this->store_socket_value_fallback(socket);
+          return;
+        }
+      }
       /* Extract the value from the bundle. */
       const SocketValue converted_value = this->handle_implicit_conversion(
           item.value, *item.socket_type, *socket->typeinfo);
       this->store_socket_value(socket, converted_value);
       return;
     }
-    /* The bundle does not contain the requested key, so use the fallback value. */
+    if (bundle_value.strict) {
+      params_.r_error_messages.append(
+          {node.node,
+           fmt::format(
+               "GLSL bundle field '{}' is no longer present; synchronize this Separate Bundle",
+               key),
+           true});
+    }
+    /* Legacy, untyped bundles retain their existing missing-key behavior. */
     this->store_socket_value_fallback(socket);
   }
 
@@ -1355,11 +1415,16 @@ class ShaderNodesInliner {
     Set<StringRef> existing_keys;
     auto joined_bundle = std::make_shared<BundleSocketValue>();
     for (const SocketValue &value : multi_input_value.values) {
+      if (std::holds_alternative<InvalidBundleValue>(value.value)) {
+        this->store_socket_value(socket, value);
+        return;
+      }
       const auto *bundle_value = std::get_if<BundleSocketValuePtr>(&value.value);
       if (!bundle_value || !*bundle_value) {
         /* Ignore invalid values. */
         continue;
       }
+      joined_bundle->strict |= (*bundle_value)->strict;
       for (const BundleSocketValue::Item &item : (*bundle_value)->items) {
         if (existing_keys.add(item.key)) {
           joined_bundle->items.append(item);
@@ -1455,6 +1520,19 @@ class ShaderNodesInliner {
       /* The node can only be evaluated if all inputs values are known. */
       return;
     }
+    if (node->is_type("ShaderNodeGLSLFunction"_ustr)) {
+      bool has_bundle = false;
+      for (const bNodeSocket *input : node->input_sockets()) {
+        has_bundle |= input->type == SOCK_BUNDLE;
+      }
+      for (const bNodeSocket *output : node->output_sockets()) {
+        has_bundle |= output->type == SOCK_BUNDLE;
+      }
+      if (has_bundle) {
+        this->handle_glsl_bundle_node(node);
+        return;
+      }
+    }
     const bke::bNodeType &node_type = *node->typeinfo;
     if (node_type.build_multi_function && ensured_inputs.all_inputs_primitive) {
       /* Do constant folding. */
@@ -1463,6 +1541,265 @@ class ShaderNodesInliner {
     }
     /* The node can't be constant-folded. So copy it to the destination tree instead. */
     this->handle_output_socket__eval_copy_node(node);
+  }
+
+  static bNodeSocket *bundle_socket_by_identifier(bNode &node,
+                                                  const eNodeSocketInOut direction,
+                                                  StringRef identifier)
+  {
+    for (bNodeSocket *socket : direction == SOCK_IN ? node.input_sockets() : node.output_sockets())
+    {
+      if (identifier == socket->identifier) {
+        return socket;
+      }
+    }
+    return nullptr;
+  }
+
+  void handle_glsl_bundle_node(const NodeInContext &node)
+  {
+    GLSLBundleInterface interface;
+    std::string error;
+    bool upstream_error_reported = false;
+    auto fail = [&]() {
+      std::string location = node->name;
+      for (const ComputeContext *context = node.context; context; context = context->parent()) {
+        if (const auto *group = dynamic_cast<const bke::GroupNodeComputeContext *>(context)) {
+          if (group->node()) {
+            location = std::string(group->node()->name) + " / " + location;
+          }
+        }
+      }
+      const std::string message = "GLSL Function '" + location + "': " + error;
+      if (!upstream_error_reported) {
+        params_.r_error_messages.append({node.node, message, true});
+      }
+      for (const bNodeSocket *socket : node->output_sockets()) {
+        if (socket->type == SOCK_BUNDLE) {
+          this->store_socket_value({node.context, socket}, {InvalidBundleValue{message, true}});
+        }
+        else {
+          this->store_socket_value_fallback({node.context, socket});
+        }
+      }
+    };
+    if (!shader_glsl_bundle_interface(*node, interface, error)) {
+      fail();
+      return;
+    }
+    auto lowering = std::make_shared<GLSLBundleLowering>();
+    struct Binding {
+      std::string identifier;
+      SocketValue value;
+      const bke::bNodeSocketType *source_type = nullptr;
+    };
+    Vector<Binding> bindings;
+    std::function<bool(const GLSLBundleField &,
+                       StringRef,
+                       const std::string &,
+                       const SocketValue *,
+                       const bke::bNodeSocketType *,
+                       int)>
+        bind;
+    bind = [&](const GLSLBundleField &field,
+               StringRef root,
+               const std::string &path,
+               const SocketValue *value,
+               const bke::bNodeSocketType *actual_type,
+               int dimensions) {
+      if (value) {
+        if (const auto *invalid = std::get_if<InvalidBundleValue>(&value->value)) {
+          upstream_error_reported = invalid->reported;
+          error = "Bundle field '" + path + "': " + invalid->message;
+          return false;
+        }
+      }
+      const int expected_dimensions = field.dimensions;
+      const eNodeSocketDatatype actual = actual_type ? actual_type->type : field.socket_type;
+      bool compatible = actual == field.socket_type;
+      if (ELEM(field.socket_type, SOCK_VECTOR, SOCK_RGBA)) {
+        compatible = (actual == SOCK_VECTOR &&
+                      (dimensions == 0 ? 3 : dimensions) == expected_dimensions) ||
+                     (actual == SOCK_RGBA && ELEM(expected_dimensions, 3, 4));
+      }
+      if (value && !compatible) {
+        error = "Bundle field '" + path + "' expects " + field.type_name + ", got " +
+                (actual_type ? std::string(actual_type->idname.c_str()) : "unknown") +
+                (actual == SOCK_VECTOR ?
+                     " (" + std::to_string(dimensions == 0 ? 3 : dimensions) + "D)" :
+                     "");
+        return false;
+      }
+      const auto *input_value = value ? std::get_if<InputSocketValue>(&value->value) : nullptr;
+      const bool missing = value == nullptr ||
+                           (field.socket_type == SOCK_BUNDLE &&
+                            (std::get_if<FallbackValue>(&value->value) ||
+                             (input_value && input_value->socket->type == SOCK_BUNDLE)));
+      if (missing && field.default_expression) {
+        lowering->default_fields.add(path);
+        std::function<void(const GLSLBundleField &, const std::string &)> empty;
+        empty = [&](const GLSLBundleField &f, const std::string &p) {
+          if (f.members.is_empty()) {
+            bindings.append({shader_glsl_bundle_leaf_identifier(root, p), {FallbackValue{}}});
+          }
+          else {
+            for (const auto &child : f.members) {
+              empty(child, p + "." + child.name);
+            }
+          }
+        };
+        empty(field, path);
+        return true;
+      }
+      if (field.socket_type == SOCK_BUNDLE) {
+        const BundleSocketValue *bundle = nullptr;
+        if (!missing) {
+          const auto *ptr = std::get_if<BundleSocketValuePtr>(&value->value);
+          if (!ptr || !*ptr || (actual_type && actual_type->type != SOCK_BUNDLE)) {
+            error = "Field '" + path + "' expects " + field.type_name + " (Bundle)";
+            return false;
+          }
+          bundle = ptr->get();
+        }
+        for (const GLSLBundleField &member : field.members) {
+          const BundleSocketValue::Item *item = nullptr;
+          if (bundle) {
+            for (const auto &candidate : bundle->items) {
+              if (candidate.key == member.name) {
+                item = &candidate;
+                break;
+              }
+            }
+          }
+          if (!bind(member,
+                    root,
+                    path + "." + member.name,
+                    item ? &item->value : nullptr,
+                    item ? item->socket_type : nullptr,
+                    item ? item->dimensions : 0))
+          {
+            return false;
+          }
+        }
+        return true;
+      }
+      if (missing) {
+        error = "Missing required bundle field '" + path + "' (" + field.type_name + ")";
+        return false;
+      }
+      bindings.append({shader_glsl_bundle_leaf_identifier(root, path), *value, actual_type});
+      return true;
+    };
+    for (const GLSLBundleSocket &socket : interface.sockets) {
+      if (socket.in_out != SOCK_IN) {
+        continue;
+      }
+      bNodeSocket *source = bundle_socket_by_identifier(
+          *const_cast<bNode *>(node.node), SOCK_IN, socket.identifier);
+      if (!source) {
+        error = "Stale bundle interface '" + socket.identifier + "'; refresh the source";
+        fail();
+        return;
+      }
+      const SocketValue &value = value_by_socket_.lookup({node.context, source});
+      if (!bind(socket.field, socket.identifier, socket.field.name, &value, source->typeinfo, 0)) {
+        fail();
+        return;
+      }
+    }
+
+    Map<const bNodeSocket *, bNodeSocket *> unused_socket_map;
+    const int identifier = this->get_next_node_identifier();
+    const std::string name = fmt::format("{}_{}", identifier, node->name);
+    bNode &copy = *bke::node_copy_with_mapping(
+        &dst_tree_,
+        *node,
+        this->node_copy_flag(),
+        name.size() < sizeof(bNode::name) ? std::make_optional<StringRefNull>(name) : std::nullopt,
+        identifier,
+        unused_socket_map);
+    copy.parent = nullptr;
+    copy.runtime->original = node->runtime->original ? node->runtime->original :
+                                                       const_cast<bNode *>(node.node);
+    shader_glsl_bundle_lower_node(dst_tree_, copy, std::move(lowering));
+    dst_tree_.ensure_topology_cache();
+    for (const bNodeSocket *source : node->input_sockets()) {
+      if (source->type == SOCK_BUNDLE || !source->is_available()) {
+        continue;
+      }
+      if (bNodeSocket *target = bundle_socket_by_identifier(copy, SOCK_IN, source->identifier)) {
+        this->set_input_socket_value(
+            *node, copy, *target, value_by_socket_.lookup({node.context, source}));
+      }
+    }
+    for (const Binding &binding : bindings) {
+      bNodeSocket *target = bundle_socket_by_identifier(copy, SOCK_IN, binding.identifier);
+      if (!target) {
+        error = "Could not materialize bundle leaf '" + binding.identifier + "'";
+        fail();
+        return;
+      }
+      const SocketValue converted = binding.source_type ?
+                                        this->handle_implicit_conversion(binding.value,
+                                                                         *binding.source_type,
+                                                                         *target->typeinfo) :
+                                        binding.value;
+      this->set_input_socket_value(*node, copy, *target, converted);
+    }
+
+    std::function<SocketValue(const GLSLBundleField &, StringRef, const std::string &)>
+        output_value;
+    output_value =
+        [&](const GLSLBundleField &field, StringRef root, const std::string &path) -> SocketValue {
+      if (field.members.is_empty()) {
+        bNodeSocket *socket = bundle_socket_by_identifier(
+            copy, SOCK_OUT, shader_glsl_bundle_leaf_identifier(root, path));
+        if (!socket) {
+          error = "Could not materialize output bundle field '" + path + "'";
+          return {FallbackValue{}};
+        }
+        return {LinkedSocketValue{&copy, socket}};
+      }
+      auto bundle = std::make_shared<BundleSocketValue>();
+      bundle->strict = true;
+      for (const GLSLBundleField &member : field.members) {
+        bundle->items.append({member.name,
+                              output_value(member, root, path + "." + member.name),
+                              bke::node_socket_type_find_static(member.socket_type),
+                              member.dimensions});
+      }
+      return {bundle};
+    };
+    for (const bNodeSocket *source : node->output_sockets()) {
+      if (!source->is_available()) {
+        continue;
+      }
+      if (source->type == SOCK_BUNDLE) {
+        bool found = false;
+        for (const GLSLBundleSocket &schema : interface.sockets) {
+          if (schema.in_out == SOCK_OUT && schema.identifier == source->identifier) {
+            this->store_socket_value(
+                {node.context, source},
+                output_value(schema.field, schema.identifier, schema.field.name));
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          error = "Stale output bundle interface";
+          fail();
+          return;
+        }
+      }
+      else if (bNodeSocket *target = bundle_socket_by_identifier(
+                   copy, SOCK_OUT, source->identifier))
+      {
+        this->store_socket_value({node.context, source}, {LinkedSocketValue{&copy, target}});
+      }
+    }
+    if (!error.empty()) {
+      fail();
+    }
   }
 
   struct EnsureInputsResult {
@@ -1771,6 +2108,17 @@ class ShaderNodesInliner {
         {
           return {PrimitiveSocketValue{
               VectorPrimitiveSocketValue{float3(color->r, color->g, color->b), color->a, 4}}};
+        }
+      }
+      if (from_socket_type.type == SOCK_VECTOR && to_socket_type.type == SOCK_RGBA) {
+        if (const auto *vector = std::get_if<VectorPrimitiveSocketValue>(
+                &src_primitive_value->value))
+        {
+          return {
+              PrimitiveSocketValue{ColorGeometry4f(vector->xyz.x,
+                                                   vector->xyz.y,
+                                                   vector->xyz.z,
+                                                   vector->dimensions == 4 ? vector->w : 1.0f)}};
         }
       }
       if (data_type_conversions_.is_convertible(*from_socket_type.base_cpp_type,

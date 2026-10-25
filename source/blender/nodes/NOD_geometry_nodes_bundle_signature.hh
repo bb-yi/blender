@@ -4,7 +4,10 @@
 
 #pragma once
 
+#include <memory>
+
 #include "BLI_vector_set.hh"
+#include "BLI_utildefines.h"
 
 #include "BKE_node.hh"
 
@@ -12,13 +15,37 @@
 
 namespace blender::nodes {
 
+/** Shader Bundle aliases preserve RGB/RGBA, but never silently resize numeric vectors. */
+inline bool bundle_socket_types_compatible(eNodeSocketDatatype expected,
+                                           int expected_dimensions,
+                                           eNodeSocketDatatype actual,
+                                           int actual_dimensions)
+{
+  const int expected_vector = expected_dimensions == 0 ? 3 : expected_dimensions;
+  const int actual_vector = actual_dimensions == 0 ? 3 : actual_dimensions;
+  if (expected == actual) {
+    return expected != SOCK_VECTOR || expected_vector == actual_vector;
+  }
+  if (expected == SOCK_VECTOR && actual == SOCK_RGBA) {
+    return ELEM(expected_vector, 3, 4);
+  }
+  if (expected == SOCK_RGBA && actual == SOCK_VECTOR) {
+    return ELEM(actual_vector, 3, 4) &&
+           (expected_dimensions == 0 || expected_dimensions == actual_vector);
+  }
+  return false;
+}
+
 struct BundleSignature {
   struct Item {
     std::string key;
     const bke::bNodeSocketType *type = nullptr;
-    NodeSocketInterfaceStructureType structure_type;
+    NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Single;
+    int dimensions = 0;
+    std::shared_ptr<const BundleSignature> nested;
+    bool optional = false;
 
-    friend bool operator==(const Item &a, const Item &b) = default;
+    friend bool operator==(const Item &a, const Item &b);
   };
 
   struct ItemKeyGetter {
@@ -29,6 +56,8 @@ struct BundleSignature {
   };
 
   CustomIDVectorSet<Item, ItemKeyGetter> items;
+  /** GLSL declarations require exact field types and non-destructive synchronization. */
+  bool strict = false;
 
   friend bool operator==(const BundleSignature &a, const BundleSignature &b);
   friend bool operator!=(const BundleSignature &a, const BundleSignature &b);
@@ -55,7 +84,7 @@ struct LinkedBundleSignatures {
   Vector<Item> items;
   bool has_type_definition() const;
 
-  std::optional<BundleSignature> get_merged_signature() const;
+  std::optional<BundleSignature> get_merged_signature(std::string *r_error = nullptr) const;
 };
 
 NodeSocketInterfaceStructureType get_structure_type_for_bundle_signature(

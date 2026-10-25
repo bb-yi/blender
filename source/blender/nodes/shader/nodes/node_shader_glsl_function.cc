@@ -65,6 +65,10 @@
 #include "NOD_sync_sockets.hh"
 #include "NOD_geometry_nodes_closure_signature.hh"
 #include "NOD_shader.h"
+#include "NOD_shader_glsl_bundle.hh"
+#include "NOD_geometry_nodes_bundle_signature.hh"
+#include "../../geometry/include/NOD_geo_bundle.hh"
+#include "NOD_node_declaration.hh"
 #include "NOD_socket.hh"
 
 #include "RNA_access.hh"
@@ -224,6 +228,7 @@ namespace blender
       Sample2D,
       Sample3D,
       SampleCube,
+      Struct,
       Void,
     };
 
@@ -292,6 +297,7 @@ namespace blender
       std::string identifier;
       int dimensions = 0;
       bool is_array = false;
+      std::shared_ptr<GLSLBundleField> bundle;
       int64_t type_source_start = -1;
       int64_t type_source_end = -1;
       Meta meta;
@@ -335,6 +341,7 @@ namespace blender
       std::string return_type_name;
       GLSLBoundaryType return_type = GLSLBoundaryType::Unsupported;
       GLSLFunctionParam::Meta return_meta;
+      std::shared_ptr<GLSLBundleField> return_bundle;
       Vector<GLSLFunctionParam> params;
       Vector<GLSLPanelMeta> panels;
       int body_token_start = -1;
@@ -428,6 +435,7 @@ namespace blender
 
     struct GLSLRawParamMeta
     {
+      int version = 1;
       std::optional<std::string> default_value;
       std::optional<std::string> min_value;
       std::optional<std::string> max_value;
@@ -2623,6 +2631,7 @@ namespace blender
       std::stringstream stream{ std::string(comment) };
       std::string line;
       bool header_seen = false;
+      int meta_version = 1;
       std::optional<std::string> active_panel_name;
       Set<std::string> panel_names;
 
@@ -2643,6 +2652,13 @@ namespace blender
           if (!StringRef(normalized).startswith("@glsl_meta"))
           {
             return true;
+          }
+          if (normalized == "@glsl_meta v2") {
+            meta_version = 2;
+          }
+          else if (normalized != "@glsl_meta" && normalized != "@glsl_meta v1") {
+            r_error = "Supported GLSL Meta versions are v1 and v2";
+            return false;
           }
           header_seen = true;
           r_is_meta_block = true;
@@ -2719,8 +2735,7 @@ namespace blender
         }
 
         const int64_t dot_index = StringRef(target).find('.');
-        if (dot_index != StringRef::not_found)
-        {
+        if (dot_index != StringRef::not_found && meta_version < 2) {
           r_error =
             "GLSL meta blocks now belong to the function directly below them; use plain parameter "
             "names inside the block";
@@ -2740,6 +2755,7 @@ namespace blender
         }
 
         GLSLRawParamMeta meta;
+        meta.version = meta_version;
         if (const GLSLRawParamMeta* existing = r_param_meta_by_name.lookup_ptr(param_name))
         {
           meta = *existing;
@@ -4860,6 +4876,182 @@ namespace blender
       return ss.str();
     }
 
+    static GLSLBundleField *find_bundle_field(GLSLBundleField &root, StringRef path)
+    {
+      GLSLBundleField *field = &root;
+      while (!path.is_empty()) {
+        const int64_t dot = path.find('.');
+        const StringRef key = dot == StringRef::not_found ? path : path.substr(0, dot);
+        GLSLBundleField *child = nullptr;
+        for (GLSLBundleField &member : field->members) {
+          if (member.name == key) {
+            child = &member;
+            break;
+          }
+        }
+        if (!child || field->matrix) {
+          return nullptr;
+        }
+        field = child;
+        if (dot == StringRef::not_found) {
+          break;
+        }
+        path = path.substr(dot + 1);
+        if (path.is_empty()) {
+          return nullptr;
+        }
+      }
+      return field;
+    }
+
+    static void parse_bundle_matrix_literal(GLSLBundleField &field)
+    {
+      if (!field.default_expression) {
+        return;
+      }
+      const std::string expression = trim_copy(*field.default_expression);
+      const std::string prefix = field.type_name + "(";
+      if (!StringRef(expression).startswith(prefix) || expression.back() != ')') {
+        return;
+      }
+      const std::string body = expression.substr(prefix.size(),
+                                                 expression.size() - prefix.size() - 1);
+      Vector<std::string> arguments;
+      int depth = 0;
+      size_t start = 0;
+      for (size_t i = 0; i < body.size(); i++) {
+        depth += body[i] == '(';
+        depth -= body[i] == ')';
+        if (body[i] == ',' && depth == 0) {
+          arguments.append(trim_copy(StringRef(body).substr(start, i - start)));
+          start = i + 1;
+        }
+      }
+      arguments.append(trim_copy(StringRef(body).substr(start)));
+      const int n = field.members.size();
+      Vector<float4> columns(n, float4(0.0f));
+      std::string unused_error;
+      if (arguments.size() == 1) {
+        float diagonal;
+        if (!parse_glsl_meta_float_literal(arguments[0], diagonal, unused_error)) {
+          return;
+        }
+        for (int c = 0; c < n; c++) {
+          columns[c][c] = diagonal;
+        }
+      }
+      else if (arguments.size() == n) {
+        for (int c = 0; c < n; c++) {
+          if (!parse_glsl_meta_vector_default(arguments[c], n, columns[c], unused_error)) {
+            return;
+          }
+        }
+      }
+      else if (arguments.size() == n * n) {
+        for (int c = 0; c < n; c++) {
+          for (int r = 0; r < n; r++) {
+            if (!parse_glsl_meta_float_literal(arguments[c * n + r], columns[c][r], unused_error))
+            {
+              return;
+            }
+          }
+        }
+      }
+      else {
+        return;
+      }
+      field.literal_default = true;
+      for (int c = 0; c < n; c++) {
+        field.members[c].literal_default = true;
+        field.members[c].default_value = columns[c];
+      }
+    }
+
+    static bool apply_bundle_field_meta(const GLSLRawParamMeta &raw,
+                                        GLSLBundleField &field,
+                                        const bool output,
+                                        std::string &error)
+    {
+      if (raw.items || raw.show_label || raw.hide_value) {
+        error =
+            "Bundle members support label, description, subtype, min/max and default; "
+            "choice lists and hidden controls belong to source nodes or ordinary parameters";
+        return false;
+      }
+      if (field.socket_type == SOCK_BOOLEAN && (raw.min_value || raw.max_value || raw.subtype)) {
+        error = "Boolean bundle members support label, description and default only";
+        return false;
+      }
+      if (raw.label) {
+        field.label = *raw.label;
+      }
+      if (raw.description) {
+        field.description = *raw.description;
+      }
+      const bool aggregate = field.socket_type == SOCK_BUNDLE && !field.matrix;
+      if (aggregate) {
+        if (raw.default_value || raw.min_value || raw.max_value || raw.subtype || raw.items ||
+            raw.hide_value || raw.show_label)
+        {
+          error =
+              "Struct metadata accepts label/description/panel; define defaults on individual "
+              "members";
+          return false;
+        }
+        return true;
+      }
+      if (output && (raw.default_value || raw.min_value || raw.max_value || raw.items ||
+                     raw.hide_value || raw.show_label))
+      {
+        error = "Output bundle members accept label, description and subtype only";
+        return false;
+      }
+      if (field.matrix) {
+        if (raw.min_value || raw.max_value || raw.subtype || raw.items || raw.hide_value ||
+            raw.show_label)
+        {
+          error = "Matrix bundle members accept label, description and default only";
+          return false;
+        }
+        if (raw.default_value) {
+          field.default_expression = trim_copy(*raw.default_value);
+          parse_bundle_matrix_literal(field);
+        }
+        return true;
+      }
+      GLSLRawParamMeta scalar_raw = raw;
+      const bool color = raw.subtype && *raw.subtype == "color" &&
+                         ELEM(field.type_name, "vec3", "vec4");
+      if (color) {
+        scalar_raw.subtype.reset();
+        field.socket_type = SOCK_RGBA;
+      }
+      GLSLFunctionParam scalar;
+      scalar.name = field.name;
+      scalar.type_name = field.type_name;
+      scalar.type = glsl_boundary_type_from_name(field.type_name);
+      scalar.dimensions = field.dimensions;
+      if (!apply_glsl_meta_to_param(scalar_raw, scalar, error)) {
+        return false;
+      }
+      if (raw.default_value) {
+        field.default_expression = trim_copy(*raw.default_value);
+      }
+      field.literal_default = scalar.meta.has_default_value;
+      field.default_value = scalar.meta.default_value;
+      field.int_default = scalar.meta.int_default_value.value_or(0);
+      field.int_min_value = scalar.meta.int_min_value;
+      field.int_max_value = scalar.meta.int_max_value;
+      if (scalar.meta.has_min) {
+        field.min_value = scalar.meta.min_value;
+      }
+      if (scalar.meta.has_max) {
+        field.max_value = scalar.meta.max_value;
+      }
+      field.subtype = scalar.meta.subtype.value_or(PROP_NONE);
+      return true;
+    }
+
     static bool apply_glsl_meta_to_function(const Map<std::string, GLSLRawParamMeta>& meta_by_key,
       const Map<std::string, Vector<GLSLPanelMeta>>& panels_by_function,
       GLSLFunctionDefinition& r_function,
@@ -4886,6 +5078,58 @@ namespace blender
         {
           continue;
         }
+        const int64_t dot = target_param.find('.');
+        const StringRef root_name = dot == StringRef::not_found ? target_param :
+                                                                  target_param.substr(0, dot);
+        GLSLBundleField *bundle = nullptr;
+        bool bundle_output = false;
+        if (item.value.version >= 2 && root_name == "return") {
+          bundle = r_function.return_bundle.get();
+          bundle_output = true;
+        }
+        for (GLSLFunctionParam &param : r_function.params) {
+          if (param.name == root_name && param.bundle) {
+            bundle = param.bundle.get();
+            bundle_output = glsl_param_has_output_socket(param);
+          }
+        }
+        if (bundle) {
+          if (item.value.panel_name && (bundle_output || dot != StringRef::not_found)) {
+            r_error =
+                "GLSL Meta panels apply to whole input parameters, not bundle members or outputs";
+            return false;
+          }
+          if (dot != StringRef::not_found && item.value.version < 2) {
+            r_error = "Bundle member metadata requires @glsl_meta v2";
+            return false;
+          }
+          GLSLBundleField *field = dot == StringRef::not_found ?
+                                       bundle :
+                                       find_bundle_field(*bundle, target_param.substr(dot + 1));
+          if (!field) {
+            r_error = "Unknown bundle field '" + std::string(target_param) + "'";
+            return false;
+          }
+          if (!apply_bundle_field_meta(item.value, *field, bundle_output, r_error)) {
+            r_error = "For bundle field '" + std::string(target_param) + "': " + r_error;
+            return false;
+          }
+          if (field->default_expression) {
+            const Vector<GLSLToken> default_tokens = tokenize_glsl_source(
+                *field->default_expression);
+            for (int i = 0; i < default_tokens.size(); i++) {
+              const GLSLToken &token = default_tokens[i];
+              if (token.kind == GLSLToken::Kind::Identifier && param_names.contains(token.text) &&
+                  (i == 0 || default_tokens[i - 1].punctuation != '.'))
+              {
+                r_error = "Default of bundle field '" + std::string(target_param) +
+                          "' cannot reference function parameter '" + token.text + "'";
+                return false;
+              }
+            }
+          }
+          continue;
+        }
         if (!param_names.contains(std::string(target_param)))
         {
           r_error = "GLSL meta parameter '" + std::string(target_param) +
@@ -4896,6 +5140,20 @@ namespace blender
 
       for (GLSLFunctionParam& param : r_function.params)
       {
+        if (param.bundle) {
+          if (!param.bundle->label.empty()) {
+            param.meta.label = param.bundle->label;
+          }
+          if (!param.bundle->description.empty()) {
+            param.meta.description = param.bundle->description;
+          }
+          if (const GLSLRawParamMeta *raw = meta_by_key.lookup_ptr(
+                  make_glsl_meta_key(r_function.name, param.name)))
+          {
+            param.meta.panel_name = raw->panel_name;
+          }
+          continue;
+        }
         if (const GLSLRawParamMeta* function_meta = meta_by_key.lookup_ptr(
           make_glsl_meta_key(r_function.name, param.name)))
         {
@@ -5622,7 +5880,10 @@ namespace blender
       const GLSLToken& type_token = *identifiers[identifiers.size() - 2];
       const StringRef type_name = type_token.text;
       const StringRef param_name = identifiers.last()->text;
-      const GLSLBoundaryType boundary_type = glsl_boundary_type_from_name(type_name);
+      GLSLBoundaryType boundary_type = glsl_boundary_type_from_name(type_name);
+      if (boundary_type == GLSLBoundaryType::Unsupported) {
+        boundary_type = GLSLBoundaryType::Struct;
+      }
       if (!ELEM(boundary_type,
                 GLSLBoundaryType::Float,
                 GLSLBoundaryType::Int,
@@ -5635,7 +5896,8 @@ namespace blender
                 GLSLBoundaryType::Mat4,
                 GLSLBoundaryType::Sample2D,
                 GLSLBoundaryType::Sample3D,
-                GLSLBoundaryType::SampleCube))
+                GLSLBoundaryType::SampleCube,
+                GLSLBoundaryType::Struct))
       {
         r_error =
             "Supported parameter types are float, int, bool, vec2, vec3, vec4, mat2, mat3, mat4, "
@@ -5691,17 +5953,21 @@ namespace blender
       r_function.name = name_token.text;
       r_function.return_type_name = type_token.text;
       r_function.return_type = glsl_boundary_type_from_name(type_token.text);
+      if (r_function.return_type == GLSLBoundaryType::Unsupported) {
+        r_function.return_type = GLSLBoundaryType::Struct;
+      }
       if (!ELEM(r_function.return_type,
-        GLSLBoundaryType::Void,
-        GLSLBoundaryType::Float,
-        GLSLBoundaryType::Int,
-        GLSLBoundaryType::Bool,
-        GLSLBoundaryType::Vec2,
-        GLSLBoundaryType::Vec3,
-        GLSLBoundaryType::Vec4,
-        GLSLBoundaryType::Mat2,
-        GLSLBoundaryType::Mat3,
-        GLSLBoundaryType::Mat4))
+                GLSLBoundaryType::Void,
+                GLSLBoundaryType::Float,
+                GLSLBoundaryType::Int,
+                GLSLBoundaryType::Bool,
+                GLSLBoundaryType::Vec2,
+                GLSLBoundaryType::Vec3,
+                GLSLBoundaryType::Vec4,
+                GLSLBoundaryType::Mat2,
+                GLSLBoundaryType::Mat3,
+                GLSLBoundaryType::Mat4,
+                GLSLBoundaryType::Struct))
       {
         r_error =
           "Supported return types are void, float, int, bool, vec2, vec3, vec4, mat2, mat3, and "
@@ -6480,6 +6746,187 @@ namespace blender
       return true;
     }
 
+    static bool resolve_glsl_bundle_types(const Vector<GLSLToken> &tokens,
+                                          GLSLFunctionDefinition &function,
+                                          std::string &error)
+    {
+      if (function.return_type != GLSLBoundaryType::Struct &&
+          std::none_of(function.params.begin(), function.params.end(), [](const auto &param) {
+            return param.type == GLSLBoundaryType::Struct;
+          }))
+      {
+        return true;
+      }
+      /* Bound expansion while constructing schemas, before a repeated nested type can grow
+       * exponentially. The final per-side limit also includes ordinary parameters. */
+      int expanded_values = 0;
+      Map<std::string, Vector<int2>> definitions;
+      int depth = 0;
+      for (int i = 0; i < tokens.size(); i++) {
+        if (depth == 0 && tokens[i].text == "struct" && i + 2 < tokens.size() &&
+            tokens[i + 1].kind == GLSLToken::Kind::Identifier && tokens[i + 2].punctuation == '{')
+        {
+          int end = i + 3, braces = 1;
+          for (; end < tokens.size(); end++) {
+            braces += tokens[end].punctuation == '{';
+            braces -= tokens[end].punctuation == '}';
+            if (braces == 0) {
+              break;
+            }
+          }
+          definitions.lookup_or_add_default(tokens[i + 1].text).append(int2(i + 3, end));
+        }
+        depth += tokens[i].punctuation == '{';
+        depth -= tokens[i].punctuation == '}';
+      }
+      Set<std::string> active_types;
+      std::function<bool(StringRef, StringRef, int, GLSLBundleField &)> resolve;
+      resolve = [&](StringRef type, StringRef path, int nesting, GLSLBundleField &field) {
+        field.type_name = type;
+        const GLSLBoundaryType builtin = glsl_boundary_type_from_name(type);
+        if (builtin != GLSLBoundaryType::Unsupported) {
+          expanded_values += glsl_boundary_type_is_matrix(builtin) ? glsl_matrix_columns(builtin) :
+                                                                     1;
+          if (expanded_values > MAX_SOCKET * 2) {
+            error = "Bundle field '" + std::string(path) +
+                    "' exceeds the bounded interface expansion limit";
+            return false;
+          }
+        }
+        field.dimensions = glsl_boundary_dimensions(builtin);
+        switch (builtin) {
+          case GLSLBoundaryType::Float:
+            field.socket_type = SOCK_FLOAT;
+            return true;
+          case GLSLBoundaryType::Int:
+            field.socket_type = SOCK_INT;
+            return true;
+          case GLSLBoundaryType::Bool:
+            field.socket_type = SOCK_BOOLEAN;
+            return true;
+          case GLSLBoundaryType::Vec2:
+          case GLSLBoundaryType::Vec3:
+          case GLSLBoundaryType::Vec4:
+            field.socket_type = SOCK_VECTOR;
+            return true;
+          case GLSLBoundaryType::Mat2:
+          case GLSLBoundaryType::Mat3:
+          case GLSLBoundaryType::Mat4: {
+            field.socket_type = SOCK_BUNDLE;
+            field.matrix = true;
+            const int columns = glsl_matrix_columns(builtin);
+            for (int c = 0; c < columns; c++) {
+              GLSLBundleField column;
+              column.name = "c" + std::to_string(c);
+              column.type_name = "vec" + std::to_string(columns);
+              column.socket_type = SOCK_VECTOR;
+              column.dimensions = columns;
+              field.members.append(std::move(column));
+            }
+            return true;
+          }
+          case GLSLBoundaryType::Unsupported:
+            break;
+          default:
+            error = "Bundle field '" + std::string(path) + "' has unsupported type '" +
+                    std::string(type) + "' (only pure data members are supported)";
+            return false;
+        }
+        if (nesting >= 32) {
+          error = "Bundle field '" + std::string(path) + "' exceeds the 32-level struct limit";
+          return false;
+        }
+        const Vector<int2> *ranges = definitions.lookup_ptr(std::string(type));
+        if (!ranges || ranges->size() != 1) {
+          error = "Bundle field '" + std::string(path) + "' has " +
+                  (!ranges ? "unknown type '" : "ambiguous struct type '") + std::string(type) +
+                  "'";
+          return false;
+        }
+        if (!active_types.add(std::string(type))) {
+          error = "Recursive struct at bundle field '" + std::string(path) + "'";
+          return false;
+        }
+        field.socket_type = SOCK_BUNDLE;
+        const int2 range = ranges->first();
+        Set<std::string> member_names;
+        for (int i = range.x; i < range.y;) {
+          if (tokens[i].kind != GLSLToken::Kind::Identifier) {
+            error = "Invalid struct member declaration in '" + std::string(type) + "'";
+            return false;
+          }
+          const std::string member_type = tokens[i++].text;
+          while (true) {
+            if (i >= range.y || tokens[i].kind != GLSLToken::Kind::Identifier) {
+              error = "Expected a member name in struct '" + std::string(type) + "'";
+              return false;
+            }
+            GLSLBundleField member;
+            member.name = tokens[i++].text;
+            const std::string child_path = std::string(path) + "." + member.name;
+            if (!member_names.add(member.name)) {
+              error = "Duplicate bundle field '" + child_path + "'";
+              return false;
+            }
+            if (i >= range.y || !ELEM(tokens[i].punctuation, ',', ';')) {
+              error = "Bundle field '" + child_path +
+                      "' uses an unsupported array or member declaration";
+              return false;
+            }
+            if (!resolve(member_type, child_path, nesting + 1, member)) {
+              return false;
+            }
+            field.members.append(std::move(member));
+            const char separator = tokens[i++].punctuation;
+            if (separator == ';') {
+              break;
+            }
+          }
+        }
+        active_types.remove(std::string(type));
+        if (field.members.is_empty()) {
+          error = "Empty struct at bundle field '" + std::string(path) + "'";
+          return false;
+        }
+        return true;
+      };
+      for (GLSLFunctionParam &param : function.params) {
+        if (param.type != GLSLBoundaryType::Struct) {
+          continue;
+        }
+        if (param.is_array) {
+          error = "Struct array parameter '" + param.name + "' is not supported";
+          return false;
+        }
+        param.bundle = std::make_shared<GLSLBundleField>();
+        param.bundle->name = param.name;
+        if (!resolve(param.type_name, param.name, 0, *param.bundle)) {
+          return false;
+        }
+      }
+      if (function.return_type == GLSLBoundaryType::Struct) {
+        function.return_bundle = std::make_shared<GLSLBundleField>();
+        function.return_bundle->name = "return";
+        if (!resolve(function.return_type_name, "return", 0, *function.return_bundle)) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    static void append_bundle_signature(std::stringstream &ss, const GLSLBundleField &field)
+    {
+      ss << '{' << field.name << ':' << field.type_name << ':' << int(field.socket_type) << ':'
+         << field.dimensions;
+      if (field.default_expression) {
+        ss << '=' << *field.default_expression;
+      }
+      for (const GLSLBundleField &member : field.members) {
+        append_bundle_signature(ss, member);
+      }
+      ss << '}';
+    }
+
     static std::string build_function_signature_key(const GLSLFunctionDefinition& function)
     {
       std::stringstream ss;
@@ -6504,8 +6951,14 @@ namespace blender
           break;
         }
         ss << param.type_name << ' ' << param.name;
+        if (param.bundle) {
+          append_bundle_signature(ss, *param.bundle);
+        }
       }
       ss << ')';
+      if (function.return_bundle) {
+        append_bundle_signature(ss, *function.return_bundle);
+      }
       return ss.str();
     }
 
@@ -8521,8 +8974,128 @@ vec3 glsl_ambient_lighting()
 
     static bool glsl_boundary_type_uses_output_temp(const GLSLBoundaryType type)
     {
-      return ELEM(type, GLSLBoundaryType::Vec4, GLSLBoundaryType::Int, GLSLBoundaryType::Bool) ||
-        glsl_boundary_type_is_matrix(type);
+      return ELEM(type,
+                  GLSLBoundaryType::Vec4,
+                  GLSLBoundaryType::Int,
+                  GLSLBoundaryType::Bool,
+                  GLSLBoundaryType::Struct) ||
+             glsl_boundary_type_is_matrix(type);
+    }
+
+    static void foreach_bundle_leaf(const GLSLBundleField &field,
+                                    const std::string &path,
+                                    const FunctionRef<void(const GLSLBundleField &, StringRef)> fn)
+    {
+      if (field.members.is_empty()) {
+        fn(field, path);
+        return;
+      }
+      for (const GLSLBundleField &member : field.members) {
+        foreach_bundle_leaf(member, path + "." + member.name, fn);
+      }
+    }
+
+    static std::string bundle_default_function_name(const GLSLParseResult &parsed, StringRef path)
+    {
+      return parsed.wrapper_name + "_default_" +
+             shader_glsl_bundle_leaf_identifier("default", path);
+    }
+
+    static void append_bundle_default_helpers(std::stringstream &ss,
+                                              const GLSLParseResult &parsed,
+                                              const GLSLBundleField &field,
+                                              const std::string &path)
+    {
+      if (field.default_expression) {
+        ss << field.type_name << ' ' << bundle_default_function_name(parsed, path)
+           << "() { return " << *field.default_expression << "; }\n";
+      }
+      for (const GLSLBundleField &member : field.members) {
+        append_bundle_default_helpers(ss, parsed, member, path + "." + member.name);
+      }
+    }
+
+    static std::string bundle_input_expression(const bNode &node,
+                                               const GLSLParseResult &parsed,
+                                               const GLSLBundleField &field,
+                                               const StringRef root_identifier,
+                                               const std::string &path)
+    {
+      if (field.default_expression && node.runtime->glsl_bundle_lowering &&
+          node.runtime->glsl_bundle_lowering->default_fields.contains(path))
+      {
+        return bundle_default_function_name(parsed, path) + "()";
+      }
+      if (!field.members.is_empty()) {
+        std::string expression = (field.matrix ? field.type_name :
+                                                 parsed.source_prefix + field.type_name) +
+                                 "(";
+        for (int i = 0; i < field.members.size(); i++) {
+          if (i) {
+            expression += ", ";
+          }
+          const GLSLBundleField &member = field.members[i];
+          expression += bundle_input_expression(
+              node, parsed, member, root_identifier, path + "." + member.name);
+        }
+        return expression + ")";
+      }
+      const std::string argument = shader_glsl_bundle_leaf_identifier(root_identifier, path);
+      if (field.socket_type == SOCK_INT) {
+        return "int(round(" + argument + "))";
+      }
+      if (field.socket_type == SOCK_BOOLEAN) {
+        return "(" + argument + " != 0.0)";
+      }
+      if (field.socket_type == SOCK_RGBA && field.dimensions == 3) {
+        return argument + ".rgb";
+      }
+      return argument;
+    }
+
+    static void append_bundle_output_assignments(std::stringstream &ss,
+                                                 const GLSLBundleField &field,
+                                                 StringRef root_identifier,
+                                                 const std::string &path,
+                                                 const std::string &value)
+    {
+      if (!field.members.is_empty()) {
+        for (int i = 0; i < field.members.size(); i++) {
+          const GLSLBundleField &member = field.members[i];
+          append_bundle_output_assignments(
+              ss,
+              member,
+              root_identifier,
+              path + "." + member.name,
+              value + (field.matrix ? "[" + std::to_string(i) + "]" : "." + member.name));
+        }
+        return;
+      }
+      ss << "  " << shader_glsl_bundle_leaf_identifier(root_identifier, path) << " = ";
+      if (field.socket_type == SOCK_INT) {
+        ss << "float(" << value << ')';
+      }
+      else if (field.socket_type == SOCK_BOOLEAN) {
+        ss << value << " ? 1.0 : 0.0";
+      }
+      else if (field.socket_type == SOCK_RGBA && field.dimensions == 3) {
+        ss << "vec4(" << value << ", 1.0)";
+      }
+      else {
+        ss << value;
+      }
+      ss << ";\n";
+    }
+
+    static StringRefNull bundle_transport_type(const GLSLBundleField &field)
+    {
+      if (ELEM(field.socket_type, SOCK_INT, SOCK_BOOLEAN)) {
+        return "float";
+      }
+      if (field.socket_type == SOCK_RGBA) {
+        return "vec4";
+      }
+      return field.type_name.c_str();
     }
 
     static std::string build_wrapper_glsl_source(
@@ -8531,17 +9104,17 @@ vec3 glsl_ambient_lighting()
       const Map<std::string, GLSLSamplerSourceKind>& sampler_source_kinds)
     {
       const GLSLFunctionDefinition& function = parse_result.analysis->function;
-      const bool uses_expression_defaults = [&]()
-        {
-          for (const GLSLFunctionParam& param : function.params)
-          {
-            if (param.meta.default_expression.has_value())
-            {
-              return true;
-            }
+      const bool uses_expression_defaults = [&]() {
+        if (function.return_bundle) {
+          return true;
+        }
+        for (const GLSLFunctionParam &param : function.params) {
+          if (param.bundle || param.meta.default_expression.has_value()) {
+            return true;
           }
-          return false;
-        }();
+        }
+        return false;
+      }();
 
       std::stringstream ss;
       if (uses_expression_defaults)
@@ -8555,6 +9128,11 @@ vec3 glsl_ambient_lighting()
           ss << "#define " << name << " " << parse_result.source_prefix << name << "\n";
         }
         ss << "\n";
+      }
+      for (const GLSLFunctionParam &param : function.params) {
+        if (param.bundle && glsl_param_has_input_socket(param)) {
+          append_bundle_default_helpers(ss, parse_result, *param.bundle, param.name);
+        }
       }
       ss << "void " << parse_result.wrapper_name << "(";
       bool need_comma = false;
@@ -8624,6 +9202,14 @@ vec3 glsl_ambient_lighting()
         {
           continue;
         }
+        if (param.bundle) {
+          foreach_bundle_leaf(
+              *param.bundle, param.name, [&](const GLSLBundleField &field, StringRef path) {
+                append_wrapper_input(bundle_transport_type(field),
+                                     shader_glsl_bundle_leaf_identifier(param.identifier, path));
+              });
+          continue;
+        }
         const std::string input_name = make_wrapper_argument_name("in", param.name);
         if (param.type == GLSLBoundaryType::Vec4)
         {
@@ -8642,8 +9228,16 @@ vec3 glsl_ambient_lighting()
       }
       if (function.return_type != GLSLBoundaryType::Void)
       {
-        if (function.return_type == GLSLBoundaryType::Vec4)
-        {
+        if (function.return_bundle) {
+          foreach_bundle_leaf(*function.return_bundle,
+                              "return",
+                              [&](const GLSLBundleField &field, StringRef path) {
+                                append_wrapper_output(bundle_transport_type(field),
+                                                      shader_glsl_bundle_leaf_identifier(
+                                                          result_socket_identifier, path));
+                              });
+        }
+        else if (function.return_type == GLSLBoundaryType::Vec4) {
           append_wrapper_split_vec4_output("out_result");
         }
         else if (glsl_boundary_type_is_matrix(function.return_type))
@@ -8662,8 +9256,14 @@ vec3 glsl_ambient_lighting()
         {
           continue;
         }
-        if (glsl_output_is_split_vec4(param))
-        {
+        if (param.bundle) {
+          foreach_bundle_leaf(
+              *param.bundle, param.name, [&](const GLSLBundleField &field, StringRef path) {
+                append_wrapper_output(bundle_transport_type(field),
+                                      shader_glsl_bundle_leaf_identifier(param.identifier, path));
+              });
+        }
+        else if (glsl_output_is_split_vec4(param)) {
           append_wrapper_split_vec4_output(make_wrapper_argument_name("out", param.name));
         }
         else if (glsl_boundary_type_is_matrix(param.type))
@@ -8685,8 +9285,8 @@ vec3 glsl_ambient_lighting()
         }
         else
         {
-          ss << "  " << function.return_type_name << " " << make_wrapper_temp_name("out_result")
-            << ";\n";
+          ss << "  " << (function.return_bundle ? parse_result.source_prefix : "")
+             << function.return_type_name << " " << make_wrapper_temp_name("out_result") << ";\n";
         }
       }
       for (const GLSLFunctionParam& param : function.params)
@@ -8701,8 +9301,9 @@ vec3 glsl_ambient_lighting()
           }
           else
           {
-            ss << "  " << param.type_name << " "
-              << make_wrapper_temp_name(make_wrapper_argument_name("out", param.name)) << ";\n";
+            ss << "  " << (param.bundle ? parse_result.source_prefix : "") << param.type_name
+               << " " << make_wrapper_temp_name(make_wrapper_argument_name("out", param.name))
+               << ";\n";
           }
         }
       }
@@ -8747,13 +9348,25 @@ vec3 glsl_ambient_lighting()
         }
         else
         {
-          ss << wrapper_argument_expression(node, param);
+          if (param.bundle) {
+            ss << bundle_input_expression(
+                node, parse_result, *param.bundle, param.identifier, param.name);
+          }
+          else {
+            ss << wrapper_argument_expression(node, param);
+          }
         }
         need_comma = true;
       }
       ss << ");\n";
-      if (function.return_type == GLSLBoundaryType::Vec4)
-      {
+      if (function.return_bundle) {
+        append_bundle_output_assignments(ss,
+                                         *function.return_bundle,
+                                         result_socket_identifier,
+                                         "return",
+                                         make_wrapper_temp_name("out_result"));
+      }
+      else if (function.return_type == GLSLBoundaryType::Vec4) {
         append_wrapper_split_vec4_assignment(ss, "out_result", make_wrapper_vec4_temp_name("out_result"));
       }
       else if (glsl_boundary_type_is_matrix(function.return_type))
@@ -8774,8 +9387,14 @@ vec3 glsl_ambient_lighting()
         if (glsl_param_has_output_socket(param) && glsl_boundary_type_uses_output_temp(param.type))
         {
           const std::string output_name = make_wrapper_argument_name("out", param.name);
-          if (glsl_output_is_split_vec4(param))
-          {
+          if (param.bundle) {
+            append_bundle_output_assignments(ss,
+                                             *param.bundle,
+                                             param.identifier,
+                                             param.name,
+                                             make_wrapper_temp_name(output_name));
+          }
+          else if (glsl_output_is_split_vec4(param)) {
             const std::string temp_name = make_wrapper_vec4_temp_name(output_name);
             append_wrapper_split_vec4_assignment(ss, output_name, temp_name);
           }
@@ -9324,6 +9943,9 @@ vec3 glsl_ambient_lighting()
       {
         return analysis;
       }
+      if (!resolve_glsl_bundle_types(tokens, result.function, result.error)) {
+        return analysis;
+      }
       if (!apply_glsl_meta_to_function(
         meta_by_key, panels_by_function, result.function, result.meta_hash, result.error))
       {
@@ -9366,6 +9988,70 @@ vec3 glsl_ambient_lighting()
       result.uses_matrix_access |= glsl_function_meta_uses_matrix_access(result.function);
       if (!validate_generated_glsl_function_identifiers(result.function, result.error))
       {
+        return analysis;
+      }
+      int input_count = result.closure_callbacks.size(), output_count = 0;
+      Set<std::string> leaf_identifiers;
+      auto count_boundary = [&](GLSLBoundaryType type,
+                                const std::shared_ptr<GLSLBundleField> &bundle,
+                                StringRef root_identifier) {
+        int count = 0;
+        if (bundle) {
+          foreach_bundle_leaf(*bundle, bundle->name, [&](const GLSLBundleField &, StringRef path) {
+            const std::string identifier = shader_glsl_bundle_leaf_identifier(root_identifier,
+                                                                              path);
+            if (!leaf_identifiers.add(identifier)) {
+              result.error = "Generated bundle leaf identifier collision at '" +
+                             std::string(path) + "'";
+            }
+            count++;
+          });
+          std::function<void(const GLSLBundleField &)> dependencies;
+          dependencies = [&](const GLSLBundleField &field) {
+            if (field.default_expression) {
+              const auto default_tokens = tokenize_glsl_source(*field.default_expression);
+              result.uses_geometry_access |= glsl_source_uses_geometry_access(default_tokens);
+              result.uses_matrix_access |= glsl_source_uses_matrix_access(default_tokens);
+              result.uses_lightprobe_access |= glsl_source_uses_lightprobe_access(default_tokens);
+              result.uses_eevee_light_access |= glsl_source_uses_eevee_light_access(
+                  default_tokens);
+            }
+            for (const auto &member : field.members) {
+              dependencies(member);
+            }
+          };
+          dependencies(*bundle);
+          return count;
+        }
+        if (type == GLSLBoundaryType::Void) {
+          return 0;
+        }
+        if (type == GLSLBoundaryType::Vec4) {
+          return 2;
+        }
+        if (glsl_boundary_type_is_matrix(type)) {
+          return glsl_matrix_columns(type) * (type == GLSLBoundaryType::Mat4 ? 2 : 1);
+        }
+        return 1;
+      };
+      output_count += count_boundary(
+          result.function.return_type, result.function.return_bundle, result_socket_identifier);
+      for (const GLSLFunctionParam &param : result.function.params) {
+        const int count = count_boundary(param.type, param.bundle, param.identifier);
+        if (glsl_param_has_input_socket(param)) {
+          input_count += count;
+        }
+        else {
+          output_count += count;
+        }
+      }
+      if (!result.error.empty()) {
+        return analysis;
+      }
+      if (input_count > MAX_SOCKET || output_count > MAX_SOCKET) {
+        result.error = "Expanded GLSL Function exceeds the " + std::to_string(MAX_SOCKET) +
+                       " socket limit (inputs=" + std::to_string(input_count) +
+                       ", outputs=" + std::to_string(output_count) + ")";
         return analysis;
       }
       result.ok = true;
@@ -9439,12 +10125,28 @@ vec3 glsl_ambient_lighting()
              glsl_analysis_dynamic_bytes(value.int_choices);
     }
 
+    static size_t glsl_bundle_dynamic_bytes(const GLSLBundleField &field)
+    {
+      size_t bytes = field.name.capacity() + field.type_name.capacity() + field.label.capacity() +
+                     field.description.capacity() +
+                     field.members.capacity() * sizeof(GLSLBundleField);
+      if (field.default_expression) {
+        bytes += field.default_expression->capacity();
+      }
+      for (const auto &member : field.members) {
+        bytes += glsl_bundle_dynamic_bytes(member);
+      }
+      return bytes;
+    }
+
     static size_t glsl_analysis_dynamic_bytes(const GLSLFunctionParam &value)
     {
       return glsl_analysis_dynamic_bytes(value.type_name) +
              glsl_analysis_dynamic_bytes(value.name) +
              glsl_analysis_dynamic_bytes(value.identifier) +
-             glsl_analysis_dynamic_bytes(value.meta);
+             glsl_analysis_dynamic_bytes(value.meta) +
+             (value.bundle ? sizeof(GLSLBundleField) + glsl_bundle_dynamic_bytes(*value.bundle) :
+                             0);
     }
 
     static size_t glsl_analysis_dynamic_bytes(const GLSLPanelMeta &value)
@@ -9466,7 +10168,10 @@ vec3 glsl_ambient_lighting()
              glsl_analysis_dynamic_bytes(value.return_type_name) +
              glsl_analysis_dynamic_bytes(value.return_meta) +
              glsl_analysis_dynamic_bytes(value.params) +
-             glsl_analysis_dynamic_bytes(value.panels);
+             glsl_analysis_dynamic_bytes(value.panels) +
+             (value.return_bundle ?
+                  sizeof(GLSLBundleField) + glsl_bundle_dynamic_bytes(*value.return_bundle) :
+                  0);
     }
 
     static size_t glsl_analysis_dynamic_bytes(const GLSLClosureCallback &value)
@@ -9824,12 +10529,95 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       bNodeSocket& socket,
       const Span<GLSLFunctionParam::IntChoiceItem> choices);
 
-    static void add_glsl_socket_declaration(DeclarationListBuilder& b,
-      const GLSLFunctionParam& param,
-      const bool is_output,
-      const UString socket_name,
-      const UString socket_identifier)
+    static std::shared_ptr<const BundleSignature> bundle_signature(const GLSLBundleField &field,
+                                                                   bool output)
     {
+      auto signature = std::make_shared<BundleSignature>();
+      signature->strict = true;
+      for (const GLSLBundleField &member : field.members) {
+        BundleSignature::Item item;
+        item.key = member.name;
+        item.type = bke::node_socket_type_find_static(member.socket_type);
+        item.dimensions = member.dimensions;
+        item.optional = !output && member.is_optional();
+        if (!member.members.is_empty()) {
+          item.nested = bundle_signature(member, output);
+        }
+        signature->items.add(std::move(item));
+      }
+      return signature;
+    }
+
+    static void add_bundle_leaf_declaration(DeclarationListBuilder &b,
+                                            const GLSLBundleField &field,
+                                            const bool output,
+                                            const UString identifier,
+                                            const UString name)
+    {
+      if (field.socket_type == SOCK_VECTOR) {
+        auto &decl = output ? b.add_output<decl::Vector>(name, identifier) :
+                              b.add_input<decl::Vector>(name, identifier);
+        decl.dimensions(field.dimensions);
+      }
+      else {
+        if (output) {
+          b.add_output(field.socket_type, name, identifier);
+        }
+        else {
+          b.add_input(field.socket_type, name, identifier);
+        }
+      }
+    }
+
+    static void add_bundle_declaration(DeclarationListBuilder &b,
+                                       const bNode &node,
+                                       const GLSLBundleField &field,
+                                       const bool output,
+                                       const UString name,
+                                       const UString identifier)
+    {
+      if (node.runtime->glsl_bundle_lowering) {
+        foreach_bundle_leaf(field, field.name, [&](const GLSLBundleField &member, StringRef path) {
+          add_bundle_leaf_declaration(
+              b,
+              member,
+              output,
+              UString(shader_glsl_bundle_leaf_identifier(identifier.ref(), path)),
+              UString(path));
+        });
+        return;
+      }
+      auto &decl = output ? b.add_output<decl::Bundle>(name, identifier) :
+                            b.add_input<decl::Bundle>(name, identifier);
+      decl.structure_type(StructureType::Single);
+      decl.signature(bundle_signature(field, output));
+      if (!field.description.empty()) {
+        decl.description(field.description);
+      }
+      if (!output) {
+        decl.custom_draw(
+            [identifier = std::string(identifier.c_str())](CustomSocketDrawParams &params) {
+              params.draw_standard(params.layout);
+              if (!params.socket.is_directly_linked()) {
+                PointerRNA op = params.layout.op("node.glsl_bundle_input", "", ICON_ADD);
+                RNA_int_set(&op, "node_identifier", params.node.identifier);
+                RNA_string_set(&op, "socket_identifier", identifier.c_str());
+              }
+            });
+      }
+    }
+
+    static void add_glsl_socket_declaration(DeclarationListBuilder &b,
+                                            const GLSLFunctionParam &param,
+                                            const bool is_output,
+                                            const UString socket_name,
+                                            const UString socket_identifier,
+                                            const bNode *node = nullptr)
+    {
+      if (param.bundle && node) {
+        add_bundle_declaration(b, *node, *param.bundle, is_output, socket_name, socket_identifier);
+        return;
+      }
       auto apply_input_description = [&](auto& decl) {
         if (!is_output && param.meta.description.has_value())
         {
@@ -10328,6 +11116,48 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
                                           PointerRNA* ptr,
                                           Span<GLSLDefineMeta> defines);
 
+    static void draw_bundle_interface(ui::Layout &layout,
+                                      const GLSLBundleField &field,
+                                      const std::string &path,
+                                      const std::string &identifier,
+                                      int node_identifier,
+                                      bool output,
+                                      int depth = 0)
+    {
+      ui::Layout &row = layout.row(false);
+      const std::string label = std::string(depth * 2, ' ') +
+                                (field.label.empty() ? field.name : field.label) + " : " +
+                                field.type_name;
+      row.label(label.c_str(), ICON_NONE);
+      if (field.default_expression && !output) {
+        const std::string value = "Default: " + field.default_expression->substr(0, 80);
+        ui::Layout &default_row = layout.row(false);
+        default_row.label(value.c_str(), ICON_NONE);
+        PointerRNA op = default_row.op("node.glsl_bundle_input", "Add Override", ICON_ADD);
+        RNA_int_set(&op, "node_identifier", node_identifier);
+        RNA_string_set(&op, "socket_identifier", identifier.c_str());
+        RNA_string_set(&op, "member_path", path.c_str());
+        if (!field.literal_default) {
+          layout.label("An override replaces this expression", ICON_INFO);
+        }
+      }
+      else if (field.members.is_empty() && !output) {
+        row.label("Required", ICON_NONE);
+      }
+      if (!field.description.empty()) {
+        layout.label(field.description.c_str(), ICON_NONE);
+      }
+      for (const auto &member : field.members) {
+        draw_bundle_interface(layout,
+                              member,
+                              path + "." + member.name,
+                              identifier,
+                              node_identifier,
+                              output,
+                              depth + 1);
+      }
+    }
+
     static void node_declare(NodeDeclarationBuilder& b)
     {
       const bNode* node = b.node_or_null();
@@ -10347,8 +11177,14 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       const bool has_parameter_panels = !parse_result.analysis->function.panels.is_empty();
       const bool has_define_panel = !parse_result.analysis->defines.is_empty();
       const bool has_closure_panel = !parse_result.analysis->closure_callbacks.is_empty();
+      const bool has_bundle = parse_result.analysis->function.return_bundle ||
+                              std::any_of(parse_result.analysis->function.params.begin(),
+                                          parse_result.analysis->function.params.end(),
+                                          [](const GLSLFunctionParam &param) {
+                                            return bool(param.bundle);
+                                          });
       const bool use_declaration_panels = has_parameter_panels || has_define_panel ||
-        has_closure_panel;
+                                          has_closure_panel || has_bundle;
       if (code_mode || use_declaration_panels)
       {
         b.use_custom_socket_order();
@@ -10361,9 +11197,16 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
           GLSLFunctionParam output_param;
           output_param.type = parse_result.analysis->function.return_type;
           output_param.type_name = parse_result.analysis->function.return_type_name;
+          output_param.bundle = parse_result.analysis->function.return_bundle;
           output_param.dimensions = glsl_boundary_dimensions(parse_result.analysis->function.return_type);
-          add_glsl_socket_declaration(
-            builder, output_param, true, "Result"_ustr, UString(result_socket_identifier));
+          add_glsl_socket_declaration(builder,
+                                      output_param,
+                                      true,
+                                      output_param.bundle && !output_param.bundle->label.empty() ?
+                                          UString(output_param.bundle->label) :
+                                          "Result"_ustr,
+                                      UString(result_socket_identifier),
+                                      node);
         }
 
         for (const GLSLFunctionParam& param : parse_result.analysis->function.params)
@@ -10373,7 +11216,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
             const UString socket_name(glsl_socket_display_name(param));
             const UString socket_identifier(make_socket_identifier("Out", param.name));
             add_glsl_socket_declaration(
-              builder, param, true, socket_name, socket_identifier);
+                builder, param, true, socket_name, socket_identifier, node);
           }
         }
       };
@@ -10386,6 +11229,44 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         PanelDeclarationBuilder& closures_panel =
           b.add_panel("Closures"_ustr, make_closures_panel_identifier());
         add_glsl_closure_declarations(closures_panel, parse_result);
+      };
+
+      auto add_bundle_panel = [&]() {
+        if (!has_bundle || node->runtime->glsl_bundle_lowering) {
+          return;
+        }
+        auto &panel = b.add_panel("Bundle Interface"_ustr,
+                                  int(BLI_ghashutil_strhash_p("glsl_bundle_interface")))
+                          .default_closed(true);
+        for (const GLSLFunctionParam &param : parse_result.analysis->function.params) {
+          if (!param.bundle) {
+            continue;
+          }
+          const auto schema = std::make_shared<const GLSLBundleField>(*param.bundle);
+          const bool output = glsl_param_has_output_socket(param);
+          panel.add_layout(
+              [schema, output, identifier = param.identifier, node_id = node->identifier](
+                  ui::Layout &layout, bContext *, PointerRNA *ptr) {
+                const bNode *owner = ptr ? static_cast<const bNode *>(ptr->data) : nullptr;
+                const bNodeSocket *socket = owner ?
+                                                owner->input_by_identifier(UString(identifier)) :
+                                                nullptr;
+                if (!output && socket && !socket->is_directly_linked()) {
+                  PointerRNA op = layout.op(
+                      "node.glsl_bundle_input", "Create Input Bundle", ICON_NODE);
+                  RNA_int_set(&op, "node_identifier", node_id);
+                  RNA_string_set(&op, "socket_identifier", identifier.c_str());
+                }
+                draw_bundle_interface(layout, *schema, schema->name, identifier, node_id, output);
+              });
+        }
+        if (parse_result.analysis->function.return_bundle) {
+          const auto schema = std::make_shared<const GLSLBundleField>(
+              *parse_result.analysis->function.return_bundle);
+          panel.add_layout([schema](ui::Layout &layout, bContext *, PointerRNA *) {
+            draw_bundle_interface(layout, *schema, "return", "", 0, true);
+          });
+        }
       };
 
       if (code_mode)
@@ -10405,9 +11286,11 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
                                       param,
                                       false,
                                       UString(glsl_socket_display_name(param)),
-                                      UString(param.identifier));
+                                      UString(param.identifier),
+                                      node);
         }
         add_closure_panel();
+        add_bundle_panel();
         return;
       }
 
@@ -10469,15 +11352,16 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
                   *param.meta.panel_name))
             {
               add_glsl_socket_declaration(
-                *panel_builder, param, false, socket_name, socket_identifier);
+                  *panel_builder, param, false, socket_name, socket_identifier, node);
               continue;
             }
           }
-          add_glsl_socket_declaration(b, param, false, socket_name, socket_identifier);
+          add_glsl_socket_declaration(b, param, false, socket_name, socket_identifier, node);
         }
       }
 
       add_closure_panel();
+      add_bundle_panel();
 
       if (!use_declaration_panels)
       {
@@ -11210,6 +12094,29 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
           lightprobe_helper_dependencies,
           lightprobe_helper_source.c_str());
       }
+      std::string bundle_diagnostic_signature;
+      std::function<void(const GLSLBundleField &, const std::string &)> register_bundle_defaults;
+      register_bundle_defaults = [&](const GLSLBundleField &field, const std::string &path) {
+        if (field.default_expression) {
+          if (bundle_diagnostic_signature.empty()) {
+            bundle_diagnostic_signature = shader_glsl_bundle_error_signature(*node);
+          }
+          GPU_material_expression_source_add(mat,
+                                             *node,
+                                             {bundle_default_function_name(parse_result, path),
+                                              "Bundle default '" + path + "'",
+                                              ""},
+                                             bundle_diagnostic_signature);
+        }
+        for (const auto &member : field.members) {
+          register_bundle_defaults(member, path + "." + member.name);
+        }
+      };
+      for (const auto &param : parse_result.analysis->function.params) {
+        if (param.bundle && glsl_param_has_input_socket(param)) {
+          register_bundle_defaults(*param.bundle, param.name);
+        }
+      }
       GPU_material_generated_source_add(
         mat,
         parse_result.source_filename.c_str(),
@@ -11270,6 +12177,359 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
     }
 
   }  // namespace nodes::node_shader_glsl_function_cc
+
+  namespace nodes {
+
+  bool GLSLBundleField::is_optional() const
+  {
+    if (default_expression) {
+      return true;
+    }
+    if (members.is_empty() || matrix) {
+      return false;
+    }
+    return std::all_of(members.begin(), members.end(), [](const GLSLBundleField &member) {
+      return member.is_optional();
+    });
+  }
+
+  std::string shader_glsl_bundle_leaf_identifier(StringRef root, StringRef path)
+  {
+    uint64_t hash = UINT64_C(14695981039346656037);
+    for (const unsigned char c : std::string(root) + ":" + std::string(path)) {
+      hash = (hash ^ c) * UINT64_C(1099511628211);
+    }
+    std::stringstream ss;
+    ss << "bundle_" << std::hex << hash;
+    return ss.str();
+  }
+
+  bool shader_glsl_bundle_interface(const bNode &node,
+                                    GLSLBundleInterface &r_interface,
+                                    std::string &r_error)
+  {
+    if (!node.is_type("ShaderNodeGLSLFunction"_ustr)) {
+      return true;
+    }
+    const auto parsed = node_shader_glsl_function_cc::parse_glsl_for_node(node);
+    if (!parsed.ok) {
+      r_error = parsed.error;
+      return false;
+    }
+    const auto &function = parsed.analysis->function;
+    for (const auto &param : function.params) {
+      if (param.bundle) {
+        r_interface.sockets.append(
+            {param.identifier,
+             node_shader_glsl_function_cc::glsl_param_has_output_socket(param) ? SOCK_OUT :
+                                                                                 SOCK_IN,
+             *param.bundle});
+      }
+    }
+    if (function.return_bundle) {
+      r_interface.sockets.append({node_shader_glsl_function_cc::result_socket_identifier,
+                                  SOCK_OUT,
+                                  *function.return_bundle});
+    }
+    return true;
+  }
+
+  void shader_glsl_bundle_lower_node(bNodeTree &tree,
+                                     bNode &node,
+                                     std::shared_ptr<const GLSLBundleLowering> lowering)
+  {
+    node.runtime->glsl_bundle_lowering = std::move(lowering);
+    update_node_declaration_and_sockets(tree, node);
+  }
+
+  std::string shader_glsl_bundle_error_signature(const bNode &node)
+  {
+    std::string source, error;
+    if (node.is_type("ShaderNodeGLSLFunction"_ustr)) {
+      node_shader_glsl_function_cc::load_glsl_source(node, source, error);
+      source += "\n" +
+                std::string(
+                    static_cast<const NodeShaderGLSLFunction *>(node.storage)->function_name);
+    }
+    else {
+      source = node.idname;
+    }
+    return shader_glsl_bundle_leaf_identifier("diagnostic", source);
+  }
+
+  std::string shader_glsl_bundle_error_get(const bNode &node)
+  {
+    if (node.is_type("ShaderNodeGLSLFunction"_ustr)) {
+      const auto parsed = node_shader_glsl_function_cc::parse_glsl_for_node(node);
+      if (!parsed.ok) {
+        return parsed.error;
+      }
+    }
+    std::string result;
+    for (const std::string &message :
+         bke::shader_node_compile_errors(node, shader_glsl_bundle_error_signature(node)))
+    {
+      if (!result.empty()) {
+        result += "\n";
+      }
+      result += message;
+    }
+    return result;
+  }
+
+  bool shader_glsl_bundle_create_input(Main &bmain,
+                                       bNodeTree &tree,
+                                       bNode &node,
+                                       StringRef socket_identifier,
+                                       StringRef override_path,
+                                       std::string &r_error)
+  {
+    GLSLBundleInterface interface;
+    if (!shader_glsl_bundle_interface(node, interface, r_error)) {
+      return false;
+    }
+    const GLSLBundleSocket *schema = nullptr;
+    for (const auto &candidate : interface.sockets) {
+      if (candidate.in_out == SOCK_IN && candidate.identifier == socket_identifier) {
+        schema = &candidate;
+        break;
+      }
+    }
+    if (!schema) {
+      r_error = "This input has no valid GLSL bundle interface";
+      return false;
+    }
+    tree.ensure_topology_cache();
+    bNodeSocket *target = node.input_by_identifier(UString(socket_identifier));
+    if (!target) {
+      r_error = "The GLSL input interface is out of date";
+      return false;
+    }
+    const std::string requested = std::string(override_path);
+    if (!requested.empty()) {
+      const std::string prefix = schema->field.name + ".";
+      if (!StringRef(requested).startswith(prefix)) {
+        r_error = "Invalid bundle member path";
+        return false;
+      }
+      GLSLBundleField copy = schema->field;
+      GLSLBundleField *field = node_shader_glsl_function_cc::find_bundle_field(
+          copy, StringRef(requested).drop_prefix(prefix.size()));
+      if (!field || !field->default_expression) {
+        r_error = "Only optional members can be added as overrides";
+        return false;
+      }
+    }
+    auto source_combine = [&](bNodeSocket &socket) -> bNode * {
+      const bNodeLink *link = node_shader_glsl_function_cc::find_used_direct_link(socket);
+      if (!link) {
+        return nullptr;
+      }
+      bNode *source = link->fromnode;
+      int depth = 0;
+      while (source && source->is_reroute() && depth++ < 32) {
+        link = node_shader_glsl_function_cc::find_used_direct_link(source->input_socket(0));
+        source = link ? link->fromnode : nullptr;
+      }
+      return source && source->is_type("NodeCombineBundle"_ustr) &&
+                     &source->owner_tree() == &tree ?
+                 source :
+                 nullptr;
+    };
+    bNode *existing = source_combine(*target);
+    if (target->is_directly_linked() && !existing) {
+      r_error =
+          "Edit the source bundle inside its node group; this operation only changes a local "
+          "Combine Bundle";
+      return false;
+    }
+    if (existing && requested.empty()) {
+      r_error = "An input bundle is already connected; use Sync on its Combine Bundle";
+      return false;
+    }
+    auto wanted = [&](const GLSLBundleField &field, const std::string &path) {
+      return !field.is_optional() || requested == path ||
+             StringRef(requested).startswith(path + ".");
+    };
+    /* Validate the entire edited path before creating or changing any node. */
+    std::function<bool(bNode *, const GLSLBundleField &, const std::string &)> validate;
+    validate = [&](bNode *combine, const GLSLBundleField &field, const std::string &path) {
+      if (!combine) {
+        return true;
+      }
+      auto &storage = *static_cast<NodeCombineBundle *>(combine->storage);
+      for (const auto &member : field.members) {
+        const std::string child_path = path + "." + member.name;
+        if (!wanted(member, child_path)) {
+          continue;
+        }
+        for (int i = 0; i < storage.items_num; i++) {
+          const auto &item = storage.items[i];
+          if (member.name != item.name) {
+            continue;
+          }
+          if (!bundle_socket_types_compatible(member.socket_type,
+                                              member.dimensions,
+                                              item.socket_type,
+                                              item.vector_socket_dimensions))
+          {
+            r_error = "Bundle field '" + child_path +
+                      "' has an incompatible type; no fields were changed";
+            return false;
+          }
+          if (!member.members.is_empty() && StringRef(requested).startswith(child_path + ".")) {
+            bNodeSocket &input = combine->input_socket(i);
+            bNode *child = source_combine(input);
+            if (input.is_directly_linked() && !child) {
+              r_error = "Edit the source of nested bundle '" + child_path + "' directly";
+              return false;
+            }
+            if (!validate(child, member, child_path)) {
+              return false;
+            }
+          }
+        }
+      }
+      return true;
+    };
+    if (!validate(existing, schema->field, schema->field.name)) {
+      return false;
+    }
+    std::function<bNode &(bNode *, const GLSLBundleField &, const std::string &, float, float)>
+        create;
+    create = [&](bNode *combine,
+                 const GLSLBundleField &field,
+                 const std::string &path,
+                 float x,
+                 float y) -> bNode & {
+      if (!combine) {
+        combine = bke::node_add_node(nullptr, tree, "NodeCombineBundle"_ustr);
+        combine->parent = node.parent;
+        STRNCPY_UTF8(combine->label, field.type_name.c_str());
+        combine->location[0] = x;
+        combine->location[1] = y;
+      }
+      int child_index = 0;
+      for (const auto &member : field.members) {
+        const std::string child_path = path + "." + member.name;
+        if (!wanted(member, child_path)) {
+          continue;
+        }
+        auto &storage = *static_cast<NodeCombineBundle *>(combine->storage);
+        NodeCombineBundleItem *item = nullptr;
+        for (int i = 0; i < storage.items_num; i++) {
+          if (member.name == storage.items[i].name) {
+            item = &storage.items[i];
+            break;
+          }
+        }
+        const bool added = item == nullptr;
+        if (!item) {
+          item = socket_items::add_item_with_socket_type_and_name<CombineBundleItemsAccessor>(
+              tree,
+              *combine,
+              member.socket_type,
+              member.name.c_str(),
+              member.socket_type == SOCK_VECTOR ? std::make_optional(member.dimensions) :
+                                                  std::nullopt);
+          item->structure_type = NodeSocketInterfaceStructureType::Single;
+          update_node_declaration_and_sockets(tree, *combine);
+          tree.ensure_topology_cache();
+        }
+        bNodeSocket *input = combine->input_by_identifier(
+            UString(CombineBundleItemsAccessor::socket_identifier_for_item(*item)));
+        if (!member.members.is_empty()) {
+          if (!input->is_directly_linked() || StringRef(requested).startswith(child_path + ".")) {
+            bNode *child = source_combine(*input);
+            bNode &created = create(
+                child, member, child_path, x - 260.0f, y - child_index * 160.0f);
+            if (!input->is_directly_linked()) {
+              bke::node_add_link(tree, created, created.output_socket(0), *combine, *input);
+            }
+            child_index++;
+          }
+        }
+        else if (added && member.literal_default) {
+          switch (member.socket_type) {
+            case SOCK_FLOAT:
+              input->default_value_typed<bNodeSocketValueFloat>()->value = member.default_value.x;
+              break;
+            case SOCK_INT:
+              input->default_value_typed<bNodeSocketValueInt>()->value = member.int_default;
+              break;
+            case SOCK_BOOLEAN:
+              input->default_value_typed<bNodeSocketValueBoolean>()->value =
+                  member.default_value.x != 0.0f;
+              break;
+            case SOCK_VECTOR:
+              copy_v4_v4(input->default_value_typed<bNodeSocketValueVector>()->value,
+                         member.default_value);
+              break;
+            case SOCK_RGBA: {
+              copy_v4_v4(input->default_value_typed<bNodeSocketValueRGBA>()->value,
+                         member.default_value);
+              if (member.dimensions == 3) {
+                input->default_value_typed<bNodeSocketValueRGBA>()->value[3] = 1.0f;
+              }
+              break;
+            }
+            default:
+              break;
+          }
+        }
+        if (added) {
+          if (!member.description.empty()) {
+            STRNCPY_UTF8(input->description, member.description.c_str());
+          }
+          if (!member.label.empty()) {
+            STRNCPY_UTF8(input->label, member.label.c_str());
+          }
+          if (member.socket_type == SOCK_FLOAT) {
+            auto &value = *input->default_value_typed<bNodeSocketValueFloat>();
+            value.subtype = member.subtype;
+            if (member.min_value) {
+              value.min = *member.min_value;
+            }
+            if (member.max_value) {
+              value.max = *member.max_value;
+            }
+          }
+          if (member.socket_type == SOCK_INT) {
+            auto &value = *input->default_value_typed<bNodeSocketValueInt>();
+            value.subtype = member.subtype;
+            if (member.int_min_value) {
+              value.min = *member.int_min_value;
+            }
+            if (member.int_max_value) {
+              value.max = *member.int_max_value;
+            }
+          }
+          if (member.socket_type == SOCK_VECTOR) {
+            auto &value = *input->default_value_typed<bNodeSocketValueVector>();
+            value.subtype = member.subtype;
+            if (member.min_value) {
+              value.min = *member.min_value;
+            }
+            if (member.max_value) {
+              value.max = *member.max_value;
+            }
+          }
+        }
+      }
+      BKE_ntree_update_tag_node_property(&tree, combine);
+      return *combine;
+    };
+    bNode &combine = create(
+        existing, schema->field, schema->field.name, node.location[0] - 260.0f, node.location[1]);
+    if (!target->is_directly_linked()) {
+      bke::node_add_link(tree, combine, combine.output_socket(0), node, *target);
+    }
+    BKE_ntree_update_tag_node_property(&tree, &node);
+    BKE_main_ensure_invariants(bmain, tree.id);
+    return true;
+  }
+
+  }  // namespace nodes
 
   bool node_shader_glsl_function_source_get(const bNode& node,
                                             std::string& r_source,

@@ -4498,7 +4498,8 @@ struct NodeCombineBundleItem {
   int identifier = 0;
   eNodeSocketDatatype socket_type = {};
   NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
-  char _pad[1] = {};
+  /** Zero is the legacy three-dimensional vector. */
+  int8_t vector_socket_dimensions = 0;
 };
 
 struct NodeCombineBundle {
@@ -4517,7 +4518,8 @@ struct NodeSeparateBundleItem {
   int identifier = 0;
   eNodeSocketDatatype socket_type = {};
   NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
-  char _pad[1] = {};
+  /** Zero is the legacy three-dimensional vector. */
+  int8_t vector_socket_dimensions = 0;
 };
 
 struct NodeSeparateBundle {
