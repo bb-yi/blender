@@ -131,8 +131,15 @@ jobs:
       - name: Download Extra Assets
         working-directory: blender
         run: |
-          curl --fail --location --retry 3 --output release/datafiles/splash.png "https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.vars.outputs.sha_full }}/release/datafiles/splash.png"
-          curl --fail --location --retry 3 --output assets/nodes/npr_node_groups.blend "https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.vars.outputs.sha_full }}/assets/nodes/npr_node_groups.blend"
+          curl --fail --location --retry 3 --output release/datafiles/splash.png "https://github.com/${{ github.repository }}/raw/${{ steps.vars.outputs.sha_full }}/release/datafiles/splash.png"
+          curl --fail --location --retry 3 --output assets/nodes/npr_node_groups.blend "https://github.com/${{ github.repository }}/raw/${{ steps.vars.outputs.sha_full }}/assets/nodes/npr_node_groups.blend"
+          python3 - <<'PY'
+          from pathlib import Path
+          with Path('release/datafiles/splash.png').open('rb') as file:
+              assert file.read(8) == bytes((137, 80, 78, 71, 13, 10, 26, 10)), 'Splash is not PNG data'
+          with Path('assets/nodes/npr_node_groups.blend').open('rb') as file:
+              assert file.read(7) == b'BLENDER', 'NPR library is not Blender data (possible LFS pointer)'
+          PY
 
       - name: Build Blender Release
         working-directory: blender
@@ -214,8 +221,15 @@ jobs:
 
       - name: Download Extra Assets
         run: |
-          curl --fail --location --retry 3 --output release/datafiles/splash.png "https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.vars.outputs.sha_full }}/release/datafiles/splash.png"
-          curl --fail --location --retry 3 --output assets/nodes/npr_node_groups.blend "https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.vars.outputs.sha_full }}/assets/nodes/npr_node_groups.blend"
+          curl --fail --location --retry 3 --output release/datafiles/splash.png "https://github.com/${{ github.repository }}/raw/${{ steps.vars.outputs.sha_full }}/release/datafiles/splash.png"
+          curl --fail --location --retry 3 --output assets/nodes/npr_node_groups.blend "https://github.com/${{ github.repository }}/raw/${{ steps.vars.outputs.sha_full }}/assets/nodes/npr_node_groups.blend"
+          python3 - <<'PY'
+          from pathlib import Path
+          with Path('release/datafiles/splash.png').open('rb') as file:
+              assert file.read(8) == bytes((137, 80, 78, 71, 13, 10, 26, 10)), 'Splash is not PNG data'
+          with Path('assets/nodes/npr_node_groups.blend').open('rb') as file:
+              assert file.read(7) == b'BLENDER', 'NPR library is not Blender data (possible LFS pointer)'
+          PY
 
       - name: Build Blender Release
         run: make release ninja

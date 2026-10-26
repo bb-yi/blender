@@ -4,6 +4,7 @@ import math
 import os
 from pathlib import Path
 import re
+import sys
 import tempfile
 
 import bpy
@@ -30,6 +31,14 @@ assert len(function.inputs) == len(function.outputs) == 1
 tree.nodes.new('ShaderNodeStencilValue')
 bundle = tree.nodes.new('NodeCombineBundle')
 assert len(bundle.outputs) == 1 and bundle.outputs[0].type == 'BUNDLE'
+npr_library = Path(bpy.utils.system_resource('DATAFILES')) / 'assets/nodes/npr_node_groups.blend'
+assert npr_library.is_file(), npr_library
+package_root = Path(bpy.app.binary_path).resolve().parent
+if sys.platform == 'darwin':
+    package_root = next(parent for parent in package_root.parents if parent.suffix == '.app')
+assert npr_library.resolve().is_relative_to(package_root), (npr_library, package_root)
+with bpy.data.libraries.load(str(npr_library)) as (library, _):
+    assert library.node_groups, 'Packaged NPR node library is empty or invalid'
 
 scene = bpy.context.scene
 assert scene.camera is not None
@@ -54,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix='npr-release-smoke-') as temporary:
 print('NPR_RELEASE_PROGRAM_SMOKE=' + json.dumps({
     'expected_commit': expected, 'build_hash': actual,
     'version': bpy.app.version_string, 'binary': bpy.app.binary_path,
-    'parser': 'PASS', 'stencil_bundle_nodes': 'PASS',
+    'parser': 'PASS', 'stencil_bundle_nodes': 'PASS', 'npr_asset_library': 'PASS',
     'cycles_cpu_16x16_finite_nonconstant': 'PASS',
     'gpu_pixel_tests': 'NOT_RUN_ON_THIS_CI_PLATFORM',
 }), flush=True)
