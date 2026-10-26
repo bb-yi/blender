@@ -41,6 +41,13 @@ jobs:
               ref = api('git/tags/' + ref['sha'])['object']
           assert ref['type'] == 'commit', 'Nested release tag did not resolve'
           commit = ref['sha']
+          if os.environ['RELEASE_EVENT'] == 'workflow_dispatch':
+              # Read-only job tokens cannot see private drafts. A manual request always
+              # builds; the write-enabled upload job checks that the draft exists.
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                  print('build_required=true', file=output)
+              print(json.dumps({'commit': commit, 'build_required': True, 'reason': 'manual request'}))
+              raise SystemExit(0)
           release_id = subprocess.check_output([
               'gh', 'release', 'view', tag, '--repo', repo,
               '--json', 'databaseId', '--jq', '.databaseId'], text=True).strip()
@@ -54,7 +61,7 @@ jobs:
               prefix = f'blender-{match[1] if match else "unknown"}-npr-port-{platform}-{commit[:12]}-'
               assets = [a for a in release['assets'] if a['name'].startswith(prefix) and a['name'].endswith(suffix)]
               complete &= len(assets) == 1 and assets[0]['state'] == 'uploaded' and assets[0]['size'] > 0 and bool(re.fullmatch(r'sha256:[0-9a-f]{64}', assets[0].get('digest') or ''))
-          required = os.environ['RELEASE_EVENT'] == 'workflow_dispatch' or not complete
+          required = not complete
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               print('build_required=' + str(required).lower(), file=output)
           print(json.dumps({'commit': commit, 'platform_assets_complete': bool(complete), 'build_required': required}))
