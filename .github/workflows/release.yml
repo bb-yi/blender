@@ -41,7 +41,12 @@ jobs:
               ref = api('git/tags/' + ref['sha'])['object']
           assert ref['type'] == 'commit', 'Nested release tag did not resolve'
           commit = ref['sha']
-          release = api(f'releases/tags/{tag}')
+          release_id = subprocess.check_output([
+              'gh', 'release', 'view', tag, '--repo', repo,
+              '--json', 'databaseId', '--jq', '.databaseId'], text=True).strip()
+          assert release_id.isdigit(), 'Release lookup did not return an ID'
+          release = api('releases/' + release_id)
+          assert release['tag_name'] == tag, 'Release tag changed during lookup'
           match = re.match(r'v(\d+\.\d+\.\d+)', tag)
           expected = [('win64', '.zip'), ('linux64', '.tar.xz'), ('macos', '.dmg')]
           complete = bool(match)
