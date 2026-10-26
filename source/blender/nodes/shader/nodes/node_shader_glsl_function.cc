@@ -827,6 +827,14 @@ namespace blender
             *node.runtime->original, param.identifier);
         const bNodeLink *original_link = original_socket ?
                                             find_used_direct_link(*original_socket) : nullptr;
+        Set<const bNode *> visited_reroutes;
+        while (original_link && original_link->fromnode && original_link->fromnode->is_reroute()) {
+          if (!visited_reroutes.add(original_link->fromnode)) {
+            original_link = nullptr;
+            break;
+          }
+          original_link = find_used_direct_link(original_link->fromnode->input_socket(0));
+        }
         if (!original_link || !original_link->fromnode ||
             !original_link->fromnode->is_type("NodeClosureOutput"_ustr))
         {
