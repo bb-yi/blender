@@ -9,6 +9,14 @@ on:
       tag_name:
         description: 'Existing release tag name to upload assets to'
         required: true
+      platform:
+        description: 'Platform to build; retain existing assets for other platforms'
+        type: choice
+        default: all
+        options:
+          - all
+          - linux
+          - macos
 
 jobs:
   release-state:
@@ -69,7 +77,7 @@ jobs:
 
   build-linux:
     needs: release-state
-    if: needs.release-state.outputs.build_required == 'true'
+    if: needs.release-state.outputs.build_required == 'true' && github.event.inputs.platform != 'macos'
     name: Build Linux x64
     runs-on: ubuntu-24.04
     container:
@@ -191,7 +199,7 @@ jobs:
 
   build-macos:
     needs: release-state
-    if: needs.release-state.outputs.build_required == 'true'
+    if: needs.release-state.outputs.build_required == 'true' && github.event.inputs.platform != 'linux'
     name: Build macOS
     runs-on: macos-latest
     permissions:
@@ -263,7 +271,19 @@ jobs:
           MOUNT="$RUNNER_TEMP/npr-package-volume"
           mkdir -p "$MOUNT"
           hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "$DMG_FILE"
-          trap 'hdiutil detach "$MOUNT"' EXIT
+          cleanup_dmg() {
+            local status=1
+            for delay in 1 2 4 8 16; do
+              if hdiutil detach "$MOUNT"; then
+                return 0
+              else
+                status=$?
+              fi
+              sleep "$delay"
+            done
+            return "$status"
+          }
+          trap cleanup_dmg EXIT
           export NPR_RELEASE_EXPECTED_COMMIT="${{ steps.vars.outputs.sha_full }}"
           test "$(git rev-parse HEAD)" = "$NPR_RELEASE_EXPECTED_COMMIT"
           SANDBOX="$RUNNER_TEMP/npr-release-smoke"
@@ -283,6 +303,7 @@ jobs:
   publish:
     name: Upload Assets to Existing Release
     needs: [build-linux, build-macos]
+    if: always() && !cancelled() && !contains(needs.*.result, 'failure') && contains(needs.*.result, 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
