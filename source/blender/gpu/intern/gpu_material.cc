@@ -147,6 +147,7 @@ struct GPUMaterial {
   eGPUMaterialFlag flag = GPU_MATFLAG_UPDATED;
   bool is_time_dependent = false;
   bool uses_stencil_value = false;
+  Vector<int> render_texture_ids;
   bool reads_stencil_value = false;
   std::string stencil_value_error;
   std::string stencil_marker_error;
@@ -1522,6 +1523,16 @@ void GPU_material_recompile_serial_clear(const Material *material)
 void GPU_material_stencil_value_used_set(GPUMaterial *mat)
 {
   mat->uses_stencil_value = true;
+}
+
+void GPU_material_render_texture_register(GPUMaterial *mat, const int uid)
+{
+  mat->render_texture_ids.append_non_duplicates(uid);
+}
+
+Span<int> GPU_material_render_texture_ids(const GPUMaterial *mat)
+{
+  return mat->render_texture_ids;
 }
 
 bool GPU_material_stencil_value_used(const GPUMaterial *mat)

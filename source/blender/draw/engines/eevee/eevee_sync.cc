@@ -160,7 +160,7 @@ static int material_tessellation_budget(Instance &inst,
   /* Render Texture captures reuse these draw commands while overriding CameraData. A budget
    * derived only from the main camera could truncate a closer capture's lattice. Keep the full
    * budget until capture-specific draws (or a bound over every capture camera) are available. */
-  if (inst.render_textures.has_active()) {
+  if (inst.render_textures.has_enabled()) {
     return material.tessellation_level;
   }
   /* Use the same evaluated mesh as DRW_cache_mesh_surface_shaded_get (also in edit mode). */

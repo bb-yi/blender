@@ -301,6 +301,8 @@ bool GPU_material_has_surface_output(GPUMaterial *mat);
 /* Separate metadata: eGPUMaterialFlag already occupies all 32 bits. */
 void GPU_material_stencil_value_used_set(GPUMaterial *mat);
 bool GPU_material_stencil_value_used(const GPUMaterial *mat);
+void GPU_material_render_texture_register(GPUMaterial *mat, int uid);
+Span<int> GPU_material_render_texture_ids(const GPUMaterial *mat);
 void GPU_material_stencil_value_readable_set(GPUMaterial *mat);
 bool GPU_material_stencil_value_readable(const GPUMaterial *mat);
 StringRef GPU_material_stencil_marker_error(const GPUMaterial *mat);

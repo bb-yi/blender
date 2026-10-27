@@ -140,6 +140,7 @@ void World::sync()
 
   GPUMaterial *gpumat = inst_.shaders.world_shader_get(
       bl_world, ntree, MAT_PIPE_DEFERRED, !wait_ready);
+  inst_.render_textures.material_sync(gpumat);
   inst_.materials.expression_diagnostics_publish(gpumat);
 
   if (GPU_material_status(gpumat) == GPU_MAT_FAILED) {
@@ -175,6 +176,7 @@ void World::sync_volume(const WorldHandle &world_handle, bool wait_ready)
   if (world && world->nodetree) {
     gpumat = inst_.shaders.world_shader_get(
         world, world->nodetree, MAT_PIPE_VOLUME_MATERIAL, !wait_ready);
+    inst_.render_textures.material_sync(gpumat);
     inst_.materials.expression_diagnostics_publish(gpumat);
   }
 

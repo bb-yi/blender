@@ -355,6 +355,8 @@ class ForwardPipeline {
   void render_outline_occlusion(View &view, Framebuffer &outline_occlusion_fb);
   void render_dlss_guides(View &view, Framebuffer &framebuffer);
 
+  void render_prepass_only(View &view, Framebuffer &prepass_fb);
+
   void render(View &view,
               gpu::Texture *depth_tx,
               Framebuffer &prepass_fb,
@@ -592,6 +594,8 @@ class DeferredLayer : DeferredLayerBase {
   static bool do_split_direct_indirect_radiance(const Instance &inst);
 
   void render_dlss_guides(View &view, Framebuffer &framebuffer);
+  void render_prepass_only(View &render_view, Framebuffer &prepass_fb);
+  void render_gbuffer_only(View &render_view, Framebuffer &prepass_fb, Framebuffer &gbuffer_fb);
 
   /* Returns the radiance buffer to feed the next layer. */
   gpu::Texture *render(View &main_view,
@@ -666,6 +670,9 @@ class DeferredPipeline {
               RayTraceBuffer &rt_buffer_opaque_layer,
               RayTraceBuffer &rt_buffer_refract_layer,
               bool &volume_compute_done);
+
+  void render_prepass_only(View &render_view, Framebuffer &prepass_fb);
+  void render_gbuffer_only(View &render_view, Framebuffer &prepass_fb, Framebuffer &gbuffer_fb);
 
   void render_dlss_guides(View &view, Framebuffer &framebuffer);
 

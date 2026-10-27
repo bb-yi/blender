@@ -44,7 +44,7 @@ struct RayTraceBuffer {
     /* Map of tiles that were processed inside the history buffer. */
     Texture tilemask_history_tx = {"tilemask_tx"};
     /** Perspective matrix for which the history buffers were recorded. */
-    float4x4 history_persmat;
+    float4x4 history_persmat = float4x4::identity();
     /** True if history buffer was used last frame and can be re-projected. */
     bool valid_history = false;
     /**
@@ -72,6 +72,19 @@ struct RayTraceBuffer {
    * Can be different from de-noise buffer's history matrix.
    */
   float4x4 history_persmat = float4x4::zero();
+
+  /** Invalidate temporal data when an auxiliary view changes identity or camera. */
+  void invalidate_history()
+  {
+    for (DenoiseBuffer &buffer : closures) {
+      buffer.valid_history = false;
+      buffer.history_persmat = float4x4::identity();
+    }
+    history_persmat = float4x4::zero();
+    if (radiance_feedback_tx.is_valid()) {
+      radiance_feedback_tx.clear(float4(0.0f));
+    }
+  }
 
   gpu::Texture *feedback_ensure(bool is_dummy, int2 extent)
   {

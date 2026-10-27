@@ -2753,6 +2753,24 @@ static void rna_SceneEEVEE_render_texture_remove(ID *id,
   rna_SceneEEVEE_render_texture_tag_update(scene);
 }
 
+static void rna_SceneEEVEE_render_texture_request_update(ID *id,
+                                                         SceneEEVEE *eevee,
+                                                         ReportList *reports,
+                                                         int index)
+{
+  SceneRenderTexture *render_texture = static_cast<SceneRenderTexture *>(
+      BLI_findlink(&eevee->render_textures, index));
+  if (render_texture == nullptr) {
+    BKE_reportf(reports, RPT_ERROR, "Render Texture index '%d' not found", index);
+    return;
+  }
+
+  render_texture->manual_update = render_texture->manual_update == INT_MAX ?
+                                      0 :
+                                      render_texture->manual_update + 1;
+  rna_SceneEEVEE_render_texture_tag_update(reinterpret_cast<Scene *>(id));
+}
+
 static void rna_SceneEEVEE_render_texture_move(ID *id,
                                                SceneEEVEE *eevee,
                                                ReportList *reports,
@@ -9089,6 +9107,12 @@ static void rna_def_scene_eevee_render_textures(BlenderRNA *brna, PropertyRNA *c
   RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
   parm = RNA_def_int(
       func, "index", -1, INT_MIN, INT_MAX, "Index", "Index to remove", -1, INT_MAX);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+
+  func = RNA_def_function(srna, "request_update", "rna_SceneEEVEE_render_texture_request_update");
+  RNA_def_function_ui_description(func, "Request a manual render texture capture");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
+  parm = RNA_def_int(func, "index", -1, INT_MIN, INT_MAX, "Index", "Index to update", -1, INT_MAX);
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
 
   func = RNA_def_function(srna, "move", "rna_SceneEEVEE_render_texture_move");

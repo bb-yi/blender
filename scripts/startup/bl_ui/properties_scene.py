@@ -113,7 +113,28 @@ def draw_eevee_render_textures(layout, context):
     row.prop(render_texture, "resolution_y", text="Y")
 
     col.prop(render_texture, "update_mode")
+    if render_texture.update_mode == 'MANUAL':
+        row = col.row()
+        row.enabled = render_texture.enabled and render_texture.camera is not None
+        row.operator("scene.eevee_render_texture_update", icon='FILE_REFRESH')
     col.prop(render_texture, "format")
+
+
+class SCENE_OT_eevee_render_texture_update(Operator):
+    bl_idname = "scene.eevee_render_texture_update"
+    bl_label = "Update Render Texture"
+    bl_description = "Capture the selected manual Render Texture on the next draw"
+
+    @classmethod
+    def poll(cls, context):
+        return (context.scene is not None and
+                0 <= context.scene.eevee.active_render_texture_index <
+                len(context.scene.eevee.render_textures))
+
+    def execute(self, context):
+        eevee = context.scene.eevee
+        eevee.render_textures.request_update(eevee.active_render_texture_index)
+        return {'FINISHED'}
 
 
 def draw_eevee_filter_graph(layout, context):
@@ -618,6 +639,7 @@ class SCENE_PT_custom_props(SceneButtonsPanel, PropertyPanel, Panel):
 
 
 classes = (
+    SCENE_OT_eevee_render_texture_update,
     SCENE_UL_keying_set_paths,
     SCENE_UL_eevee_render_textures,
     SCENE_OT_eevee_filter_graph_new,

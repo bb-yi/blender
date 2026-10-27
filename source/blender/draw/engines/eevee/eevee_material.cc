@@ -576,6 +576,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                                      outline_shell,
                                                      &node_tree_info);
 
+  inst_.render_textures.material_sync(matpass.gpumat);
   has_time_dependent_materials_ |= GPU_material_is_time_dependent(matpass.gpumat);
 
   queue_texture_loading(matpass.gpumat);

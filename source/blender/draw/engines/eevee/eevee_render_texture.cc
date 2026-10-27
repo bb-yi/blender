@@ -10,6 +10,7 @@
 
 #include "DEG_depsgraph_query.hh"
 
+#include "DNA_material_types.h"
 #include "DNA_scene_types.h"
 
 #include "MEM_guardedalloc.h"
@@ -65,26 +66,38 @@ RenderTextureData RenderTextureModule::slot_default_data()
 
 void RenderTextureModule::slot_reset(const int slot_index)
 {
-  slots_[slot_index].uid = -1;
-  slots_[slot_index].camera = nullptr;
-  slots_[slot_index].camera_orig = nullptr;
-  slots_[slot_index].extent = int2(1);
-  slots_[slot_index].source = SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR;
-  slots_[slot_index].format = SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA16F;
-  slots_[slot_index].active = false;
+  RuntimeSlot &slot = slots_[slot_index];
+  slot.uid = -1;
+  slot.camera = nullptr;
+  slot.camera_orig = nullptr;
+  slot.extent = int2(1);
+  slot.source = SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR;
+  slot.format = SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA16F;
+  slot.update_mode = SCE_EEVEE_RENDER_TEXTURE_UPDATE_EVERY_FRAME;
+  slot.manual_update = 0;
+  slot.capture_pending = true;
+  slot.active = false;
+  slot.used = false;
+  slot.history_reset_pending = true;
+  slot.has_camera_data = false;
+  slot.camera_data = {};
+  slot.rt_buffer_opaque.reset();
+  slot.rt_buffer_refract.reset();
   data_[slot_index] = slot_default_data();
 }
 
-void RenderTextureModule::slot_ensure_textures(const int slot_index)
+uint8_t RenderTextureModule::slot_ensure_textures(const int slot_index)
 {
   RuntimeSlot &slot = slots_[slot_index];
   const float4 clear_color(0.0f);
   const gpu::TextureFormat texture_format = render_texture_gpu_format(slot.format);
+  constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ |
+                                     GPU_TEXTURE_USAGE_SHADER_WRITE;
 
-  const bool recreated_current = slot.color_tx.current().ensure_2d(
-      texture_format, slot.extent, GPU_TEXTURE_USAGE_GENERAL);
+  const int2 extent = slot.active && slot.used ? slot.extent : int2(1);
+  const bool recreated_current = slot.color_tx.current().ensure_2d(texture_format, extent, usage);
   const bool recreated_previous = slot.color_tx.previous().ensure_2d(
-      texture_format, slot.extent, GPU_TEXTURE_USAGE_GENERAL);
+      texture_format, extent, usage);
 
   if (recreated_current) {
     slot.color_tx.current().clear(clear_color);
@@ -92,6 +105,9 @@ void RenderTextureModule::slot_ensure_textures(const int slot_index)
   if (recreated_previous) {
     slot.color_tx.previous().clear(clear_color);
   }
+
+  return uint8_t(recreated_current ? SLOT_TEXTURE_CURRENT_RECREATED : 0u) |
+         uint8_t(recreated_previous ? SLOT_TEXTURE_PREVIOUS_RECREATED : 0u);
 }
 
 void RenderTextureModule::init()
@@ -108,40 +124,83 @@ void RenderTextureModule::init()
 
 void RenderTextureModule::begin_sync()
 {
-  int slot_index = 0;
+  used_uids_.clear();
+  capture_has_texture_dependencies_ = false;
+  requires_full_capture_ = false;
+  const uint64_t evaluation = DEG_get_update_count(inst_.depsgraph);
+  const float time = DEG_get_ctime(inst_.depsgraph);
+  const bool evaluation_changed = !has_evaluation_ || evaluation != last_evaluation_ ||
+                                  time != last_time_;
+  last_evaluation_ = evaluation;
+  last_time_ = time;
+  has_evaluation_ = true;
+
+  Vector<SceneRenderTexture *, RENDER_TEXTURE_SLOT_MAX> enabled;
   for (SceneRenderTexture *render_texture = static_cast<SceneRenderTexture *>(
            inst_.scene->eevee.render_textures.first);
        render_texture != nullptr;
        render_texture = render_texture->next)
   {
-    if (slot_index >= RENDER_TEXTURE_SLOT_MAX) {
-      break;
-    }
     if (!render_texture->enabled || render_texture->camera == nullptr) {
       continue;
     }
+    enabled.append(render_texture);
+    if (enabled.size() == RENDER_TEXTURE_SLOT_MAX) {
+      break;
+    }
+  }
 
+  /* Reorder all surviving UIDs before initializing new entries, which might otherwise overwrite
+   * a later entry's cached image. Keep feedback capture order identical to the scene list. */
+  for (const int index : enabled.index_range()) {
+    for (const int previous : IndexRange(RENDER_TEXTURE_SLOT_MAX)) {
+      if (slots_[previous].uid != enabled[index]->uid) {
+        continue;
+      }
+      if (index != previous) {
+        /* Move by assignment to transfer Texture ownership safely. */
+        RuntimeSlot displaced;
+        displaced = std::move(slots_[index]);
+        slots_[index] = std::move(slots_[previous]);
+        slots_[previous] = std::move(displaced);
+        std::swap(data_[index], data_[previous]);
+      }
+      break;
+    }
+  }
+
+  int slot_index = 0;
+  for (SceneRenderTexture *render_texture : enabled) {
     RuntimeSlot &slot = slots_[slot_index];
     const int2 extent(max_ii(render_texture->resolution_x, 1),
                       max_ii(render_texture->resolution_y, 1));
     const int source = render_texture_source_normalize(render_texture->source);
+    const int update_mode = render_texture->update_mode;
     const bool reset_history = slot.uid != render_texture->uid ||
                                slot.camera_orig != render_texture->camera ||
                                slot.extent != extent || slot.source != source ||
                                slot.format != render_texture->format;
+    const bool update_mode_changed = slot.update_mode != update_mode;
+    const bool manual_update_requested = slot.manual_update != render_texture->manual_update;
     slot.uid = render_texture->uid;
     slot.camera = DEG_get_evaluated(inst_.depsgraph, render_texture->camera);
     slot.camera_orig = render_texture->camera;
     slot.extent = extent;
     slot.source = source;
     slot.format = render_texture->format;
+    slot.update_mode = update_mode;
+    slot.manual_update = render_texture->manual_update;
     slot.active = (slot.camera != nullptr);
-    slot_ensure_textures(slot_index);
     if (reset_history) {
-      slot.color_tx.current().clear(float4(0.0f));
-      slot.color_tx.previous().clear(float4(0.0f));
+      slot.history_reset_pending = true;
+      slot.rt_buffer_opaque.reset();
+      slot.rt_buffer_refract.reset();
+      slot.has_camera_data = false;
       data_[slot_index] = slot_default_data();
     }
+    slot.capture_pending |= reset_history || update_mode_changed || manual_update_requested;
+    slot.capture_pending |= evaluation_changed &&
+                            update_mode != SCE_EEVEE_RENDER_TEXTURE_UPDATE_MANUAL;
 
     data_[slot_index].info = int4(
         slot.uid, slot.extent.x, slot.extent.y, render_texture_info_flags(slot.source, slot.format));
@@ -154,6 +213,80 @@ void RenderTextureModule::begin_sync()
     slot_ensure_textures(slot_index);
   }
 
+  data_.push_update();
+}
+
+void RenderTextureModule::material_sync(GPUMaterial *material, const bool is_capture_material)
+{
+  if (material == nullptr) {
+    return;
+  }
+  const Span<int> ids = GPU_material_render_texture_ids(material);
+  for (const int uid : ids) {
+    used_uids_.add(uid);
+  }
+  if (!is_capture_material) {
+    return;
+  }
+  capture_has_texture_dependencies_ |= !ids.is_empty();
+
+  constexpr eGPUMaterialFlag dependencies = GPU_MATFLAG_SHADER_TO_RGBA | GPU_MATFLAG_AO |
+                                            GPU_MATFLAG_RAYCAST | GPU_MATFLAG_SHADER_INFO |
+                                            GPU_MATFLAG_NPR | GPU_MATFLAG_NPR_REFRACTION |
+                                            GPU_MATFLAG_NPR_FOREACH_LIGHT |
+                                            GPU_MATFLAG_SCENE_COLOR |
+                                            GPU_MATFLAG_SCREENSPACE_INFO |
+                                            GPU_MATFLAG_LIGHTPROBE_ACCESS |
+                                            GPU_MATFLAG_GLSL_LIGHT_ACCESS;
+  requires_full_capture_ |= (GPU_material_flag(material) & dependencies) != 0 ||
+                            GPU_material_stencil_value_used(material) ||
+                            GPU_material_uses_hiz_data(material) ||
+                            GPU_material_has_glsl_light_shader_eval(material) ||
+                            GPU_material_has_depth_offset_output(material);
+  if (const blender::Material *source = GPU_material_get_material(material)) {
+    requires_full_capture_ |= source->stencil_enabled ||
+                              source->stencil_mode != MA_STENCIL_STANDARD ||
+                              material_ztest_mode_get(*source) != MA_ZTEST_LESS_EQUAL;
+  }
+}
+
+void RenderTextureModule::end_sync()
+{
+  for (const int index : IndexRange(RENDER_TEXTURE_SLOT_MAX)) {
+    RuntimeSlot &slot = slots_[index];
+    const bool was_used = slot.used;
+    slot.used = slot.active && used_uids_.contains(slot.uid);
+    slot.capture_pending |= slot.used && !was_used;
+    slot.capture_pending |= inst_.is_viewport() && inst_.sampling.is_reset() &&
+                            slot.update_mode != SCE_EEVEE_RENDER_TEXTURE_UPDATE_MANUAL;
+    if (!slot.used) {
+      slot.rt_buffer_opaque.reset();
+      slot.rt_buffer_refract.reset();
+      slot.has_camera_data = false;
+      data_[index] = slot_default_data();
+    }
+    const uint8_t recreated = slot_ensure_textures(index);
+    if (slot.history_reset_pending && slot.used) {
+      if ((recreated & SLOT_TEXTURE_CURRENT_RECREATED) == 0) {
+        slot.color_tx.current().clear(float4(0.0f));
+      }
+      if ((recreated & SLOT_TEXTURE_PREVIOUS_RECREATED) == 0) {
+        slot.color_tx.previous().clear(float4(0.0f));
+      }
+      slot.history_reset_pending = false;
+    }
+    if (slot.used) {
+      data_[index].info = int4(slot.uid,
+                               slot.extent.x,
+                               slot.extent.y,
+                               render_texture_info_flags(slot.source, slot.format));
+      /* A capture request also changes the main view's shader input. Scene time can advance
+       * without any other time-dependent materials, so invalidate a converged Film here. */
+      if (slot.capture_pending && inst_.is_viewport()) {
+        inst_.sampling.reset();
+      }
+    }
+  }
   data_.push_update();
 }
 
@@ -189,8 +322,28 @@ void RenderTextureModule::slot_extract(const int slot_index, RenderBuffers &rbuf
   inst_.manager->submit(extract_ps_);
 }
 
-void RenderTextureModule::slot_capture(const int slot_index)
+bool RenderTextureModule::slot_should_capture(const RuntimeSlot &slot) const
 {
+  if (!slot.active || !slot.used) {
+    return false;
+  }
+
+  switch (slot.update_mode) {
+    case SCE_EEVEE_RENDER_TEXTURE_UPDATE_EVERY_SAMPLE:
+      return true;
+    case SCE_EEVEE_RENDER_TEXTURE_UPDATE_MANUAL:
+      return slot.capture_pending;
+    case SCE_EEVEE_RENDER_TEXTURE_UPDATE_EVERY_FRAME:
+    default:
+      /* Scene edits and motion-blur evaluation steps tag a new capture in begin_sync(). A
+       * converging viewport must not advance feedback once for every unrelated TAA sample. */
+      return slot.capture_pending;
+  }
+}
+
+void RenderTextureModule::slot_capture(const Span<int> capture_slots)
+{
+  const int slot_index = capture_slots[0];
   RuntimeSlot &slot = slots_[slot_index];
   if (!slot.active) {
     return;
@@ -204,21 +357,30 @@ void RenderTextureModule::slot_capture(const int slot_index)
     return;
   }
 
-  slot.color_tx.swap();
-  slot_ensure_textures(slot_index);
+  if (!slot.has_camera_data || slot.camera_data != rt_camera) {
+    if (slot.rt_buffer_opaque) {
+      slot.rt_buffer_opaque->invalidate_history();
+    }
+    if (slot.rt_buffer_refract) {
+      slot.rt_buffer_refract->invalidate_history();
+    }
+  }
+  slot.camera_data = rt_camera;
+  slot.has_camera_data = true;
 
-  data_[slot_index].prev_viewproj = data_[slot_index].viewproj;
-  data_[slot_index].viewproj = rt_camera.persmat;
   const float4x4 camera_view_basis = math::transpose(rt_camera.viewmat);
-  data_[slot_index].camera_position = float4(rt_camera.viewinv.location(), 1.0f);
-  data_[slot_index].camera_axis_x = float4(camera_view_basis.x_axis(), 0.0f);
-  data_[slot_index].camera_axis_y = float4(camera_view_basis.y_axis(), 0.0f);
-  data_[slot_index].camera_axis_z = float4(camera_view_basis.z_axis(), 0.0f);
-  data_[slot_index].info = int4(slot.uid,
-                                slot.extent.x,
-                                slot.extent.y,
-                                render_texture_info_flags(slot.source, slot.format) |
-                                    RENDER_TEXTURE_SLOT_CAPTURING);
+  for (const int index : capture_slots) {
+    RuntimeSlot &capture = slots_[index];
+    capture.color_tx.swap();
+    data_[index].prev_viewproj = data_[index].viewproj;
+    data_[index].viewproj = rt_camera.persmat;
+    data_[index].camera_position = float4(rt_camera.viewinv.location(), 1.0f);
+    data_[index].camera_axis_x = float4(camera_view_basis.x_axis(), 0.0f);
+    data_[index].camera_axis_y = float4(camera_view_basis.y_axis(), 0.0f);
+    data_[index].camera_axis_z = float4(camera_view_basis.z_axis(), 0.0f);
+    data_[index].info.w = render_texture_info_flags(capture.source, capture.format) |
+                          RENDER_TEXTURE_SLOT_CAPTURING;
+  }
   data_.push_update();
 
   inst_.render_extent_override_set(slot.extent);
@@ -235,7 +397,15 @@ void RenderTextureModule::slot_capture(const int slot_index)
   RenderBuffers &rbufs = inst_.render_buffers;
   rbufs.acquire(slot.extent);
 
-  inst_.planar_probes.set_view(render_view, slot.extent);
+  const bool depth_only = !requires_full_capture_ &&
+                          slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_DEPTH;
+  const bool normal_only = !requires_full_capture_ &&
+                           slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_NORMAL;
+  /* Empty hybrid subpasses still bind planar resources. Set them up before acquiring the
+   * capture GBuffer because planar setup releases its own temporary GBuffer. */
+  if (!depth_only) {
+    inst_.planar_probes.set_view(render_view, slot.extent);
+  }
 
   combined_fb_.ensure(GPU_ATTACHMENT_TEXTURE(rbufs.depth_tx),
                       GPU_ATTACHMENT_TEXTURE(rbufs.combined_tx));
@@ -248,16 +418,18 @@ void RenderTextureModule::slot_capture(const int slot_index)
       with_raycast ? GPU_ATTACHMENT_TEXTURE(rbufs.object_id_tx) : GPU_ATTACHMENT_NONE,
       GPU_ATTACHMENT_TEXTURE(rbufs.vector_tx));
 
-  inst_.gbuffer.acquire(slot.extent,
+  inst_.gbuffer.acquire(depth_only ? int2(1) : slot.extent,
                         inst_.pipelines.deferred.header_layer_count(),
                         inst_.pipelines.deferred.closure_layer_count(),
                         inst_.pipelines.deferred.normal_layer_count());
-  gbuffer_fb_.ensure(GPU_ATTACHMENT_TEXTURE(rbufs.depth_tx),
-                     GPU_ATTACHMENT_TEXTURE(rbufs.combined_tx),
-                     GPU_ATTACHMENT_TEXTURE_LAYER(inst_.gbuffer.header_tx.layer_view(0), 0),
-                     GPU_ATTACHMENT_TEXTURE_LAYER(inst_.gbuffer.normal_tx.layer_view(0), 0),
-                     GPU_ATTACHMENT_TEXTURE_LAYER(inst_.gbuffer.closure_tx.layer_view(0), 0),
-                     GPU_ATTACHMENT_TEXTURE_LAYER(inst_.gbuffer.closure_tx.layer_view(1), 0));
+  if (!depth_only) {
+    gbuffer_fb_.ensure(GPU_ATTACHMENT_TEXTURE(rbufs.depth_tx),
+                       GPU_ATTACHMENT_TEXTURE(rbufs.combined_tx),
+                       GPU_ATTACHMENT_TEXTURE_LAYER(inst_.gbuffer.header_tx.layer_view(0), 0),
+                       GPU_ATTACHMENT_TEXTURE_LAYER(inst_.gbuffer.normal_tx.layer_view(0), 0),
+                       GPU_ATTACHMENT_TEXTURE_LAYER(inst_.gbuffer.closure_tx.layer_view(0), 0),
+                       GPU_ATTACHMENT_TEXTURE_LAYER(inst_.gbuffer.closure_tx.layer_view(1), 0));
+  }
 
   const float4 clear_velocity(inst_.velocity.camera_has_motion() ? VELOCITY_INVALID : 0.0f);
   GPU_texture_clear(rbufs.vector_tx, GPU_DATA_FLOAT, &clear_velocity);
@@ -271,54 +443,134 @@ void RenderTextureModule::slot_capture(const int slot_index)
   const double4 clear_color = double4(0.0, 0.0, 0.0, 1.0);
   GPU_framebuffer_bind(combined_fb_);
   GPU_framebuffer_clear_color_depth(combined_fb_, clear_color, inst_.film.depth.clear_value);
-  inst_.pipelines.background.clear(render_view);
 
   inst_.lights.set_view(render_view, slot.extent);
   inst_.hiz_buffer.set_source(&inst_.render_buffers.depth_tx);
-  inst_.volume.set_view(main_view, slot.extent, false);
-  inst_.uniform_data.data.push_update();
 
-  inst_.volume.draw_prepass(main_view);
-  inst_.pipelines.background.render(render_view, combined_fb_);
-
-  bool volume_compute_done = false;
-  inst_.pipelines.deferred.render(main_view,
-                                  render_view,
-                                  prepass_fb_,
-                                  combined_fb_,
-                                  gbuffer_fb_,
-                                  slot.extent,
-                                  rt_buffer_opaque_,
-                                  rt_buffer_refract_,
-                                  volume_compute_done);
-
-  if (!volume_compute_done) {
-    inst_.volume.draw_compute(main_view, slot.extent);
+  CLOG_INFO(&Instance::log,
+            "RenderTexture capture uid=%d outputs=%d path=%s extent=%dx%d",
+            slot.uid,
+            int(capture_slots.size()),
+            depth_only  ? "depth" :
+            normal_only ? "normal" :
+                          "color",
+            slot.extent.x,
+            slot.extent.y);
+  inst_.gbuffer.header_tx.clear(uint4(0));
+  if (depth_only || normal_only) {
+    slot.rt_buffer_opaque.reset();
+    slot.rt_buffer_refract.reset();
   }
-  inst_.volume.draw_resolve(main_view);
-  inst_.ambient_occlusion.render_pass(render_view);
-  inst_.pipelines.forward.render(
-      render_view, rbufs.depth_tx, prepass_fb_, transparent_fb_, combined_fb_, slot.extent);
+  if (depth_only) {
+    inst_.pipelines.deferred.render_prepass_only(render_view, prepass_fb_);
+    inst_.pipelines.forward.render_prepass_only(render_view, prepass_fb_);
+  }
+  else if (normal_only) {
+    inst_.pipelines.deferred.render_gbuffer_only(render_view, prepass_fb_, gbuffer_fb_);
+  }
+  else {
+    if (!slot.rt_buffer_opaque) {
+      slot.rt_buffer_opaque = std::make_unique<RayTraceBuffer>();
+      slot.rt_buffer_refract = std::make_unique<RayTraceBuffer>();
+    }
+    inst_.pipelines.background.clear(render_view);
+    inst_.volume.set_view(main_view, slot.extent, false);
+    inst_.uniform_data.data.push_update();
+    inst_.volume.draw_prepass(main_view);
+    inst_.pipelines.background.render(render_view, combined_fb_);
 
-  slot_extract(slot_index, rbufs);
+    bool volume_compute_done = false;
+    inst_.pipelines.deferred.render(main_view,
+                                    render_view,
+                                    prepass_fb_,
+                                    combined_fb_,
+                                    gbuffer_fb_,
+                                    slot.extent,
+                                    *slot.rt_buffer_opaque,
+                                    *slot.rt_buffer_refract,
+                                    volume_compute_done);
+
+    if (!volume_compute_done) {
+      inst_.volume.draw_compute(main_view, slot.extent);
+    }
+    inst_.volume.draw_resolve(main_view);
+    inst_.ambient_occlusion.render_pass(render_view);
+    inst_.pipelines.forward.render(
+        render_view, rbufs.depth_tx, prepass_fb_, transparent_fb_, combined_fb_, slot.extent);
+  }
+
+  for (const int index : capture_slots) {
+    slot_extract(index, rbufs);
+    data_[index].info.w &= ~RENDER_TEXTURE_SLOT_CAPTURING;
+    slots_[index].capture_pending = false;
+  }
 
   inst_.gbuffer.release();
   rbufs.release();
 
-  data_[slot_index].info.w &= ~RENDER_TEXTURE_SLOT_CAPTURING;
   data_.push_update();
 }
 
 void RenderTextureModule::render()
 {
+  /* Retain pending captures until their materials are ready. In particular, Manual must not
+   * permanently cache a fallback material or a texture that is still loading. */
+  if (inst_.materials.queued_shaders_count > 0 || inst_.materials.queued_textures_count > 0) {
+    return;
+  }
+
+  if (std::none_of(slots_.begin(), slots_.end(), [&](const RuntimeSlot &slot) {
+        return slot_should_capture(slot);
+      }))
+  {
+    return;
+  }
+
   const CameraData main_camera = inst_.camera.data_get();
   const bool main_is_camera_object = inst_.camera.is_camera_object();
+  std::array<bool, RENDER_TEXTURE_SLOT_MAX> captured = {};
+  /* Temporal buffers belong to individual slots. Sharing only the extracted image would leave
+   * followers without history when a different update cadence changes the next capture group. */
+  const auto can_batch = [&](const RuntimeSlot &slot) {
+    return !inst_.raytracing.use_raytracing() ||
+           (!requires_full_capture_ &&
+            (slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_DEPTH ||
+             slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_NORMAL));
+  };
 
   for (int slot_index = 0; slot_index < RENDER_TEXTURE_SLOT_MAX; slot_index++) {
-    if (!slots_[slot_index].active) {
+    if (captured[slot_index] || !slot_should_capture(slots_[slot_index])) {
       continue;
     }
-    slot_capture(slot_index);
+    Vector<int, RENDER_TEXTURE_SLOT_MAX> captures;
+    captures.append(slot_index);
+    if (!capture_has_texture_dependencies_ && can_batch(slots_[slot_index])) {
+      /* Captures that sample Render Textures keep their original serial feedback ordering. */
+      for (int index = slot_index + 1; index < RENDER_TEXTURE_SLOT_MAX; index++) {
+        const RuntimeSlot &slot = slots_[index];
+        if (!captured[index] && slot_should_capture(slot) && can_batch(slot) &&
+            slot.camera == slots_[slot_index].camera && slot.extent == slots_[slot_index].extent)
+        {
+          captures.append(index);
+        }
+      }
+      /* One color render also supplies depth and GBuffer normals. A normal render supplies depth.
+       */
+      const auto priority = [&](const int index) {
+        return slots_[index].source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR  ? 2 :
+               slots_[index].source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_NORMAL ? 1 :
+                                                                                0;
+      };
+      const auto leader = std::max_element(
+          captures.begin(), captures.end(), [&](const int a, const int b) {
+            return priority(a) < priority(b);
+          });
+      std::swap(captures[0], *leader);
+    }
+    slot_capture(captures);
+    for (const int index : captures) {
+      captured[index] = true;
+    }
   }
 
   inst_.render_extent_override_clear();

@@ -67,6 +67,7 @@ static int node_shader_gpu_render_texture(GPUMaterial *mat,
   }
 
   GPU_material_flag_set(mat, GPU_MATFLAG_RENDER_TEXTURE);
+  GPU_material_render_texture_register(mat, node->custom1);
   return GPU_stack_link(mat,
                         node,
                         "node_render_texture",

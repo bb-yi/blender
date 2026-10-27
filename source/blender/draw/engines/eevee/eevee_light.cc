@@ -922,6 +922,7 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
                                    const char *error_message) {
     GPUMaterial *gpumat = inst_.shaders.light_shader_get(
         const_cast<blender::Light *>(&la), la.nodetree, pipeline_type, false);
+    inst_.render_textures.material_sync(gpumat);
     inst_.materials.expression_diagnostics_publish(gpumat);
     if (gpumat != nullptr && GPU_material_status(gpumat) == GPU_MAT_SUCCESS &&
         GPU_material_has_light_shader_output(gpumat))

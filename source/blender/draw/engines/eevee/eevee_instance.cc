@@ -569,6 +569,7 @@ namespace blender::eevee
      * If engine shaders are not ready, will skip the pipeline sync. */
     {
       ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginWorld);
+      render_textures.begin_sync();
       world.sync();
     }
 
@@ -602,7 +603,6 @@ namespace blender::eevee
 
     {
       ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginNPRPost);
-      render_textures.begin_sync();
       filter_materials.begin_sync();
       outline.begin_sync();
       ambient_occlusion.sync();
@@ -732,6 +732,7 @@ namespace blender::eevee
 
     {
       ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndVolumeShadowsLights);
+      render_textures.end_sync();
       volume.end_sync();  /* Needs to be before shadows. */
       shadows.end_sync(); /* Needs to be before lights. */
       lights.end_sync();
@@ -773,7 +774,6 @@ namespace blender::eevee
 
     {
       ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndNPRPost);
-      render_textures.end_sync();
       filter_materials.end_sync();
     }
 

@@ -1297,6 +1297,19 @@ void ForwardPipeline::render_dlss_guides(View &view, Framebuffer &framebuffer)
   }
 }
 
+void ForwardPipeline::render_prepass_only(View &view, Framebuffer &prepass_fb)
+{
+  if (!has_opaque_ && !has_transparent_ && !has_no_depth_ && !has_stencil_) {
+    return;
+  }
+
+  prepass_fb.bind();
+  prepass_.render(view, nullptr, true);
+  if (has_stencil_) {
+    inst_.manager->submit(stencil_ps_, view);
+  }
+}
+
 void ForwardPipeline::render(View &view,
                              gpu::Texture *depth_tx,
                              Framebuffer &prepass_fb,
@@ -2577,6 +2590,42 @@ void DeferredLayer::render_dlss_guides(View &view, Framebuffer &framebuffer)
   }
 }
 
+void DeferredLayer::render_prepass_only(View &render_view, Framebuffer &prepass_fb)
+{
+  if (is_empty()) {
+    return;
+  }
+
+  GPU_framebuffer_bind(prepass_fb);
+  GPU_framebuffer_clear_stencil(prepass_fb, 0xFFu);
+  prepass_.render(render_view, inst_.render_buffers.depth_tx, true);
+  if (has_stencil_) {
+    inst_.manager->submit(stencil_ps_, render_view);
+  }
+}
+
+void DeferredLayer::render_gbuffer_only(View &render_view,
+                                        Framebuffer &prepass_fb,
+                                        Framebuffer &gbuffer_fb)
+{
+  render_prepass_only(render_view, prepass_fb);
+  if (closure_count_ == 0) {
+    return;
+  }
+
+  /* Keep a valid radiance binding. Materials that consume its lighting data use the full
+   * capture path instead. */
+  radiance_behind_tx_ = dummy_black;
+  /* The shared GBuffer pass binds probe textures even for unlit materials. Initialize these
+   * resources before submission, just as the full deferred path does. */
+  inst_.volume_probes.set_view(render_view);
+  inst_.sphere_probes.set_view(render_view);
+  inst_.hiz_buffer.swap_layer();
+  inst_.hiz_buffer.update();
+  inst_.gbuffer.bind(gbuffer_fb, false, !has_stencil_);
+  inst_.manager->submit(gbuffer_ps_, render_view);
+}
+
 void DeferredPipeline::render_dlss_guides(View &view, Framebuffer &framebuffer)
 {
   opaque_layer_.render_dlss_guides(view, framebuffer);
@@ -2635,6 +2684,24 @@ void DeferredPipeline::render(View &main_view,
                                 volume_compute_done);
   }
   GPU_debug_group_end();
+}
+
+void DeferredPipeline::render_prepass_only(View &render_view, Framebuffer &prepass_fb)
+{
+  opaque_layer_.render_prepass_only(render_view, prepass_fb);
+  for (auto &entry : refraction_layers_) {
+    entry.second->render_prepass_only(render_view, prepass_fb);
+  }
+}
+
+void DeferredPipeline::render_gbuffer_only(View &render_view,
+                                           Framebuffer &prepass_fb,
+                                           Framebuffer &gbuffer_fb)
+{
+  opaque_layer_.render_gbuffer_only(render_view, prepass_fb, gbuffer_fb);
+  for (auto &entry : refraction_layers_) {
+    entry.second->render_gbuffer_only(render_view, prepass_fb, gbuffer_fb);
+  }
 }
 
 DeferredLayer &DeferredPipeline::get_refraction_layer(short index)

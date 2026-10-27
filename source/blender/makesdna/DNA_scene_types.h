@@ -2719,7 +2719,8 @@ struct SceneRenderTexture {
   char source;
   char update_mode;
   char format;
-  char _pad[8];
+  int manual_update;
+  char _pad[4];
 };
 
 struct SceneFilterMaterial {

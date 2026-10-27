@@ -905,6 +905,7 @@ if(WITH_GPU_RENDER_TESTS)
     tessellation_default_coordinates
     filter_stage_pool
     eevee_resource_lifetime
+    render_texture_updates
     vulkan_failure_recovery
   )
   foreach(backend IN ITEMS opengl vulkan)
