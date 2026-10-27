@@ -74,8 +74,8 @@ class RenderBuffers {
 
   void init();
 
-  /* Acquires (also ensures) the render buffer before rendering to them. */
-  void acquire(int2 extent, gpu::TextureFormat raycast_depth_format = depth_format);
+  /* Acquire render buffers and return the number of persistent textures recreated. */
+  int acquire(int2 extent, gpu::TextureFormat raycast_depth_format = depth_format);
   void release();
 
   /* Return the size of the allocated render buffers. Undefined if called before `acquire()`. */

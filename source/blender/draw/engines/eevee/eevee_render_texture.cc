@@ -6,7 +6,9 @@
  * \ingroup eevee
  */
 
+#include "BKE_mesh.hh"
 #include "BLI_listbase.h"
+#include <cmath>
 
 #include "DEG_depsgraph_query.hh"
 
@@ -79,10 +81,14 @@ void RenderTextureModule::slot_reset(const int slot_index)
   slot.active = false;
   slot.used = false;
   slot.history_reset_pending = true;
+  slot.needs_history = false;
+  slot.requires_full_capture = false;
+  slot.sync_camera_valid = false;
   slot.has_camera_data = false;
   slot.camera_data = {};
   slot.rt_buffer_opaque.reset();
   slot.rt_buffer_refract.reset();
+  slot.buffers.reset();
   data_[slot_index] = slot_default_data();
 }
 
@@ -97,7 +103,7 @@ uint8_t RenderTextureModule::slot_ensure_textures(const int slot_index)
   const int2 extent = slot.active && slot.used ? slot.extent : int2(1);
   const bool recreated_current = slot.color_tx.current().ensure_2d(texture_format, extent, usage);
   const bool recreated_previous = slot.color_tx.previous().ensure_2d(
-      texture_format, extent, usage);
+      texture_format, slot.needs_history && slot.used ? extent : int2(1), usage);
 
   if (recreated_current) {
     slot.color_tx.current().clear(clear_color);
@@ -125,6 +131,7 @@ void RenderTextureModule::init()
 void RenderTextureModule::begin_sync()
 {
   used_uids_.clear();
+  capture_read_uids_.clear();
   capture_has_texture_dependencies_ = false;
   requires_full_capture_ = false;
   const uint64_t evaluation = DEG_get_update_count(inst_.depsgraph);
@@ -191,6 +198,10 @@ void RenderTextureModule::begin_sync()
     slot.update_mode = update_mode;
     slot.manual_update = render_texture->manual_update;
     slot.active = (slot.camera != nullptr);
+    slot.requires_full_capture = false;
+    slot.sync_camera_valid = slot.active &&
+                             camera_data_from_object(
+                                 inst_.scene, slot.camera, slot.extent, slot.sync_camera_data);
     if (reset_history) {
       slot.history_reset_pending = true;
       slot.rt_buffer_opaque.reset();
@@ -216,7 +227,23 @@ void RenderTextureModule::begin_sync()
   data_.push_update();
 }
 
-void RenderTextureModule::material_sync(GPUMaterial *material, const bool is_capture_material)
+bool RenderTextureModule::foreach_enabled_camera(
+    FunctionRef<void(const CameraData &)> callback) const
+{
+  for (const RuntimeSlot &slot : slots_) {
+    if (slot.active) {
+      if (!slot.sync_camera_valid) {
+        return false;
+      }
+      callback(slot.sync_camera_data);
+    }
+  }
+  return true;
+}
+
+void RenderTextureModule::material_sync(GPUMaterial *material,
+                                        const bool is_capture_material,
+                                        const bool is_object_material)
 {
   if (material == nullptr) {
     return;
@@ -229,6 +256,19 @@ void RenderTextureModule::material_sync(GPUMaterial *material, const bool is_cap
     return;
   }
   capture_has_texture_dependencies_ |= !ids.is_empty();
+  for (const int uid : ids) {
+    capture_read_uids_.add(uid);
+  }
+  if (!is_object_material) {
+    requires_full_capture_ |= material_requires_full_capture(material);
+  }
+}
+
+bool RenderTextureModule::material_requires_full_capture(GPUMaterial *material)
+{
+  if (material == nullptr) {
+    return false;
+  }
 
   constexpr eGPUMaterialFlag dependencies = GPU_MATFLAG_SHADER_TO_RGBA | GPU_MATFLAG_AO |
                                             GPU_MATFLAG_RAYCAST | GPU_MATFLAG_SHADER_INFO |
@@ -238,15 +278,86 @@ void RenderTextureModule::material_sync(GPUMaterial *material, const bool is_cap
                                             GPU_MATFLAG_SCREENSPACE_INFO |
                                             GPU_MATFLAG_LIGHTPROBE_ACCESS |
                                             GPU_MATFLAG_GLSL_LIGHT_ACCESS;
-  requires_full_capture_ |= (GPU_material_flag(material) & dependencies) != 0 ||
-                            GPU_material_stencil_value_used(material) ||
-                            GPU_material_uses_hiz_data(material) ||
-                            GPU_material_has_glsl_light_shader_eval(material) ||
-                            GPU_material_has_depth_offset_output(material);
+  bool full = (GPU_material_flag(material) & dependencies) != 0 ||
+              GPU_material_stencil_value_used(material) || GPU_material_uses_hiz_data(material) ||
+              GPU_material_has_glsl_light_shader_eval(material) ||
+              GPU_material_has_depth_offset_output(material);
   if (const blender::Material *source = GPU_material_get_material(material)) {
-    requires_full_capture_ |= source->stencil_enabled ||
-                              source->stencil_mode != MA_STENCIL_STANDARD ||
-                              material_ztest_mode_get(*source) != MA_ZTEST_LESS_EQUAL;
+    full |= source->stencil_enabled || source->stencil_mode != MA_STENCIL_STANDARD ||
+            material_ztest_mode_get(*source) != MA_ZTEST_LESS_EQUAL;
+  }
+  return full;
+}
+
+void RenderTextureModule::object_sync(const ObjectHandle &object, const Material &material)
+{
+  /* Color always uses the complete pipeline. Once every relevant view needs that pipeline,
+   * shared materials on subsequent objects must not pay for more dependency/bounds queries. */
+  const auto needs_visibility_test = [](const RuntimeSlot &slot) {
+    return slot.active && slot.source != SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR &&
+           !slot.requires_full_capture;
+  };
+  if (requires_full_capture_ || std::none_of(slots_.begin(), slots_.end(), needs_visibility_test))
+  {
+    return;
+  }
+  bool full = false;
+  bool unbounded = object.object->type != OB_MESH || object.object->mode != OB_MODE_OBJECT ||
+                   material.tessellation_level > 1 || material.outline_shell_bounds_inflation > 0;
+  for (GPUMaterial *gpumat : {material.shading.gpumat,
+                              material.prepass.gpumat,
+                              material.npr.gpumat,
+                              material.stencil.gpumat,
+                              material.outline_shell_shading.gpumat,
+                              material.volume_material.gpumat})
+  {
+    full |= material_requires_full_capture(gpumat);
+    if (gpumat) {
+      unbounded |= GPU_material_has_displacement_output(gpumat) ||
+                   GPU_material_has_depth_offset_output(gpumat);
+    }
+  }
+  if (!full) {
+    return;
+  }
+  /* Match the evaluated mesh actually drawn, including modifiers and geometry nodes. */
+  const auto bounds = unbounded ?
+                          std::nullopt :
+                          DRW_object_get_data_for_drawing<Mesh>(*object.object).bounds_min_max();
+  for (RuntimeSlot &slot : slots_) {
+    if (!needs_visibility_test(slot)) {
+      continue;
+    }
+    bool visible = unbounded || !bounds || !slot.sync_camera_valid;
+    if (!visible) {
+      for (const int instance : IndexRange(object.instances_count())) {
+        const float4x4 matrix = slot.sync_camera_data.persmat * object.object_to_world(instance);
+        bool outside[4] = {true, true, true, true};
+        bool uncertain = false;
+        for (int corner = 0; corner < 8; corner++) {
+          const float3 p((corner & 1) ? bounds->max.x : bounds->min.x,
+                         (corner & 2) ? bounds->max.y : bounds->min.y,
+                         (corner & 4) ? bounds->max.z : bounds->min.z);
+          const float4 clip = matrix * float4(p, 1.0f);
+          /* Crossings of the camera plane, deformation and missing bounds retain full capture.
+           * Use only lateral planes: custom fragment depth must never invalidate this bound. */
+          if (!(clip.w > 1e-5f) || !std::isfinite(clip.x) || !std::isfinite(clip.y)) {
+            uncertain = true;
+            break;
+          }
+          const float margin = 1e-4f * std::max(1.0f, std::abs(clip.w));
+          outside[0] &= clip.x < -clip.w - margin;
+          outside[1] &= clip.x > clip.w + margin;
+          outside[2] &= clip.y < -clip.w - margin;
+          outside[3] &= clip.y > clip.w + margin;
+        }
+        visible |= uncertain || !(outside[0] || outside[1] || outside[2] || outside[3]);
+        if (visible) {
+          break;
+        }
+      }
+    }
+    slot.requires_full_capture |= visible;
   }
 }
 
@@ -256,6 +367,7 @@ void RenderTextureModule::end_sync()
     RuntimeSlot &slot = slots_[index];
     const bool was_used = slot.used;
     slot.used = slot.active && used_uids_.contains(slot.uid);
+    slot.needs_history = capture_read_uids_.contains(slot.uid);
     slot.capture_pending |= slot.used && !was_used;
     slot.capture_pending |= inst_.is_viewport() && inst_.sampling.is_reset() &&
                             slot.update_mode != SCE_EEVEE_RENDER_TEXTURE_UPDATE_MANUAL;
@@ -263,6 +375,7 @@ void RenderTextureModule::end_sync()
       slot.rt_buffer_opaque.reset();
       slot.rt_buffer_refract.reset();
       slot.has_camera_data = false;
+      slot.buffers.reset();
       data_[index] = slot_default_data();
     }
     const uint8_t recreated = slot_ensure_textures(index);
@@ -276,6 +389,13 @@ void RenderTextureModule::end_sync()
       slot.history_reset_pending = false;
     }
     if (slot.used) {
+      CLOG_INFO(&Instance::log,
+                "RenderTexture output uid=%d current=%dx%d history=%dx%d",
+                slot.uid,
+                GPU_texture_width(slot.color_tx.current()),
+                GPU_texture_height(slot.color_tx.current()),
+                GPU_texture_width(slot.color_tx.previous()),
+                GPU_texture_height(slot.color_tx.previous()));
       data_[index].info = int4(slot.uid,
                                slot.extent.x,
                                slot.extent.y,
@@ -371,7 +491,9 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
   const float4x4 camera_view_basis = math::transpose(rt_camera.viewmat);
   for (const int index : capture_slots) {
     RuntimeSlot &capture = slots_[index];
-    capture.color_tx.swap();
+    if (capture.needs_history) {
+      capture.color_tx.swap();
+    }
     data_[index].prev_viewproj = data_[index].viewproj;
     data_[index].viewproj = rt_camera.persmat;
     data_[index].camera_position = float4(rt_camera.viewinv.location(), 1.0f);
@@ -383,9 +505,33 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
   }
   data_.push_update();
 
+  const bool cache_render_buffers = slot.extent != inst_.film.render_extent_get();
+  const bool cache_hiz = !inst_.hiz_buffer.storage_matches_extent(slot.extent);
+  if (!cache_render_buffers && !cache_hiz) {
+    slot.buffers.reset();
+  }
+  if ((cache_render_buffers || cache_hiz) &&
+      (!slot.buffers || slot.buffers->extent != slot.extent))
+  {
+    slot.buffers.reset();
+    for (const RuntimeSlot &other : slots_) {
+      if (other.buffers && other.buffers->extent == slot.extent) {
+        slot.buffers = other.buffers;
+        break;
+      }
+    }
+    if (!slot.buffers) {
+      slot.buffers = std::make_shared<CaptureBuffers>();
+      slot.buffers->extent = slot.extent;
+    }
+  }
+  swap_capture_buffers(slot, cache_render_buffers, cache_hiz);
+  for (const int index : capture_slots) {
+    slots_[index].buffers = slot.buffers;
+  }
   inst_.render_extent_override_set(slot.extent);
   inst_.lights.sync_render_extent(slot.extent);
-  inst_.hiz_buffer.sync();
+  const int hiz_created = inst_.hiz_buffer.sync();
   inst_.camera.override(rt_camera, true);
   inst_.uniform_data.push_update();
 
@@ -395,15 +541,21 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
   render_view.sync(rt_camera.viewmat, rt_camera.winmat);
 
   RenderBuffers &rbufs = inst_.render_buffers;
-  rbufs.acquire(slot.extent);
+  const int buffers_created = rbufs.acquire(slot.extent);
 
-  const bool depth_only = !requires_full_capture_ &&
-                          slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_DEPTH;
-  const bool normal_only = !requires_full_capture_ &&
-                           slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_NORMAL;
+  const bool full_capture = requires_full_capture_ ||
+                            std::any_of(
+                                capture_slots.begin(), capture_slots.end(), [&](int index) {
+                                  return slots_[index].requires_full_capture;
+                                });
+  const bool depth_only = !full_capture && slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_DEPTH;
+  const bool normal_only = !full_capture && slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_NORMAL;
   /* Empty hybrid subpasses still bind planar resources. Set them up before acquiring the
    * capture GBuffer because planar setup releases its own temporary GBuffer. */
-  if (!depth_only) {
+  if (normal_only) {
+    inst_.planar_probes.ensure_resources();
+  }
+  else if (!depth_only) {
     inst_.planar_probes.set_view(render_view, slot.extent);
   }
 
@@ -448,14 +600,15 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
   inst_.hiz_buffer.set_source(&inst_.render_buffers.depth_tx);
 
   CLOG_INFO(&Instance::log,
-            "RenderTexture capture uid=%d outputs=%d path=%s extent=%dx%d",
+            "RenderTexture capture uid=%d outputs=%d path=%s extent=%dx%d storage_created=%d",
             slot.uid,
             int(capture_slots.size()),
             depth_only  ? "depth" :
             normal_only ? "normal" :
                           "color",
             slot.extent.x,
-            slot.extent.y);
+            slot.extent.y,
+            hiz_created + buffers_created);
   inst_.gbuffer.header_tx.clear(uint4(0));
   if (depth_only || normal_only) {
     slot.rt_buffer_opaque.reset();
@@ -507,8 +660,28 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
 
   inst_.gbuffer.release();
   rbufs.release();
+  swap_capture_buffers(slot, cache_render_buffers, cache_hiz);
+  for (const int index : capture_slots) {
+    if (slots_[index].update_mode == SCE_EEVEE_RENDER_TEXTURE_UPDATE_MANUAL) {
+      slots_[index].buffers.reset();
+    }
+  }
 
   data_.push_update();
+}
+
+void RenderTextureModule::swap_capture_buffers(RuntimeSlot &slot,
+                                               const bool render_buffers,
+                                               const bool hiz)
+{
+  if (render_buffers) {
+    Texture::swap(inst_.render_buffers.depth_tx, slot.buffers->depth_tx);
+    Texture::swap(inst_.render_buffers.rp_color_tx, slot.buffers->rp_color_tx);
+    Texture::swap(inst_.render_buffers.rp_value_tx, slot.buffers->rp_value_tx);
+  }
+  if (hiz) {
+    inst_.hiz_buffer.swap_textures(slot.buffers->hiz_tx);
+  }
 }
 
 void RenderTextureModule::render()
@@ -533,7 +706,7 @@ void RenderTextureModule::render()
    * followers without history when a different update cadence changes the next capture group. */
   const auto can_batch = [&](const RuntimeSlot &slot) {
     return !inst_.raytracing.use_raytracing() ||
-           (!requires_full_capture_ &&
+           (!requires_full_capture_ && !slot.requires_full_capture &&
             (slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_DEPTH ||
              slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_NORMAL));
   };

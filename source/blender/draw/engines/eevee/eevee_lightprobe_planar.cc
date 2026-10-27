@@ -74,11 +74,31 @@ void PlanarProbeModule::end_sync()
   }
 }
 
+void PlanarProbeModule::ensure_resources()
+{
+  /* Unused hybrid subpasses still bind these resources. Preserve full-size textures so the
+   * main view does not have to recreate them after a normal capture. */
+  const eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_ATTACHMENT;
+  if (!radiance_tx_.is_valid()) {
+    radiance_tx_.ensure_2d_array(gpu::TextureFormat::UFLOAT_11_11_10, int2(1), 1, usage);
+  }
+  if (!depth_tx_.is_valid()) {
+    depth_tx_.ensure_2d_array(gpu::TextureFormat::SFLOAT_32_DEPTH, int2(1), 1, usage);
+  }
+  probe_planar_buf_[0].layer_id = -1;
+  probe_planar_buf_.push_update();
+}
+
 void PlanarProbeModule::set_view(const draw::View &main_view, int2 main_view_extent)
 {
   GBuffer &gbuf = inst_.gbuffer;
 
   const int64_t num_probes = inst_.light_probes.planar_map_.size();
+  CLOG_INFO(&Instance::log,
+            "PlanarProbe render extent=%dx%d count=%d",
+            main_view_extent.x,
+            main_view_extent.y,
+            int(num_probes));
 
   /* TODO resolution percentage. */
   int2 extent = main_view_extent;

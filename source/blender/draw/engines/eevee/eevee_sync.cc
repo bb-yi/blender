@@ -142,34 +142,18 @@ void SyncModule::geometry_call(PassMain::Sub *sub_pass,
 /** Bound every original edge's LOD without changing its fractional partitioning.
  * Evaluated bounds enclose endpoints and their midpoints. All instances share the largest budget.
  * Displacement and Phong smoothing happen after LOD, so they do not enlarge these bounds. */
-static int material_tessellation_budget(Instance &inst,
-                                        const ObjectHandle &ob_handle,
-                                        const Material &material)
+static int material_tessellation_camera_budget(const ObjectHandle &ob_handle,
+                                               const Material &material,
+                                               const ShaderTessellationSettings &settings,
+                                               const CameraData &camera,
+                                               const int2 extent)
 {
-  if (material.tessellation_level <= 1 || material.shading.gpumat == nullptr) {
-    return material.tessellation_level;
-  }
-  const MaterialNodeTreeInfo &info = inst.materials.node_tree_info_get(
-      GPU_material_get_material(material.shading.gpumat));
-  const ShaderTessellationSettings &settings = info.tessellation;
-  if (!info.has_tessellation || settings.mode == SHD_TESSELLATION_FIXED ||
-      settings.min_level == settings.max_level)
-  {
-    return material.tessellation_level;
-  }
-  /* Render Texture captures reuse these draw commands while overriding CameraData. A budget
-   * derived only from the main camera could truncate a closer capture's lattice. Keep the full
-   * budget until capture-specific draws (or a bound over every capture camera) are available. */
-  if (inst.render_textures.has_enabled()) {
-    return material.tessellation_level;
-  }
   /* Use the same evaluated mesh as DRW_cache_mesh_surface_shaded_get (also in edit mode). */
   const Mesh &mesh = DRW_object_get_data_for_drawing<Mesh>(*ob_handle.object);
   const std::optional<Bounds<float3>> bounds = mesh.bounds_min_max();
   if (!bounds) {
     return material.tessellation_level;
   }
-  const CameraData &camera = inst.camera.data_get();
   int budget = 1;
   for (const int instance : IndexRange(ob_handle.instances_count())) {
     const float4x4 &model = ob_handle.object_to_world(instance);
@@ -193,8 +177,7 @@ static int material_tessellation_budget(Instance &inst,
         if (!(clip.w > 1e-5f)) {
           return material.tessellation_level;
         }
-        const float2 pixel = (float2(clip.x, clip.y) / clip.w) * 0.5f *
-                             float2(inst.film.render_extent_get());
+        const float2 pixel = (float2(clip.x, clip.y) / clip.w) * 0.5f * float2(extent);
         if (!std::isfinite(pixel.x) || !std::isfinite(pixel.y)) {
           return material.tessellation_level;
         }
@@ -236,6 +219,41 @@ static int material_tessellation_budget(Instance &inst,
     }
   }
   return std::min(budget, material.tessellation_level);
+}
+
+static int material_tessellation_budget(Instance &inst,
+                                        const ObjectHandle &object,
+                                        const Material &material)
+{
+  if (material.tessellation_level <= 1 || material.shading.gpumat == nullptr) {
+    return material.tessellation_level;
+  }
+  const MaterialNodeTreeInfo &info = inst.materials.node_tree_info_get(
+      GPU_material_get_material(material.shading.gpumat));
+  const ShaderTessellationSettings &settings = info.tessellation;
+  if (!info.has_tessellation || settings.mode == SHD_TESSELLATION_FIXED ||
+      settings.min_level == settings.max_level)
+  {
+    return material.tessellation_level;
+  }
+  int budget = material_tessellation_camera_budget(
+      object, material, settings, inst.camera.data_get(), inst.film.render_extent_get());
+  /* Demand is finalized after object sync. Bound every enabled camera, including a newly
+   * referenced capture, rather than truncating its geometry or submitting the full lattice. */
+  const bool valid = inst.render_textures.foreach_enabled_camera([&](const CameraData &camera) {
+    if (budget < material.tessellation_level) {
+      /* Captures override CameraData, but tess_vertex_get still reads film.render_extent.
+       * Match that shader input even when the capture output has a different resolution. */
+      budget = std::max(budget,
+                        material_tessellation_camera_budget(
+                            object, material, settings, camera, inst.film.render_extent_get()));
+    }
+  });
+  CLOG_INFO(&Instance::log,
+            "RenderTexture tessellation budget=%d full=%d",
+            valid ? budget : material.tessellation_level,
+            material.tessellation_level);
+  return valid ? budget : material.tessellation_level;
 }
 
 static inline void geometry_volume_call(PassMain::Sub *pass,

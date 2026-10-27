@@ -412,12 +412,12 @@ def child(case):
         extract_case(case)
 
 
-def child_output(case):
+def child_output(case, script=None):
     assert os.environ.get('BLENDER_USER_CONFIG'), 'Run with isolated Blender user resources'
     gpu.init()
     command = [bpy.app.binary_path, '--background', '--factory-startup', '--gpu-backend',
                gpu.platform.backend_type_get().lower(), '--debug-gpu', '--log', 'eevee',
-               '--log-level', '2', '--python-exit-code', '1', '--python', __file__,
+               '--log-level', '2', '--python-exit-code', '1', '--python', script or __file__,
                '--', '--rt-case', case]
     path = OUT / (case.replace(':', '_') + '.log')
     environment = os.environ.copy()

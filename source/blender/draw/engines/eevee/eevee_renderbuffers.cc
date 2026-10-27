@@ -53,7 +53,7 @@ void RenderBuffers::init()
   data.aovs = inst_.film.aovs_info;
 }
 
-void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
+int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
 {
   const eViewLayerEEVEEPassType enabled_passes = inst_.film.render_buffer_passes_get();
 
@@ -70,7 +70,8 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
   /* Depth and combined are always needed. */
   /* Texture usage must include views from the first allocation: ensure_2d does not compare usage.
    */
-  depth_tx.ensure_2d(depth_format, extent, usage_attachment_read | GPU_TEXTURE_USAGE_FORMAT_VIEW);
+  int created = depth_tx.ensure_2d(
+      depth_format, extent, usage_attachment_read | GPU_TEXTURE_USAGE_FORMAT_VIEW);
   /* TODO(fclem): depth_tx should ideally be a texture from pool but we need stencil_view
    * which is currently unsupported by pool textures. */
   // depth_tx.acquire(extent, depth_format);
@@ -111,14 +112,14 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
   int value_len = data.value_len + data.aovs.value_len +
                   inst_.native_postfx_outputs.value_len_get();
 
-  rp_color_tx.ensure_2d_array(color_format,
-                              (color_len > 0) ? extent : int2(1),
-                              math::max(1, color_len),
-                              usage_attachment_read_write);
-  rp_value_tx.ensure_2d_array(float_format,
-                              (value_len > 0) ? extent : int2(1),
-                              math::max(1, value_len),
-                              usage_attachment_read_write);
+  created += rp_color_tx.ensure_2d_array(color_format,
+                                         (color_len > 0) ? extent : int2(1),
+                                         math::max(1, color_len),
+                                         usage_attachment_read_write);
+  created += rp_value_tx.ensure_2d_array(float_format,
+                                         (value_len > 0) ? extent : int2(1),
+                                         math::max(1, value_len),
+                                         usage_attachment_read_write);
 
   const gpu::TextureFormat cryptomatte_format = gpu::TextureFormat::SFLOAT_32_32_32_32;
   cryptomatte_tx.acquire_2d(pass_extent(EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT |
@@ -136,6 +137,7 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
   outline_info_tx.acquire_2d(outline_extent, gpu::TextureFormat::UINT_32_32_32_32, outline_usage);
   outline_color_tx.clear(float4(0.0f));
   outline_info_tx.clear(uint4(0u));
+  return created;
 }
 
 void RenderBuffers::release()

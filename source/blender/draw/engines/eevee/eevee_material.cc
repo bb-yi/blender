@@ -576,7 +576,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                                      outline_shell,
                                                      &node_tree_info);
 
-  inst_.render_textures.material_sync(matpass.gpumat);
+  inst_.render_textures.material_sync(matpass.gpumat, true, true);
   has_time_dependent_materials_ |= GPU_material_is_time_dependent(matpass.gpumat);
 
   queue_texture_loading(matpass.gpumat);
@@ -802,6 +802,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       material_telemetry_features_update(mat);
       return mat;
     });
+    inst_.render_textures.object_sync(ob_handle, mat);
     return mat;
   }
 
@@ -1166,6 +1167,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
     return mat;
   });
 
+  inst_.render_textures.object_sync(ob_handle, mat);
   return mat;
 }
 

@@ -906,6 +906,7 @@ if(WITH_GPU_RENDER_TESTS)
     filter_stage_pool
     eevee_resource_lifetime
     render_texture_updates
+    render_texture_performance
     vulkan_failure_recovery
   )
   foreach(backend IN ITEMS opengl vulkan)

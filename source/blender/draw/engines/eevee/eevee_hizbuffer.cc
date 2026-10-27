@@ -13,7 +13,19 @@ namespace blender::eevee {
  *
  * \{ */
 
-void HiZBuffer::sync()
+bool HiZBuffer::storage_matches_extent(const int2 extent) const
+{
+  const int2 size = math::ceil_to_multiple(
+      math::max(extent, int2(inst_.sphere_probes.probe_render_extent())),
+      int2(1u << (HIZ_MIP_COUNT - 1)));
+  return hiz_tx_.current().is_valid() && hiz_tx_.previous().is_valid() &&
+         GPU_texture_width(hiz_tx_.current()) == size.x &&
+         GPU_texture_height(hiz_tx_.current()) == size.y &&
+         GPU_texture_width(hiz_tx_.previous()) == size.x &&
+         GPU_texture_height(hiz_tx_.previous()) == size.y;
+}
+
+int HiZBuffer::sync()
 {
   int2 render_extent = inst_.render_extent_get();
   int2 probe_extent = int2(inst_.sphere_probes.probe_render_extent());
@@ -24,8 +36,9 @@ void HiZBuffer::sync()
   int2 dispatch_size = math::divide_ceil(hiz_extent, int2(HIZ_GROUP_SIZE) * 2);
 
   eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
+  int created = 0;
   for ([[maybe_unused]] const int i : IndexRange(hiz_tx_.size())) {
-    hiz_tx_.current().ensure_2d(
+    created += hiz_tx_.current().ensure_2d(
         gpu::TextureFormat::SFLOAT_32, hiz_extent, usage, nullptr, HIZ_MIP_COUNT);
     hiz_tx_.current().ensure_mip_views();
     GPU_texture_mipmap_mode(hiz_tx_.current(), true, false);
@@ -85,6 +98,7 @@ void HiZBuffer::sync()
     debug_draw_ps_.bind_resources(this->front);
     debug_draw_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   }
+  return created;
 }
 
 void HiZBuffer::update()

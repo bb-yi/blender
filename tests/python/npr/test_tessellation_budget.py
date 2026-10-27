@@ -198,6 +198,15 @@ dl.new(uv.outputs['UV'],sample.inputs['Vector'])
 dl.new(sample.outputs['Color'],de.inputs['Color'])
 dl.new(de.outputs[0],dn.get('Material Output').inputs['Surface'])
 compare('render_texture_near_camera')
+capture_camera.location.z = 18
+compare('render_texture_far_camera')
+settings('SCREEN_EDGE', edge=45)
+capture_camera.data.ortho_scale = 2
+compare('render_texture_screen_camera')
+# The capture changes CameraData but the LOD shader still uses the main Film's pixel extent.
+# A smaller output must not reduce the submitted lattice below that shader's required levels.
+rt.resolution_x = rt.resolution_y = 32
+compare('render_texture_small_screen_camera')
 rt.enabled = False
 bpy.data.objects.remove(display,do_unlink=True)
 bpy.data.objects.remove(capture_camera,do_unlink=True)

@@ -67,6 +67,7 @@ class PlanarProbeModule {
   void end_sync();
 
   void set_view(const draw::View &main_view, int2 main_view_extent);
+  void ensure_resources();
 
   void viewport_draw(View &view, gpu::FrameBuffer *view_fb);
 
