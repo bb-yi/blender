@@ -2471,6 +2471,8 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
   }
 
   switch (pipeline_type) {
+    case MAT_PIPE_OUTLINE_FREESTYLE:
+      return inst_.outline.material_add(gpumat);
     case MAT_PIPE_PREPASS_DEFERRED:
       return deferred.prepass_add(
           blender_mat, draw_state, gpumat, false, ob->refraction_layer_index, hide_from_raycast);

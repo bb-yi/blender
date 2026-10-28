@@ -8,6 +8,7 @@
 #include "DNA_object_types.h"
 
 #include "GPU_capabilities.hh"
+#include "GPU_material.hh"
 #include "GPU_texture.hh"
 
 #include "draw_cache.hh"
@@ -21,25 +22,40 @@ void OutlineModule::begin_sync()
 {
   freestyle_edge_ps_.init();
   freestyle_edge_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE);
-  freestyle_edge_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_FREESTYLE));
-  freestyle_edge_ps_.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
-  freestyle_edge_ps_.bind_texture("outline_color_tx", &inst_.render_buffers.outline_color_tx);
-  freestyle_edge_ps_.bind_texture("outline_info_tx", &inst_.render_buffers.outline_info_tx);
+  freestyle_edge_ps_.bind_texture(OUTLINE_DEPTH_TEX_SLOT, &inst_.render_buffers.depth_tx);
+  freestyle_edge_ps_.bind_texture(OUTLINE_COLOR_TEX_SLOT, &inst_.render_buffers.outline_color_tx);
+  freestyle_edge_ps_.bind_texture(OUTLINE_INFO_TEX_SLOT, &inst_.render_buffers.outline_info_tx);
   freestyle_edge_ps_.bind_resources(inst_.uniform_data);
+  freestyle_edge_ps_.bind_resources(inst_.sampling);
+  freestyle_edge_ps_.bind_resources(inst_.render_textures);
+  freestyle_edge_ps_.bind_resources(inst_.lights);
 }
 
-void OutlineModule::sync_object(Object *ob, ResourceHandleRange res_handle)
+PassMain::Sub *OutlineModule::material_add(GPUMaterial *gpumat)
 {
-  if (inst_.scene->eevee.use_outline == 0) {
+  if (GPU_material_get_shader(gpumat) == nullptr) {
+    return nullptr;
+  }
+  PassMain::Sub &pass = freestyle_edge_ps_.sub(GPU_material_get_name(gpumat));
+  pass.material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
+  return &pass;
+}
+
+void OutlineModule::sync_object(Object *ob,
+                                ResourceHandleRange res_handle,
+                                PassMain::Sub *pass,
+                                const int material)
+{
+  if (inst_.scene->eevee.use_outline == 0 || pass == nullptr) {
     return;
   }
   if ((ob->base_flag & BASE_HOLDOUT) || (ob->visibility_flag & OB_HOLDOUT)) {
     return;
   }
 
-  gpu::Batch *geom = DRW_cache_mesh_freestyle_edges_get(ob);
+  gpu::Batch *geom = DRW_cache_mesh_freestyle_edges_get(ob, material);
   if (geom != nullptr) {
-    freestyle_edge_ps_.draw(geom, res_handle);
+    pass->draw(geom, res_handle);
   }
 }
 
@@ -100,6 +116,7 @@ void OutlineModule::sync()
   jfa_step_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_JFA_STEP));
   jfa_step_ps_.bind_image("jfa_in_img", &jfa_tx_.previous());
   jfa_step_ps_.bind_image("jfa_out_img", &jfa_tx_.current());
+  jfa_step_ps_.bind_texture("outline_seed_tx", &edge_seed_tx_.current());
   jfa_step_ps_.push_constant("jfa_step_size", &jfa_step_size_, 1);
   jfa_step_ps_.dispatch(&jfa_dispatch_size_);
   jfa_step_ps_.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);

@@ -910,6 +910,12 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       }
 
       mat.shading = material_pass_get(ob, blender_mat, surface_pipe, geometry_type);
+      if (!hide_on_camera && color_write && use_outline && mat.uses_outline_control &&
+          geometry_type_is_mesh(geometry_type))
+      {
+        mat.outline_freestyle = material_pass_get(
+            ob, blender_mat, MAT_PIPE_OUTLINE_FREESTYLE, MAT_GEOM_MESH);
+      }
       const bool has_deferred_npr_tree = !hide_on_camera && (surface_pipe == MAT_PIPE_DEFERRED) &&
                                          (node_tree_info.npr_tree != nullptr);
       const bool has_surface_npr_tree = has_deferred_npr_tree && color_write;

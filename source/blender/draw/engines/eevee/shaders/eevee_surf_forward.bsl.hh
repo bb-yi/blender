@@ -204,7 +204,7 @@ SurfaceForwardFragOut surf_forward_impl(
       view, resource_id, g_thickness_forward, gl_FragCoord.xy, radiance, transmittance);
   g_data.P = nodetree_P;
   attenuate_outline(saturate(average(transmittance)));
-  outline_output_flush();
+  outline_output_flush(1.0f - saturate(average(transmittance)));
 
   /* Volumetric resolve and compositing. */
   float2 uvs = gl_FragCoord.xy * uni.uniform_buf.volumes.main_view_extent_inv;

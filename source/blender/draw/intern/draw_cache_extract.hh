@@ -290,6 +290,10 @@ struct MeshBatchCache {
   Array<gpu::IndexBufPtr> tris_per_mat;
   Array<gpu::Batch *> surface_per_mat;
 
+  /* Marked edges grouped by their incident face material, sharing the surface attributes. */
+  Array<gpu::IndexBufPtr> freestyle_lines_per_mat;
+  Array<gpu::Batch *> freestyle_edges_per_mat;
+
   DRWSubdivCache *subdiv_cache;
 
   DRWBatchFlag batch_requested;

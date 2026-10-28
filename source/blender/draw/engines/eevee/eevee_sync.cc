@@ -50,32 +50,18 @@ static void append_npr_and_probe_materials(Vector<GPUMaterial *> &materials,
 {
   for (const Material *material : npr_materials) {
     for (GPUMaterial *gpumat : {material->npr.gpumat,
-                               material->planar_probe_npr.gpumat,
-                               material->lightprobe_sphere_npr.gpumat,
-                               material->outline_shell_prepass.gpumat,
-                               material->outline_shell_shading.gpumat,
-                               material->outline_shell_shadow.gpumat})
+                                material->planar_probe_npr.gpumat,
+                                material->lightprobe_sphere_npr.gpumat,
+                                material->outline_shell_prepass.gpumat,
+                                material->outline_shell_shading.gpumat,
+                                material->outline_shell_shadow.gpumat,
+                                material->outline_freestyle.gpumat})
     {
       if (gpumat != nullptr) {
         materials.append(gpumat);
       }
     }
   }
-}
-
-static bool material_array_uses_outline_control(const MaterialArray &material_array,
-                                                Span<gpu::Batch *> mat_geom)
-{
-  for (const int i : material_array.materials.index_range()) {
-    if (i >= mat_geom.size() || mat_geom[i] == nullptr) {
-      continue;
-    }
-
-    if (material_array.materials[i].uses_outline_control) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /* -------------------------------------------------------------------- */
@@ -527,15 +513,16 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
       }
     }
   }
+  for (const Material &material : material_array.materials) {
+    if (material.outline_freestyle.gpumat != nullptr) {
+      attribute_materials.add(material.outline_freestyle.gpumat);
+    }
+  }
   Span<gpu::Batch *> mat_geom = DRW_cache_object_surface_material_get(
       ob_handle.object, attribute_materials.as_span());
   mesh_attribute_requests_++;
   if (mat_geom.is_empty()) {
     return;
-  }
-
-  if (material_array_uses_outline_control(material_array, mat_geom)) {
-    inst_.outline.sync_object(ob_handle.object, ob_handle.res_handle);
   }
 
   Vector<Material *, 8> synced_materials;
@@ -547,6 +534,8 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
     }
 
     Material &material = material_array.materials[i];
+    inst_.outline.sync_object(
+        ob_handle.object, ob_handle.res_handle, material.outline_freestyle.sub_pass, i);
     material.tessellation_level = material_tessellation_budget(inst_, ob_handle, material);
     synced_materials.append(&material);
 

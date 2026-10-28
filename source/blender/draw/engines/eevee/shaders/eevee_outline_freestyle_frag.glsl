@@ -3,12 +3,21 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "infos/eevee_outline_infos.hh"
+#include "infos/eevee_nodetree_infos.hh"
 
 FRAGMENT_SHADER_CREATE_INFO(eevee_outline_freestyle)
+FRAGMENT_SHADER_CREATE_INFO(eevee_nodetree)
 
 #include "draw_view_lib.glsl"
 #include "eevee_outline_lib.glsl"
 #include "eevee_reverse_z_lib.glsl"
+#include "eevee_nodetree_frag_lib.glsl"
+#include "eevee_surf_common.bsl.hh"
+
+float4 closure_to_rgba_depth(Closure /*cl*/)
+{
+  return float4(g_emission, saturate(1.0f - average(g_transmittance)));
+}
 
 float4 outline_source_color_fetch(int2 texel)
 {
@@ -17,7 +26,7 @@ float4 outline_source_color_fetch(int2 texel)
 
 uint4 outline_source_info_fetch(int2 texel)
 {
-  return texelFetch(outline_info_tx, texel, 0);
+  return texelFetch(outline_info_tx, int3(texel, 0), 0);
 }
 
 float outline_depth_fetch(int2 texel)
@@ -33,7 +42,12 @@ void main()
     discard;
   }
 
-  const float line_depth = reverse_z::read(gl_FragCoord.z);
+  float line_depth = reverse_z::read(gl_FragCoord.z);
+#ifdef MAT_DEPTH_OFFSET
+  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
+  init_globals(uni, view_matrices_get(), true);
+  line_depth = material_depth_offset_screen_depth(nodetree_depth_offset());
+#endif
   const float scene_depth = outline_depth_fetch(texel);
   if (line_depth > scene_depth + 1.0e-5f) {
     discard;

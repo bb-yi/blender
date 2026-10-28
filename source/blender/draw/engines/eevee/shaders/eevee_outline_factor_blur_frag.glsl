@@ -8,9 +8,9 @@
  * curvature. This removes the per-Voronoi-cell drawn-radius staircase (inner-boundary sawtooth)
  * that a nearest-seed-only resolve produces when adjacent seeds have different factors.
  *
- * Only the factor channel (.r) is blurred; the full line width (.a) is passed through untouched so
- * the downstream JFA flood + resolve coverage test still use a single uniform radius and stay
- * hole-free. Run as a ping-pong pass between the edge detect/freestyle passes and the JFA init. */
+ * Only the factor channel (.r) is blurred; the full line width (.a) is passed through untouched.
+ * JFA and resolve then use the same effective width. Run as a ping-pong pass between the edge
+ * detect/freestyle passes and the JFA init. */
 
 #include "infos/eevee_outline_infos.hh"
 
@@ -29,7 +29,7 @@ void main()
     return;
   }
 
-  const uint center_id = outline_id_unpack(texelFetch(outline_info_tx, texel, 0).a);
+  const uint center_id = outline_id_unpack(texelFetch(outline_info_tx, int3(texel, 0), 0).a);
   float factor_sum = clamp(center.r, 0.0f, 1.0f);
   float weight_sum = 1.0f;
 
@@ -39,12 +39,17 @@ void main()
         continue;
       }
       const int2 tap = texel + int2(dx, dy);
+      if (any(lessThan(tap, int2(0))) ||
+          any(greaterThanEqual(tap, textureSize(outline_seed_tx, 0))))
+      {
+        continue;
+      }
       const float4 neighbor = texelFetch(outline_seed_tx, tap, 0);
       if (neighbor.a <= 0.0f) {
         continue; /* Not a seed pixel -> not part of the contour. */
       }
       /* Same outline id only: never bleed the factor across different objects' contours. */
-      if (outline_id_unpack(texelFetch(outline_info_tx, tap, 0).a) != center_id) {
+      if (outline_id_unpack(texelFetch(outline_info_tx, int3(tap, 0), 0).a) != center_id) {
         continue;
       }
       factor_sum += clamp(neighbor.r, 0.0f, 1.0f);

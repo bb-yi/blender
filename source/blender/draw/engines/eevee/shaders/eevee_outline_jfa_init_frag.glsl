@@ -10,7 +10,7 @@ void main()
 {
   const int2 texel = int2(gl_FragCoord.xy);
   const float4 seed = texelFetch(outline_seed_tx, texel, 0);
-  if (seed.a > 0.0f) {
+  if (seed.a > 0.0f && seed.r > 0.0f) {
     out_jfa_coord = float2(texel) + 0.5f;
   }
   else {

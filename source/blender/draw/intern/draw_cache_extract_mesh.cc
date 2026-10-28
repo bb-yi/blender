@@ -195,7 +195,7 @@ void mesh_buffer_cache_create_requested(TaskGraph & /*task_graph*/,
         created_ibos[i] = extract_lines_adjacency(mr, cache.is_manifold);
         break;
       case IBOType::FreestyleLines:
-        created_ibos[i] = extract_freestyle_lines(mr);
+        created_ibos[i] = extract_freestyle_lines(mr, cache.freestyle_lines_per_mat);
         break;
       case IBOType::UVTris:
         created_ibos[i] = extract_edituv_tris(mr, false);
@@ -416,7 +416,9 @@ void mesh_buffer_cache_create_requested_subdiv(MeshBatchCache &cache,
     }
   }
   if (ibos_to_create.contains(IBOType::FreestyleLines)) {
-    buffers.ibos.add_new(IBOType::FreestyleLines, extract_freestyle_lines_subdiv(subdiv_cache, mr));
+    buffers.ibos.add_new(
+        IBOType::FreestyleLines,
+        extract_freestyle_lines_subdiv(subdiv_cache, mr, cache.freestyle_lines_per_mat));
   }
   if (ibos_to_create.contains(IBOType::Tris)) {
     buffers.ibos.add_new(IBOType::Tris, extract_tris_subdiv(subdiv_cache, cache));

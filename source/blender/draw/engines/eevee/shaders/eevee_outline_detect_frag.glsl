@@ -18,11 +18,16 @@ float4 outline_source_color_fetch(int2 texel)
 
 uint4 outline_source_info_fetch(int2 texel)
 {
-  return texelFetch(outline_info_tx, texel, 0);
+  return texelFetch(outline_info_tx, int3(texel, 0), 0);
 }
 
 float outline_screen_depth_fetch(int2 texel)
 {
+  if (outline_width_unpack(outline_source_info_fetch(texel).r) > 0.0f &&
+      outline_source_color_fetch(texel).a > 0.0f)
+  {
+    return reverse_z::read(uintBitsToFloat(texelFetch(outline_info_tx, int3(texel, 1), 0).r));
+  }
   return reverse_z::read(texelFetch(depth_tx, texel, 0).r);
 }
 
@@ -96,6 +101,15 @@ float3 outline_surface_normal_or_reconstructed(int2 texel,
                                                bool use_prepass_normal,
                                                out bool has_surface_normal)
 {
+  if (outline_width_unpack(outline_source_info_fetch(texel).r) > 0.0f &&
+      outline_source_color_fetch(texel).a > 0.0f)
+  {
+    const float3 normal = uintBitsToFloat(texelFetch(outline_info_tx, int3(texel, 1), 0).gba);
+    if (dot(normal, normal) > 1e-10f) {
+      has_surface_normal = true;
+      return normalize(normal);
+    }
+  }
   const gbuffer::Header header = gbuffer::read_header(texel);
   if (!header.is_empty()) {
     has_surface_normal = true;
@@ -280,14 +294,11 @@ void main()
                                                    normal_threshold_range,
                                                    normal_edge_width));
     }
-    /* Decouple coverage geometry from width modulation: the JFA flood and the resolve coverage
-     * test must use a single uniform radius (the full seed_line_width) so that the nearest-seed
-     * Voronoi partition stays consistent with the union-of-disks coverage. Storing a per-seed
-     * modulated width here would make a pixel that is euclidean-nearest to a thin seed get dropped
-     * even though it lies inside a wider neighbor's disk, producing gaps / a broken edge layer.
-     * Instead we keep the full width in .a (used by JFA + coverage) and pass the modulation factor
-     * separately in .r (applied to the drawn radius in resolve). seed.rgb is otherwise unused by
-     * resolve, which reads the line color from outline_color_tx. */
-    out_outline_seed = float4(width_factor, 0.0f, 0.0f, seed_line_width);
+    /* Keep the width and its modulation separate for the contour-factor blur. JFA compares
+     * distance normalized by their product, so an inactive or narrower seed cannot take
+     * coverage away from a wider contour. Resolve fetches color from outline_color_tx. */
+    if (width_factor > 0.0f) {
+      out_outline_seed = float4(width_factor, 0.0f, 0.0f, seed_line_width);
+    }
   }
 }

@@ -178,6 +178,12 @@ float4 g_outline_staged_color;
 uint4 g_outline_staged_info;
 #endif
 
+#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(GPU_FRAGMENT_SHADER)
+/* Emitted with the material graph, where its shading globals and depth offset are available.
+ * Layer 1 stores raw reverse-Z depth followed by the world-space surface normal. */
+uint4 outline_surface_data();
+#endif
+
 void outline_output_reset()
 {
 #if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(MAT_OUTLINE_CLEAR) && \
@@ -187,17 +193,20 @@ void outline_output_reset()
 #endif
 }
 
-void outline_output_flush()
+void outline_output_flush(float surface_opacity)
 {
 #if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(MAT_OUTLINE_CLEAR) && \
     defined(GPU_FRAGMENT_SHADER)
-  if (g_outline_staged_color.a <= 0.0f || g_outline_staged_info.r == 0u) {
+  g_outline_staged_color.a *= saturate(surface_opacity);
+  if (g_outline_staged_color.a <= 0.0f ||
+      outline_width_unpack(g_outline_staged_info.r) <= 0.0f) {
     return;
   }
 
   int2 texel = int2(gl_FragCoord.xy);
   imageStoreFast(outline_color_img, texel, g_outline_staged_color);
-  imageStoreFast(outline_info_img, texel, g_outline_staged_info);
+  imageStoreFast(outline_info_img, int3(texel, 0), g_outline_staged_info);
+  imageStoreFast(outline_info_img, int3(texel, 1), outline_surface_data());
 #endif
 }
 
@@ -209,7 +218,7 @@ void attenuate_outline(float keep_factor)
   keep_factor = saturate(keep_factor);
   if (keep_factor <= 1e-5f) {
     imageStoreFast(outline_color_img, texel, float4(0.0f));
-    imageStoreFast(outline_info_img, texel, uint4(0u));
+    imageStoreFast(outline_info_img, int3(texel, 0), uint4(0u));
     return;
   }
   if (keep_factor >= 0.99999f) {
@@ -219,14 +228,14 @@ void attenuate_outline(float keep_factor)
   float4 outline_color = imageLoadFast(outline_color_img, texel);
   if (outline_color.a <= 1e-5f) {
     imageStoreFast(outline_color_img, texel, float4(0.0f));
-    imageStoreFast(outline_info_img, texel, uint4(0u));
+    imageStoreFast(outline_info_img, int3(texel, 0), uint4(0u));
     return;
   }
 
   outline_color.a *= keep_factor;
   if (outline_color.a <= 1e-5f) {
     imageStoreFast(outline_color_img, texel, float4(0.0f));
-    imageStoreFast(outline_info_img, texel, uint4(0u));
+    imageStoreFast(outline_info_img, int3(texel, 0), uint4(0u));
     return;
   }
   imageStoreFast(outline_color_img, texel, outline_color);
@@ -300,7 +309,8 @@ void output_outline(float4 line_color,
   g_outline_staged_info = stored_info;
 #  else
   imageStoreFast(outline_color_img, texel, stored_color);
-  imageStoreFast(outline_info_img, texel, stored_info);
+  imageStoreFast(outline_info_img, int3(texel, 0), stored_info);
+  imageStoreFast(outline_info_img, int3(texel, 1), outline_surface_data());
 #  endif
 #endif
 }

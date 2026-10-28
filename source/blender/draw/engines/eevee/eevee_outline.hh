@@ -8,6 +8,7 @@
 #include "draw_pass.hh"
 
 struct Object;
+struct GPUMaterial;
 
 namespace blender::eevee {
 
@@ -50,7 +51,8 @@ class OutlineModule {
   OutlineModule(Instance &inst) : inst_(inst) {}
 
   void begin_sync();
-  void sync_object(Object *ob, ResourceHandleRange res_handle);
+  PassMain::Sub *material_add(GPUMaterial *gpumat);
+  void sync_object(Object *ob, ResourceHandleRange res_handle, PassMain::Sub *pass, int material);
 
   void sync();
   void render(View &view, int2 extent);

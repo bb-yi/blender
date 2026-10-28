@@ -448,8 +448,7 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        OUTLINE_JFA_INIT,
                                        OUTLINE_FACTOR_BLUR,
                                        OUTLINE_JFA_STEP,
-                                       OUTLINE_RESOLVE,
-                                       OUTLINE_FREESTYLE};
+                                       OUTLINE_RESOLVE};
     request(DEFERRED_LIGHTING_SHADERS, AS_SPAN(shader_list));
   }
   {
@@ -760,8 +759,6 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_outline_jfa_step";
     case OUTLINE_RESOLVE:
       return "eevee_outline_resolve";
-    case OUTLINE_FREESTYLE:
-      return "eevee_outline_freestyle";
     case DEFERRED_AOV_CLEAR:
       return "eevee_deferred_aov_clear";
     case DEFERRED_CAPTURE_EVAL:
@@ -1260,6 +1257,8 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
       return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_FORWARD;
     case MAT_PIPE_BAKE_COLOR:
       return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_BAKE;
+    case MAT_PIPE_OUTLINE_FREESTYLE:
+      return OUTLINE_INFO_TEX_SLOT;
     case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
     case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
     case MAT_PIPE_PREPASS_OVERLAP:
@@ -1332,6 +1331,12 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
       break;
     default:
       switch (pipeline_type) {
+        case MAT_PIPE_OUTLINE_FREESTYLE:
+          pipeline_info_name = "eevee_outline_freestyle";
+          info.name_ += "_outline_freestyle";
+          info.define("closure_to_rgba", "closure_to_rgba_depth");
+          info.fragment_source("eevee_outline_freestyle_frag.glsl");
+          break;
         case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
         case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
           pipeline_info_name = "eevee_surf_depthTtrue_infos_";
@@ -2250,7 +2255,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.compilation_constant(gpu::shader::Type::bool_t, "shadow_random", true);
   }
 
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_BARYCENTRIC)) {
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_BARYCENTRIC) &&
+      pipeline_type != MAT_PIPE_OUTLINE_FREESTYLE)
+  {
     switch (geometry_type) {
       case MAT_GEOM_MESH:
       case MAT_GEOM_MESH_TESS:
@@ -2672,6 +2679,17 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     /* Improve error logging. */
     frag_gen << "#line 1 \"" __FILE__ "\"\n";
     frag_gen << "#line " STRINGIFY(__LINE__) "\n";
+
+    if (has_outline_output && use_outline_support) {
+      frag_gen << "uint4 outline_surface_data()\n";
+      frag_gen << "{\n";
+      frag_gen << "  float depth = gl_FragCoord.z;\n";
+      frag_gen << "#ifdef MAT_DEPTH_OFFSET\n";
+      frag_gen << "  depth = material_depth_offset_frag_depth(nodetree_depth_offset());\n";
+      frag_gen << "#endif\n";
+      frag_gen << "  return floatBitsToUint(float4(depth, g_data.N));\n";
+      frag_gen << "}\n\n";
+    }
 
     frag_gen << "Closure nodetree_surface(float closure_rand)\n";
     frag_gen << "{\n";
@@ -3325,6 +3343,20 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
   constexpr GPUPrimType prim_type = GPU_PRIM_TRIS;
 
   switch (pipeline_type) {
+    case MAT_PIPE_OUTLINE_FREESTYLE: {
+      r_info.pipeline_state()
+          .primitive(GPU_PRIM_LINES)
+          .state(GPU_WRITE_COLOR,
+                 GPU_BLEND_NONE,
+                 GPU_CULL_NONE,
+                 GPU_DEPTH_NONE,
+                 GPU_STENCIL_NONE,
+                 GPU_STENCIL_OP_NONE,
+                 GPU_VERTEX_LAST)
+          .viewports(1)
+          .color_format(gpu::TextureTargetFormat::SFLOAT_16_16_16_16);
+      break;
+    }
     case MAT_PIPE_PREPASS_DEFERRED: {
       /* DeferredLayer pipeline. */
       r_info.pipeline_state()

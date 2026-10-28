@@ -181,10 +181,11 @@ gpu::Batch *DRW_cache_mesh_all_edges_get(Object *ob)
   return DRW_mesh_batch_cache_get_all_edges(DRW_object_get_data_for_drawing<Mesh>(*ob));
 }
 
-gpu::Batch *DRW_cache_mesh_freestyle_edges_get(Object *ob)
+gpu::Batch *DRW_cache_mesh_freestyle_edges_get(Object *ob, const int material)
 {
   BLI_assert(ob->type == OB_MESH);
-  return DRW_mesh_batch_cache_get_freestyle_edges(DRW_object_get_data_for_drawing<Mesh>(*ob));
+  return DRW_mesh_batch_cache_get_freestyle_edges(DRW_object_get_data_for_drawing<Mesh>(*ob),
+                                                  material);
 }
 
 gpu::Batch *DRW_cache_mesh_loose_edges_get(Object *ob)

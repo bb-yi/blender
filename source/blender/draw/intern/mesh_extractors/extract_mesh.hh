@@ -290,9 +290,11 @@ void extract_lines(const MeshRenderData &mr,
                    gpu::IndexBufPtr *lines,
                    gpu::IndexBufPtr *lines_loose,
                    bool &no_loose_wire);
-gpu::IndexBufPtr extract_freestyle_lines(const MeshRenderData &mr);
+gpu::IndexBufPtr extract_freestyle_lines(const MeshRenderData &mr,
+                                         MutableSpan<gpu::IndexBufPtr> ibos_per_material);
 gpu::IndexBufPtr extract_freestyle_lines_subdiv(const DRWSubdivCache &subdiv_cache,
-                                                const MeshRenderData &mr);
+                                                const MeshRenderData &mr,
+                                                MutableSpan<gpu::IndexBufPtr> ibos_per_material);
 void extract_lines_subdiv(const DRWSubdivCache &subdiv_cache,
                           const MeshRenderData &mr,
                           gpu::IndexBufPtr *lines,

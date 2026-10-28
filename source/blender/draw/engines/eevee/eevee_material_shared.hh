@@ -51,6 +51,8 @@ enum eMaterialPipeline {
   MAT_PIPE_CAPTURE,
   MAT_PIPE_FILTER,
   MAT_PIPE_BAKE_COLOR,
+  /* Marked mesh edges, using the material's vertex displacement. */
+  MAT_PIPE_OUTLINE_FREESTYLE,
 };
 
 /**

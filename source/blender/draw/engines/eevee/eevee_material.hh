@@ -500,6 +500,7 @@ struct Material {
    * materials. */
   MaterialPass overlap_masking;
   MaterialPass outline_occlusion;
+  MaterialPass outline_freestyle;
   MaterialPass capture;
   MaterialPass lightprobe_sphere_prepass;
   MaterialPass lightprobe_sphere_shading;

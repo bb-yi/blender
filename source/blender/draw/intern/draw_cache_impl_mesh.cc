@@ -117,6 +117,13 @@ static void discard_buffers(MeshBatchCache &cache,
     }
   }
 
+  if (!cache.batch.freestyle_edges) {
+    for (gpu::Batch *&batch : cache.freestyle_edges_per_mat) {
+      GPU_BATCH_DISCARD_SAFE(batch);
+    }
+    cache.batch_ready &= ~MBC_FREESTYLE_EDGES;
+  }
+
   for (const VBOType vbo : vbos) {
     cache.final.buff.vbos.remove(vbo);
     cache.cage.buff.vbos.remove(vbo);
@@ -126,6 +133,11 @@ static void discard_buffers(MeshBatchCache &cache,
     cache.final.buff.ibos.remove(ibo);
     cache.cage.buff.ibos.remove(ibo);
     cache.uv_cage.buff.ibos.remove(ibo);
+  }
+  if (ibos.contains(IBOType::FreestyleLines)) {
+    for (gpu::IndexBufPtr &ibo : cache.freestyle_lines_per_mat) {
+      ibo.reset();
+    }
   }
 }
 
@@ -441,6 +453,8 @@ static void mesh_batch_cache_init(Mesh &mesh)
   cache->mat_len = BKE_id_material_used_with_fallback_eval(mesh.id);
   cache->surface_per_mat = Array<gpu::Batch *>(cache->mat_len, nullptr);
   cache->tris_per_mat.reinitialize(cache->mat_len);
+  cache->freestyle_edges_per_mat = Array<gpu::Batch *>(cache->mat_len, nullptr);
+  cache->freestyle_lines_per_mat.reinitialize(cache->mat_len);
 
   cache->is_dirty = false;
   cache->batch_ready = DRWBatchFlag(0);
@@ -600,6 +614,7 @@ static void mesh_batch_cache_clear(MeshBatchCache &cache)
   }
 
   cache.tris_per_mat = {};
+  cache.freestyle_lines_per_mat = {};
 
   for (int i = 0; i < sizeof(cache.batch) / sizeof(void *); i++) {
     gpu::Batch **batch = reinterpret_cast<gpu::Batch **>(&cache.batch);
@@ -608,10 +623,14 @@ static void mesh_batch_cache_clear(MeshBatchCache &cache)
   for (const int i : cache.surface_per_mat.index_range()) {
     GPU_BATCH_DISCARD_SAFE(cache.surface_per_mat[i]);
   }
+  for (gpu::Batch *&batch : cache.freestyle_edges_per_mat) {
+    GPU_BATCH_DISCARD_SAFE(batch);
+  }
 
   mesh_batch_cache_discard_shaded_tri(cache);
   mesh_batch_cache_discard_uvedit(cache);
   cache.surface_per_mat = {};
+  cache.freestyle_edges_per_mat = {};
   cache.mat_len = 0;
 
   cache.batch_ready = DRWBatchFlag(0);
@@ -681,11 +700,17 @@ gpu::Batch *DRW_mesh_batch_cache_get_all_edges(Mesh &mesh)
   return DRW_batch_request(&cache.batch.all_edges);
 }
 
-gpu::Batch *DRW_mesh_batch_cache_get_freestyle_edges(Mesh &mesh)
+gpu::Batch *DRW_mesh_batch_cache_get_freestyle_edges(Mesh &mesh, const int material)
 {
   MeshBatchCache &cache = *mesh_batch_cache_get(mesh);
+  BLI_assert(material >= 0 && material < cache.mat_len);
   cache.batch_requested |= MBC_FREESTYLE_EDGES;
-  return DRW_batch_request(&cache.batch.freestyle_edges);
+  DRW_batch_request(&cache.batch.freestyle_edges);
+  if (!cache.freestyle_edges_per_mat[material]) {
+    GPU_BATCH_CLEAR_SAFE(cache.batch.freestyle_edges);
+    cache.batch_ready &= ~MBC_FREESTYLE_EDGES;
+  }
+  return DRW_batch_request(&cache.freestyle_edges_per_mat[material]);
 }
 
 gpu::Batch *DRW_mesh_batch_cache_get_surface(Mesh &mesh)
@@ -1219,10 +1244,13 @@ void DRW_mesh_batch_cache_create_requested(TaskGraph &task_graph,
        * referenced for drawing. Just clear them in place. */
       for (int i = 0; i < cache.mat_len; i++) {
         GPU_BATCH_CLEAR_SAFE(cache.surface_per_mat[i]);
+        GPU_BATCH_CLEAR_SAFE(cache.freestyle_edges_per_mat[i]);
       }
       GPU_BATCH_CLEAR_SAFE(cache.batch.surface);
       GPU_BATCH_CLEAR_SAFE(cache.batch.sculpt_overlays);
-      cache.batch_ready &= ~(MBC_SURFACE | MBC_SURFACE_PER_MAT | MBC_SCULPT_OVERLAYS);
+      GPU_BATCH_CLEAR_SAFE(cache.batch.freestyle_edges);
+      cache.batch_ready &= ~(MBC_SURFACE | MBC_SURFACE_PER_MAT | MBC_SCULPT_OVERLAYS |
+                             MBC_FREESTYLE_EDGES);
 
       mesh_cd_layers_type_merge(&cache.cd_used, cache.cd_needed);
       drw_attributes_merge(&cache.attr_used, &cache.attr_needed);
@@ -1389,11 +1417,25 @@ void DRW_mesh_batch_cache_create_requested(TaskGraph &task_graph,
                          {VBOType::Position}});
     }
     if (batches_to_create & MBC_FREESTYLE_EDGES) {
-      batch_info.append({*cache.batch.freestyle_edges,
-                         GPU_PRIM_LINES,
-                         list,
-                         IBOType::FreestyleLines,
-                         {VBOType::Position}});
+      BatchCreateData batch{*cache.batch.freestyle_edges,
+                            GPU_PRIM_LINES,
+                            list,
+                            IBOType::FreestyleLines,
+                            {VBOType::Position, VBOType::CornerNormal}};
+      /* Marked edges use the surface material's vertex displacement, including its attributes. */
+      if (!cache.cd_used.uv.is_empty()) {
+        batch.vbos.append(VBOType::UVs);
+      }
+      if (!cache.cd_used.tan.is_empty() || cache.cd_used.tan_orco) {
+        batch.vbos.append(VBOType::Tangents);
+      }
+      if (cache.cd_used.orco) {
+        batch.vbos.append(VBOType::Orco);
+      }
+      for (const int i : cache.attr_used.index_range()) {
+        batch.vbos.append(VBOType(int8_t(VBOType::Attr0) + i));
+      }
+      batch_info.append(std::move(batch));
     }
     if (batches_to_create & MBC_SURFACE_WEIGHTS) {
       batch_info.append({*cache.batch.surface_weights,
@@ -1824,6 +1866,15 @@ void DRW_mesh_batch_cache_create_requested(TaskGraph &task_graph,
       for (const int i : cache.attr_used.index_range()) {
         GPU_batch_vertbuf_add(
             batch, buffers.vbos.lookup(VBOType(int8_t(VBOType::Attr0) + i)).get(), false);
+      }
+    }
+  }
+
+  if (batches_to_create & MBC_FREESTYLE_EDGES) {
+    for (const int material : cache.freestyle_edges_per_mat.index_range()) {
+      if (gpu::Batch *batch = cache.freestyle_edges_per_mat[material]) {
+        GPU_batch_copy(batch, cache.batch.freestyle_edges);
+        GPU_batch_elembuf_set(batch, cache.freestyle_lines_per_mat[material].get(), false);
       }
     }
   }
