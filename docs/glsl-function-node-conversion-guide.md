@@ -1,255 +1,159 @@
-# Blender NPR Port GLSL Function 节点转换指南
+# GLSL Function 节点转换指南
 
-## 文档目的
+面向 GLSL、Shadertoy、HLSL 和 ShaderLab 的代码转换。核对版本：**Blender 5.2.2 NPR `1c82f84cbebf`（2026-10-26）**，对应 `blender_npr_post_mainfix/main`。
+本指南针对 Eevee；Cycles 不执行这些自定义 GLSL，也不会自动转换为 OSL。
 
-这份文档是写给 `AI`、脚本生成器、自动转换工具的。
+## 1. 先选节点和入口
 
-目标不是介绍着色器原理，而是让另一个 AI 在阅读这份文档后，能够把：
+| 节点 | 填写内容 |
+| --- | --- |
+| **GLSL Function** | 普通 GLSL 函数源码；可包含顶层 helper、具名结构体和 Meta，支持纹理、循环和多输出 |
+| **GLSL Script Expression** | 单个数值表达式，如 `mix(a, b, factor)`；不写分号、return、函数定义、声明、赋值、注释或预处理指令 |
 
-- 普通 `GLSL`
-- `Shadertoy GLSL`
-- `HLSL`
-- 一部分 `ShaderLab / Unity CGPROGRAM / HLSLPROGRAM`
+Expression 的 Float 变量是 GLSL `float`，不能直接做整数位运算；变量名、类型和向量维度由节点配置，4D 的 W 与 Color Alpha 有独立插口。不要把 Function 的 Meta、Bundle 或拆分规则套到 Expression。
 
-稳定地转换成可直接粘贴到 `Blender NPR Port` 的 `GLSL Function` 节点里的、符合当前实现规范的 `GLSL` 源码。
+**Function 留空即 Auto**：优先选择唯一带 `@glsl_meta` 的普通函数；没有这类候选时，选择唯一未被其他函数体调用的外层函数。`@glsl_closure` helper 不参与候选。多个候选会提示名称，需手动选择；显式填写名字则锁定入口，源码改名后不会自动改锁定值。通常只给导出入口加 Meta。
 
-> 当前实现基线：Blender 5.2 NPR `main`（`fd9fabb4f531`）。本指南覆盖当前的 typed Closure callback、Closure sampler Alpha、sampler3D、draw-view 矩阵 helper 以及 `@glsl_defines v1` 合同；如果目标是 `blender_npr_post_mainfix`，必须先检查该分支的源码和测试是否已经包含这些能力。
+源码、函数名与 Node/Code 切换位于默认展开的 **Code Settings** 面板，折叠状态随节点保存；输入输出插口留在面板外。
+Code 编辑先进入草稿，Apply 成功后才更新已应用源码和接口；Discard 丢弃草稿。预验证失败保留旧源码与连线；后续接线、资源或异步 GPU 错误由材质编译报告。共享 Text 的 Apply 会检查全部使用者和并发草稿；外部文件只读，需 Make Internal 后才能在节点内编辑。
 
+## 2. 公开接口与类型
 
-## 一、先记住当前节点真正支持什么
+省略参数限定词等同于 `in`。边界规则适用于导出函数，普通 helper 和函数内部可使用更广的合法 GLSL；GLSL 不支持在函数体内再定义函数。
 
-`GLSL Function` 节点当前是“把一段用户 GLSL 函数源码注入到 Eevee 材质编译链里”。
+| 类型 | 输入 | out / 返回值 |
+| --- | --- | --- |
+| `float / int / bool` | 对应标量 | 支持 |
+| `vec2 / vec3` | 对应向量；vec3 可用 `subtype=color` 改为 RGB Color | 支持 |
+| `vec4` | 普通参数拆成 XYZ Vector + W Float，调用前重组 | 同样拆分 |
+| `mat2 / mat3 / mat4` | 按 GLSL 列优先拆分；mat4 每列再拆 XYZ + W | 同样拆分 |
+| 顶层具名纯数据 `struct`，可嵌套 | 一个 Bundle | 一个 Bundle |
+| `sampler2D / sampler3D / samplerCube` | Closure 插口，按资源类型连接 | 不支持 |
+| `void` | 不适用 | 允许返回，但必须至少有一个 out |
 
-它不是完整的 Shadertoy 运行时，也不是完整的 Unity / Unreal shader framework。
+- 导出边界不支持 `inout`、数组、非方阵、`uint/uvec*/ivec*/bvec*`、匿名结构体或引擎内建结构体。struct 内也不能有资源、Closure、数组或递归成员。
+- int 在函数内部是整数，**跨节点只有 `[-16777216, 16777216]` 保证精确**；不要用它传递完整 32 位 UID/哈希。普通参数、Bundle 和 typed Closure 都受传输精度约束。
+- 普通 vec3 Color 输入只读取 RGB；普通 vec4 即使写 `subtype=color` 仍拆为 XYZ/W。不要丢失 W 或将其误当作自动材质透明度。
+- 参数名须避开生成的 W/矩阵列标识符冲突；显示标签与 GLSL 名称分开，中文 label 不改变连接标识符。
 
-### 1. 当前可用的函数接口类型
+## 3. Meta v1/v2
 
-选中的导出函数，其参数和返回值只允许使用以下边界类型：
+Meta 紧贴它所属函数的上方，一函数一块。节点允许无 Meta，但本指南及本地验证器要求交付代码补全公开参数 Meta。无版本写法按 v1 处理。
 
-- 输入参数 `in`
-  - `float`
-  - `int`
-  - `bool`
-  - `vec2`
-  - `vec3`
-  - `vec4`
-  - `mat2`
-  - `mat3`
-  - `mat4`
-  - `sampler2D`
-  - `sampler3D`
-  - `samplerCube`
-- 输出参数 `out`
-  - `float`
-  - `int`
-  - `bool`
-  - `vec2`
-  - `vec3`
-  - `vec4`
-  - `mat2`
-  - `mat3`
-  - `mat4`
-- 返回值
-  - `void`
-  - `float`
-  - `int`
-  - `bool`
-  - `vec2`
-  - `vec3`
-  - `vec4`
-  - `mat2`
-  - `mat3`
-  - `mat4`
+| 目标 | 写法与限制 |
+| --- | --- |
+| 普通输入参数 | v1/v2：`name: label=...`，其余属性须符合类型 |
+| 普通非结构体 out | **仅 label** |
+| 普通非结构体返回值 | 不接受 Meta；v2 的 `return:` 也不适用 |
+| 结构体输入成员 | v2：`surface.field` 或更深路径；根/嵌套包只写 label、description |
+| 返回结构体 / out 结构体 | v2：`return.field` / `out_name.field`；根支持 label、description，成员另可写类型允许的 subtype |
 
-### 1A. 结构体与 Bundle 扩展
+`return` 专指结构体返回值，不是默认输出标签 `Result`；不要写旧的 `function_name.param` 目标。
 
-具名纯数据 `struct` 可以作为输入、返回值和 `out` 参数，每个对应一个原生 Bundle 插口，支持嵌套。
-字段支持 float/int/bool、vec2/3/4 与 mat2/3/4。结构体内 vec4 保留完整 4D，矩阵映射为按列的子捆包。
-成员默认值通过 `@glsl_meta v2` 的 `参数.成员` 路径声明；缺失字段无默认值时必须报错。
-完整语法、创建/覆盖/同步及兼容边界见 [GLSL Function：结构体与捆包](glsl-function-bundles.md)。
-普通参数的 v1、vec4 XYZ/W 和矩阵插口保持原样；typed Closure callback 的接口限制也保持原样。
+### 常用属性
 
-### 2. 当前不支持的函数接口写法
+| 属性 | 用途与边界 |
+| --- | --- |
+| `label="名称"`、`description="说明"` | 名称/tooltip，不改变字段键；单行文本可包含中文、空格，内部引号写 `\"`、反斜杠写 `\\` |
+| `default=...` | 标量、向量、方阵的类型匹配字面量或 GLSL 表达式；整个结构体和 sampler 不接受 default |
+| `min=... max=...` | 语义明确时设置输入范围；int 使用整数字面量，bool/矩阵不使用；min 不得大于 max |
+| `subtype=...` | float 常用 factor/angle/distance/time；向量常用 xyz/translation/color，color 仅 vec3/vec4；int/bool/矩阵不使用 |
+| `items="0:关闭;1:开启"` | 普通 int 输入或 int Define 的枚举；default 必须是其中的整数字面量，值不重复、名称不为空，不与 min/max 混用 |
+| `show_label=true` | 仅配合 int items；默认隐藏枚举前置名称 |
+| `hide_value=true` | 普通输入只隐藏数值框，仍可连线；不是删除接口 |
 
-- `inout`
-- `out sampler2D` / `out sampler3D` / `out samplerCube`
-- `array` 作为函数边界类型；具名纯数据 `struct` 已支持 Bundle 接口，见 [结构体与捆包](glsl-function-bundles.md)
-- 非方阵矩阵（例如 `mat2x3`）作为函数边界类型
-- 含 sampler、Closure 或数组成员的结构体接口
-- 递归
-- 依赖外部运行时注入的全局 uniform 体系
-- 历史 `sample2D` 旧写法不再作为公开函数边界类型，统一改写为 `sampler2D`
+颜色应明确写 `subtype=color`，法线/方向用 `subtype=xyz` 或省略并说明坐标空间。转换规范不使用球形控件 `subtype=direction`，本地验证器也会拒绝它。
+**sampler 只接受 label、description 和输入 panel 分组**。结构体成员不接受 items/show_label/hide_value；输入矩阵成员只支持 label/description/default，输出成员不能写 default/min/max，输出矩阵只写 label/description。
 
-### 3. 当前和 UI 相关的重要事实
+### 默认值的两种触发方式
 
-- `GLSL Function` 节点可用于 Eevee 的 Object、Filter、NPR 和 World 节点域；World 中的输入方向应显式连接 `Texture Coordinate.Normal`，并且仍需用实际 GPU 渲染验证，不能只看 `parse_status=READY`
-- `Function` 现在必须显式指定，不会自动选第一个函数
-- `sampler2D` 会显示为 `Closure` 输入口
-- `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
-- `sampler2D` / `sampler3D` 真正未连接时，会在 GPU 编译阶段隐式使用不透明白色常量来源；它不会创建 Image datablock、GPU texture、纹理槽或额外节点
-- 白色来源下，2D 的 `texture`（含 bias）、`textureLod`、`textureGrad`、`texelFetch`、`textureGather` 都返回 `vec4(1.0)`，`textureSize` 返回 `ivec2(1)`；3D 的对应合法查询也返回白色，`textureSize` 返回 `ivec3(1)`
-- `textureGather(sampler3D, ...)` 在 GLSL 中本来就无效，不会被白色来源放宽；显式连接但图片缺失、Closure 签名错误或来源不受支持时仍然报错
-- `Closure Output -> sampler2D` 当前只保证 `texture(tex, coord)` 这种直接采样形式；`coord` 的语义由闭包内部决定，普通贴图通常是 UV，NPR 图像句柄通常是 `Image Sample.Offset`
-- `sampler3D` 也会显示为 `Closure` 输入口，可连接 `Image to Closure` 的 `3D LUT Strip` 或符合约定的 `Closure Output`
-- `Closure Output -> sampler3D` 使用 `Closure Input` 中名为 `UV` 的 `Vector` 传递完整 `vec3` 坐标；首版只保证 `texture(volume, vec3_coord)`，不支持 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 或 `textureGather`
-- sampler Closure 自动同步接口为 `UV: Vector`、`Color: RGBA`、`Alpha: Float`；新建 Alpha 默认 `1.0`，旧 Closure 没有 Alpha 时仍可继续使用
-- 如果函数依赖显式 `LOD`、`grad` 或尺寸查询等图像专用能力，应优先使用 `Image to Closure`
-- `Image to Closure` 可以经过转接点、捆包和嵌套节点组传递。接到 `GLSL Function` 的 sampler 参数时保留真实图像资源、尺寸和采样设置，不转换成程序化闭包近似。
-- 同一个图像闭包也可以连接 `Evaluate Closure`。连接空的解算节点或点击 **Sync** 后，接口为 `UV: Vector` 输入、`Color: Color` 和 `Alpha: Float` 输出；2D 使用 UV 的 XY 绝对坐标，3D LUT 使用 XYZ，Cube 使用 XYZ 方向。各个解算节点可以使用独立坐标；未连接 UV 时使用其数值默认值 `(0, 0, 0)`。
-- 解算的 Color 保留采样 RGBA，Alpha 同时单独输出；后续代码若组合这两个输出，应避免将同一个 Alpha 再乘一次。解算不会改变同一来源在 GLSL Function 中的 `textureLod`、`textureGrad`、`textureSize`、`texelFetch`、`textureGather` 等原生纹理操作。不同 sampler 类型仍须匹配 2D、3D LUT 或 Cube 模式。
-- 解算默认采样与 GLSL 的 `texture` 使用同一原生 sampler 行为，不额外套用普通 Image Texture 节点的 LOD 偏置或 Alpha 处理。当前图像闭包的 `Cubic` / `Smart` 仍沿用已有的线性过滤行为；本次连接与解算支持没有增加真正的三次插值或 UDIM 支持。
-- 导出函数边界当前已经支持 `int / bool`，适合直接作为模式开关、枚举值、`lightgroup_id` 这类参数
-- 默认情况下 `vec2/vec3/vec4` 仍然显示为“向量插口”
-- 只有显式写了 `subtype=color` 的 `vec3` 输入，才会显示为颜色插口
-- `vec3 + subtype=color` 会显示为颜色插口，内部按 `rgb` 使用，`alpha` 固定为 `1.0`
-- `vec4` 输入会显示为 `vec3 + float W` 两个插口，并在 GLSL wrapper 内重组为 `vec4`
-- `mat2/mat3/mat4` 边界会按列拆分为多个向量插口；`mat4` 的每列会进一步拆成 `vec3 + float W`
+- **普通参数**：字面量初始化新插口，刷新不覆盖同名插口的用户数值；表达式不写入静态 RNA 值，只在参数未连线时使用，并隐藏数值框。vec4/矩阵只要任一拆分插口连线，就改用整组插口重建，其余分量取自身插口值。
+- **Bundle 成员**：仅在字段缺失时使用默认值，每个缺失成员求值一次；字段存在但未连线时使用自身数值，包括零。类型错误不能触发缺省。整包/嵌套包缺失时须所有成员都可缺省；提供矩阵时必须有全部列，只有整个矩阵缺失才能用默认矩阵。
+- 默认表达式可用同份源码的常量、宏、顶层 helper 和当前材质域支持的内建助手；不引用当前函数参数或其他默认字段。复杂表达式最外层加括号，保持单行。int items 不使用表达式 default。
 
-### 3A. 5.2 当前 Closure / sampler 快速判定
+### 输入分组与编译宏
 
-2026-10 材质兼容更新：
+以下为 Meta **片段**，放入导出入口的 Meta 块中：
 
-- `samplerCube` 连接 `Image to Closure` 的 **Cube Strip**。输入为六个等大正方形面的水平图集，左到右为 `+X, -X, +Y, -Y, +Z, -Z`，不做经纬度重采样。各面行序按 GPU Cube 坐标约定；导入游戏贴图时先核对面朝向，不凭资源名推测。
-- Cube 使用原生 GPU 纹理及自动生成的 mip，支持方向向量采样 `texture`、显式 `textureLod` 和返回 `ivec2` 的 `textureSize`。当前不支持把程序化 `Closure Output` 当作 Cube，也不直接读取 DDS Cube 或保留源游戏自带 mip 链。
-- Cube 可穿过节点组 Closure 接口；HDR 数据遵循图像色彩空间设置，数据纹理建议 Non-Color / Channel Packed。图像重载和像素编辑会使 GPU Cube 缓存失效。
-- 3D LUT 与 Cube 的像素尺寸在 GPU 资源准备阶段检查，节点解析不提前加载图像。因此 `parse_status=READY` 只证明接口与语法通过，仍须实渲验证图像格式、路径及 GPU 资源。
-- 程序化 sampler Closure 与 typed callback 都在创建它们的组实例上下文中展开，组输入不再退回节点组定义里的默认值。
-- 对已知节点宏或源码整数宏，依赖分析前会裁剪确定不执行的条件分支。支持 `#if/#ifdef/#ifndef/#elif/#else`、括号、`defined`、比较及 `! / && / ||`；源码整数仅提前求值无后缀的有符号 32 位常量。宽整数、无符号常量、宏别名与替换表达式、无法确定的表达式和 GPU 后端宏保留给后端，避免宿主整数语义或后续宏重定义改变结果。不能假设任意 C 预处理表达式都被节点分析器求值。
-
-转换前先判断外部代码依赖的是哪一种 Closure 合同。下面四种路径不能互相替换：
-
-| 来源或需求 | GLSL Function 边界 | 节点侧连接 / 坐标语义 | 关键限制 |
-| --- | --- | --- | --- |
-| 普通图片、噪声图、LUT | `sampler2D` | `Image to Closure`，通常使用 `texture(tex, uv)` | 需要 `LOD`、导数、尺寸或 texel 查询时必须说明真实纹理语义 |
-| NPR/AOV/渲染结果图像句柄 | `sampler2D` | `Image Sample.Image -> Image Sample.Color/Alpha -> Closure Output` | `texture(image, offset)` 的第二个参数是像素/视图偏移，不是 mesh UV；需要透明度时必须连 `Image Sample.Alpha` |
-| 程序化三维场、SDF | `sampler3D` | `Closure Input.UV (Vector)` 接完整 `vec3`，结果接 `Closure Output` | 首版只保证 `texture(volume, vec3)`；不支持 `textureLod`、`textureGrad`、`textureSize`、`texelFetch`、`textureGather` |
-| 硬件 3D LUT | `sampler3D` | `Image to Closure` 的 `3D LUT Strip` | 使用原生 3D 纹理语义，不要手工把 LUT strip 插值改写成程序化 Closure |
-
-`@glsl_closure v1` 是另一条独立合同：它只能标记由导出函数可达的普通 helper，供 Closure 节点子图替换。callback 只允许 `float / int / bool / vec2 / vec3 / vec4`，不能使用 sampler、矩阵、数组、struct 或 `inout`；必须有返回值或至少一个 `out`，返回 socket 保留名为 `Result`。没有连接 Closure 时，原始 helper 函数体继续作为 fallback。
-
-typed Closure 的 `int` 通过 float 通道传输，只有闭区间 `[-16777216, 16777216]` 保证整数精确。callback Meta 只能使用最小的 `label`、`description` 和类型允许的 `subtype`，不能套用导出函数的 `default`、`min/max`、`items`、`panel` 或 `closed` 配置。
-
-边界拆分也必须提前考虑：`vec4` 会生成 Vector + W 插口，`mat2/mat3/mat4` 按列拆分，`mat4` 的每列进一步生成 Vector + W。不要把参数命名成可能与生成的 split identifier 冲突的名称。涉及这些合同的转换，除 parser 外还应优先运行 `glsl-function-typed-closure-callback`、`glsl-function-closure-sampler3d` 或对应的最小 GPU/render 回归。
-
-### 4. `Node / Code` 编辑模式与刷新生命周期
-
-- 节点顶部的 `Node / Code` 分段控件用于切换普通节点界面和源码编辑界面。
-- 内部 `Text` 数据块可以在 `Code` 模式直接编辑。编辑内容先进入节点草稿，不会立即改写当前运行中的 `Text`、函数列表或 socket。
-- 草稿变脏后，执行 `Apply`（刷新）会先解析并验证整次变更，再原子更新源码和 socket；`Discard` 会丢弃草稿并恢复当前已应用源码。
-- 解析或 GPU 编译失败时，旧的 `Text` 与 socket 保持可用，不会留下半更新状态。
-- 多个节点共享同一个 `Text` 时，Apply 会验证并刷新所有使用者；如果存在另一个未处理的并发草稿，本次提交会被拒绝，避免静默覆盖。
-- 外部 `.glsl` 文件在 `Code` 模式中只读；需要节点内编辑时，先使用 `Make Internal` 转为内部 `Text`。
-- 未提交草稿会随 `.blend` 保存并恢复，但只有 Apply 成功后的源码参与实际编译和渲染。
-
-### 5. 内部实现和边界接口要区分
-
-虽然函数边界只支持上面那几种类型，但函数体内部可以正常使用很多普通 GLSL 语法，比如：
-
-- `if`
-- `for`
-- `while`
-- `int`
-- `bool`
-- `uint` / `uvec*`
-- `mat2` / `mat3` / `mat4`
-- 局部辅助函数
-- `mix` / `clamp` / `fract` / `texture` 等常见 GLSL 内建
-- `textureLod` / `dFdx` / `dFdy` 等函数体内部用法
-
-也就是说：
-
-- “函数内部”可以相对自由
-- “节点导出函数的参数和返回值”必须使用上方支持的边界类型
-- “辅助函数”不必都遵守导出函数的边界类型限制；真正必须满足限制的是节点 `Function` 最终选中的那个函数
-- 因此辅助函数里可以出现 `bool` / `int` / `mat*` / 非方阵矩阵 / 更自由的 `out` 参数组合，但最终报告里必须再次明确真正要调用的是哪个导出函数
-
-
-## 二、AI 转换时必须遵守的总规则
-
-如果你是另一个 AI，要把任意 shader 代码转换给这个节点用，必须遵守以下规则。
-
-### 规则 1：最终输出必须是“普通 GLSL 函数源码”，不是完整 shader 文件
-
-最终结果里不要保留这些内容：
-
-- `main()`
-- `mainImage()`
-- `frag()`
-- `vert()`
-- `Pass`
-- `SubShader`
-- `Properties`
-- `CGPROGRAM`
-- `HLSLPROGRAM`
-- `ENDCG`
-- `ENDHLSL`
-- `#version`
-- `precision highp/mediump/lowp ...`
-- `layout(...)`
-- 平台 pragma
-- 渲染状态声明
-- engine include
-- `/** SHADERDATA ... */`
-- `//proc:...`、`//proc:noise:...` 这类资源生成或工具元数据注释
-
-最终应只保留：
-
-- 常量
-- 必要的辅助函数
-- 一个准备给节点选择的导出函数
-
-### 规则 2：必须给出明确的导出函数名
-
-因为节点不会自动选择第一个函数，所以 AI 输出时必须同时告诉使用者：
-
-- `Function` 应该设成哪个名字
-
-推荐输出格式：
-
-```text
-Function: your_function_name
+```glsl
+@panel "高级" closed=true
+roughness: label="粗糙度" default=0.5 min=0.0 max=1.0 subtype=factor
+@end_panel
 ```
 
-### 规则 2A：导出函数必须补全 `@glsl_meta v1`
+panel 默认 closed=true，只支持一级且须闭合；只能容纳整个输入参数，不能标注成员或输出。较少调节的参数折叠，主要输入默认可见。
 
-只要最终导出函数有输入参数或 `out` 参数，AI 输出的代码就必须在导出函数正上方补一块完整的 `@glsl_meta v1`。
+编译结构/性能档位用独立 `@glsl_defines v1`；连线驱动或逐像素值用函数参数。下面是可放在源码任意顶层位置的宏块：
 
-不要等用户额外提醒才写 Meta。Meta 是默认输出的一部分，不是可选装饰。
+```glsl
+/* @glsl_defines v1 closed=true
+@define USE_RIM bool default=true label="边缘光"
+@define MODE int default=1 items="0:基础;1:增强" label="模式"
+*/
+```
 
-Meta 必须覆盖导出函数的公开接口：
+bool 关闭时不生成对应 define；int 生成 `#define NAME value`。宏名合法且不超过 63 字符，不得重复；多个宏块的 closed 设置须一致。Defines 面板默认展开，可用 closed=true 折叠。
+节点只提前裁剪可确定的条件：已知节点宏、受支持的无后缀有符号 32 位整数条件，以及 defined、比较、括号、!、&&、||。无法确定的表达式、无符号/宽整数、宏替换表达式和 GPU 后端宏保留给后端。
+确定分支中可包含顶层声明；未知条件不能保护顶层函数、变量或 struct，应把分支移进固定签名的函数体。不要依赖任意 C 预处理表达式都能被节点分析器求值。
 
-- 每个输入参数都应有一行 Meta，说明 `label` 和必要的 `description`
-- 数值调节参数应尽量写 `default`，并在语义明确时写 `min` / `max`
-- `0..1` 混合、阈值、强度、柔和度等参数应优先写 `subtype=factor`
-- 颜色参数优先用 `vec3` 并写 `subtype=color`；需要 alpha 时使用 `vec4` 或拆成 `vec3 color + float alpha`
-- 坐标、方向、比例等向量参数应写清楚语义；不要给方向/法线参数写 `subtype=direction`，这个 subtype 会触发不友好的球形方向控件；需要普通三轴向量 UI 时用 `subtype=xyz` 或省略 subtype
-- 固定模式类 `int` 参数应优先写 `items="0:Label;1:Other"`，让默认值显示成下拉菜单；只有连续数值范围才用普通 `min/max` 整数框
-- `items` 下拉默认隐藏前置参数名，只显示当前选项；当同一行没有足够上下文或面板里有多个相似下拉时，再写 `show_label=true`
-- `sampler2D` / `sampler3D` 只能写 `label`、`description`，以及放进 panel；不要写 `default/min/max/hide_value/subtype`
-- `out` 参数只能写 `label`，不要写默认值、范围、subtype 或 description
-- 返回值不支持 Meta，必须在 `Outputs` 和结果说明里写清楚
-- 参数超过 4 个，或语义能自然分组时，应使用一级 `@panel` / `@end_panel` 分组；高级/很少调节的参数默认 `closed=true`，主要工作流参数可以 `closed=false`
-- 编译期开关、会影响 helper 函数或需要 `#if/#ifdef` 裁剪的选项，应写进独立 `@glsl_defines` 块，而不是混进函数参数 Meta
+## 4. struct ↔ Bundle
 
-如果导出函数确实没有任何输入参数和 `out` 参数，可以省略 Meta，但结果说明里要写明“无可标注接口”。
+| 结构体成员 | Bundle 表示 |
+| --- | --- |
+| float/int/bool | 对应标量 |
+| vec2/vec3/vec4 | 完整 2D/3D/4D Vector，不拆 W |
+| vec3/vec4 + subtype=color | RGB/RGBA Color，vec4 保留 Alpha |
+| mat2/mat3/mat4 | 子包 `c0…cN-1`，每列为对应维度向量，不转置 |
+| 嵌套结构体 | 同名子包 |
 
-### 规则 2B：可由 Closure 替换的 helper 只写最小 Meta
+字段按完整路径、名称和类型绑定，区分大小写，与排列顺序无关。Color 可按对应向量读取 RGB/RGBA，数值向量维度须匹配。
+允许额外输入字段，但输出只含结构体声明的字段；要保留其他数据，显式 Join Bundle，重复键沿用 Join 的优先级。
 
-`@glsl_closure v1` 标记普通 helper 可以由外部 Closure 节点子图替换。helper 的函数名、参数名、参数类型、返回值和 `out` 参数已经构成完整调用 ABI，不要重复写普通输入控件 Meta。
+**创建和同步**：普通 Combine Bundle 接到函数输入、Separate Bundle 接到输出，再点标题栏同步图标或侧栏 Sync。空包连接只自动补必需字段；显式 Sync 还会初始化具有一致常量默认值的可选字段。表达式默认值、不同消费者的不同默认值及超出整数传输精确范围的默认值保持省略。
+手动添加同名同类型字段会覆盖默认值，包括默认表达式；共享包的显式字段影响所有消费者。
 
-- helper 的参数、返回值和 `out` 只支持 `float / int / bool / vec2 / vec3 / vec4`；不支持 sampler、矩阵、数组、struct 或 `inout`
-- helper 必须有返回值或至少一个 `out`；返回 socket 固定使用保留名 `Result`，参数不能命名为 `Result`
-- 标记的 helper 必须能从导出函数的调用链到达；导出函数本身不能标记为 Closure helper
-- 含 Closure helper 的源码不允许函数重载或重复定义，也不允许可达调用链递归
-- 不要用函数式宏直接或间接调用 Closure helper；应写普通 GLSL 函数调用，避免预处理后 ABI 无法可靠定位
-- `int` 经由 Closure socket 的 float 通道传输，只有闭区间 `[-16777216, 16777216]` 保证整数精确
-- header 只支持可选的 `label` 和 `description`
-- 输入项只支持可选的 `label`、`description`，以及用于区分 `vec3` Color/Vector 的 `subtype=color`；`float subtype=factor` 等其他输入 subtype 不支持
-- `Result` 和 `out` 输出项支持可选的 `label`、`description` 和与类型匹配的 `subtype`；`vec4` item 在 v1 中不支持 subtype
-- 不支持 `closed`、`default`、`min`、`max`、`hide_value`、`items`、`show_label` 或嵌套 panel
-- helper 没有连接 Closure 时执行原始 GLSL 函数体；Closure Meta 不定义 fallback 参数值
+Sync 保留现有标识符、数值、连线和额外字段，不猜测重命名、不删除已连接的旧字段；共享消费者类型冲突时原子报错，不做部分更新。函数接口变化不会静默重写共享来源。
+最多嵌套 32 层，展开后每侧最多 512 个插口，普通参数和资源/Closure 也计入。非 3D Bundle 向量仅用于 Shader 树，不扩大 Geometry Nodes 或 Zone 的接口类型；新功能工程需要新版本读取。
 
-推荐的最小写法：
+详细规则见 [结构体与捆包](glsl-function-bundles.md)。
+
+## 5. 纹理和 Closure：按来源选择
+
+| 来源 | 边界 / 连接 | 坐标与限制 |
+| --- | --- | --- |
+| 普通 2D 图像 | sampler2D ← Image to Closure | UV 绝对坐标；需要 LOD、导数、尺寸或 texel 查询时优先走真实图像资源 |
+| 程序化 2D / NPR 图像句柄 | sampler2D ← Closure Output | 只保证直接 `texture(tex, coord)`；坐标语义由闭包内部决定 |
+| 程序化三维场/SDF | sampler3D ← Closure Output | Closure Input 的 `UV: Vector` 传完整 XYZ；只保证 `texture(volume, vec3)`，不支持 LOD/grad/size/fetch/gather |
+| 硬件 3D LUT | sampler3D ← Image to Closure 的 3D LUT Strip | 原生 3D 纹理语义，不用程序化闭包近似插值 |
+| Cube | samplerCube ← Image to Closure 的 Cube Strip | 六个等大方形面水平排列 +X/-X/+Y/-Y/+Z/-Z；方向采样、textureLod、textureSize(ivec2)，自动生成 mip |
+
+Cube 不支持程序化 Closure、直接读取 DDS Cube 或保留游戏原始 mip 链；导入时核对面朝向。3D LUT/Cube 尺寸在 GPU 资源准备时检查，READY 不保证图像有效。
+sampler2D/3D **真正未连接**时隐式使用不透明白色，不创建 Image 或 GPU 纹理；合法颜色查询返回 vec4(1)，textureSize 为对应维度的全 1。非法 GLSL 操作（如 3D textureGather）、显式错误连接或缺失图片仍报错；Cube 不适用此白色回退。
+sampler Closure 的标准接口为 `UV: Vector`、`Color: RGBA`、`Alpha: Float`，新 Alpha 默认 1；旧 Color-only Closure 保持兼容。
+
+**NPR 图像句柄的坐标是偏移，不是 mesh UV**：
+
+```text
+NPR/AOV 等图像句柄 → Image Sample.Image
+Closure Input.UV → Image Sample.Offset
+Image Sample.Color / Alpha → Closure Output → 函数 sampler2D
+```
+
+`texture(image, vec2(0))` 采当前像素；Pixel 模式下 `(1,0)` 表示右移一个像素。需要透明度时接出独立 Alpha，不能只保留 RGB。Shadertoy 的反馈/多 pass 仍需显式实现或说明近似，不能靠 sampler 自动补齐运行时。
+
+Image to Closure 可经转接点、Bundle、嵌套节点组传递，保留资源与采样设置。接到空 Evaluate Closure 或 Sync 后，接口为 UV Vector → Color、Alpha；2D 取 XY、3D LUT 取 XYZ、Cube 取方向，未连接 UV 使用数值默认值 `(0,0,0)`。
+解算 Color 保留 RGBA，同时另出 Alpha，别重复相乘。采样遵循原生 sampler，不额外套用 Image Texture 的 LOD 偏置/Alpha 处理；不增加 UDIM 支持，Cubic/Smart 仍使用既有线性过滤。
+
+### Typed Closure callback
+
+`@glsl_closure v1` 标记可由节点子图替换的普通 helper；它必须可从导出入口到达，未连接时执行原 helper 函数体。
+
+- ABI 只允许 float/int/bool/vec2/3/4；必须有返回值或至少一个 out，不支持 sampler、矩阵、数组、struct、inout。返回插口保留名 Result，参数不能同名。
+- 含 callback 的源码不允许重载/重复定义或可达递归；不通过函数式宏直接或间接调用 callback。
+- header 只支持 label/description。输入 item 只支持 label/description 与 vec3 的 subtype=color；Result/out 可写类型适用的 subtype，但 v1 vec4 item 不支持 subtype。
+- 不使用普通参数的 default、min/max、items、hide_value、show_label、closed 或 panel。节点组内按创建闭包的实例上下文展开。
+
+标记 helper 的**片段**如下，仍需普通导出入口调用：
 
 ```glsl
 /* @glsl_closure v1 label="Typed Remap"
@@ -263,1874 +167,244 @@ vec3 typed_remap(vec3 color, float strength, out float mask)
 }
 ```
 
-如果不需要友好名称、说明或 Color 插口，块内可以不写任何逐项 Meta：
+## 6. Eevee helper 的适用范围
 
-```glsl
-/* @glsl_closure v1 */
-float remap(float value)
-{
-  return value;
-}
-```
+| helper | 含义 / 可保证范围 |
+| --- | --- |
+| glsl_position() / glsl_normal() / glsl_true_normal() / glsl_incoming() | 对齐 Geometry 对应输出；物体材质与 NPR 几何语义，Filter/World 不作稳定保证 |
+| glsl_ambient_lighting() | Shader Info 的 Ambient Lighting，即 probe/环境间接漫反射；不含反射/完整间接总和，Filter/World 不作保证 |
+| glsl_view_matrix() / glsl_projection_matrix() / glsl_view_projection_matrix()，以及各自 glsl_*_matrix_inverse() | 当前 draw 的视图/投影状态，含 overscan/crop/TAA jitter；Surface/NPR/Filter，顶点与片元阶段 |
+| glsl_model_matrix() / glsl_model_matrix_inverse() / glsl_model_view_matrix() / glsl_model_view_projection_matrix() / glsl_normal_matrix() | 当前物体变换，Surface/NPR；Filter 模型矩阵回退单位阵，normal_matrix 是 object→world 法线变换 |
+| glsl_light_count() / glsl_light_get(i) / glsl_light_shadow(i, N) | 仅普通 Eevee 物体材质的 Deferred/Forward 直接光与阴影；不用于 Filter/NPR/World，不负责 probe/volume/indirect |
 
-### 规则 3：所有外部输入都改成函数参数
+World 应显式传入如 Texture Coordinate.Normal 的方向；不要从材质域可创建节点推断所有 helper 都可用。
 
-不要依赖下面这些外部名字直接存在：
+### GLSLLight 与 Lightgroup ID
 
-- `iTime`
-- `iResolution`
-- `iMouse`
-- `u_time`
-- `u_resolution`
-- `u_mouse`
-- `_Time`
-- `_ScreenParams`
-- `_MainTex_ST`
-- 自定义 `uniform`
-- Unity 的内置矩阵和语义变量
+`glsl_light_get(i)` 的 i 是**当前着色点局部可见列表序号**，不是稳定场景编号。按灯光属性里的整数 Lightgroup ID 筛选时比较 `light.lightgroup_id`；0 表示第 0 组，同组可有多盏灯。
 
-必须把它们改成导出函数参数。
+| 字段 | 语义 |
+| --- | --- |
+| valid / type / lightgroup_id | 是否有效、公开灯类型、灯光组 ID |
+| vector / position / direction / distance | 着色点指向灯中心的归一化方向、灯中心世界坐标、灯的世界朝向轴、距离 |
+| diffuse_color / specular_color | 适合手写光照模型的颜色项，不存在通用 color 或 roughness 字段 |
+| attenuation | 基础衰减，不含 NdotL、BRDF、shadow、LTC、Fresnel 或材质 roughness |
+| influence_radius | 表面光照有效影响半径，不是光源形状半径；太阳/无效灯为 0 |
 
-例如：
+日光 position 为零，direction 为日光方向；聚光/面光 direction 对应灯局部 +Z 的世界方向，点光 direction 为零。类型使用 `GLSL_LIGHT_TYPE_INVALID/SUN/POINT/SPOT/AREA_RECT/AREA_ELLIPSE` 常量。
+`GLSLLight` 是引擎库类型，且有内部 uint index/UID，**不能直接作为 Bundle 接口或重定义同名类型**；复制所需字段到自定义纯数据 struct。
+`glsl_light_default()` 只构造无效初值。灯光着色器自定义参数可用 `glsl_light_parameter_float/int/bool/vec2/vec3/vec4/color(light, "参数名", fallback, valid)`；直接调用、字符串字面量名称、匹配类型 fallback、bool valid，不能据此读取任意对象属性。
 
-- `iTime` -> `float time`
-- `iTimeDelta` -> `float time_delta`
-- `iFrame` -> `float frame`
-- `iResolution.xy` -> `vec2 resolution`
-- `fragCoord` -> `vec2 frag_coord`
-- `_MainTex` -> `sampler2D tex`
-- `i.uv` -> `vec2 uv`
-- `iChannelResolution[0].xy` -> `vec2 channel0_resolution`
+自定义漫反射组合为 `light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(i, N)`；高光显式计算自己的 BRDF，环境项另取 ambient helper。不要寻找已移除的单字段 light helper 或使用 light_buf/LightData 等内部接口。
 
-如果源码通过别名宏间接依赖这些运行时变量，也要先展开再参数化，例如：
+## 7. 外部源码转换速查
 
-- `#define time iTime` -> 删除宏，直接使用 `float time`
-- `#define res iResolution.xy` -> 删除宏，直接使用 `vec2 resolution`
-- `#define frag gl_FragCoord.xy` -> 删除宏，改成显式参数 `vec2 frag_coord`
+| 来源 / 写法 | 转换方式 |
+| --- | --- |
+| 完整 shader | 去掉 main/mainImage、入口语义、#version、precision、layout、引擎 include、工具元数据；保留普通函数 |
+| uniform / cbuffer / 全局运行时量 | 改成显式参数；时间、分辨率、鼠标等由外部驱动，不保留共享可变全局状态 |
+| Shadertoy fragCoord/iResolution/iTime/iChannel | 改成坐标、分辨率、时间、sampler 参数；说明像素/UV、宽高比和坐标原点；反馈、多 pass、视频/键盘通道需另行处理 |
+| HLSL half/fixed/floatN、lerp、saturate、frac | float/vecN、mix、clamp(x,0,1)、fract |
+| Texture2D + SamplerState、Sample/SampleLevel | sampler2D + texture/textureLod，明确资源来源；不能保留 DX 对象/寄存器系统 |
+| mul(A,B) | 按原行列/坐标约定改为乘法，不盲目调换；复杂非方阵投影可用 dot helper 展开 |
+| HLSL 输入 struct | 删除字段语义；纯数据可保留为 GLSL 具名 struct，资源拆成独立 sampler，不必强拆全部成员 |
+| ShaderLab | 抽取核心着色逻辑，移除 Properties/SubShader/Pass/pragma/CGPROGRAM 包装与引擎宏 |
 
-### 规则 4：如果来源代码依赖贴图采样，统一落成 `sampler2D`
+类型/维度显式匹配；比较结果参与数值运算时写 `condition ? 1.0 : 0.0`，不依赖 bool 隐式转数值。反向 smoothstep 改成 `1.0 - smoothstep(low, high, x)` 或稳定 helper，处理零分母。
+只在原算法需要时保留显式 LOD/导数；删除死代码和无用宏，保留用户已有 Meta、函数结构、默认值与无关效果。
+原 Alpha 须说明保留在 vec4.a、独立 out，还是有意省略；颜色到 Surface 不会自动建立透明材质逻辑。
 
-例如：
+## 8. 完整示例
 
-- HLSL `Texture2D + SamplerState`
-- Unity `sampler2D _MainTex`
-- GLSL `sampler2D`
+以下源码可直接放入 Function，函数名可留空用 Auto。普通 vec4 返回值会拆成 XYZ/W；结构体输出经 Separate Bundle + Sync 读取。
 
-如果只是普通静态 2D 图片，优先改成下面的边界，并在节点图中通过 `Image to Closure` 选择图片后连接到该 Closure 输入口：
-
-```glsl
-sampler2D tex
-```
-
-普通贴图的基础采样通常都应改成：
-
-```glsl
-texture(tex, uv)
-```
-
-如果原算法明确依赖显式 `LOD`、模糊级别、景深级别等采样语义，也可以在函数体内部保留例如：
-
-```glsl
-textureLod(tex, uv, lod)
-```
-
-也就是说：
-
-- 公开函数边界统一使用 `sampler2D`
-- `sampler2D` 的来源可以是 `Image to Closure`，也可以是符合约定的 `Closure Output`
-- 普通贴图在函数体内部通常写成 `texture(tex, uv)`
-- 函数体内部不必强行把所有采样都降级成最基础的 `texture`
-
-- 不要再生成 `sample2D` 作为公开函数参数类型。
-- 不要生成“`sampler2D` 能随便接任何 Closure”的说明；对程序化来源，当前只推荐 `Closure Output`。
-- 如果用了 `textureLod` / `textureGrad` / `textureSize` / `texelFetch` 一类图像专用能力，应默认提醒使用 `Image to Closure`。
-
-### 规则 4A：NPR Tree 里的图像句柄采样仍可用 `sampler2D`，但坐标是偏移量
-
-这里必须先区分两类完全不同的“采样”：
-
-- 普通静态图片、贴图、LUT、噪声图：按上面的规则转成 `sampler2D tex`，函数里使用 `texture(tex, uv)`，外部直接接 UV。
-- `NPR Tree` 中来自 `NPR Input`、`AOV Input`、`NPR Refraction`、`NPR SSS Input`、渲染结果或 NPR 运行时缓冲的输出：也可以包装成 `sampler2D` 闭包输入，但 `texture(image, coord)` 里的 `coord` 应按 `Image Sample.Offset` 理解，不是 mesh UV。
-
-后一类输出在节点图里是图像句柄 / `TextureHandle` 语义。它们不能作为 `GLSL Function` 的公开边界类型直接传入，但可以通过 `Closure Output -> sampler2D` 间接采样。闭包内部的采样节点是 `Image Sample`。
-
-典型闭包节点连接应写成类似：
-
-```text
-Closure Input.UV -> Image Sample.Offset
-NPR Input.Combined Color / AOV Input.Color / NPR Refraction.Combined Color -> Image Sample.Image
-Image Sample.Color -> Closure Output.Color
-Image Sample.Alpha -> Closure Output.Alpha
-Closure Output -> GLSL Function 的 sampler2D 输入
-```
-
-这里 `Closure Input` 的接口项仍然叫 `UV`，但在这个闭包里它只是承载 GLSL `texture(image, coord)` 的第二个参数。因为它被接到了 `Image Sample.Offset`，所以语义应写成 `offset`。
-
-`Image Sample.Offset` 表示**相对当前像素 / 当前采样点的偏移**，不是绝对 UV：
-
-- `Offset = vec3(0.0, 0.0, 0.0)`：采样当前像素。
-- `Pixel` 模式下 `Offset = vec3(1.0, 0.0, 0.0)`：采样右侧 1 个像素，不是 `uv.x = 1.0`。
-- `Pixel` 模式下 `Offset = vec3(-1.0, 0.0, 0.0)`：采样左侧 1 个像素。
-- `View` 模式下 `Offset` 按节点暴露的视图 / 屏幕空间偏移语义工作，不能直接把它解释成 mesh UV。
-
-因此 NPR Tree 图像句柄的 GLSL Function 示例应写成：
-
-```glsl
-vec4 npr_sample_current_pixel(sampler2D image)
-{
-  return texture(image, vec2(0.0));
-}
-
-vec4 npr_sample_pixel_right(sampler2D image, float radius)
-{
-  return texture(image, vec2(radius, 0.0));
-}
-```
-
-如果写邻域采样、高斯模糊、边缘检测、SSAO 之类效果，函数参数也应命名为 `offset` / `radius` / `pixel_radius`，不要命名成 `uv`：
-
-```glsl
-vec4 npr_gaussian_blur_3x3(sampler2D image, vec2 offset, float radius)
-{
-  float r = max(radius, 0.0);
-  vec4 sum = vec4(0.0);
-  sum += texture(image, offset + vec2(-r, -r)) * 1.0;
-  sum += texture(image, offset + vec2( 0, -r)) * 2.0;
-  sum += texture(image, offset + vec2( r, -r)) * 1.0;
-  sum += texture(image, offset + vec2(-r,  0)) * 2.0;
-  sum += texture(image, offset + vec2( 0,  0)) * 4.0;
-  sum += texture(image, offset + vec2( r,  0)) * 2.0;
-  sum += texture(image, offset + vec2(-r,  r)) * 1.0;
-  sum += texture(image, offset + vec2( 0,  r)) * 2.0;
-  sum += texture(image, offset + vec2( r,  r)) * 1.0;
-  return sum / 16.0;
-}
-```
-
-如果原始屏幕 shader 写的是：
-
-```glsl
-texture(buffer, uv + delta_pixels / resolution)
-```
-
-并且用户明确说明这是 `NPR Tree` 中采样 `NPR Input` / `AOV` 这类缓冲，那么转换报告应写成：
-
-- `buffer` 来源改为 `NPR Input` / `AOV Input` / 对应 NPR 图像句柄，再通过 `Image Sample -> Closure Output -> sampler2D` 提供给 GLSL Function。
-- `uv + delta_pixels / resolution` 不要按 mesh UV 翻译；应把第二个参数改成 NPR 采样偏移，例如 `offset + delta_pixels`。
-- 当前像素采样用 `texture(buffer, vec2(0.0))` 或 `texture(buffer, offset)`，其中 `offset` 默认为 `vec2(0.0)`。
-- 邻域采样优先用 `Pixel` 模式，例如 `texture(buffer, offset + delta_pixels)`。
-- 只有在确实需要视图空间偏移时，才说明使用 `View` 模式；不要把归一化 UV 偏移直接塞给 `Pixel` 模式。
-
-因此：
-
-- 不要因为没有 UV 就判定这类 `NPR Tree` 采样不能转换；这里的坐标本来就是偏移量。
-- 不要因为它使用 `sampler2D` 就自动把第二个参数命名成 `uv`。
-- 不要把 mesh UV 直接接到闭包内部的 `Image Sample.Offset`，除非用户明确要用 UV 值伪装偏移。
-- 转换报告应写清楚：图像句柄采样发生在 `Image Sample` 闭包内部，GLSL 函数边界仍然是 `sampler2D image`，但 `texture(image, offset)` 的 `offset` 是 NPR 偏移量。
-
-### 规则 4B：程序化三维距离场使用 `sampler3D + Closure Output`
-
-当输入来自 `SDF Primitive`、程序化纹理或其他可由 Closure helper 执行的三维节点网络时，公开边界可以写成：
-
-```glsl
-float sample_sdf(sampler3D sdf_volume, vec3 position)
-{
-  return texture(sdf_volume, position).r;
-}
-```
-
-节点侧的接口约定是：
-
-```text
-Closure Input.UV (Vector) -> 程序化节点的三维 Vector
-程序化结果 -> Closure Output.Color (Float / Vector / RGBA)
-可选透明度 -> Closure Output.Alpha (Float)
-Closure Output.Closure -> GLSL Function 的 sampler3D 输入
-```
-
-- `UV` 只是固定接口名；在 `sampler3D` 路径中运行时值是完整 `vec3`，Z 不会固定为 `0.0`。
-- 这条路径是每次调用时重新执行程序化闭包的 helper，不是真实 GPU 3D 纹理，不提供硬件 mip、LOD 或导数语义。
-- 首版只使用两参数 `texture(sampler3D, vec3)`；需要真实 3D LUT 或其他纹理采样语义时，改用 `Image to Closure` 的 `3D LUT Strip`。
-- Closure Output 必须有名为 `UV` 的 Vector 输入项，以及名为 `Color` 的 Float、Vector 或 RGBA 输出项。
-- 独立 `Alpha` 输出是可选的，但存在时必须为 Float，并覆盖 `texture(...).a`；没有 Alpha 时保留 `Color.a`，Color 没有第四通道时回退为 `1.0`。
-
-### 规则 4.1：如果要使用 Eevee 逐灯辅助接口，必须把范围说清楚
-
-当前 `GLSL Function` 额外提供了一组 **Eevee 直接光 helper API**，目的是让函数体能在受控范围内读取逐灯直接光信息。
-
-这组接口目前包括：
-
-- `GLSLLight`
-- `glsl_light_count()`
-- `glsl_light_get(light_index)`
-- `glsl_light_shadow(light_index, shading_normal)`
-- `GLSL_LIGHT_TYPE_INVALID`
-- `GLSL_LIGHT_TYPE_SUN`
-- `GLSL_LIGHT_TYPE_POINT`
-- `GLSL_LIGHT_TYPE_SPOT`
-- `GLSL_LIGHT_TYPE_AREA_RECT`
-- `GLSL_LIGHT_TYPE_AREA_ELLIPSE`
-- 旧的逐灯宏接口和 `glsl_light_color(...)` 这类单字段 helper 已移除，不再作为公开用法支持
-- `GLSLLight.vector` 表示**从当前着色点指向灯中心的归一化方向**
-- `GLSLLight.type` 表示稳定的公开灯光类型：
-  - `GLSL_LIGHT_TYPE_SUN`
-  - `GLSL_LIGHT_TYPE_POINT`
-  - `GLSL_LIGHT_TYPE_SPOT`
-  - `GLSL_LIGHT_TYPE_AREA_RECT`
-  - `GLSL_LIGHT_TYPE_AREA_ELLIPSE`
-- `GLSLLight.lightgroup_id` 表示这盏灯的整数 `Lightgroup ID`，可直接用于自定义逐灯过滤
-- `GLSLLight.influence_radius` 是世界空间的表面光照有效影响半径，复用 EEVEE 的自动范围或自定义截止距离（含灯光着色器范围缩放），不是光源形状半径。太阳灯和无效灯返回 0；按范围归一化距离前须判断大于 0。需要包含此新增字段的构建。
-- `GLSLLight.position` 表示**灯中心世界坐标**；日光没有有限位置，因此返回 `vec3(0.0)`
-- `GLSLLight.direction` 表示**灯的世界空间朝向轴**：
-  - 日光：`sun().direction`
-  - 聚光 / 面光：灯对象局部 `+Z` 轴对应的世界空间方向
-  - 点光：返回 `vec3(0.0)`
-- `GLSLLight.diffuse_color` 表示**对自定义逐灯模型友好的 diffuse 颜色项**：它会把 Eevee 内部的 surface radiance 权重换算成更接近 point-like 直觉的通道能量，避免点光默认半径很小时数值爆炸
-- `GLSLLight.specular_color` 表示**对自定义逐灯模型友好的 specular 颜色项**：同样会把 Eevee 内部的 surface radiance 权重换算成更适合手写高光模型的通道能量
-- `GLSLLight.attenuation` 表示**适合自定义逐灯模型的基础衰减项**；它内部组合了 `light_point_light(...)` 和 `light_attenuation_surface(...)`，但不包含 `NdotL`、toon ramp、half-lambert、Blinn-Phong、GGX、`light_attenuation_facing(...)`、`light_ltc(...)`、shadow 或材质侧 Fresnel / IOR / metallic / tint / roughness
-- 推荐漫反射写法：`light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
-- 推荐高光写法：`light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
-- `glsl_light_count()` / `glsl_light_get(i)` 返回的是**当前片元局部可见灯列表**，不是场景全局稳定灯编号
-- 因此 `glsl_light_get(0)` 的含义是“当前片元局部列表里的第 0 盏有效灯”，不是“场景里固定编号的第 0 盏灯”
-
-必须同时明确下面几点：
-
-- 这只是 **Eevee 直接光 helper**，不是公开 `LightData`、`light_buf` 或 Eevee 内部宏
-- V1 只支持普通 `Eevee` 物体材质
-- V1 只覆盖 `Deferred` / `Forward` 路径中的 **direct light + shadow**
-- 对这套 **direct light helper** 来说，`FILTER`、`NPR Tree`、`World` 当前都不支持，而且它本身也不负责 probe / indirect / volume lighting
-
-因此：
-
-- 不要生成“可以直接访问 Eevee 全部灯光内部数据结构”的说明
-- 不要生成“在任意 shader 域都支持逐灯 helper”的说明
-- 不要把 indirect / probe / volume 结果说成这套 helper 的能力范围
-
-### 规则 4.2：如果只是想在函数体里读几何体输入，优先使用内置几何 helper
-
-当前 `GLSL Function` 还提供了一组**几何 helper**，目的是让函数体直接读取常用几何输入，而不是额外再拉一圈节点线。
-
-这组接口目前包括：
-
-- `glsl_position()`
-- `glsl_normal()`
-- `glsl_true_normal()`
-- `glsl_incoming()`
-
-它们的语义直接对齐内置 `Geometry` 节点：
-
-- `glsl_position()` = `Geometry.Position`
-- `glsl_normal()` = `Geometry.Normal`
-- `glsl_true_normal()` = `Geometry.True Normal`
-- `glsl_incoming()` = `Geometry.Incoming`
-
-使用这组 helper 时要明确：
-
-- 这是**几何输入快捷接口**，不是新的导出函数边界类型
-- 它的优势是函数体里更紧凑，不代表外部节点输入方式被废弃
-- 如果某段逻辑本身就更适合由节点图显式传参，例如要让同一个函数复用外部改写后的法线、位置或别的来源，仍然应该保留普通输入参数
-- 当前这组几何 helper 按普通 `Eevee` 物体材质和 `NPR Tree` 的几何语义工作；`FILTER`、`World` 不作为稳定保证范围
-
-因此：
-
-- 不要把它说成“任意域都稳定可用”的全局 GLSL 内建
-- 不要把它和 `Texture Coordinate`、`Camera`、`Object Info` 等别的输入节点混成一组等价接口
-
-### 规则 4.2.1：如果需要视图 / 投影 / 模型矩阵，使用 draw-view 矩阵 helper
-
-当前 `GLSL Function` 额外提供一组 **draw-view 变换矩阵 helper**，来自当前 draw 的 `ViewMatrices` / `ObjectMatrices`（含 overscan、Film crop、TAA jitter）：
-
-- 视图 / 投影（Surface、NPR、Filter 可用；顶点与片元阶段）：
-  - `glsl_view_matrix()` / `glsl_view_matrix_inverse()`
-  - `glsl_projection_matrix()` / `glsl_projection_matrix_inverse()`
-  - `glsl_view_projection_matrix()` / `glsl_view_projection_matrix_inverse()`
-- 物体模型（仅 Surface / NPR；`Filter` 路径回退为单位矩阵）：
-  - `glsl_model_matrix()` / `glsl_model_matrix_inverse()`
-  - `glsl_model_view_matrix()` / `glsl_model_view_projection_matrix()`
-  - `glsl_normal_matrix()`（object→world 法线：`transpose(mat3(model_inverse))`）
-
-使用这组 helper 时要明确：
-
-- 这是**当前 draw 视图状态**，不是自定义 Camera 节点或任意用户矩阵输入
-- 适合 Displacement、屏幕空间反投影、自定义 clip 空间变换等；不要假设在 `World` 路径稳定可用
-- `Filter` 材质可以用视图 / 投影 helper；不要在 Filter 路径依赖 `glsl_model_*` 的真实物体矩阵
-
-### 规则 4.3：如果要读 `Shader Info` 那种环境光，使用 `glsl_ambient_lighting()`
-
-当前 `GLSL Function` 还提供了一个**环境光 helper**：
-
-- `glsl_ambient_lighting()`
-
-它的语义对齐 `Shader Info` 的 `Ambient Lighting` 输出，也就是当前着色点的 probe / 环境**间接漫反射**结果。
-
-使用这条接口时要明确：
-
-- 它只返回这类环境漫反射项，不包含 reflection probe 反射颜色
-- 它也不等于 `Light Probe Color` 的 `Combined`
-- 它依赖 Eevee 的 light probe 数据路径，因此应当按 light-probe 相关能力来描述，而不是按逐灯 direct-light helper 来描述
-- 当前不把 `FILTER`、`World` 当作稳定保证范围
-
-因此：
-
-- 不要把 `glsl_ambient_lighting()` 说成“完整间接光照总和”
-- 不要把 reflection、combined、probe radiance、screen-space indirect 等其他概念混进这个 helper 的定义里
-
-### 规则 4.4：写自定义 PBR / 半 PBR 时，优先组合几何 helper、环境光 helper 和逐灯 helper
-
-当前推荐的组合方式是：
-
-- 几何：`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
-- 环境：`glsl_ambient_lighting()`
-- 逐灯：`glsl_light_count()`、`glsl_light_get(i)`、`glsl_light_shadow(i, N)`
-
-典型写法应按下面这个层次组织：
-
-- 漫反射部分：`diffuse_brdf * light.diffuse_color * light.attenuation * NdotL * shadow`
-- 高光部分：`specular_brdf * light.specular_color * light.attenuation * NdotL * shadow`
-- 环境部分：`glsl_ambient_lighting() * base_color * ambient_term`
-
-这里的关键点是：
-
-- `GLSLLight.diffuse_color` / `GLSLLight.specular_color` 已经是对自定义模型友好的逐灯颜色项
-- `GLSLLight.attenuation` 只负责基础逐灯衰减，不替你计算 `NdotL`、GGX、toon ramp 或阴影
-- 因此 `shadow` 仍然应显式写成 `glsl_light_shadow(i, N)`
-- 如果想写更接近标准 PBR 的版本，优先在函数体内部自己实现 Fresnel / NDF / Geometry，而不要再寻找旧的 `glsl_light_diffuse_attenuation(...)` 或 `glsl_light_specular_attenuation(...)`
-
-仓库内的 [`blender-npr-features-and-usage.md`](../blender-npr-features-and-usage.md) 已附带一段可直接粘贴到 `GLSL Function` 的 PBR 风格完整示例，可作为转换结果的参考模板。
-
-
-### 规则 5：如果原代码是屏幕着色器，要把它改写成“可被材质节点调用的函数”
-
-最常见的错误是直接把 Shadertoy 或后处理 shader 原封不动贴进来。
-
-不可以这样做。
-
-必须把它改成类似这种形式：
-
-```glsl
-vec4 my_effect(vec2 frag_coord, vec2 resolution, float time)
-{
-  ...
-}
-```
-
-或者：
-
-```glsl
-vec3 my_effect(vec2 uv, float time)
-{
-  ...
-}
-```
-
-总之要变成“普通函数”，而不是“shader 入口”。
-
-### 规则 6：把宏分支、危险捷径和死代码收敛成稳定版本
-
-真实转换时，很多源码表面上是“GLSL”，但里面混着大量只适用于原运行时的宏和写法。
-
-必须额外注意：
-
-- 如果源码里有 `#define FEATURE`、`#ifdef XXX`、`#ifndef XXX` 这类功能开关，不要把所有分支原样保留给节点；优先收敛成“当前实际启用的那条分支”
-- 只有当某个开关确实需要在节点运行时调节时，才把它改成受支持的函数参数，例如 `float enabled`
-- 删除未使用的辅助函数、注释掉的旧代码、媒体链接、说明文字、被宏禁用的分支
-- 对依赖实现细节的捷径写法要显式改写，例如 `smoothstep(a, b, t)` 在 `a > b` 时不要直接赌实现行为，应该改写成你自己可控的稳定辅助函数
-- 如果源码里有 `#define time iTime`、`#define T u_time` 这类“给运行时变量改别名”的宏，不要保留；应该展开成真实参数名
-- 如果源码里有共享可变的全局状态，例如 `float gTime;` 先在某处写入、再在多个 helper 中隐式读取，优先改成显式参数传递或局部变量
-- 如果源码里把比较结果直接塞进数值向量，例如 `vec3(dir.x == 0.0, dir.y == 0.0, dir.z == 0.0)`，不要赌隐式转换；改成显式三元表达式
-- 如果源码里用了 `mat3x2` / `mat2x3` / `mat4x3` 这类非方阵，或者同时出现 `vec * mat` 与 `mat * vec` 的双向乘法，优先拆成语义明确的辅助函数，不要把方向感很差的矩阵表达式原样照搬
-
-### 规则 7：区分“普通贴图采样”和“运行时反馈 / 多通道缓冲”
-
-Shadertoy 的 `iChannel0~3` 并不总是“普通 2D 贴图”。
-
-有些来源代码里：
-
-- `iChannel0` 是噪声图、LUT、普通图片
-- `iChannel1` 是上一帧结果
-- `iChannel2` / `iChannel3` 是 `Buffer A/B/C/D` 的中间结果
-- 某个通道可能还是视频、键盘纹理、cubemap、数据贴图
-
-对当前 `GLSL Function` 节点来说，最稳妥的规则是：
-
-- 如果某个通道本质上就是普通静态 2D 图片采样，改成 `sampler2D`，并在节点图中用 `Image to Closure` 选择图片和提供 Closure
-- 如果某个通道希望在节点图里接图片或程序化纹理，且核心采样能收敛为 `texture(tex, uv)`，公开函数边界仍然改成 `sampler2D`，再在节点侧用 `Image to Closure` 或 `Closure Output` 提供来源
-- 如果某个通道在 `NPR Tree` 中实际来自 `NPR Input`、`AOV Input`、`NPR Refraction`、`NPR SSS Input` 或其他 NPR 运行时图像句柄，仍然可以改成 `sampler2D` 闭包输入；但闭包内部应使用 `Image Sample.Image + Offset`，GLSL 里的 `texture(image, coord)` 第二个参数应按 offset 写法和命名
-- 如果某个通道依赖“上一帧反馈”“多 pass 缓冲”“运行时积累”“专用输入设备纹理”，不要假装它和普通 `sampler2D` 完全等价
-- 这类运行时依赖要么删除、要么近似、要么改成普通外部输入参数，但必须明确说明是“近似改写”，不是等价转换
-
-### 规则 8：最终输出末尾必须附带转换结果说明
-
-转换结果不能只给代码，还必须明确告诉使用者这次转换到底是：
-
-- `成功`
-- `部分成功`
-- `失败`
-
-并且至少说明这些内容：
-
-- 是否成功转换成当前节点可接受的函数边界类型
-- 是否存在不支持而被删除、近似、替换的部分
-- 是否保留了运行时依赖，或者已经去掉
-- 如果做过本地解析或编译验证，要写明验证结果
-- 结果说明、状态报告、删改说明、验证说明默认使用“用户当前使用的语言”
-
-不要让使用者自己猜：
-
-- 这段代码是不是完整可用
-- 哪些效果丢了
-- 哪些地方只是近似
-- 有没有不支持的类型或运行时资源
-
-说明：
-
-- 如果用户用中文提问，就用中文写结果报告
-- 如果用户用英文提问，就用英文写结果报告
-- 像 `Function` 这种需要直接对应节点 UI 的字段名可以保留原样，但解释性文字和结果报告应优先跟随用户语言
-
-### 规则 9：交付前必须经过静态检查和 Blender 真实解析
-
-外观看起来正确或历史上曾经 `parse_status=READY`，都不能代替当前候选源码的验证。
-
-在本工作区，把完整候选代码写入 `temp\...` 下的临时 `.glsl` 文件，并运行：
-
-```powershell
-python tools\validate_glsl_function.py <file.glsl> --function <export_name> --require-blender --json
-```
-
-只有同时满足以下条件，才能报告 `Validation: PASS (static + Blender parser)`：
-
-- `"valid": true`
-- `"blender": "READY"`
-- `"findings": []`
-
-如果转换涉及 typed Closure callback、Closure sampler 重写、Eevee 逐灯/环境 helper、Filter/World 上下文或其他 GPU 专用行为，`READY` 只证明解析和 socket 生成成功，不能证明专用 GPU 源码或渲染结果正确。此时还必须运行对应的最小 GPU / render 回归，并把实际测试名写进验证状态，例如：
-
-```text
-Validation: PASS (static + Blender parser + typed Closure GPU regression)
-```
-
-工作区外没有真实 Blender 校验器时，只能报告 `Validation: STATIC_ONLY`；验证失败必须报告 `Validation: FAIL`，不得把未验证结果写成可直接使用或 `READY`。
-
-
-## 三、AI 推荐输出格式
-
-为了让人类或下一个工具最少返工，建议按下面格式输出：
-
-下面模板用中文演示；如果用户使用其他语言，结果报告部分应切换到对应语言。
-
-````text
-Function: effect_name
-
-Inputs:
-- uv: vec2
-- time: float
-- tex: sampler2D
-
-Outputs:
-- return: vec3
-
-Meta Checklist:
-- @glsl_meta v1 已写在导出函数正上方
-- 每个输入参数都有 label/description 和必要的 default/min/max/subtype
-- sampler2D 只使用 label/description/panel
-- out 参数只使用 label
-- 参数分组 panel 已闭合
-
-Code:
-```glsl
-...最终代码...
-```
-
-转换结果:
-- 状态: 成功 / 部分成功 / 失败
-- 最终调用函数: ...
-- 已支持边界类型: ...
-- 不支持或已删除: ...
-- 已近似或已替代: ...
-- Alpha 处理: 已保留 / 已拆分 / 原始 alpha 恒定 / 已省略
-- Meta 情况: 已补全 / 无可标注接口 / 未补全并说明原因
-- 验证情况: PASS (static + Blender parser) / PASS (static + Blender parser + 具体 GPU/render 测试) / STATIC_ONLY / FAIL
-````
-
-如果函数有额外 `out` 参数，也写清楚：
-
-```text
-Outputs:
-- return: float
-- out color: vec3
-```
-
-如果函数有可调参数、贴图输入或 `out` 参数，`Code` 中应直接包含对应的 `@glsl_meta v1` 块，而不是只在文字说明里建议用户自己补。
-
-### 转换结果说明建议
-
-`转换结果` 建议至少包含下面几项：
-
-- `状态`
-  - `成功`：核心效果已转成当前节点可直接使用的版本，没有已知必然报错的边界问题
-  - `部分成功`：完成了可用近似，但删掉或替换了部分原效果
-  - `失败`：由于边界类型、运行时依赖或其他限制，无法给出当前节点可直接使用的版本
-- `已支持边界类型`
-  - 明确写这次导出函数最终使用了哪些受支持边界类型，例如 `vec2 / float / sampler2D / out float`
-- `最终调用函数`
-  - 明确写最终在节点 `Function` 一栏中应该填写哪个函数名
-  - 如果源码中保留了多个辅助函数，也要再次确认真正要选的是哪一个导出函数
-- `不支持或已删除`
-  - 明确列出被删除或当前节点不支持的东西，例如 `iChannel1 backbuffer feedback`、`UDIM`、`inout`
-- `已近似或已替代`
-  - 明确列出做过近似的部分，例如“将上一帧反馈删除”“把宏分支固定为当前启用版本”
-- `Alpha 处理`
-  - 如果原 shader 的 `fragColor.a` 有意义，要明确写出它是保留为 `vec4.a`、拆成单独 `out float alpha`，还是被省略
-  - 如果原始 alpha 本来恒定为 `1.0`，也建议直接写明，避免用户误以为漏转
-- `Meta 情况`
-  - 明确写出 `@glsl_meta v1` 是否已补全
-  - 如果没有写 Meta，必须说明导出函数没有输入参数和 `out` 参数，或说明当前限制导致无法标注
-  - 不要把“用户可自行补 Meta”当作完成状态
-- `验证情况`
-  - 当前工作区必须通过静态检查和 Blender 节点解析，写 `PASS (static + Blender parser)`
-  - 涉及 GPU 专用行为时还要写出实际通过的测试名
-  - 工作区外只能完成静态检查时写 `STATIC_ONLY`
-  - 任一必需检查失败时写 `FAIL`
-- 如果用户不是中文语境，上面这些字段名和状态值应切换成对应语言，而不是强行保留中文
-
-
-## 四、从不同来源转换时的具体策略
-
-## 1. 从普通 GLSL 转换
-
-如果来源本来就是 GLSL：
-
-1. 删除 `main` / `mainImage` / pipeline 外壳
-2. 保留必要的辅助函数
-3. 选一个主函数作为节点导出函数
-4. 把所有外部 `uniform` 改成函数参数
-5. 把不支持的边界类型改成支持类型
-6. 明确给出 `Function` 名称
-
-### 适合保留的内容
-
-- `const`
-- 数学辅助函数
-- `palette`
-- `noise`
-- `hash`
-- `sdSphere` 这类 SDF 函数
-
-### 应该移除或改写的内容
-
-- framebuffer 输出
-- `fragColor`
-- `gl_FragCoord` 直接依赖
-- `precision highp float;` 这类文件级精度声明
-- `#version`
-- `layout(...)`
-- 自定义 uniform 块
-- `/** SHADERDATA ... */`、`//proc:*` 这类元数据
-- 注释掉的旧代码、视频链接、音乐链接等与算法无关的内容
-- 仅用于切换功能的宏分支和未启用分支
-- 依赖上一帧结果或其他 pass 缓冲的运行时逻辑
-
-
-## 2. 从 Shadertoy GLSL 转换
-
-Shadertoy 常见入口：
-
-```glsl
-void mainImage(out vec4 fragColor, in vec2 fragCoord)
-```
-
-转换原则：
-
-- `fragColor` 改成返回值
-- `fragCoord` 保留为参数
-- `iResolution` 改成 `vec2 resolution`
-- `iTime` 改成 `float time`
-- `iTimeDelta` 改成 `float time_delta`
-- `iFrame` 改成 `float frame`，需要整数语义时在函数内部 `int(frame)`
-- `iMouse` 改成 `vec4 mouse` 或拆成更小参数
-- 纹理通道 `iChannel0~3` 改成 `sampler2D`
-- 如果保留 `mouse`，最好明确约定语义，例如 `mouse.xy` 为像素坐标，`mouse.z > 0.0` 表示按下
-- 如果原效果依赖模糊采样或景深采样，可以把 `textureLod(iChannel0, uv, lod)` 改成 `textureLod(tex, uv, lod)`
-- 如果原效果依赖 `Buffer A/B/C/D`、上一帧反馈、视频流、键盘纹理等 Shadertoy 运行时资源，要明确写明哪些部分被删除或近似
-
-### 标准改写模板
-
-```glsl
-vec4 effect_name(vec2 frag_coord, vec2 resolution, float time)
-{
-  vec2 uv = frag_coord / resolution;
-  ...
-  return color;
-}
-```
-
-### Shadertoy 来源的常见错误
-
-- 直接保留 `mainImage`
-- 保留 `iTime`
-- 保留 `iResolution`
-- 保留 `fragColor =`
-- 保留 `iChannel0` 但没有改成参数
-- 保留一堆 `#define` / `#ifdef` 分支，但不说明最终到底走哪条逻辑
-- 直接照搬类似 `#define S(a, b, t) smoothstep(a, b, t)` 这种依赖反向边界的捷径写法
-- 把上一帧反馈通道、Buffer 通道、视频通道直接当成普通静态 `sampler2D`
-
-
-## 3. 从 HLSL 转换
-
-HLSL 转 GLSL 时，优先做“语义剥离”和“内建函数映射”。
-
-### 必须去掉的 HLSL / DX 语义
-
-- `: SV_Target`
-- `: SV_POSITION`
-- `: TEXCOORD0`
-- `float4 frag(v2f i) : SV_Target`
-
-### HLSL 到 GLSL 常见映射
-
-| HLSL | GLSL |
-|---|---|
-| `float` | `float` |
-| `float2` | `vec2` |
-| `float3` | `vec3` |
-| `float4` | `vec4` |
-| `half` / `fixed` | `float` |
-| `half2` / `fixed2` | `vec2` |
-| `half3` / `fixed3` | `vec3` |
-| `half4` / `fixed4` | `vec4` |
-| `lerp(a,b,t)` | `mix(a,b,t)` |
-| `frac(x)` | `fract(x)` |
-| `ddx(x)` | `dFdx(x)` |
-| `ddy(x)` | `dFdy(x)` |
-| `rsqrt(x)` | `inversesqrt(x)` |
-| `mul(a,b)` | 需要按矩阵乘法方向手动改写 |
-| `saturate(x)` | `clamp(x, 0.0, 1.0)` |
-| `tex2D(tex, uv)` | `texture(tex, uv)` |
-| `atan2(y, x)` | `atan(y, x)` |
-
-### HLSL 转换中的强制规则
-
-- `half`、`fixed` 全部收敛成 `float`
-- `Texture2D` / `SamplerState` 尽量合并为单个 `sampler2D`
-- 输入结构体拆成显式函数参数
-- 不要保留 `cbuffer`
-- 不要保留语义标注
-
-
-## 4. 从 ShaderLab / Unity 片段转换
-
-ShaderLab 只能“部分转换”，不能整段照搬。
-
-AI 必须只抽取真正有用的着色逻辑：
-
-- `CGPROGRAM` / `HLSLPROGRAM` 中的辅助函数
-- `frag` 或核心颜色计算逻辑
-
-AI 必须删除：
-
-- `Shader`
-- `SubShader`
-- `Pass`
-- `Tags`
-- `Blend`
-- `ZTest`
-- `Cull`
-- `Stencil`
-- `Properties`
-- `#pragma`
-- `Fallback`
-
-### ShaderLab 推荐抽取顺序
-
-1. 找到最终颜色计算逻辑
-2. 找到依赖的辅助函数
-3. 找到依赖的贴图、时间、UV、屏幕参数
-4. 把这些外部依赖改成函数参数
-5. 写成纯 GLSL 导出函数
-
-### Unity 常见内建量改写
-
-| Unity / ShaderLab | Blender GLSL Function 参数建议 |
-|---|---|
-| `_Time.y` | `float time` |
-| `i.uv` | `vec2 uv` |
-| `_MainTex` | `sampler2D tex` |
-| `_MainTex_ST` | 拆成 `vec2 uv_scale, vec2 uv_offset` 或直接预烘焙进 uv 计算 |
-| `_ScreenParams.xy` | `vec2 resolution` |
-
-
-## 五、边界类型不支持时怎么改
-
-这是 AI 最容易翻车的地方。
-
-### 1. `int` / `bool` 可以直接作为节点接口
-
-当前公开边界已经支持 `int` 和 `bool` 输入、`out` 参数与返回值，不要再为了节点接口把它们改写成 `float`。例如：
+### 8.1 最小纹理函数
 
 ```glsl
 /* @glsl_meta v1
-mode: label="Mode" description="Integer mode selector"
-enabled: label="Enabled" description="Enables the selected mode"
-out_mode: label="Selected Mode"
+tex: label="主贴图" description="通过 Image to Closure 提供纹理"
+uv: label="UV" default=vec2(0.0)
 */
-bool test(int mode, bool enabled, out int out_mode)
-{
-  out_mode = mode;
-  return enabled && mode > 0;
-}
-```
-
-模式型整数可以通过 `items` 元数据生成下拉选项；连续整数和布尔值也可以保留原生 socket 语义。
-
-### 2. 方阵矩阵可以作为节点接口，非方阵仍要改写
-
-当前 `GLSL Function` 的公开边界已经支持 `mat2`、`mat3`、`mat4`，可以直接作为输入参数、`out` 参数或返回值使用。节点 UI 会按 GLSL 列主序把它们拆成多组插口：
-
-- `mat2` -> `C1`、`C2` 两个 `vec2`
-- `mat3` -> `C1`、`C2`、`C3` 三个 `vec3`
-- `mat4` -> `C1`、`C2`、`C3`、`C4` 四列，每列拆成 `vec3 + W float`
-
-因此这类方阵接口不需要再为了节点边界强行拆成多个独立函数参数：
-
-```glsl
-/* @glsl_meta v1
-transform: label="Transform" description="Column-major transform matrix"
-out_basis: label="Basis"
-*/
-mat4 matrix_boundary_example(mat4 transform, out mat3 out_basis)
-{
-  out_basis = mat3(transform);
-  return transform;
-}
-```
-
-但仍然不要把下列类型作为公开边界：
-
-- `mat2x3`、`mat3x2`、`mat4x3` 等非方阵矩阵
-- 数组，以及含资源、数组或递归成员的结构体
-- 方向语义很难读清的混合矩阵边界
-
-这类情况应改成：
-
-- 展开为语义明确的 `vec2` / `vec3` / `vec4` 参数
-- 或把矩阵保留在函数内部/辅助函数内部构造
-- 或用 `dot(...)` helper 明确表达投影方向
-
-### 3. 多返回值与结构体的选择
-
-独立的输出可以继续使用返回值加 `out`：
-
-```glsl
-float effect(vec2 uv, out vec3 color)
-{
-  ...
-}
-```
-
-需要作为整体传递时，可以声明具名纯数据 `ResultData`，返回该结构体或使用 `out ResultData`。
-它会生成 Bundle 输出；成员类型、嵌套和 Meta v2 规则见结构体与捆包指南。
-
-### 4. `void` 返回值不是“没有输出”
-
-当前节点允许导出函数返回 `void`，但前提是它仍然要通过 `out` 参数暴露至少一个输出。
-
-错误：
-
-```glsl
-void do_nothing(vec2 uv)
-{
-}
-```
-
-应该改成：
-
-```glsl
-void do_something(vec2 uv, out vec3 color)
-{
-  color = vec3(uv, 0.0);
-}
-```
-
-### 5. 纹理采样不要保留 Unity / DX 风格对象系统
-
-错误：
-
-```hlsl
-Texture2D tex;
-SamplerState samp;
-float4 frag(...) : SV_Target
-{
-  return tex.Sample(samp, uv);
-}
-```
-
-应该改成：
-
-```glsl
-vec4 frag_color(sampler2D tex, vec2 uv)
-{
-  return texture(tex, uv);
-}
-```
-
-### 6. 反向 `smoothstep` 和类似捷径不要直接照搬
-
-很多现成 shader 会写这种宏：
-
-```glsl
-#define S(a, b, t) smoothstep(a, b, t)
-```
-
-然后在实际调用里大量出现：
-
-```glsl
-S(0.4, 0.0, d)
-S(1.0, y, st.y)
-```
-
-这种写法在原作者目标环境里“可能刚好能跑”，但它依赖的是反向边界的实现细节，不适合作为稳定转换结果直接保留。
-
-更稳妥的做法是：
-
-- 显式写一个你自己控制的辅助函数
-- 在函数里自己处理正向、反向、退化区间
-- 再把所有原来的 `S(...)` 调用替换掉
-
-### 7. 不要依赖布尔值到数值类型的隐式转换
-
-错误：
-
-```glsl
-dir += vec3(dir.x == 0.0, dir.y == 0.0, dir.z == 0.0) * 1e-5;
-```
-
-应该改成：
-
-```glsl
-dir += vec3(dir.x == 0.0 ? 1e-5 : 0.0,
-            dir.y == 0.0 ? 1e-5 : 0.0,
-            dir.z == 0.0 ? 1e-5 : 0.0);
-```
-
-说明：
-
-- 原 shader 有时会依赖目标环境对 `bool` / `bvec*` 的宽松处理
-- 稳定转换时不要假设“比较结果可以直接当 `float` 用”
-- 这类写法优先改成显式三元表达式、`mix`、`step` 或手动 `float(...)` 化
-
-### 8. 非方阵或方向不清晰的矩阵运算优先展开成辅助函数
-
-有些来源代码会写出这类表达式：
-
-```glsl
-mat3x2 tri = mat3x2(...);
-vec3 coord = some_vec2 * tri;
-vec2 uv = tri * some_vec3;
-```
-
-即使原环境能跑，这类写法在转换后也常常不够直观，不利于稳定维护和排错。
-
-更推荐的做法是：
-
-- 把“投影”与“反投影”拆成两个显式 helper
-- 用 `dot(...)` 或明确分量组合来表达变换
-- 不要把“向量在左乘”还是“矩阵在左乘”的理解成本留给用户
-
-### 9. 不要保留共享可变全局状态
-
-错误：
-
-```glsl
-float gTime = 0.0;
-
-float wave(vec3 p)
-{
-  return sin(gTime + p.x);
-}
-
-vec3 effect(vec2 uv, float time)
-{
-  gTime = time;
-  return vec3(wave(vec3(uv, 0.0)));
-}
-```
-
-应该改成：
-
-```glsl
-float wave(vec3 p, float time)
-{
-  return sin(time + p.x);
-}
-
-vec3 effect(vec2 uv, float time)
-{
-  return vec3(wave(vec3(uv, 0.0), time));
-}
-```
-
-说明：
-
-- 像 `gTime`、`gFrame`、`gMouse` 这种“先写全局，再在 helper 里读”的模式，不适合当作稳定转换模板保留
-- 优先改成显式参数传递，避免隐式副作用和阅读歧义
-
-### 10. 原 shader 的 alpha 要显式处理
-
-如果原始代码里 `fragColor.a` 不是固定 `1.0`，不要在转换报告里省略这件事。
-
-可选做法：
-
-- 直接保留为 `vec4` 返回值
-- 或拆成 `out float alpha`
-- 如果当前转换故意只保留 RGB，也必须在结果报告里明确写出 alpha 被省略
-
-如果原 shader 的 alpha 本来恒定为 `1.0`，也建议在结果报告里写明“原始 alpha 恒定，因此未单独处理”。
-
-
-## 六、AI 必须做的自检清单
-
-在输出最终代码前，必须逐条检查：
-
-1. 最终是不是“普通函数源码”，而不是完整 shader 文件？
-2. 是否明确给出了 `Function` 名称？
-3. 是否还残留了 `main` / `mainImage` / `fragColor`？
-4. 是否还残留了 `uniform` / `cbuffer` / `Properties` / `Pass`？
-5. 所有外部输入是否都已改成函数参数？
-6. 导出函数的参数和返回值是否只用了允许的边界类型？
-7. 是否错误保留了 `inout`？
-8. 是否把 `sampler2D` 写成了 `out`？
-9. 如果用了普通贴图采样，是否已经改成 `texture(tex, uv)`；如果是 NPR 图像句柄采样，是否已经改成 `texture(image, offset)` 语义；如果确实需要显式级别，是否说明了 `textureLod` 等限制？
-10. 如果导出函数返回 `void`，是否仍然通过 `out` 参数暴露了至少一个输出？
-11. 如果有 `sampler2D` / `sampler3D` 参数，是否明确它会显示为 Closure 输入口，并说明应连接哪类 `Image to Closure` 或符合约定的 `Closure Output`？
-12. 如果有 `sampler2D` 参数，是否明确说明应通过 `Image to Closure` 或符合约定的 `Closure Output` 提供来源？
-13. 如果有 `sampler2D` 参数，是否错误假设它支持任意 Closure、任意图像专用采样函数或旧的面板选图工作流？
-14. 如果原始来源使用了历史 `sample2D` 旧写法，是否已经统一改写成公开的 `sampler2D` 边界类型？
-15. 如果用户明确说是 `NPR Tree`，且来源是 `NPR Input` / `AOV Input` / `NPR Refraction` / `NPR SSS Input` 这类图像句柄，是否保留 `sampler2D` 闭包输入，同时说明闭包内部要用 `Image Sample.Image + Offset`？
-16. 是否明确说明 `texture(image, offset)` 里的 `offset` 不是 UV，`vec2(0.0)` 采当前像素，`Pixel` 模式下 `vec2(1.0, 0.0)` 表示右移 1 个像素？
-17. 如果源码里有宏开关、注释掉的旧代码、未使用辅助函数，是否已经收敛或删除？
-18. 如果源码里有反向 `smoothstep` 或类似依赖实现细节的捷径写法，是否已经改成稳定辅助函数？
-19. 如果源码依赖上一帧反馈、Buffer A/B/C/D、多 pass 中间结果、视频或键盘通道，是否已经明确说明删除、近似或替代方案？
-20. 如果来自 HLSL，是否已去掉所有语义标注？
-21. 如果来自 ShaderLab，是否只保留了核心逻辑？
-22. 是否避免依赖特定引擎的 include 和无法离开原运行时的宏？
-23. 最终输出里是否明确写了本次转换是 `成功`、`部分成功` 还是 `失败`？
-24. 最终输出里是否再次明确写了节点 `Function` 一栏最终应调用的函数名？
-25. 最终输出里是否明确列出了不支持、删除、近似、替代和验证情况？
-26. 最终输出里的结果报告语言，是否跟随了用户当前使用的语言？
-27. 是否移除了 `precision` / `#version` / `layout(...)` / `SHADERDATA` / `proc:` 这类文件级声明或工具元数据？
-28. 如果源码通过 `#define time iTime` 之类的别名宏引用运行时变量，是否已经展开并参数化？
-29. 如果源码里用了共享可变全局状态（如 `gTime`），是否已经改成显式参数或局部变量？
-30. 如果源码里有把比较结果直接拿去构造 `vec*` 或参与数值运算的写法，是否已经改成显式数值表达式？
-31. 如果源码里用了 `mat3x2` / `mat2x3` 或其他方向不够直观的矩阵乘法，是否已经改写成更清晰的 helper？
-32. 如果原 shader 的 alpha 有实际含义，是否已经明确说明保留、拆分还是省略？
-33. 如果使用 `@glsl_closure v1`，helper ABI、`Result` 保留名、可达性、重载/递归/函数式宏限制和整数精确范围是否都满足？
-34. 完整候选是否已通过 `tools\validate_glsl_function.py ... --require-blender --json`，且 `valid=true`、`blender=READY`、`findings=[]`？
-35. 如果涉及 Closure callback、sampler 重写、Eevee helper 或 Filter/World 上下文，是否还运行了对应 GPU / render 回归，而不是只依据 `parse_status=READY`？
-
-
-## 七、推荐的最小输出模板
-
-如果你是另一个 AI，除非用户明确要求别的格式，否则建议按下面模板输出：
-
-````text
-Function: converted_function
-
-Inputs:
-- uv: vec2
-- time: float
-- tex: sampler2D
-
-Outputs:
-- return: vec3
-
-Code:
-```glsl
-/* @glsl_meta v1
-uv: label="UV" default=vec2(0.0) description="Texture coordinates"
-time: label="Time" default=0.0 description="Animation time in seconds"
-tex: label="Texture" description="Texture Closure sampled with UV"
-*/
-vec3 converted_function(vec2 uv, float time, sampler2D tex)
-{
-  vec3 col = texture(tex, uv).rgb;
-  return col;
-}
-```
-
-转换结果:
-- 状态: 成功
-- 最终调用函数: converted_function
-- 已支持边界类型: vec2, float, sampler2D, vec3 return
-- 不支持或已删除: 无
-- 已近似或已替代: 无
-- Alpha 处理: 原始 alpha 恒定
-- Meta 情况: 已补全
-- 验证情况: PASS (static + Blender parser)
-````
-
-如果是部分成功，也建议像这样写：
-
-````text
-转换结果:
-- 状态: 部分成功
-- 最终调用函数: converted_function
-- 已支持边界类型: vec2, vec2, float, sampler2D, vec3 return
-- 不支持或已删除: 删除 iChannel1 的 backbuffer feedback
-- 已近似或已替代: 将多 pass 运行时依赖替换为单 pass 近似
-- Alpha 处理: 已省略
-- Meta 情况: 已补全
-- 验证情况: PASS (static + Blender parser)
-````
-
-
-## 八、示例
-
-## 示例 1：Shadertoy `mainImage` 转节点函数
-
-### 原始形式
-
-```glsl
-void mainImage(out vec4 fragColor, in vec2 fragCoord)
-{
-  vec2 uv = fragCoord / iResolution.xy;
-  vec3 col = 0.5 + 0.5 * cos(iTime + uv.xyx + vec3(0.0, 2.0, 4.0));
-  fragColor = vec4(col, 1.0);
-}
-```
-
-### 转换后
-
-```text
-Function: shadertoy_color
-```
-
-```glsl
-vec4 shadertoy_color(vec2 frag_coord, vec2 resolution, float time)
-{
-  vec2 uv = frag_coord / resolution;
-  vec3 col = 0.5 + 0.5 * cos(time + uv.xyx + vec3(0.0, 2.0, 4.0));
-  return vec4(col, 1.0);
-}
-```
-
-
-## 示例 2：HLSL 片段函数转节点函数
-
-### 原始形式
-
-```hlsl
-float4 frag(v2f i) : SV_Target
-{
-    float2 uv = i.uv;
-    float wave = sin(_Time.y + uv.x * 10.0);
-    float3 col = lerp(float3(0.2, 0.4, 0.8), float3(1.0, 0.9, 0.2), saturate(wave));
-    return float4(col, 1.0);
-}
-```
-
-### 转换后
-
-```text
-Function: hlsl_wave_color
-```
-
-```glsl
-vec4 hlsl_wave_color(vec2 uv, float time)
-{
-  float wave = sin(time + uv.x * 10.0);
-  vec3 col = mix(vec3(0.2, 0.4, 0.8), vec3(1.0, 0.9, 0.2), clamp(wave, 0.0, 1.0));
-  return vec4(col, 1.0);
-}
-```
-
-
-## 示例 3：Unity 贴图采样逻辑转节点函数
-
-### 原始形式
-
-```hlsl
-sampler2D _MainTex;
-
-fixed4 frag(v2f i) : SV_Target
-{
-    fixed4 c = tex2D(_MainTex, i.uv);
-    return c;
-}
-```
-
-### 转换后
-
-```text
-Function: sample_main_tex
-```
-
-```glsl
 vec4 sample_main_tex(sampler2D tex, vec2 uv)
 {
   return texture(tex, uv);
 }
 ```
 
+tex 接 Image to Closure，uv 接纹理坐标；返回值的 W 保留 Alpha。
 
-## 示例 4：需要多个输出时的写法
-
-```text
-Function: split_mask_color
-```
+### 8.2 两个 Bundle 输入，返回值加两个 Bundle out
 
 ```glsl
-float split_mask_color(vec2 uv, out vec3 color)
+struct SurfaceData {
+  vec4 base_color;
+  vec2 uv;
+};
+
+struct LightingControls {
+  vec3 tint;
+  float gain;
+  mat2 uv_transform;
+};
+
+struct LightingResult {
+  vec4 color;
+  vec2 uv;
+};
+
+/* @glsl_meta v2
+surface: label="表面"
+surface.base_color: label="基础色" subtype=color default=vec4(0.8, 0.4, 0.2, 0.75)
+surface.uv: label="UV" default=vec2(0.25, 0.5)
+controls: label="控制"
+controls.tint: label="染色" subtype=color default=vec3(0.5, 1.0, 0.25)
+controls.gain: label="强度" default=0.8 min=0.0 max=2.0
+controls.uv_transform: label="UV 矩阵" default=mat2(1.0, 0.25, 0.5, 1.0)
+return: label="处理后表面"
+return.base_color: subtype=color
+original: label="原始表面"
+original.base_color: subtype=color
+report: label="计算结果"
+report.color: subtype=color
+*/
+SurfaceData shade_bundles(SurfaceData surface,
+                         LightingControls controls,
+                         out SurfaceData original,
+                         out LightingResult report)
 {
-  float mask = smoothstep(0.4, 0.6, uv.x);
-  color = vec3(uv, 1.0 - uv.x);
-  return mask;
+  original = surface;
+  SurfaceData result = surface;
+  result.base_color.rgb *= controls.tint * controls.gain;
+  result.uv = controls.uv_transform * surface.uv;
+  report.color = result.base_color;
+  report.uv = result.uv;
+  return result;
 }
 ```
 
+两个输入断开也有效，因为成员都有默认值。输出依次为处理后表面、原始表面和计算结果；Alpha 保持 0.75，默认 UV 结果为 `(0.5, 0.5625)`。
+矩阵列为 `(1.0,0.25)`、`(0.5,1.0)`；Bundle 字段键使用 `uv_transform.c0/c1`，不是普通矩阵插口的 C1/C2 显示名。
 
-## 示例 5：反向 `smoothstep` 和 `textureLod` 的改写
+### 8.3 按 Lightgroup ID 输出灯光 Bundle
 
-### 原始片段
-
-```glsl
-#define S(a, b, t) smoothstep(a, b, t)
-
-float mask = S(0.4, 0.0, d);
-vec3 col = textureLod(iChannel0, uv + n, focus).rgb;
-```
-
-### 转换思路
-
-- `S(0.4, 0.0, d)` 这种反向边界不要直接照搬
-- `textureLod` 如果原算法确实依赖显式 `LOD`，可以保留
-- 纹理通道仍然统一收敛成 `sampler2D tex`
-
-### 转换后
-
-```text
-Function: sample_blurred_mask
-```
+用于 Eevee 物体表面材质。返回当前列表第一盏匹配灯；需要选择唯一对象时给目标灯独立 ID，无匹配返回 valid=false。
 
 ```glsl
-float stable_smooth(float a, float b, float t)
+struct LightQuery {
+  int lightgroup_id;
+};
+
+struct LightBundle {
+  bool valid;
+  int type;
+  int lightgroup_id;
+  vec3 vector;
+  vec3 position;
+  vec3 direction;
+  float distance;
+  vec3 diffuse_color;
+  vec3 specular_color;
+  float attenuation;
+  float influence_radius;
+};
+
+/* @glsl_meta v2
+query: label="灯光选择"
+query.lightgroup_id: label="灯光组 ID" default=1 min=0
+return: label="灯光数据"
+return.diffuse_color: label="漫反射颜色" subtype=color
+return.specular_color: label="高光颜色" subtype=color
+*/
+LightBundle light_by_group(LightQuery query)
 {
-  float denom = b - a;
-  if (abs(denom) < 1e-5) {
-    return t < a ? 0.0 : 1.0;
+  LightBundle result;
+  result.valid = false;
+  result.type = GLSL_LIGHT_TYPE_INVALID;
+  result.lightgroup_id = query.lightgroup_id;
+  result.vector = vec3(0.0, 0.0, 1.0);
+  result.position = vec3(0.0);
+  result.direction = vec3(0.0);
+  result.distance = 0.0;
+  result.diffuse_color = vec3(0.0);
+  result.specular_color = vec3(0.0);
+  result.attenuation = 0.0;
+  result.influence_radius = 0.0;
+
+  int count = glsl_light_count();
+  for (int i = 0; i < count; i++) {
+    GLSLLight light = glsl_light_get(i);
+    if (!light.valid || light.lightgroup_id != query.lightgroup_id) {
+      continue;
+    }
+    result.valid = true;
+    result.type = light.type;
+    result.lightgroup_id = light.lightgroup_id;
+    result.vector = light.vector;
+    result.position = light.position;
+    result.direction = light.direction;
+    result.distance = light.distance;
+    result.diffuse_color = light.diffuse_color;
+    result.specular_color = light.specular_color;
+    result.attenuation = light.attenuation;
+    result.influence_radius = light.influence_radius;
+    break;
   }
-  float x = clamp((t - a) / denom, 0.0, 1.0);
-  return x * x * (3.0 - 2.0 * x);
-}
-
-vec3 sample_blurred_mask(vec2 uv, float d, float focus, sampler2D tex)
-{
-  float mask = stable_smooth(0.4, 0.0, d);
-  vec3 col = textureLod(tex, uv, focus).rgb;
-  return col * mask;
+  return result;
 }
 ```
 
+默认选择组 1。输出 Sync 后接 diffuse_color/specular_color，不要沿用旧包的 color/roughness 连接；Sync 保留旧字段，需要手动改接。
+Color 可直连材质 Surface，显示灯光颜色项；不会自动附加衰减、NdotL 或阴影，完整光照须按前节公式计算。
 
-## 示例 6：Shadertoy 上一帧反馈通道的处理
-
-### 原始片段
+### 8.4 普通参数的矩阵及 int/bool 表达式默认值
 
 ```glsl
-vec4 past = texture(iChannel1, q);
-if (condition) {
-  col = mix(col, past.rgb, 0.85);
+mat2 default_basis()
+{
+  return mat2(0.25, 0.5, 0.75, 1.0);
+}
+
+/* @glsl_meta v1
+basis: label="基矩阵" default=default_basis()
+mode: label="模式" default=(1+2)
+enabled: label="启用" default=(1.0<2.0)
+*/
+vec3 defaults_example(mat2 basis, int mode, bool enabled)
+{
+  float weight = enabled && mode == 3 ? 0.25 : 0.0;
+  return vec3(basis[0][1], basis[1][0], weight);
 }
 ```
 
-### 转换原则
+输入均断开时返回 `(0.5, 0.75, 0.25)`。表达式 default 不写入插口静态数值；任一矩阵列连线会关闭整个矩阵默认表达式。
 
-- 如果 `iChannel1` 本质上是上一帧结果或 `Buffer A/B/C/D` 输出，不要声称它能被当前节点“等价支持”
-- 可以：
-  - 删除这段反馈逻辑
-  - 改成普通静态贴图近似
-  - 或把它改成另一个普通 `sampler2D` 输入，但必须明确说明这是“近似替代”
+## 9. 验证与交付
 
-### 推荐说明方式
+从工作区根目录运行，**显式指定实际交付的 Blender**；验证器不会自动跟随最新 Release/mainfix，默认路径可能指向旧安装。测试使用隔离用户配置，不保存或重置用户工程。
+
+```powershell
+$nprBlender = 'release\blender-5.2.2-npr-port-win64-1c82f84cbebf-20261026-092514\blender.exe'
+python tools\validate_glsl_function.py 'temp\effect.glsl' --function sample_main_tex --blender $nprBlender --require-blender --json
+```
+
+必须得到 `valid=true`、`blender=READY`、`findings=[]` 才算静态与 Blender 接口解析通过。验证器的入口推断比节点 Auto 保守，多 helper 时用 --function 指定，同时核对节点 Auto。
+`gpu: not run (interface validation only)` 就是尚未做 GPU 检查；Bundle、默认表达式、Closure、sampler、Eevee helper 或特殊材质域需对应 GPU/render 用例。结构体不能只做静态检查。查看 node.error_message，不能把退出码零、READY、白色 sampler 回退或没有粉色当作渲染正确。
+
+交付前集中检查：
+
+1. 导出边界、Auto 候选、Meta 目标/版本合法；宏与 panel 闭合，无源码/资源残留依赖。
+2. 字段名称/类型/维度匹配，W、Alpha、矩阵列序和默认值触发规则正确；共享包/过期字段已处理。
+3. 纹理来源、坐标和材质域明确；删除、近似、反馈与透明度差异如实说明。
+4. 写明实际解析/GPU 测试和未验证范围，不把部分可用宣称为完全等价。
+
+结果说明保持简短，使用用户语言：
 
 ```text
-原 shader 中的 iChannel1 用作上一帧反馈。
-当前 GLSL Function 节点没有 Shadertoy backbuffer / multi-pass 运行时，
-因此这里删除该反馈混合，只保留核心单帧效果。
+入口：Auto -> 函数名，或显式锁定名称
+连接：必要输入 / 输出与 Alpha 处理
+差异：无，或具体删除/近似内容
+验证：PASS（列出静态、Blender parser、实际 GPU 测试）/ STATIC_ONLY / FAIL
 ```
 
-
-## 示例 7：`mat3x2` 三角网格投影写法的稳定改写
-
-### 原始片段
-
-```glsl
-mat3x2 tri = mat3x2(-1,0, 0.5,0.866, 0.5,-0.866);
-vec3 coord = (res * 0.5 - fragCoord) * tri / res.y * SCALE + SCALE;
-if (texture(u_tex, .71 - (tri * vox) / 8e2).r < .6) break;
-```
-
-### 转换思路
-
-- 这类写法同时混用了 `vec2 * mat3x2` 和 `mat3x2 * vec3`
-- 即使原环境允许，也不适合作为稳定转换模板直接保留
-- 更稳妥的方式是把“投影”和“反投影”拆成两个语义明确的 helper
-
-### 转换后
-
-```text
-Function: triangle_dda
-```
-
-```glsl
-vec3 triangle_project(vec2 p)
-{
-  return vec3(dot(p, vec2(-1.0, 0.0)),
-              dot(p, vec2(0.5, 0.866)),
-              dot(p, vec2(0.5, -0.866)));
-}
-
-vec2 triangle_unproject(vec3 v)
-{
-  return vec2(-v.x + 0.5 * v.y + 0.5 * v.z,
-              0.866 * (v.y - v.z));
-}
-```
-
-说明：
-
-- 这种改法会比把非方阵乘法原样照搬更清楚
-- 同时也更适合在转换报告里解释“哪些地方做了等价重写”
-
-
-## 九、推荐给 AI 的转换提示词
-
-如果你想让另一个 AI 帮你转换 shader，推荐直接给它下面这段要求：
-
-```text
-把下面这段 shader 代码转换为 Blender NPR Port 的 GLSL Function 节点可直接使用的 GLSL。
-
-必须遵守这些规则：
-1. 最终结果只能是普通 GLSL 函数源码，不要输出完整 shader 文件。
-2. 明确给出 Function 应设置的函数名。
-3. 只要导出函数有输入参数或 out 参数，代码里必须在导出函数正上方写完整的 `@glsl_meta v1`，不要让用户后续自己补。
-4. Meta 要覆盖每个输入参数和 out 参数：输入参数写 label/description 和必要的 default/min/max/subtype；sampler2D/sampler3D 只写 label/description/panel；out 参数只写 label；返回值不支持 Meta，必须在 Outputs 中说明。
-5. 参数超过 4 个或语义能自然分组时，使用一级 `@panel` / `@end_panel` 分组，panel 必须闭合。
-6. 把所有外部 uniform / 时间 / 分辨率 / 鼠标 / 贴图输入改成函数参数。
-7. 导出函数的参数和返回值只允许使用 float、int、bool、vec2、vec3、vec4、mat2、mat3、mat4、sampler2D、sampler3D，以及 out float/int/bool/vec2/vec3/vec4/mat2/mat3/mat4。
-8. 不允许使用 inout，也不允许 out sampler2D 或 out sampler3D。
-9. 如果来源是 HLSL 或 ShaderLab，去掉语义、Pass、Properties、pragma 和引擎包装层。
-10. 贴图采样优先改成 `texture(tex, uv)`；如果原算法明确依赖显式 `LOD`，可以保留为 `textureLod(tex, uv, lod)`，并说明这更适合配合 `Image to Closure`。
-11. 如果存在宏开关、死代码、未使用辅助函数、反向 `smoothstep`、运行时别名宏、共享可变全局状态、布尔到数值隐式转换、非方阵矩阵双向乘法这类不稳定写法，要收敛成稳定版本。
-12. 独立输出使用 out 参数；需要整体传递时使用具名纯数据 struct 返回或 out struct，并遵循 Bundle 与 Meta v2 合同。
-13. 如果原 shader 的 alpha 有意义，要明确说明是保留、拆分还是省略。
-14. 在结果最后明确说明转换是 success / partial / failed，并列出不支持、删除、近似、替代、alpha 处理、Meta 情况、验证情况。
-15. 在当前 NPR 工作区，完整候选必须通过 `python tools\validate_glsl_function.py <file> --function <name> --require-blender --json`，并满足 valid=true、blender=READY、findings=[]；涉及 Closure callback、sampler 重写、Eevee helper 或 Filter/World 行为时还要运行对应 GPU/render 回归。
-16. 输出格式为：
-   Function: ...
-   Inputs: ...
-   Outputs: ...
-   Meta Checklist: ...
-   Code: ```glsl ... ```
-   Conversion Result: ...
-   其中要再次明确 function_to_call: ...
-
-待转换代码如下：
-```
-
-
-## 十、结论
-
-对当前 `GLSL Function` 节点来说，最稳定的思路不是“把原 shader 原封不动搬过来”，而是：
-
-1. 抽取核心算法
-2. 去掉引擎壳
-3. 把外部依赖参数化
-4. 把接口压缩到节点支持的那几种边界类型
-5. 输出一个明确可选的导出函数，并给公开接口补全 Meta
-
-只要严格遵守这份文档，绝大多数数学类 GLSL、很多 HLSL 片段逻辑、以及相当一部分 ShaderLab 片段逻辑，都可以被稳定改写为当前 Blender 节点可直接使用的版本。
-## 附录：GLSL Function Meta 语法
-
-`GLSL Function` 节点支持从 GLSL 源码里的块注释读取少量 Meta 信息，用来描述输入参数在 Blender 节点界面中的默认值、范围、子类型和注释。
-
-这个 Meta 系统只负责节点 UI 语义，不改变 GLSL 函数逻辑本身。
-
-当前范围主要是：
-
-- 默认值
-- 最小值
-- 最大值
-- `int` 选择列表
-- 隐藏数值输入控件
-- socket subtype
-- socket 显示名
-- socket 注释 / tooltip
-- 一级折叠面板分组
-
-AI 生成最终 GLSL Function 代码时，Meta 的默认要求是“补全”，不是“可选”。除非导出函数没有任何输入参数和 `out` 参数，否则最终代码块里必须直接包含 `@glsl_meta v1`。
-
-### 1. 基本格式
-
-Meta 必须写在函数正上方的块注释里，并以 `@glsl_meta` 开头：
-
-```glsl
-/* @glsl_meta v1
-base_color: label="基础色" default=vec3(1.0) subtype=color description="Base color before stylization"
-strength: label="强度" default=0.5 min=0.0 max=1.0 subtype=factor description="Blend amount"
-tint: label="目标颜色" default=vec3(1.0, 0.8, 0.2) subtype=color description="Target tint color"
-*/
-vec3 stylize(vec3 base_color, float strength, vec3 tint)
-{
-  return mix(base_color, tint, strength);
-}
-```
-
-### 2. 作用规则
-
-Meta 只会作用到它正下方那个函数。
-
-也就是说：
-
-- 每个函数最多对应一块 Meta
-- Meta 块应该紧贴函数上方
-- Meta 块内部只写“参数名: 属性”
-- 不再需要也不再推荐写 `function some_name`
-- 不再需要也不再推荐写 `some_function.some_param`
-
-如果 `@glsl_meta` 后面不是紧接着一个函数定义，而是夹了别的顶层代码，当前实现会报错。
-
-#### 2.0 AI 补全清单
-
-当你生成或转换一个导出函数时，先按函数签名逐项检查 Meta：
-
-- `float` 调节项：写 `label`、`default`、`description`；能确定范围时写 `min/max`
-- `float` 的强度、混合、遮罩、阈值、柔和度、概率类参数：优先写 `subtype=factor`
-- `int` / `bool` 开关：写清楚 `label`、`default` 和 `description`；如果 `int` 是固定模式枚举，优先写 `items`
-- `int items` 下拉：默认不写 `show_label`，让控件只显示当前选项；当下拉项离开上下文会难以理解时写 `show_label=true`
-- `vec2` 坐标、偏移、比例：写 `label`、`default=vec2(...)` 和 `description`
-- `vec3` 颜色：写 `subtype=color`，并给出颜色默认值；需要 alpha 时用 `vec4`，它会拆成 `vec3 + float W`
-- `vec3` 方向、法线、位置：不要误标为颜色；用 `description` 写清楚空间语义；不要使用 `subtype=direction`，需要普通三轴输入时用 `subtype=xyz` 或省略 subtype
-- `sampler2D` / `sampler3D`：只写 `label` 和 `description`，必要时放进 `@panel`
-- `out` 参数：只写 `label`；不要写 `default/min/max/subtype/description`
-- 返回值：不写 Meta；在 `Outputs` 中说明返回类型和含义
-- 参数较多时：用一级 `@panel "分组名" closed=true/false` 分组，并用 `@end_panel` 闭合
-
-如果某个参数是内部常量更合适，就不要暴露成函数参数；一旦暴露成函数参数，就要给它写对应 Meta。
-
-布局建议：
-
-- 主要输入（颜色、UV、主强度、模式）放在默认区域或 `closed=false` 面板里
-- 高级调节、调试输出、很少改的阈值放进 `closed=true` 面板
-- 固定模式选择用 `int items`，不要用多个 bool 互斥开关
-- 需要连线驱动的模式选择仍然用普通函数 `int` 参数；需要编译期裁剪或让辅助函数看到的模式选择用 `@glsl_defines`
-- 一个面板里只有一个下拉时通常不需要 `show_label=true`；多个相邻下拉或没有清晰分组标题时再显示 label
-
-#### 2.1 推荐结构
-
-```glsl
-/* @glsl_meta v1
-base_color: label="基础色" default=vec3(1.0) subtype=color description="Input color"
-strength: label="强度" default=0.5 min=0.0 max=1.0 subtype=factor description="Blend amount"
-tint: label="目标颜色" default=vec3(1.0, 0.8, 0.2) subtype=color description="Target color"
-*/
-vec3 stylize(vec3 base_color, float strength, vec3 tint)
-{
-  return mix(base_color, tint, strength);
-}
-```
-
-这里的 `strength` 和 `tint` 会自动解释为正下方 `stylize` 的参数。
-
-#### 2.2 不再推荐的旧写法
-
-```glsl
-/* @glsl_meta v1
-stylize.strength: default=0.5
-stylize.tint: default=vec3(1.0, 0.8, 0.2)
-*/
-```
-
-这种旧写法现在不再推荐，建议改成“一函数一块 Meta，直接放在函数上方”。
-
-### 3. 当前支持的键
-
-#### 3.1 `default`
-
-- `float` 使用标量
-- `vec2/vec3/vec4` 使用对应构造器
-- `float/vec2/vec3/vec4` 也可以直接写 GLSL 表达式默认值
-- `mat2/mat3/mat4` 当前不支持 Meta 默认值；节点会生成按列拆分的输入插口
-- 当 `default=` 是表达式时，socket 未连接会使用这段表达式；一旦连线，就使用连线值
-- 当 `default=` 是表达式时，节点会自动隐藏这个输入的数值输入框，但保留 socket 本身
-- 表达式默认值可以引用同一份源码里的 top-level helper 函数，也可以直接调用 `glsl_position()`、`glsl_normal()`、`glsl_ambient_lighting()` 这类内置 helper
-
-示例：
-
-```glsl
-strength: default=0.5
-uv_scale: default=vec2(1.0, 1.0)
-tint: default=vec3(1.0, 0.8, 0.2)
-color_a: default=vec4(1.0, 0.5, 0.2, 1.0)
-```
-
-表达式默认值示例：
-
-```glsl
-position_ws: default=glsl_position()
-normal_ws: default=normalize(glsl_normal())
-ambient: default=glsl_ambient_lighting()
-```
-
-更完整的推荐写法：
-
-```glsl
-vec3 default_surface_color()
-{
-  return glsl_position() * 0.25 + vec3(0.5);
-}
-
-/* @glsl_meta v1
-surface_color: default=default_surface_color()
-*/
-vec4 emit_surface_color(vec3 surface_color)
-{
-  return vec4(surface_color, 1.0);
-}
-```
-
-如果表达式比较复杂，建议最外层包一层括号，这样在 Meta 行里更稳妥：
-
-```glsl
-mask: default=(smoothstep(0.2, 0.8, glsl_position().z))
-```
-
-#### 3.2 `min`
-
-用于设置输入 socket 的最小值。
-
-```glsl
-strength: min=0.0
-```
-
-#### 3.3 `max`
-
-用于设置输入 socket 的最大值。
-
-```glsl
-strength: max=1.0
-```
-
-#### 3.4 `items`
-
-用于给 `int` 输入参数声明固定选择列表。它只改变未连接时默认值的 UI 表现：socket 类型仍然是 `int`，仍然可以连线，函数调用也仍然传入整数。
-
-带 `items` 的下拉菜单默认只显示当前选项，不显示前置参数名；需要保留前置名称时写 `show_label=true`。
-
-```glsl
-/* @glsl_meta v1
-method: label="方法" default=1 items="0:Christensen-Burley;1:Random Walk;2:Random Walk Skin"
-*/
-vec4 subsurface_mode(vec4 color, int method)
-{
-  if (method == 2) {
-    return color * vec4(1.0, 0.9, 0.85, 1.0);
-  }
-  return color;
-}
-```
-
-规则：
-
-- 只允许用于 `int` 输入参数。
-- 格式固定为 `整数:显示名`，多个项用 `;` 分隔。
-- `default` 必须是整数字面量，并且必须等于列表中的某个值。
-- 列表值不能重复；显示名不能为空。
-- `items` 不能和 `min` / `max` 混用。需要连续范围时用普通整数输入框；需要固定模式时用 `items`。
-- `show_label=true|false` 只能和 `int items` 一起使用；省略时默认不显示下拉菜单前的参数名。
-- 显示名只影响 UI，不参与 GLSL 参数名、socket identifier 或函数调用。
-
-使用建议：
-
-- 当一个 `int` 参数只是固定算法/混合/采样模式时，用 `items`，不要让用户手输整数。
-- 当参数需要连续整数范围（例如采样数量、迭代次数）时，用普通 `min/max`，不要写 `items`。
-- 当模式值需要从其他节点连线控制时，用函数参数 `int items`；下拉只影响未连接时的默认值，连线后仍按 int socket 工作。
-- 当模式会改变编译期代码路径、需要影响辅助函数，或希望 wrapper 生成 `#define` 时，用 `@glsl_defines` 的 int `items`，不要把它伪装成函数参数。
-- 默认让下拉控件隐藏前置 label，使节点更紧凑；只有多个下拉靠在一起且标题不清楚时写 `show_label=true`。
-
-#### 3.5 `subtype`
-
-用于设置 Blender socket subtype。
-
-`float` 常用值：
-
-- `none`
-- `unsigned`
-- `percentage`
-- `factor`
-- `mass`
-- `angle`
-- `time`
-- `time_absolute`
-- `distance`
-- `wavelength`
-
-`vec2/vec3/vec4` 常用值：
-
-- `none`
-- `factor`
-- `percentage`
-- `translation`
-- `velocity`
-- `acceleration`
-- `euler`
-- `xyz`
-- `color`（`vec3` 会显示为颜色插口；`vec4` 可解析但仍会拆成 `vec3 + float W`）
-
-示例：
-
-```glsl
-strength: default=0.5 min=0.0 max=1.0 subtype=factor
-offset: default=vec3(0.0) subtype=translation
-normal_dir: default=vec3(0.0, 0.0, 1.0) subtype=xyz
-tint: default=vec3(1.0, 0.8, 0.2) subtype=color
-overlay: default=vec4(1.0, 0.8, 0.2, 0.5)
-```
-
-`direction` 虽然是 Blender 的向量 subtype，但它会在节点 UI 中显示成球形方向控件，不适合 GLSL Function 自动生成的方向、法线、视线、切线参数；这类参数应靠 `label` / `description` 写清楚坐标空间，并使用 `subtype=xyz` 或不写 subtype。
-
-#### 3.6 `hide_value`
-
-用于隐藏输入 socket 的数值输入框，但保留 socket 本身。
-
-这意味着：
-
-- 仍然可以连线
-- 仍然保留接口
-- 只是节点面板里不显示具体数值输入控件
-
-示例：
-
-```glsl
-strength: default=0.5 hide_value=true
-```
-
-当前支持的布尔写法：
-
-- `true` / `false`
-- `1` / `0`
-- `yes` / `no`
-- `on` / `off`
-
-#### 3.7 `label`
-
-用于给 socket 设置节点界面上的显示名。它只改变节点 UI 文本，不改变 GLSL 参数名，也不改变 socket identifier。
-
-这适合把必须保持合法 GLSL 标识符的参数名显示成中文或更易读的名称：
-
-```glsl
-base_color: label="基础色" default=vec4(1.0, 1.0, 1.0, 1.0)
-tex: label="贴图"
-out_color: label="输出色"
-```
-
-规则：
-
-- `label="..."` 支持空格和中文
-- 如果文本里需要写引号，使用 `\"`
-- 如果文本里需要写反斜杠，使用 `\\`
-- V1 只支持单行显示名，不支持跨行文本
-- `label` 不改变 socket identifier；例如参数 `base_color` 的输入仍然是 `In_base_color`
-- 输入参数都支持 `label`
-- `out` 参数只支持 `label`，不支持默认值、范围、隐藏值、subtype、description 或 panel
-- `sampler2D` / `sampler3D` 支持 `label`
-
-#### 3.8 `description`
-
-用于给输入 socket 写描述文本。这个文本会进入 socket declaration 的 `description`，在 Blender 节点 tooltip 中显示。
-
-推荐使用带引号的单行字符串：
-
-```glsl
-strength: default=0.5 min=0.0 max=1.0 subtype=factor description="Blend amount for the effect"
-tint: default=vec3(1.0, 0.8, 0.2) subtype=color description="Main tint color"
-tex: label="贴图" description="Source texture closure"
-```
-
-规则：
-
-- `description="..."` 支持空格
-- 如果文本里需要写引号，使用 `\"`
-- 如果文本里需要写反斜杠，使用 `\\`
-- V1 只支持单行描述，不支持跨行文本
-- `description` 只影响 UI，不改变 socket identifier、默认值、范围或 GLSL 函数调用方式
-- `sampler2D` / `sampler3D` 只支持 `label`、`description` 和 panel 分组，不支持 `default/min/max/hide_value/subtype`
-
-#### 3.9 `@panel` / `@end_panel`
-
-用于把大量输入参数分组到节点上的一级折叠面板里。面板只影响 UI 排列，不改变 socket identifier，也不改变 GLSL 函数调用方式。
-
-```glsl
-/* @glsl_meta v1
-base_color: label="基础色" default=vec3(1.0) subtype=color description="Base color before shading"
-
-@panel "Specular" closed=true
-specular: label="高光强度" default=0.5 min=0.0 max=1.0 subtype=factor description="Specular contribution"
-roughness: label="粗糙度" default=0.5 min=0.0 max=1.0 subtype=factor description="Microfacet roughness"
-anisotropy: label="各向异性" default=0.0 min=-1.0 max=1.0 description="Anisotropic highlight direction bias"
-@end_panel
-
-@panel "Thin Film" closed=false
-film_thickness: label="薄膜厚度" default=0.0 min=0.0 description="Thin-film thickness control"
-film_ior: label="薄膜 IOR" default=1.5 min=1.0 description="Thin-film index of refraction"
-@end_panel
-*/
-vec3 shader(
-  vec3 base_color,
-  float specular,
-  float roughness,
-  float anisotropy,
-  float film_thickness,
-  float film_ior)
-{
-  return base_color;
-}
-```
-
-规则：
-
-- `@panel "Name" closed=true|false` 开始一个面板
-- `closed` 省略时默认为 `true`
-- 面板名可以加引号；不带空格的名字可以不加引号
-- `@end_panel` 必须显式关闭当前面板
-- 面板内允许 `param:` 这种空属性行，表示只把参数放到当前面板，不改默认值或范围
-- V1 只支持一级面板，不支持嵌套
-- 重复 `@end_panel`、未关闭面板、嵌套 `@panel` 都会报 parse error
-
-### 4. 行为规则
-
-#### 4.1 默认值同步规则
-
-`default` 不会在每次 redraw 时反复覆盖用户手动修改的 socket 值。
-
-当前逻辑是：
-
-- 当 `default` 是 literal（例如 `0.5`、`vec3(...)`）时，Meta 第一次生效会把它写入 socket 默认值
-- 刷新后只要参数名和 socket identifier 没变，用户手动改过的 literal 默认值会保留
-- Meta 本身发生变化时，新出现的 socket 会使用新的声明默认值；已有同名 socket 不会被强制重置
-- 当 `default` 是表达式时，不会写入 RNA/socket 静态默认值
-- 表达式默认值只在 wrapper 运行时参与：未连接时用表达式，已连接时用连线值
-
-这意味着它更适合作为“函数作者建议值”，而不是强制锁死值。
-
-#### 4.2 `min/max/subtype/label/description` 的作用
-
-这些项属于 socket 声明的一部分，会直接影响 Blender 节点界面、socket 类型或 tooltip。
-
-例如：
-
-- `subtype=factor` 会让 float 输入变成 `NodeSocketFloatFactor`
-- `subtype=xyz` 会让 vector 输入变成 `NodeSocketVectorXYZ`
-- `vec3/vec4` 默认仍然是向量输入，不会自动变成颜色输入
-- `subtype=color` 会让 `vec3` 输入变成 `NodeSocketColor`
-- `vec3 + subtype=color` 进入 GLSL 函数时只使用 `rgb`
-- `vec4` 输入会拆成 `vec3 + float W`，进入 GLSL 函数时会重组为完整 `rgba`
-- `label="..."` 会显示为 socket 名称，不影响 GLSL 参数名、identifier 或计算
-- `description="..."` 会显示在 socket tooltip 中，不影响计算
-
-### 5. 当前限制
-
-当前版本有这些限制：
-
-- 除 `out` 参数的 `label` 以外，Meta 只支持输入参数
-- 不支持返回值 Meta
-- 不支持 `inout`
-- `sampler2D` / `sampler3D` 只支持 `label`、`description` 和 panel 分组，不支持默认值、范围、隐藏值或 subtype
-- `mat2/mat3/mat4` 边界参数的 Meta 只建议写 `label/description/panel`，不要写 `default/min/max/subtype`
-- 结构体成员 Meta 使用 `@glsl_meta v2` 的参数成员路径；数组边界仍不支持
-- panel 只支持一级，不支持嵌套
-- panel 必须显式 `@end_panel` 关闭
-- 表达式默认值当前只支持输入参数 `float / vec2 / vec3 / vec4`
-- 表达式默认值不要引用同函数的其他参数名；这类值在 wrapper 里不会自动展开成可见局部变量
-- 如果 Meta 指向了不存在的参数，会报错
-- 一个函数当前只支持一块 Meta
-
-### 6. 推荐写法
-
-```glsl
-/* @glsl_meta v1
-base_color: label="基础色" default=vec3(1.0) subtype=color description="Base color before dissolve"
-threshold: label="阈值" default=0.35 min=0.0 max=1.0 subtype=factor description="Mask cutoff"
-edge_width: label="边缘宽度" default=0.08 min=0.0 max=1.0 subtype=factor description="Soft edge width"
-edge_color: label="边缘颜色" default=vec3(1.0, 0.5, 0.1) subtype=color description="Edge highlight color"
-*/
-vec3 dissolve_mask(vec3 base_color, float threshold, float edge_width, vec3 edge_color)
-{
-  return base_color;
-}
-```
-
-### 7. 不推荐写法
-
-#### 7.1 旧的全局目标写法
-
-不要再写：
-
-```glsl
-/* @glsl_meta v1
-function stylize
-strength: default=0.5
-*/
-```
-
-也不要再写：
-
-```glsl
-/* @glsl_meta v1
-stylize.strength: default=0.5
-*/
-```
-
-现在更推荐也更稳定的方式，是把 Meta 直接放在函数正上方，并且块内只写参数名。
-
-#### 7.2 伪造 GLSL 形参默认值
-
-不要写：
-
-```glsl
-vec3 stylize(vec3 base_color, float strength = 0.5)
-```
-
-当前节点不会把这种写法当成 Blender 参数默认值系统。
-
-#### 7.3 给 `sampler2D` 写数值 Meta
-
-不要写：
-
-```glsl
-/* @glsl_meta v1
-tex: default=0.5
-*/
-vec4 sample_it(sampler2D tex, vec2 uv)
-{
-  return texture(tex, uv);
-}
-```
-
-`sampler2D` / `sampler3D` 可以通过 `Image to Closure` 或 `Closure Output` 接入来源；真正未连接时会在 GPU 编译阶段隐式采样不透明白色。这个行为不是 socket 或 Meta 默认值，不创建 Image，也不允许写 `@glsl_meta default=`；sampler 仍不支持默认值、范围、隐藏值或 subtype。
-
-可以写 `label`、`description`，也可以放进 panel：
-
-```glsl
-/* @glsl_meta v1
-@panel Texture closed=true
-tex: label="贴图" description="Texture closure used by texture(tex, uv)"
-uv: label="坐标" default=vec2(0.0) description="Texture coordinates"
-@end_panel
-*/
-vec4 sample_it(sampler2D tex, vec2 uv)
-{
-  return texture(tex, uv);
-}
-```
-
-#### 7.4 给不存在的参数写 Meta
-
-不要写：
-
-```glsl
-/* @glsl_meta v1
-missing_param: default=1.0
-*/
-vec3 stylize(vec3 base_color, float strength)
-{
-  return base_color;
-}
-```
-
-这会直接触发解析错误。
-
-### 8. 给 AI 的转换建议
-
-如果你是另一个 AI，要把外部 GLSL / HLSL / ShaderLab 片段转换成 `GLSL Function` 节点可用代码：
-
-- 默认必须给导出函数补全 `@glsl_meta v1`，除非导出函数没有任何输入参数和 `out` 参数
-- 必须把“建议默认值”写进 Meta，而不是只写在说明文字里
-- 必须把语义明确的参数范围写进 Meta，减少手动调节点的成本
-- 必须把 Blender 语义明确的参数标为合适 subtype
-- 必须给 `sampler2D`、坐标、颜色、强度、阈值、输出参数写清楚可读 label
-- 必须在输出前检查 Meta 是否只引用真实存在的函数参数或 `out` 参数
-- 不要把运行时资源、贴图选择、函数逻辑分支控制错误地塞进 Meta
-
-最稳妥的理解是：
-
-- GLSL 函数体负责算法
-- Meta 注释负责节点 UI 语义
-
-## 附录：GLSL Function Defines 语法
-
-`@glsl_defines` 用来声明编译期宏开关。它和 `@glsl_meta` 是两套独立信息：Meta 只描述函数参数和 socket UI，Defines 会生成独立的 `Defines` 面板，并在编译 wrapper 前写入 `#define`。
-
-基本写法：
-
-```glsl
-/* @glsl_defines v1 closed=true
-@define USE_RIM bool default=true label="Rim Lighting" description="Compile rim lighting branch"
-@define EFFECT_MODE int default=2 min=0 max=3 label="Effect Mode" description="Compile-time effect variant"
-@define METHOD int default=1 label="Method" items="0:Christensen-Burley;1:Random Walk;2:Random Walk Skin"
-*/
-```
-
-规则：
-
-- `@glsl_defines v1` 可以写成单独块，不需要紧贴某个函数。
-- 头部支持 `closed=true|false`，控制 `Defines` 面板首次出现时是否默认折叠；省略时默认为 `closed=false`。
-- `@define NAME bool default=true|false` 会显示为布尔开关；关闭时不会生成对应 `#define`。
-- `@define NAME int default=... min=... max=...` 会显示为整数输入，并生成 `#define NAME value`。
-- `@define NAME int default=... items="0:Label;1:Other"` 会显示为下拉菜单，并生成 `#define NAME value`。
-- 带 `items` 的宏下拉菜单默认只显示当前选项；需要保留前置宏名时写 `show_label=true`。
-- `items` 只允许用于 `int` 宏，不能用于 `bool` 宏，也不能和 `min/max` 混用。
-- `items` 的值不能重复，显示名不能为空；`default` 必须是列表中的某个整数值。
-- `show_label=true|false` 只能和 `int items` 一起使用。
-- 宏名必须是合法 GLSL 标识符，最长 63 个字符；更长的宏名会报 parse error，避免保存到节点 DNA 时被截断。
-- `label` 和 `description` 只影响面板显示，不改变宏名；`description` 会显示在对应宏控件下方。
-- 同一份源码可以有多个 `@glsl_defines` 块，但宏名不能重复；如果多个块都写了 `closed`，取值必须一致。
-- 宏名是整份 GLSL 源码级别的编译开关，辅助函数也能通过 `#ifdef` / `#if` 看到这些宏，不是只作用于导出函数。
-- `#ifdef` / `#if` 可以放在函数体或辅助函数体内部，用来切换局部逻辑。
-- 顶层 GLSL 函数、全局变量、struct 等声明不能包在 `#ifdef` / `#if` 里；节点解析器需要稳定的顶层 API。需要可选 helper 时，把 helper 保持为顶层固定函数，把条件分支移进函数体。
-- 顶层只包含预处理器指令的条件块可以保留，例如按宏切换 `#define` 常量。
-
-使用和布局建议：
-
-- 影响 shader 编译结构、helper 函数、采样路径或较重效果开关的选项，优先放进 `@glsl_defines`。
-- 需要被其他节点连线驱动、每个像素可能变化的值，仍然用普通函数参数，不要放进宏。
-- `Defines` 面板默认可以 `closed=true`，适合放编译期开关、性能档位、调试模式；如果它是日常必须调的主模式，可以写 `closed=false`。
-- 互斥编译模式用 `int items` 下拉，不要暴露多个互相冲突的 bool 宏。
-- 宏下拉默认隐藏前置 label，让面板更紧凑；多个下拉连续出现或没有清楚分组语义时，再给该宏写 `show_label=true`。
-- `label` 应写给用户看的短名称；`description` 用来说明性能、视觉影响或编译期开关的代价，不要把这些解释写进宏名。
-
-示例：
-
-```glsl
-/* @glsl_defines v1 closed=true
-@define USE_RIM bool default=true label="Rim" description="Compile rim highlight"
-@define MODE int default=1 items="0:Base;1:Half;2:Boost" label="Mode" description="Compile-time branch mode"
-*/
-
-vec3 rim_helper(vec3 color)
-{
-#ifdef USE_RIM
-  color += vec3(0.1);
-#endif
-  return color;
-}
-
-vec3 stylize_with_defines(vec3 color)
-{
-#if MODE == 2
-  color *= 0.5;
-#endif
-  return rim_helper(color);
-}
-```
+语法权威：[Function 源码](../source/blender/nodes/shader/nodes/node_shader_glsl_function.cc)、[灯光 helper](../source/blender/gpu/shaders/material/gpu_shader_material_glsl_light_access.glsl)、[Expression 源码](../source/blender/nodes/shader/nodes/node_shader_script_expression.cc)。
+回归入口：`tests/python/bl_node_glsl_function.py`、`tests/python/npr/test_glsl_function_{auto_entry,bundle,bundle_ui}.py`。
