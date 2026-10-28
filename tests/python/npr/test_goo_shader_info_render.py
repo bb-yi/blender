@@ -173,6 +173,61 @@ def make_light():
     return light
 
 
+def find_node(tree, bl_idname):
+    active = None
+    first = None
+    for node in tree.nodes:
+        if node.bl_idname != bl_idname:
+            continue
+        first = first or node
+        if getattr(node, "is_active_output", False):
+            active = node
+    return active or first
+
+
+def clear_socket_links(tree, socket):
+    for link in list(socket.links):
+        tree.links.remove(link)
+
+
+def configure_light_shader_output(light_object, color, intensity=1.0, attenuation=1.0):
+    light_data = light_object.data
+    light_data.use_nodes = True
+    tree = light_data.node_tree
+    assert tree is not None, "Expected light node tree to exist"
+    output = find_node(tree, "ShaderNodeEeveeLightShaderOutput")
+    assert output is not None, "Expected Eevee Light Shader Output node"
+
+    for socket_name in ("Color", "Intensity", "Attenuation"):
+        clear_socket_links(tree, output.inputs[socket_name])
+    output.inputs["Color"].default_value = color
+    output.inputs["Intensity"].default_value = intensity
+    output.inputs["Attenuation"].default_value = attenuation
+    if hasattr(output, "range_scale"):
+        output.range_scale = 10.0
+    bpy.context.view_layer.update()
+
+
+def configure_light_shader_output_default_attenuation(light_object, color):
+    light_data = light_object.data
+    light_data.use_nodes = True
+    tree = light_data.node_tree
+    assert tree is not None, "Expected light node tree to exist"
+    output = find_node(tree, "ShaderNodeEeveeLightShaderOutput")
+    info = find_node(tree, "ShaderNodeEeveeLightShaderInfo")
+    assert output is not None, "Expected Eevee Light Shader Output node"
+    assert info is not None, "Expected Eevee Light Shader Info node"
+
+    for socket_name in ("Color", "Intensity", "Attenuation"):
+        clear_socket_links(tree, output.inputs[socket_name])
+    output.inputs["Color"].default_value = color
+    output.inputs["Intensity"].default_value = 1.0
+    if hasattr(output, "range_scale"):
+        output.range_scale = 10.0
+    tree.links.new(info.outputs["Default Attenuation"], output.inputs["Attenuation"])
+    bpy.context.view_layer.update()
+
+
 def make_centered_point_light():
     light_data = bpy.data.lights.new("ShaderInfoPointCentered", type="POINT")
     light_data.energy = 5000.0
@@ -290,6 +345,44 @@ def assert_diffuse_response():
 
     assert lit[0] > unlit[0] + 0.2, f"Diffuse shading should react to light, got lit={lit} unlit={unlit}"
     assert lit[0] > 0.2, f"Diffuse shading should not stay black under direct light, got {lit}"
+
+
+def assert_light_shader_output_response():
+    build_scene("Diffuse Shading", with_light=True, with_blocker=False)
+    configure_light_shader_output(bpy.data.objects["ShaderInfoPoint"], (1.0, 0.0, 0.0, 1.0))
+    red_pixels, red_width, red_height = render_image()
+    red = sample_world_point(red_pixels, red_width, red_height, 0.0, 0.0)
+
+    build_scene("Diffuse Shading", with_light=True, with_blocker=False)
+    configure_light_shader_output(
+        bpy.data.objects["ShaderInfoPoint"], (1.0, 1.0, 1.0, 1.0), attenuation=0.2
+    )
+    dim_pixels, dim_width, dim_height = render_image()
+    dim = sample_world_point(dim_pixels, dim_width, dim_height, 0.0, 0.0)
+
+    assert red[0] > 1.0e-5, f"Shader Info should receive custom light color, got {red}"
+    assert red[1] < red[0] * 0.2 + 1.0e-6 and red[2] < red[0] * 0.2 + 1.0e-6, (
+        f"Shader Info should apply custom light color to diffuse output, got {red}"
+    )
+    assert dim[0] < red[0] * 0.45, (
+        f"Shader Info should apply custom light attenuation, got red={red} dim={dim}"
+    )
+
+
+def assert_light_shader_output_texture_response():
+    build_scene("Diffuse Shading", with_light=True, with_blocker=False)
+    configure_light_shader_output_default_attenuation(
+        bpy.data.objects["ShaderInfoPoint"], (1.0, 0.0, 0.0, 1.0)
+    )
+    pixels, width, height = render_image()
+    color = sample_world_point(pixels, width, height, 0.0, 0.0)
+
+    assert color[0] > 1.0e-7, (
+        f"Shader Info should read point-dependent Light Shader Output, got {color}"
+    )
+    assert color[1] < color[0] * 0.2 + 1.0e-6 and color[2] < color[0] * 0.2 + 1.0e-6, (
+        f"Shader Info should apply point-dependent custom color, got {color}"
+    )
 
 
 def assert_unshadowed_response(output_name, min_value=0.2, tolerance=0.05):
@@ -566,6 +659,8 @@ def assert_blinn_phong_point_gradient_on_plane():
 assert hasattr(bpy.types, "ShaderNodeShaderInfo"), "ShaderNodeShaderInfo is not registered"
 
 assert_diffuse_response()
+assert_light_shader_output_response()
+assert_light_shader_output_texture_response()
 assert_diffuse_sun_gradient_on_sphere()
 assert_diffuse_point_gradient_on_plane()
 assert_unshadowed_response("Diffuse Shading", min_value=0.2, tolerance=0.05)

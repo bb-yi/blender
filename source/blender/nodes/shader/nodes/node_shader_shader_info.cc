@@ -77,7 +77,12 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
   NodeShaderShaderInfo *storage = static_cast<NodeShaderShaderInfo *>(node->storage);
   const float lightgroup_id_value = float(storage != nullptr ? max_ii(storage->lightgroup_id, 0) : 0);
 
-  GPU_material_flag_set(mat, GPU_MATFLAG_DIFFUSE | GPU_MATFLAG_SHADER_INFO);
+  /* Shader Info evaluates the same per-light custom color/attenuation cache used by GLSL
+   * Function's GLSLLight helpers. Keep the existing light-access create-info path enabled so
+   * ordinary Deferred materials receive LIGHT_SHADER_TEXTURE_EVAL and its front-layer resources. */
+  GPU_material_flag_set(mat,
+                        GPU_MATFLAG_DIFFUSE | GPU_MATFLAG_SHADER_INFO |
+                            GPU_MATFLAG_GLSL_LIGHT_ACCESS);
   if (out[5].hasoutput || out[6].hasoutput) {
     GPU_material_shader_info_shadow_classification_set(mat);
   }
