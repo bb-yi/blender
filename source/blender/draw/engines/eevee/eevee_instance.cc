@@ -1001,6 +1001,31 @@ namespace blender::eevee
       }
     }
 
+    /* Render Texture snapshots are exported directly, without main-camera post effects. */
+    for (const SceneRenderTexture *render_texture =
+             static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first);
+         render_texture;
+         render_texture = render_texture->next)
+    {
+      if (!render_texture->use_compositor_output) {
+        continue;
+      }
+      const std::string name = BKE_scene_render_texture_pass_name(*render_texture);
+      RenderPass *rp = RE_pass_find_by_name(render_layer, name.c_str(), view_name);
+      if (!rp) {
+        continue;
+      }
+      const double start = record_readbacks ? BLI_time_now_seconds() : 0.0;
+      if (float *result = render_textures.read_pass(
+              *render_texture, int2(rp->rectx, rp->recty), rp->channels))
+      {
+        record_readback(TelemetryPassReadbackType::RenderPass, name.c_str(), rp, start);
+        BLI_mutex_lock(&render->update_render_passes_mutex);
+        RE_pass_set_buffer_data(rp, result);
+        BLI_mutex_unlock(&render->update_render_passes_mutex);
+      }
+    }
+
     /* Generated native camera post-FX outputs. */
     for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs)
     {
@@ -1252,6 +1277,7 @@ namespace blender::eevee
     if (is_viewport_compositor_enabled)
     {
       this->film.write_viewport_compositor_passes();
+      this->render_textures.write_viewport_compositor_passes();
     }
 
     /* Do not request redraw during viewport animation to lock the frame-rate to the animation
@@ -1317,6 +1343,7 @@ namespace blender::eevee
     if (is_viewport_compositor_enabled)
     {
       this->film.write_viewport_compositor_passes();
+      this->render_textures.write_viewport_compositor_passes();
     }
   }
 
@@ -1352,6 +1379,30 @@ namespace blender::eevee
   void Instance::update_passes(RenderEngine* engine, Scene* scene, ViewLayer* view_layer)
   {
     RE_engine_register_pass(engine, scene, view_layer, RE_PASSNAME_COMBINED, 4, "RGBA", SOCK_RGBA);
+    int enabled_render_textures = 0;
+    for (const SceneRenderTexture *render_texture =
+             static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first);
+         render_texture;
+         render_texture = render_texture->next)
+    {
+      if (!render_texture->enabled || !render_texture->camera) {
+        continue;
+      }
+      if (enabled_render_textures++ == RENDER_TEXTURE_SLOT_MAX) {
+        break;
+      }
+      if (render_texture->use_compositor_output) {
+        const std::string name = BKE_scene_render_texture_pass_name(*render_texture);
+        const bool value = BKE_scene_render_texture_pass_is_value(*render_texture);
+        RE_engine_register_pass(engine,
+                                scene,
+                                view_layer,
+                                name.c_str(),
+                                value ? 1 : 4,
+                                value ? "X" : "RGBA",
+                                value ? SOCK_FLOAT : SOCK_RGBA);
+      }
+    }
     if (view_layer->eevee.render_passes & EEVEE_RENDER_PASS_PRE_FX) {
       RE_engine_register_pass(engine, scene, view_layer, pre_fx_pass_name, 4, "RGBA", SOCK_RGBA);
     }

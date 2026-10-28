@@ -2419,6 +2419,15 @@ static void rna_SceneEEVEE_shadow_resolution_update(Main * /*bmain*/,
 static void rna_SceneEEVEE_render_texture_tag_update(Scene *scene)
 {
   DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+  RenderEngine *engine = RE_engine_create(RE_engines_find(scene->r.engine));
+  if (engine) {
+    for (ViewLayer &view_layer : scene->view_layers) {
+      BKE_view_layer_verify_aov(engine, scene, &view_layer);
+    }
+    RE_engine_free(engine);
+  }
+  BKE_ntree_update_tag_id_changed(G_MAIN, &scene->id);
+  BKE_main_ensure_invariants(*G_MAIN);
   WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
 }
 
@@ -9370,6 +9379,15 @@ static void rna_def_scene_render_texture(BlenderRNA *brna)
   RNA_def_property_enum_sdna(prop, nullptr, "format");
   RNA_def_property_enum_items(prop, render_texture_format_items);
   RNA_def_property_ui_text(prop, "Format", "Storage format used by this render texture");
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");
+
+  prop = RNA_def_property(srna, "use_compositor_output", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "use_compositor_output", 1);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop,
+                           "Output to Compositor",
+                           "Export this capture as a Render Layers pass at the main image size");
   RNA_def_property_update(
       prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");
 }

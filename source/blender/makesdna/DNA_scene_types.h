@@ -2720,7 +2720,8 @@ struct SceneRenderTexture {
   char update_mode;
   char format;
   int manual_update;
-  char _pad[4];
+  char use_compositor_output;
+  char _pad[3];
 };
 
 struct SceneFilterMaterial {

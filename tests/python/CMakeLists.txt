@@ -907,6 +907,7 @@ if(WITH_GPU_RENDER_TESTS)
     eevee_resource_lifetime
     render_texture_updates
     render_texture_performance
+    render_texture_layers
     vulkan_failure_recovery
   )
   foreach(backend IN ITEMS opengl vulkan)

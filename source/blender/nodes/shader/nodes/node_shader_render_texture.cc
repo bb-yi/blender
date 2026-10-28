@@ -24,7 +24,12 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Float>("Alpha"_ustr);
   b.add_default_layout();
 
-  b.add_input<decl::Vector>("Vector"_ustr).hide_value();
+  b.add_input<decl::Vector>("Vector"_ustr)
+      .hide_value()
+      .description(
+          "Texture coordinates in the 0 to 1 range. Unconnected uses capture camera projection "
+          "(black outside the image). Connect Texture Coordinate UV to map onto a mesh, or "
+          "Window in a Filter Material");
 
   PanelDeclarationBuilder &camera_panel = b.add_panel("Camera"_ustr).default_closed(true);
   camera_panel.add_output<decl::Vector>("Camera Position"_ustr)
@@ -40,11 +45,21 @@ static void node_declare(NodeDeclarationBuilder &b)
 static void node_shader_buts(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
   layout.prop(ptr, "render_texture", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  const bNode &node = *static_cast<bNode *>(ptr->data);
+  const bNodeSocket *vector = bke::node_find_socket(node, SOCK_IN, "Vector"_ustr);
+  if (vector && !(vector->flag & SOCK_IS_LINKED)) {
+    layout.label(IFACE_("Camera Projection"), ICON_INFO);
+  }
 }
 
 static void node_shader_init_render_texture(bNodeTree * /*ntree*/, bNode *node)
 {
   node->custom1 = -1;
+}
+
+static bool node_add_ui_poll(const bContext *C)
+{
+  return object_eevee_shader_nodes_poll(C) || filter_eevee_shader_nodes_poll(C);
 }
 
 static int node_shader_gpu_render_texture(GPUMaterial *mat,
@@ -93,7 +108,7 @@ void register_node_type_sh_render_texture()
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts;
   ntype.initfunc = file_ns::node_shader_init_render_texture;
-  ntype.add_ui_poll = object_eevee_shader_nodes_poll;
+  ntype.add_ui_poll = file_ns::node_add_ui_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_render_texture;
 
   bke::node_register_type(ntype);

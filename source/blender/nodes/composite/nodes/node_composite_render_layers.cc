@@ -65,11 +65,11 @@ static BaseSocketDeclarationBuilder &declare_existing_output(NodeDeclarationBuil
 {
   if (output->type == SOCK_VECTOR) {
     const int dimensions = output->default_value_typed<bNodeSocketValueVector>()->dimensions;
-    return b.add_output<decl::Vector>(output->identifier_ustr())
+    return b.add_output<decl::Vector>(UString(output->name), output->identifier_ustr())
         .dimensions(dimensions)
         .structure_type(StructureType::Dynamic);
   }
-  return b.add_output(output->type, output->identifier_ustr())
+  return b.add_output(output->type, UString(output->name), output->identifier_ustr())
       .structure_type(StructureType::Dynamic);
 }
 
@@ -87,7 +87,7 @@ static void declare_existing(NodeDeclarationBuilder &b)
 
 /* Declares an output that matches the type of the given pass. */
 static void declare_pass_callback(void *user_data,
-                                  Scene * /*scene*/,
+                                  Scene *scene,
                                   ViewLayer * /*view_layer*/,
                                   const char *pass_name,
                                   int channels_count,
@@ -97,15 +97,31 @@ static void declare_pass_callback(void *user_data,
   NodeDeclarationBuilder &b = *static_cast<NodeDeclarationBuilder *>(user_data);
 
   /* The combined pass is aliased as Image. */
-  const UString name = StringRef(pass_name) == RE_PASSNAME_COMBINED ? "Image"_ustr :
-                                                                      UString(pass_name);
+  UString name = StringRef(pass_name) == RE_PASSNAME_COMBINED ? "Image"_ustr : UString(pass_name);
+  if (StringRef(scene->r.engine) == RE_engine_id_BLENDER_EEVEE) {
+    for (const SceneRenderTexture *render_texture =
+             static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first);
+         render_texture;
+         render_texture = render_texture->next)
+    {
+      if (render_texture->enabled && render_texture->camera &&
+          render_texture->use_compositor_output &&
+          BKE_scene_render_texture_pass_name(*render_texture) == pass_name)
+      {
+        name = UString(std::string("RT: ") + render_texture->name);
+        break;
+      }
+    }
+  }
+  const UString identifier = StringRef(pass_name) == RE_PASSNAME_COMBINED ? "Image"_ustr :
+                                                                            UString(pass_name);
   if (socket_type == SOCK_VECTOR) {
-    b.add_output<decl::Vector>(UString(name))
+    b.add_output<decl::Vector>(name, identifier)
         .dimensions(channels_count)
         .structure_type(StructureType::Dynamic);
   }
   else {
-    b.add_output(socket_type, name).structure_type(StructureType::Dynamic);
+    b.add_output(socket_type, name, identifier).structure_type(StructureType::Dynamic);
   }
 
   /* The Alpha pass is generated based on the combined pass. */

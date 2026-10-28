@@ -118,6 +118,7 @@ def draw_eevee_render_textures(layout, context):
         row.enabled = render_texture.enabled and render_texture.camera is not None
         row.operator("scene.eevee_render_texture_update", icon='FILE_REFRESH')
     col.prop(render_texture, "format")
+    col.prop(render_texture, "use_compositor_output")
 
 
 class SCENE_OT_eevee_render_texture_update(Operator):

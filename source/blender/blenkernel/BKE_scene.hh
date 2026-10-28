@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
+#include <string>
+
 /** \file
  * \ingroup bke
  */
@@ -26,6 +28,7 @@ struct Object;
 struct RenderData;
 struct Scene;
 struct SceneRenderView;
+struct SceneRenderTexture;
 struct ToolSettings;
 struct TransformOrientation;
 struct TransformOrientationSlot;
@@ -354,5 +357,9 @@ TransformOrientation *BKE_scene_transform_orientation_find(const Scene *scene, i
  */
 int BKE_scene_transform_orientation_get_index(const Scene *scene,
                                               const TransformOrientation *orientation);
+
+/** Stable Render Result pass identifier, independent of the entry's name or list position. */
+std::string BKE_scene_render_texture_pass_name(const SceneRenderTexture &render_texture);
+bool BKE_scene_render_texture_pass_is_value(const SceneRenderTexture &render_texture);
 
 }  // namespace blender

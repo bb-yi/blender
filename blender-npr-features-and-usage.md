@@ -90,7 +90,7 @@
 
 `Render Textures` 是场景级的 Eevee 额外渲染纹理系统。
 
-它允许场景预先维护最多 `4` 个 Render Texture 槽位，每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质中通过 `Render Texture` 节点采样。
+它允许场景预先维护最多 `4` 个 Render Texture 槽位，每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质或 Filter Material 中通过 `Render Texture` 节点采样，也可直接输出到合成器。
 
 #### 面板入口
 
@@ -123,7 +123,7 @@
 1. 打开 `Scene Properties > Render Textures`。
 2. 新建一个 `Render Texture` 条目。
 3. 选择 `Source`、`Camera`、分辨率、刷新模式和格式。
-4. 在普通物体材质里添加 `Add > Texture > Render Texture` 节点。
+4. 在普通物体材质或 Filter Material 中添加 `Add > Texture > Render Texture` 节点。
 5. 在节点面板中选择对应的 `Render Texture` 条目。
 6. 使用节点输出的 `Color` / `Alpha` 参与后续材质计算。
 
@@ -133,9 +133,11 @@
 
 捕获缓存属于当前渲染实例。关闭并重新创建视口渲染实例，或开始一帧独立的最终渲染时，会重新生成初始图像。
 
-仅被当前材质、World、灯光着色器或活动 Filter Pass 引用的条目参与捕获；移除引用会回收其全尺寸图像和光追历史。没有 Render Texture 反馈依赖时，同相机、同尺寸且不需要独立光追历史的待刷新条目可以复用一次渲染，分别提取各自输出和格式。Depth/Normal 在材质不依赖光照、场景颜色或模板状态时使用轻量路径；需要这些输入时保留完整捕获路径。Manual 缓存随条目 UID 保留，其他条目的启停、删除、插入或列表重排不会触发其刷新。
+仅被当前材质、World、灯光着色器、活动 Filter Pass 引用，或开启 `Output to Compositor` 的条目参与捕获；移除全部引用并关闭合成输出后会回收其全尺寸图像和光追历史。没有 Render Texture 反馈依赖时，同相机、同尺寸且不需要独立光追历史的待刷新条目可以复用一次渲染，分别提取各自输出和格式。Depth/Normal 在材质不依赖光照、场景颜色或模板状态时使用轻量路径；需要这些输入时保留完整捕获路径。Manual 缓存随条目 UID 保留，其他条目的启停、删除、插入或列表重排不会触发其刷新。
 
 没有捕获材质读取条目时，仅保留一张全尺寸输出图；引入反馈后自动恢复历史图，并保留已有 Manual 快照。同尺寸捕获复用临时缓冲，缓存数量受启用条目数限制，停用或移除引用后回收。Normal 轻量捕获只准备探针资源绑定，不额外渲染平面探针。完整管线回退按各捕获视图的可见材质判断；World、灯光以及变形或边界不确定的对象仍使用保守回退。自适应细分提交预算同时覆盖主相机和全部启用的捕获相机。
+
+开启条目的 `Output to Compositor` 后，合成器 `Render Layers` 节点出现 `RT: 条目名称` 输出，无需中转材质或 AOV。Color 输出 RGBA（Alpha 为不透明度），Depth 与 R16F/R32F 输出数值，RGBA 格式的 Normal 保持原有 RGB 编码。导出按主图分辨率和渲染边界适配，不改变原捕获尺寸，也不叠加主相机的景深或运动模糊。通道按 UID 绑定，重命名和重排保留连线；默认关闭导出。Filter 材质中需将 `Texture Coordinate > Window` 连接到 Render Texture 的 `Vector`，按全屏坐标采样。
 
 ### 2. Filter Materials
 
@@ -1138,6 +1140,14 @@ vec4 pbr_lit(vec3 base_color,
 
 - 输入：`Vector`
 - 输出：`Color`、`Alpha`
+
+#### 坐标与刷新
+
+`Vector` 留空时使用捕获相机投射，节点会显示 `Camera Projection`。采样位置来自物体表面的世界坐标；超出捕获相机画面的部分为黑色。它不会自动把整张捕获图铺到物体上，因此移动显示平面可能只看到局部色块。
+
+要把平面当作显示屏，连接 `Texture Coordinate > UV → Render Texture > Vector`，并确保网格有 UV。`Color` 可以直接连接 `Material Output > Surface`，也可接到 Emission 的 Color。Filter Material 使用 `Texture Coordinate > Window → Vector`。
+
+`Every Frame` 会在时间线或场景改变后刷新，`Every Sample` 在每个渲染样本捕获；`Manual` 保留已有图像，需显式请求更新。若显示物体也出现在捕获相机里，会读取上一张捕获作为反馈，检查画面时应先让显示物体位于捕获画面外。
 
 ### Screenspace Info
 

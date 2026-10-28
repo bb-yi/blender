@@ -462,6 +462,8 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        RENDER_TEXTURE_EXTRACT_RGBA32F,
                                        RENDER_TEXTURE_EXTRACT_R16F,
                                        RENDER_TEXTURE_EXTRACT_R32F,
+                                       RENDER_TEXTURE_EXPORT_COLOR,
+                                       RENDER_TEXTURE_EXPORT_VALUE,
                                        NATIVE_POSTFX_OUTPUT_EXTRACT,
                                        NATIVE_POSTFX_OUTPUT_PACK_COLOR,
                                        NATIVE_POSTFX_OUTPUT_PACK_VALUE,
@@ -896,6 +898,10 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_render_texture_extract_r16f";
     case RENDER_TEXTURE_EXTRACT_R32F:
       return "eevee_render_texture_extract_r32f";
+    case RENDER_TEXTURE_EXPORT_COLOR:
+      return "eevee_render_texture_export_color";
+    case RENDER_TEXTURE_EXPORT_VALUE:
+      return "eevee_render_texture_export_value";
     case LIGHTPROBE_IRRADIANCE_BOUNDS:
       return "eevee_lightprobe_volume_bounds";
     case LIGHTPROBE_IRRADIANCE_OFFSET:

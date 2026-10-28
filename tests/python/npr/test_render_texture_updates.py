@@ -177,6 +177,150 @@ class Viewport:
         self.buffer.free()
 
 
+def material_display(mode='EVERY_FRAME'):
+    """A separate display must sample UVs independently of its world position."""
+    s, _, emission = scene()
+    s.eevee.use_shadows = s.eevee.use_raytracing = s.eevee.use_outline = False
+    source = bpy.context.object
+    emission.inputs['Color'].default_value = (.2, .4, .6, 1)
+    camera = s.camera
+    main = bpy.data.objects.new('Display camera', camera.data.copy())
+    s.collection.objects.link(main)
+    main.location = (6, 0, 3)
+    s.camera = main
+    rt = capture(s, mode=mode, camera=camera, size=(128, 128))
+    bpy.ops.mesh.primitive_plane_add(size=2, location=(6, 0, 0))
+    display = bpy.context.object
+    material = bpy.data.materials.new('Render Texture directly to Surface')
+    material.use_nodes = True
+    display.data.materials.append(material)
+    tree = material.node_tree
+    tree.nodes.clear()
+    output = tree.nodes.new('ShaderNodeOutputMaterial')
+    node = tree.nodes.new('ShaderNodeRenderTexture')
+    node.render_texture = f'RENDER_TEXTURE_{rt.uid}'
+    tree.links.new(node.outputs['Color'], output.inputs['Surface'])
+    coordinates = tree.nodes.new('ShaderNodeTexCoord')
+    return s, emission, source, display, rt, tree, node, coordinates
+
+
+def material_coordinates():
+    s, _, _, display, _, tree, node, coordinates = material_display()
+    viewport = Viewport()
+    records = {}
+    try:
+        # With no Vector link, the display is outside the capture frustum: black is expected.
+        near(viewport.draw(), [0, 0, 0])
+        tree.links.new(coordinates.outputs['UV'], node.inputs['Vector'])
+        near(viewport.draw(), [.2, .4, .6])
+        # A spatially distinct right half detects missing UV attributes or constant UVs.
+        bpy.ops.mesh.primitive_plane_add(size=2, location=(.5, 0, .01))
+        half = bpy.context.object
+        half.scale = (.5, 2, 1)
+        material = bpy.data.materials.new('Right half')
+        material.use_nodes = True
+        half.data.materials.append(material)
+        material.node_tree.nodes.clear()
+        emit = material.node_tree.nodes.new('ShaderNodeEmission')
+        emit.inputs['Color'].default_value = (.6, .1, .2, 1)
+        out = material.node_tree.nodes.new('ShaderNodeOutputMaterial')
+        material.node_tree.links.new(emit.outputs[0], out.inputs['Surface'])
+
+        def halves(label, left, right):
+            viewport.draw()
+            pixels = np.array(viewport.buffer.texture_color.read(), dtype=np.float32)
+            pixels = pixels.reshape(viewport.height, viewport.width, 4)
+            actual = [pixels[viewport.height // 2, x, :3] for x in
+                      (viewport.width // 4, 3 * viewport.width // 4)]
+            near(actual[0], left)
+            near(actual[1], right)
+            records[label] = [value.tolist() for value in actual]
+
+        halves('uv_outside', [.2, .4, .6], [.6, .1, .2])
+        # Projection is still supported. Put the display behind the source so it cannot
+        # obscure the capture, and observe its back face with an independent main camera.
+        tree.links.remove(node.inputs['Vector'].links[0])
+        display.location = (0, 0, -.5)
+        s.camera.location = (0, 0, -3)
+        s.camera.rotation_euler = (math.pi, 0, 0)
+        halves('projection_inside', [.2, .4, .6], [.6, .1, .2])
+        display.location.x = s.camera.location.x = .9
+        halves('projection_edge', [.6, .1, .2], [0, 0, 0])
+        display.location.x = s.camera.location.x = 6
+        near(viewport.draw(), [0, 0, 0])
+        tree.links.new(coordinates.outputs['UV'], node.inputs['Vector'])
+        halves('uv_restored', [.2, .4, .6], [.6, .1, .2])
+    finally:
+        viewport.free()
+    print('RT_CASE_RESULT', json.dumps({'material_coordinates': records}), flush=True)
+
+
+def material_refresh(mode='EVERY_FRAME', preview=False, offline=False):
+    s, emission, source, display, rt, tree, node, coordinates = material_display(mode)
+    tree.links.new(coordinates.outputs['UV'], node.inputs['Vector'])
+    records = []
+    if offline:
+        actual = center(render('material_direct_first'))
+        near(actual, [.2, .4, .6])
+        records.append(actual.tolist())
+        emission.inputs['Color'].default_value = (.6, .1, .2, 1)
+        actual = center(render('material_direct_edited'))
+        near(actual, [.6, .1, .2])
+        records.append(actual.tolist())
+    else:
+        viewport = Viewport()
+        s.eevee.taa_samples = 8
+        if preview:
+            viewport.space.shading.type = 'MATERIAL'
+            viewport.space.shading.use_scene_world = False
+            viewport.space.shading.use_scene_lights = False
+
+        def check(expected):
+            actual = viewport.draw()
+            near(actual, expected)
+            records.append(actual.tolist())
+
+        try:
+            for _ in range(10):
+                check([.2, .4, .6])
+            for frame, color in ((1, [.6, .1, .2]), (2, [.1, .7, .3])):
+                previous = [.2, .4, .6] if frame == 1 else [.6, .1, .2]
+                emission.inputs['Color'].default_value = (*color, 1)
+                s.frame_set(frame)
+                check(previous if mode == 'MANUAL' else color)
+                if mode == 'MANUAL':
+                    s.eevee.render_textures.request_update(0)
+                    check(color)
+            # Scene geometry edits must invalidate a converged Film too.
+            source.location.x = 20
+            check([.1, .7, .3] if mode == 'MANUAL' else [0, 0, 0])
+            if mode == 'MANUAL':
+                s.eevee.render_textures.request_update(0)
+                check([0, 0, 0])
+            source.location.x = 0
+            if mode == 'MANUAL':
+                s.eevee.render_textures.request_update(0)
+            check([.1, .7, .3])
+            rt.camera.location.x = 20
+            check([.1, .7, .3] if mode == 'MANUAL' else [0, 0, 0])
+            if mode == 'MANUAL':
+                s.eevee.render_textures.request_update(0)
+                check([0, 0, 0])
+            rt.camera.location.x = 0
+            if mode == 'MANUAL':
+                s.eevee.render_textures.request_update(0)
+            check([.1, .7, .3])
+            for enabled in (True, False):
+                rt.use_compositor_output = enabled
+                check([.1, .7, .3])
+            display.location.x = s.camera.location.x = 8
+            check([.1, .7, .3])
+        finally:
+            viewport.free()
+    print('RT_CASE_RESULT', json.dumps({'material_refresh': mode, 'preview': preview,
+                                      'offline': offline, 'pixels': records}), flush=True)
+
+
 def manual_viewport():
     s, _, rt, add = feedback('MANUAL')
     viewport = Viewport()
@@ -408,6 +552,14 @@ def child(case):
         manual_slot_reorder()
     elif case == 'mixed_update_history':
         mixed_update_history()
+    elif case == 'material_coordinates':
+        material_coordinates()
+    elif case.startswith('material_refresh:'):
+        material_refresh(case.split(':')[1])
+    elif case == 'material_preview':
+        material_refresh(preview=True)
+    elif case == 'material_offline':
+        material_refresh(offline=True)
     else:
         extract_case(case)
 
@@ -454,7 +606,9 @@ def main():
              'unused', 'batch', 'fallback', 'DEPTH:R16F', 'DEPTH:R32F',
              'NORMAL:RGBA16F', 'NORMAL:RGBA32F', 'manual_viewport', 'frame_viewport',
              'history_views', 'manual_slot_identity', 'manual_slot_reorder',
-             'mixed_update_history', 'batch_lightweight_rt']
+             'mixed_update_history', 'batch_lightweight_rt', 'material_coordinates',
+             'material_refresh:EVERY_FRAME', 'material_refresh:EVERY_SAMPLE',
+             'material_refresh:MANUAL', 'material_preview', 'material_offline']
     results = {}
     for case in cases:
         log = child_output(case)

@@ -6,7 +6,9 @@
  * \ingroup eevee
  */
 
+#include "BKE_compositor.hh"
 #include "BKE_mesh.hh"
+#include "BKE_scene.hh"
 #include "BLI_listbase.h"
 #include <cmath>
 
@@ -80,6 +82,7 @@ void RenderTextureModule::slot_reset(const int slot_index)
   slot.capture_pending = true;
   slot.active = false;
   slot.used = false;
+  slot.compositor_output = false;
   slot.history_reset_pending = true;
   slot.needs_history = false;
   slot.requires_full_capture = false;
@@ -198,6 +201,8 @@ void RenderTextureModule::begin_sync()
     slot.update_mode = update_mode;
     slot.manual_update = render_texture->manual_update;
     slot.active = (slot.camera != nullptr);
+    slot.compositor_output = render_texture->use_compositor_output && !inst_.is_pre_fx_render &&
+                             !inst_.is_dlss_guide_render;
     slot.requires_full_capture = false;
     slot.sync_camera_valid = slot.active &&
                              camera_data_from_object(
@@ -366,7 +371,7 @@ void RenderTextureModule::end_sync()
   for (const int index : IndexRange(RENDER_TEXTURE_SLOT_MAX)) {
     RuntimeSlot &slot = slots_[index];
     const bool was_used = slot.used;
-    slot.used = slot.active && used_uids_.contains(slot.uid);
+    slot.used = slot.active && (used_uids_.contains(slot.uid) || slot.compositor_output);
     slot.needs_history = capture_read_uids_.contains(slot.uid);
     slot.capture_pending |= slot.used && !was_used;
     slot.capture_pending |= inst_.is_viewport() && inst_.sampling.is_reset() &&
@@ -751,6 +756,97 @@ void RenderTextureModule::render()
   inst_.hiz_buffer.sync();
   inst_.camera.override(main_camera, main_is_camera_object);
   inst_.uniform_data.push_update();
+}
+
+void RenderTextureModule::slot_export(RuntimeSlot &slot, gpu::Texture *output, int2 sample_offset)
+{
+  const int2 extent(GPU_texture_width(output), GPU_texture_height(output));
+  const bool single_channel = ELEM(
+      slot.format, SCE_EEVEE_RENDER_TEXTURE_FORMAT_R16F, SCE_EEVEE_RENDER_TEXTURE_FORMAT_R32F);
+  const bool value_output = GPU_texture_format(output) == gpu::TextureFormat::SFLOAT_32;
+  PassSimple pass("RenderTexture.Export");
+  pass.init();
+  pass.shader_set(inst_.shaders.static_shader_get(value_output ? RENDER_TEXTURE_EXPORT_VALUE :
+                                                                 RENDER_TEXTURE_EXPORT_COLOR));
+  const GPUSamplerState sampler = slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_DEPTH ?
+                                      GPUSamplerState{GPU_SAMPLER_FILTERING_DEFAULT} :
+                                      GPUSamplerState{GPU_SAMPLER_FILTERING_LINEAR};
+  pass.bind_texture("capture_tx", slot.color_tx.current(), sampler);
+  pass.bind_image("output_img", output);
+  pass.push_constant("output_extent", extent);
+  pass.push_constant("sample_offset", sample_offset);
+  pass.push_constant("display_extent", inst_.film.display_extent_get());
+  pass.push_constant("film_offset", inst_.film.film_offset_get());
+  pass.push_constant("film_extent", inst_.film.film_extent_get());
+  pass.push_constant("single_channel", single_channel);
+  pass.push_constant("invert_alpha",
+                     !single_channel && slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR);
+  pass.dispatch(math::divide_ceil(extent, int2(FILM_GROUP_SIZE)));
+  pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_TEXTURE_UPDATE);
+  inst_.manager->submit(pass);
+}
+
+float *RenderTextureModule::read_pass(const SceneRenderTexture &render_texture,
+                                      const int2 extent,
+                                      const int channels)
+{
+  /* Render Result owns the pass layout. Keep the readback allocation consistent with its
+   * channel count when capture storage settings change. */
+  if (!ELEM(channels, 1, 4)) {
+    return nullptr;
+  }
+  for (RuntimeSlot &slot : slots_) {
+    if (slot.uid != render_texture.uid || !slot.used || !slot.compositor_output) {
+      continue;
+    }
+    TextureFromPool output("RenderTexture.Export");
+    output.acquire_2d(extent,
+                      channels == 1 ? gpu::TextureFormat::SFLOAT_32 :
+                                      gpu::TextureFormat::SFLOAT_32_32_32_32,
+                      GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE |
+                          GPU_TEXTURE_USAGE_HOST_READ);
+    slot_export(slot, output, inst_.film.film_offset_get());
+    return static_cast<float *>(GPU_texture_read(output, GPU_DATA_FLOAT, 0));
+  }
+  return nullptr;
+}
+
+void RenderTextureModule::write_viewport_compositor_passes()
+{
+  if (inst_.is_pre_fx_render || inst_.is_dlss_guide_render ||
+      std::none_of(slots_.begin(), slots_.end(), [](const RuntimeSlot &slot) {
+        return slot.used && slot.compositor_output;
+      }))
+  {
+    return;
+  }
+  const Set<std::string> needed = bke::compositor::get_used_passes(*inst_.scene, inst_.view_layer);
+  for (const SceneRenderTexture *render_texture =
+           static_cast<const SceneRenderTexture *>(inst_.scene->eevee.render_textures.first);
+       render_texture;
+       render_texture = render_texture->next)
+  {
+    if (!render_texture->use_compositor_output) {
+      continue;
+    }
+    const std::string name = BKE_scene_render_texture_pass_name(*render_texture);
+    if (!needed.contains(name)) {
+      continue;
+    }
+    for (RuntimeSlot &slot : slots_) {
+      if (slot.uid != render_texture->uid || !slot.used || !slot.compositor_output) {
+        continue;
+      }
+      TextureFromPool &output = DRW_viewport_pass_texture_get(name.c_str());
+      output.acquire_2d(inst_.film.display_extent_get(),
+                        BKE_scene_render_texture_pass_is_value(*render_texture) ?
+                            gpu::TextureFormat::SFLOAT_32 :
+                            gpu::TextureFormat::SFLOAT_32_32_32_32,
+                        GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE);
+      slot_export(slot, output, int2(0));
+      break;
+    }
+  }
 }
 
 }  // namespace blender::eevee

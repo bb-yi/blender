@@ -59,6 +59,7 @@ class RenderTextureModule {
     bool capture_pending = true;
     bool active = false;
     bool used = false;
+    bool compositor_output = false;
     bool history_reset_pending = true;
     bool needs_history = false;
     bool requires_full_capture = false;
@@ -102,6 +103,8 @@ class RenderTextureModule {
                      bool is_object_material = false);
   void object_sync(const ObjectHandle &object, const Material &material);
   bool foreach_enabled_camera(FunctionRef<void(const CameraData &)> callback) const;
+  float *read_pass(const SceneRenderTexture &render_texture, int2 extent, int channels);
+  void write_viewport_compositor_passes();
 
   bool has_active() const
   {
@@ -139,6 +142,7 @@ class RenderTextureModule {
   bool slot_should_capture(const RuntimeSlot &slot) const;
   static bool material_requires_full_capture(GPUMaterial *material);
   void swap_capture_buffers(RuntimeSlot &slot, bool render_buffers, bool hiz);
+  void slot_export(RuntimeSlot &slot, gpu::Texture *output, int2 sample_offset);
 };
 
 }  // namespace blender::eevee

@@ -3894,4 +3894,18 @@ void View3DCursor::set_matrix(const float4x4 &mat, const bool use_compat)
 
 /** \} */
 
+std::string BKE_scene_render_texture_pass_name(const SceneRenderTexture &render_texture)
+{
+  /* OpenEXR uses dots to separate layer, pass and channel names. */
+  return "RenderTexture_" + std::to_string(render_texture.uid);
+}
+
+bool BKE_scene_render_texture_pass_is_value(const SceneRenderTexture &render_texture)
+{
+  return render_texture.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_DEPTH ||
+         ELEM(render_texture.format,
+              SCE_EEVEE_RENDER_TEXTURE_FORMAT_R16F,
+              SCE_EEVEE_RENDER_TEXTURE_FORMAT_R32F);
+}
+
 }  // namespace blender
