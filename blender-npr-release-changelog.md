@@ -615,6 +615,19 @@
 - 修复 `NodeTree.type` 缺少 `FILTER_GRAPH` 枚举项导致的控制台持续报错 `current value '4' matches no enum in 'EeveeFilterGraphNodeTree', 'Eevee Filter Graph', 'type'`，`tree.type` 现在正确返回 `FILTER_GRAPH`。
 - Windows 发布包已完成带 Cycles 的全量清理构建，完整 Release 测试 `116/116` 通过；该结果不代表 Linux 或 macOS 测试覆盖。
 
+## 2026-10-31  图像闭包与 Deferred 描边修复
+
+#### 新增功能
+- 无
+
+#### 修复与改进
+- 修复 `Evaluate Closure` 评估图像闭包时，旧坐标键 `Vector` 被忽略而导致整片采到默认位置的问题。兼容旧 `Vector`，存在 `UV` 时优先使用 `UV`。
+- 图像闭包显式同步接口时，可将旧 `Vector` 迁移为 `UV`，并保留坐标默认值、插口标识和连线。坐标缺失或类型错误时给出明确诊断；普通自定义 Closure 继续严格按参数键匹配。
+- 修复使用 `Outline Shell Output` 且开启 Raytrace Transmission 时，Deferred 描边挡住 NPR Refraction 背景的问题。描边预通道与着色通道跟随对象的 `Refraction Layer`，高层可读取低层完成后的主体和描边，不再读入自身描边壳内部。
+- 修复多个折射层开启 `Clamp Surface Direct` 后，背景反馈被当前层颜色覆盖的问题。仅在反馈纹理读写重叠时保存临时背景，保留 HDR 颜色和 Alpha。
+- 修复没有不透明物体、仅有世界背景时，双层及更多层 NPR Refraction 变黑的问题，正确区分首个有效层和后续层。
+- 补齐旧闭包文件重载、节点组与 Bundle、折射层级跳号、共享材质、动态层级切换、多材质槽、Alpha 动画及 OpenGL/Vulkan 回归，并更新相关使用文档。
+
 ## 暂存
 
 #### 新增功能
