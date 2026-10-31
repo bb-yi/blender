@@ -32,6 +32,8 @@ class RenderBuffers {
 
   Texture depth_tx;
   TextureFromPool stencil_value_tx;
+  TextureFromPool stencil_surface_value_tx;
+  TextureFromPool stencil_surface_depth_tx;
   TextureFromPool combined_tx;
 
   // TextureFromPool mist_tx; /* Derived from depth_tx during accumulation. */

@@ -9892,6 +9892,20 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
   RNA_def_property_update(
       prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
 
+  static const EnumPropertyItem stencil_surface_resolution_items[] = {
+      {0, "FULL", 0, "Full", "Use the current render-buffer resolution"},
+      {1, "HALF", 0, "Half", "Use half width and height"},
+      {2, "QUARTER", 0, "Quarter", "Use quarter width and height"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "stencil_surface_resolution", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "stencil_surface_resolution");
+  RNA_def_property_enum_items(prop, stencil_surface_resolution_items);
+  RNA_def_property_enum_default(prop, 0);
+  RNA_def_property_ui_text(
+      prop, "Writer Surface Resolution", "Resolution of stencil writer surface sampling");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_Scene_render_update");
+
   prop = RNA_def_property(srna, "use_outline", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "use_outline", 1);
   RNA_def_property_ui_text(

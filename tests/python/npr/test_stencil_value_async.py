@@ -15,6 +15,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_stencil_value import arguments, configure, marker_material, material, math_node, plane
 from test_stencil_value_regressions import marker_geometry
+from mathutils import Quaternion, Vector
 
 args = arguments()
 gpu.init()
@@ -28,7 +29,9 @@ if bpy.app.background:
     # Create only the isolated test preference file, so the first-run setup does not cover the
     # viewport. Never let this test write the real user configuration.
     sandbox_config = Path(os.environ['BLENDER_USER_CONFIG']).resolve()
-    assert sandbox_config.is_relative_to(Path(__file__).resolve().parents[4]), sandbox_config
+    workspace = next(p for p in Path(__file__).resolve().parents
+                     if (p / 'tools/blender_isolated.ps1').is_file())
+    assert sandbox_config.is_relative_to(workspace / 'temp'), sandbox_config
     bpy.context.preferences.view.show_splash = False
     bpy.ops.wm.save_userpref()
     environment = os.environ.copy()
@@ -36,8 +39,9 @@ if bpy.app.background:
     temporary.mkdir(parents=True, exist_ok=True)
     environment['TEMP'] = environment['TMP'] = str(temporary)
     command = [str(binary), '--factory-startup', '--enable-event-simulate', '--gpu-backend', backend,
-               '--python-exit-code', '1', '--window-geometry', '0', '0', '640', '480',
-               '--python', str(Path(__file__).resolve()), '--', '--phase', 'async', '--output-dir', str(out),
+               '--python-exit-code', '1', '--window-geometry', '0', '0',
+               str(args.benchmark_width or 640), str(args.benchmark_height or 480),
+               '--python', str(Path(__file__).resolve()), '--', '--phase', args.phase, '--output-dir', str(out),
                '--geometry', args.geometry]
     with (out / 'window.log').open('w', encoding='utf-8') as log:
         process = subprocess.Popen(command, env=environment, stdout=log, stderr=subprocess.STDOUT)
@@ -52,6 +56,11 @@ if bpy.app.background:
     result = json.loads((out / 'verification.json').read_text())
     assert result['passed'], result
     assert any(r.get('status') == 'QUEUED' for r in result['records']), result
+    if args.phase == 'writer_surface_async':
+        assert result.get('writer_surface') is True, result
+        names = {r['event'] for r in result['records']}
+        assert {'writer_behind', 'writer_restored', 'free_yaw', 'free_pitch',
+                'resolution_half', 'resolution_quarter', 'resolution_full', 'material_preview'} <= names, names
     print('STENCIL_VALUE_ASYNC_GPU_TEST_PASSED', flush=True)
 else:
     bpy.context.preferences.view.show_splash = False
@@ -68,11 +77,20 @@ else:
     tree.links.new(transparent.outputs[0], mix.inputs[1])
     tree.links.new(tree.nodes.get('Emission').outputs[0], mix.inputs[2])
     tree.links.new(mix.outputs[0], tree.nodes.get('Material Output').inputs['Surface'])
-    marker_geometry(args.geometry, marker_mat)
+    marker_object = marker_geometry(args.geometry, marker_mat)
+    marker_location = marker_object.location.copy()
     reader = material('AsyncReader', (0, 0, 0, 1))
     rt = reader.node_tree
     stencil = rt.nodes.new('ShaderNodeStencilValue')
+    writer_surface = args.phase == 'writer_surface_async'
+    if writer_surface:
+        stencil.source = 'WRITER_SURFACE'
     mask = math_node(rt, 'GREATER_THAN', stencil.outputs['Value'], 0.5)
+    if writer_surface:
+        camera_data = rt.nodes.new('ShaderNodeCameraData')
+        gap = math_node(rt, 'SUBTRACT', camera_data.outputs['View Z Depth'], stencil.outputs['Depth'])
+        front = math_node(rt, 'GREATER_THAN', gap, 0)
+        mask = math_node(rt, 'MULTIPLY', mask, math_node(rt, 'MULTIPLY', front, stencil.outputs['Valid']))
     blue = rt.nodes.new('ShaderNodeCombineXYZ')
     rt.links.new(mask, blue.inputs['Z'])
     rt.links.new(blue.outputs[0], rt.nodes.get('Emission').inputs['Color'])
@@ -92,6 +110,11 @@ else:
     records = []
     stable = 0
     warmup_draws = 0
+    view_check_index = 0
+    view_check_draws = 0
+    view_checks = [('resolution_half', 1), ('resolution_quarter', 1), ('resolution_full', 1),
+                   ('writer_behind', 0), ('writer_restored', 1), ('free_yaw', 1), ('free_pitch', 1),
+                   ('material_preview', 1)]
 
     def dismiss_intro():
         window.event_simulate(type='ESC', value='PRESS')
@@ -120,7 +143,8 @@ else:
         result = {'passed': passed, 'backend': backend, 'geometry': args.geometry,
                   'build_hash': bpy.app.build_hash.decode(),
                   'build_date_utc': bpy.app.build_date.decode() + ' ' + bpy.app.build_time.decode(),
-                  'records': records, 'error': error}
+                  'records': records, 'error': error, 'writer_surface': writer_surface,
+                  'window_extent': [window.width, window.height]}
         (out / 'verification.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
         print('STENCIL_ASYNC_FINISHED', json.dumps(result), flush=True)
         if passed:
@@ -132,8 +156,27 @@ else:
         with bpy.context.temp_override(window=window, area=area):
             bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
 
+    def apply_view_check():
+        name, expected = view_checks[view_check_index]
+        if name.startswith('resolution_'):
+            scene.eevee.stencil_surface_resolution = name.split('_')[1].upper()
+        elif name == 'writer_behind':
+            marker_object.location = marker_location - Vector((0, 0, 2))
+        elif name == 'writer_restored':
+            marker_object.location = marker_location
+        elif name == 'material_preview':
+            space.shading.type = 'MATERIAL'
+            space.shading.use_scene_world = False
+            space.shading.use_scene_lights = False
+        else:
+            space.region_3d.view_perspective = 'PERSP'
+            space.region_3d.view_location = Vector((0, 0, 0))
+            space.region_3d.view_distance = 5
+            axis = (0, 1, 0) if name == 'free_yaw' else (1, 0, 0)
+            space.region_3d.view_rotation = Quaternion(axis, .35)
+
     def tick():
-        global state, stable, warmup_draws
+        global state, stable, warmup_draws, view_check_index, view_check_draws
         try:
             assert time.monotonic() < deadline, (state, status(), latest_pixel)
             before_draw = status()
@@ -177,12 +220,32 @@ else:
                 assert latest_pixel[2] > 0.98 and max(latest_pixel[:2]) < 0.02, latest_pixel
                 records.append({'event': 'recovered', 'status': current, 'pixel': latest_pixel})
                 state = 'stable'
+            elif state == 'view_checks':
+                if current != 'COMPILED':
+                    return .05
+                view_check_draws += 1
+                if view_check_draws < 3:
+                    return .05
+                name, expected = view_checks[view_check_index]
+                assert (latest_pixel[2] > .98 if expected else max(latest_pixel) < .02), (name, latest_pixel)
+                records.append({'event': name, 'status': current, 'pixel': latest_pixel,
+                                'frame': scene.frame_current})
+                view_check_index += 1
+                view_check_draws = 0
+                if view_check_index == len(view_checks):
+                    finish(True)
+                    return None
+                apply_view_check()
             else:
                 assert current == 'COMPILED' and latest_pixel[2] > 0.98, (current, latest_pixel)
                 stable += 1
                 if stable == 10:
-                    finish(True)
-                    return None
+                    if writer_surface:
+                        state = 'view_checks'
+                        apply_view_check()
+                    else:
+                        finish(True)
+                        return None
             area.tag_redraw()
             return 0.05
         except BaseException:

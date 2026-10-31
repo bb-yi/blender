@@ -149,7 +149,11 @@ void surf_depth([[resource_table]] PipelineConstants &pipe,
 
   /* Always written, but may be optimized out by frame-buffer/subpass setup. */
   frag_out.normal.rgb = normalize(interp.N) * 0.5f + 0.5f;
+#ifdef MAT_STENCIL_WRITER_SURFACE
+  frag_out.object_id = uint(stencil_writer_reference) & 15u;
+#else
   frag_out.object_id = interp_flat.resource_id_raw & uint(0xFFFF);
+#endif
 }
 
 template void surf_depth<true>(PipelineConstants &,

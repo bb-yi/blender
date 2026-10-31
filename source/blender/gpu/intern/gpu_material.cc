@@ -152,6 +152,8 @@ struct GPUMaterial {
   Vector<const bNode *> planar_probe_error_nodes;
   Vector<int> render_texture_ids;
   bool reads_stencil_value = false;
+  bool uses_stencil_surface = false;
+  bool reads_stencil_surface = false;
   std::string stencil_value_error;
   std::string stencil_marker_error;
   /** Fatal schema errors are retained independently of shader/pass replacement. */
@@ -1624,6 +1626,26 @@ void GPU_material_stencil_value_readable_set(GPUMaterial *mat)
 bool GPU_material_stencil_value_readable(const GPUMaterial *mat)
 {
   return mat != nullptr && mat->reads_stencil_value;
+}
+
+void GPU_material_stencil_surface_used_set(GPUMaterial *mat)
+{
+  mat->uses_stencil_surface = true;
+}
+
+bool GPU_material_stencil_surface_used(const GPUMaterial *mat)
+{
+  return mat != nullptr && mat->uses_stencil_surface;
+}
+
+void GPU_material_stencil_surface_readable_set(GPUMaterial *mat)
+{
+  mat->reads_stencil_surface = true;
+}
+
+bool GPU_material_stencil_surface_readable(const GPUMaterial *mat)
+{
+  return mat != nullptr && mat->reads_stencil_surface;
 }
 
 StringRef GPU_material_stencil_marker_error(const GPUMaterial *mat)

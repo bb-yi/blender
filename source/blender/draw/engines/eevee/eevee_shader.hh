@@ -349,7 +349,8 @@ class ShaderModule {
                                    blender::Material *default_mat,
                                    bool use_outline = true,
                                    bool outline_shell = false,
-                                   const MaterialNodeTreeInfo *node_tree_info = nullptr);
+                                   const MaterialNodeTreeInfo *node_tree_info = nullptr,
+                                   bool stencil_writer_surface = false);
   GPUMaterial *world_shader_get(blender::World *blender_world,
                                 bNodeTree *nodetree,
                                 eMaterialPipeline pipeline_type,

@@ -1280,6 +1280,16 @@ class RENDER_PT_simplify_greasepencil(RenderButtonsPanel, Panel, GreasePencilSim
     bl_options = {'DEFAULT_CLOSED'}
 
 
+class RENDER_PT_eevee_stencil_surface(RenderButtonsPanel, Panel):
+    bl_label = "Stencil Writer Surface"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    def draw(self, context):
+        self.layout.use_property_split = True
+        self.layout.prop(context.scene.eevee, "stencil_surface_resolution", text="Resolution")
+
+
 class RENDER_PT_hydra_debug(RenderButtonsPanel, Panel):
     bl_label = "Hydra Debug"
     bl_options = {'DEFAULT_CLOSED'}
@@ -1320,6 +1330,7 @@ classes = (
     RENDER_PT_eevee_volumes,
     RENDER_PT_eevee_volumes_range,
     RENDER_PT_eevee_hair,
+    RENDER_PT_eevee_stencil_surface,
     RENDER_PT_simplify,
     RENDER_PT_simplify_viewport,
     RENDER_PT_simplify_render,

@@ -11074,6 +11074,26 @@ static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_function_output(func, parm);
 }
 
+static void def_sh_stencil_value(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem source_items[] = {
+      {0, "STENCIL_SNAPSHOT", 0, "Stencil Snapshot", "Read the immutable native stencil snapshot"},
+      {1,
+       "WRITER_SURFACE",
+       0,
+       "Writer Surface",
+       "Read the nearest enabled stencil writer's reference and linear depth, independently of "
+       "stencil operations"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  PropertyRNA *prop = RNA_def_property(srna, "source", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, source_items);
+  RNA_def_property_enum_default(prop, 0);
+  RNA_def_property_ui_text(prop, "Source", "Data sampled by Stencil Value");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
 static void def_sh_scene_color(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem scene_source_items[] = {
@@ -14760,7 +14780,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
   define("ShaderNode", "ShaderNodeRenderInfo", def_sh_render_info);
   define("ShaderNode", "ShaderNodeDrawInfo", def_sh_draw_info);
-  define("ShaderNode", "ShaderNodeStencilValue");
+  define("ShaderNode", "ShaderNodeStencilValue", def_sh_stencil_value);
   define("ShaderNode", "ShaderNodeWorldEnvironment");
   define("ShaderNode", "ShaderNodeLightProbeColor");
   define("ShaderNode", "ShaderNodePlanarProbe", def_sh_planar_probe);

@@ -538,7 +538,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                                const bool register_pass,
                                                const SurfaceDrawState *state_override,
                                                const bool outline_shell,
-                                               const bool stencil_marker)
+                                               const bool stencil_marker,
+                                               const bool stencil_writer_surface)
 {
   if (blender_mat->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
     /* Filter materials are evaluated as a dedicated fullscreen post pass. */
@@ -574,7 +575,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                                      default_mat,
                                                      inst_.scene->eevee.use_outline != 0,
                                                      outline_shell,
-                                                     &node_tree_info);
+                                                     &node_tree_info,
+                                                     stencil_writer_surface);
 
   inst_.render_textures.material_sync(matpass.gpumat, true, true);
   has_time_dependent_materials_ |= GPU_material_is_time_dependent(matpass.gpumat);
@@ -784,6 +786,35 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
   return matpass;
 }
 
+MaterialPass MaterialModule::stencil_writer_surface_get(Object *ob,
+                                                        blender::Material *material,
+                                                        eMaterialGeometry geometry_type)
+{
+  if (inst_.is_baking() || (ob->visibility_flag & OB_HIDE_CAMERA) || !material->stencil_enabled ||
+      (material->stencil_write_mask & 15) == 0 || !geometry_type_has_surface(geometry_type) ||
+      (material->stencil_pass_op == MA_STENCIL_OP_KEEP &&
+       material->stencil_fail_op == MA_STENCIL_OP_KEEP &&
+       material->stencil_zfail_op == MA_STENCIL_OP_KEEP))
+  {
+    return {};
+  }
+  SurfaceDrawState state = surface_draw_state_body(*material);
+  state.color_write = true;
+  state.depth_write = true;
+  MaterialPass pass = material_pass_get(ob,
+                                        material,
+                                        MAT_PIPE_PREPASS_DEFERRED,
+                                        geometry_type,
+                                        MAT_PROBE_NONE,
+                                        false,
+                                        &state,
+                                        false,
+                                        true,
+                                        true);
+  pass.sub_pass = inst_.pipelines.deferred.stencil_surface_add(material, pass.gpumat);
+  return pass;
+}
+
 Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                         blender::Material *blender_mat,
                                         eMaterialGeometry geometry_type,
@@ -871,8 +902,8 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       return mat;
     }
     if (blender_mat->stencil_mode == MA_STENCIL_MARKER_ONLY) {
-      /* Keep only the geometry shader for attribute/instancing/tessellation setup. No normal,
-       * shadow, shell, volume or capture pass may be registered for this slot. */
+      /* Keep geometry for marker sampling, including the independent writer-surface capture.
+       * No ordinary shading, shadow, shell, volume or light-probe capture is registered. */
       if (!inst_.is_baking() && geometry_type_has_surface(geometry_type)) {
         SurfaceDrawState marker_state = surface_draw_state_body(*blender_mat);
         marker_state.color_write = false;
@@ -894,6 +925,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                                                             marker.gpumat);
         }
       }
+      mat.stencil_writer_surface = stencil_writer_surface_get(ob, blender_mat, geometry_type);
       material_telemetry_features_update(mat);
       return mat;
     }
@@ -1113,6 +1145,8 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       mat.stencil.sub_pass = inst_.pipelines.deferred.early_stencil_add(blender_mat,
                                                                         mat.stencil.gpumat);
     }
+
+    mat.stencil_writer_surface = stencil_writer_surface_get(ob, blender_mat, geometry_type);
 
     if (!inst_.is_baking() && !is_filter_material && geometry_type_is_mesh(geometry_type))
     {
