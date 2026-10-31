@@ -51,6 +51,50 @@ struct LightprobePlaneRenderData {
     return best_index;
   }
 
+  int select_object(float3 P, float3 N, uint object_uid) const
+  {
+    if (object_uid == 0u) {
+      return -1;
+    }
+    int best = -1;
+    float best_score = -1.0f;
+    float best_distance = 3.402823e+38f;
+    for (int index = 0; index < PLANAR_PROBE_MAX; index++) {
+      PlanarProbeData probe = probe_planar_buf[index];
+      if (probe.layer_id == -1) {
+        break;
+      }
+      if (probe.object_uid != object_uid) {
+        continue;
+      }
+      float score = probe_score(probe, P, N);
+      float3 local = float4(P, 1.0f) * probe.world_to_object_transposed;
+      float distance = dot(local, local);
+      bool better = best == -1;
+      if (best != -1) {
+        PlanarProbeData previous = probe_planar_buf[best];
+        if (probe.is_instance != previous.is_instance) {
+          better = probe.is_instance < previous.is_instance;
+        }
+        else if (score != best_score) {
+          better = score > best_score;
+        }
+        else if (distance != best_distance) {
+          better = distance < best_distance;
+        }
+        else {
+          better = probe.instance_rank < previous.instance_rank;
+        }
+      }
+      if (better) {
+        best = index;
+        best_score = score;
+        best_distance = distance;
+      }
+    }
+    return best;
+  }
+
  private:
   static float distance_score(PlanarProbeData planar, float3 P)
   {

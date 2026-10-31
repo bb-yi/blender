@@ -908,6 +908,7 @@ namespace blender::eevee
       film.update_sample_table();
       uniform_data.push_update();
 
+      planar_probes.invalidate();
       capture_view.render_world();
       lookdev.rotate_world();
       capture_view.render_probes();

@@ -147,6 +147,9 @@ struct GPUMaterial {
   eGPUMaterialFlag flag = GPU_MATFLAG_UPDATED;
   bool is_time_dependent = false;
   bool uses_stencil_value = false;
+  bool uses_planar_probe = false;
+  std::string planar_probe_error;
+  Vector<const bNode *> planar_probe_error_nodes;
   Vector<int> render_texture_ids;
   bool reads_stencil_value = false;
   std::string stencil_value_error;
@@ -329,7 +332,7 @@ static void gpu_material_validate_stencil_dependencies(GPUMaterial &mat, bNodeTr
   }
   bool needs_validation = mat.source_material->stencil_mode != MA_STENCIL_STANDARD;
   for (const bNode &node : tree.nodes) {
-    needs_validation |= node.type_legacy == SH_NODE_STENCIL_VALUE;
+    needs_validation |= ELEM(node.type_legacy, SH_NODE_STENCIL_VALUE, SH_NODE_PLANAR_PROBE);
   }
   if (!needs_validation) {
     return;
@@ -400,7 +403,7 @@ static void gpu_material_validate_stencil_dependencies(GPUMaterial &mat, bNodeTr
     }
   }
 
-  enum { SNAPSHOT = 1, LATE_SURFACE = 2 };
+  enum { SNAPSHOT = 1, LATE_SURFACE = 2, PLANAR_CAPTURE = 4 };
   Map<const bNode *, int> source_dependencies;
   for (const bNode &node : tree.nodes) {
     std::string source;
@@ -448,6 +451,23 @@ static void gpu_material_validate_stencil_dependencies(GPUMaterial &mat, bNodeTr
     int coverage = 0;
   };
   Map<const bNodeSocket *, Dependency> dependencies;
+  Map<const bNodeSocket *, Vector<const bNode *>> planar_values;
+  Map<const bNodeSocket *, Vector<const bNode *>> planar_coverages;
+  auto merge_sources = [](Vector<const bNode *> &target, const Vector<const bNode *> &sources) {
+    bool changed = false;
+    for (const bNode *source : sources) {
+      if (!target.contains(source)) {
+        target.append(source);
+        changed = true;
+      }
+    }
+    return changed;
+  };
+  auto planar_sources = [](const Map<const bNodeSocket *, Vector<const bNode *>> &map,
+                           const bNodeSocket &input) {
+    return input.link ? map.lookup_default(input.link->fromsock, Vector<const bNode *>{}) :
+                        Vector<const bNode *>{};
+  };
   auto input_dependency = [&](const bNodeSocket &input) {
     return input.link ? dependencies.lookup_default(input.link->fromsock, Dependency{}) :
                         Dependency{};
@@ -459,11 +479,19 @@ static void gpu_material_validate_stencil_dependencies(GPUMaterial &mat, bNodeTr
     for (const bNode &node : tree.nodes) {
       int value = source_dependencies.lookup_default(&node, 0);
       int coverage = 0;
+      Vector<const bNode *> planar_value;
+      Vector<const bNode *> planar_coverage;
+      if (node.type_legacy == SH_NODE_PLANAR_PROBE) {
+        value |= PLANAR_CAPTURE;
+        planar_value.append(node.runtime->original ? node.runtime->original : &node);
+      }
       for (const bNodeSocket &input : node.inputs) {
         const Dependency dep = input_dependency(input);
         value |= dep.value;
+        merge_sources(planar_value, planar_sources(planar_values, input));
         if (input.type == SOCK_SHADER) {
           coverage |= dep.coverage;
+          merge_sources(planar_coverage, planar_sources(planar_coverages, input));
         }
         if (ELEM(StringRef(input.name), "Alpha", "Weight", "Transparency") ||
             (node.type_legacy == SH_NODE_MIX_SHADER && input.type != SOCK_SHADER &&
@@ -471,6 +499,7 @@ static void gpu_material_validate_stencil_dependencies(GPUMaterial &mat, bNodeTr
             node.type_legacy == SH_NODE_BSDF_TRANSPARENT)
         {
           coverage |= dep.value;
+          merge_sources(planar_coverage, planar_sources(planar_values, input));
         }
       }
       if (node.type_legacy == SH_NODE_STENCIL_VALUE) {
@@ -527,6 +556,21 @@ static void gpu_material_validate_stencil_dependencies(GPUMaterial &mat, bNodeTr
                    (dep.coverage | output_coverage) != dep.coverage;
         dep.value |= output_value;
         dep.coverage |= output_coverage;
+        const bool coverage_value = (node.type_legacy == SH_NODE_SHADERTORGB &&
+                                     StringRef(output.name) == "Alpha") ||
+                                    (node.type_legacy == SH_NODE_PRINCIPLED_NPR &&
+                                     StringRef(output.name) == "Alpha");
+        const Vector<const bNode *> &output_sources = coverage_value ? planar_coverage :
+                                                                       planar_value;
+        if (!output_sources.is_empty()) {
+          changed |= merge_sources(planar_values.lookup_or_add_default(&output), output_sources);
+        }
+        if (output.type == SOCK_SHADER) {
+          const Vector<const bNode *> &sources = known_closure ? planar_coverage : planar_value;
+          if (!sources.is_empty()) {
+            changed |= merge_sources(planar_coverages.lookup_or_add_default(&output), sources);
+          }
+        }
       }
     }
   }
@@ -551,6 +595,7 @@ static void gpu_material_validate_stencil_dependencies(GPUMaterial &mat, bNodeTr
         const StringRef name(input.name);
         if (name == "Surface") {
           early_dependency |= dep.coverage;
+          merge_sources(mat.planar_probe_error_nodes, planar_sources(planar_coverages, input));
         }
         else if (ELEM(name,
                       "Displacement",
@@ -562,8 +607,17 @@ static void gpu_material_validate_stencil_dependencies(GPUMaterial &mat, bNodeTr
                       "Vertex Offset"))
         {
           early_dependency |= dep.value;
+          merge_sources(mat.planar_probe_error_nodes, planar_sources(planar_values, input));
         }
       }
+    }
+  }
+  if (early_dependency & PLANAR_CAPTURE) {
+    mat.planar_probe_error =
+        "Planar Probe cannot affect opacity, transparent shader mixing, displacement, "
+        "tessellation or depth offset: its capture is only available for surface color evaluation";
+    if (mat.source_material->stencil_mode != MA_STENCIL_STANDARD) {
+      mat.stencil_marker_error = mat.planar_probe_error;
     }
   }
   if (early_dependency & SNAPSHOT) {
@@ -572,7 +626,7 @@ static void gpu_material_validate_stencil_dependencies(GPUMaterial &mat, bNodeTr
         "tessellation or depth offset: those must be evaluated before the stencil snapshot";
     mat.stencil_marker_error = mat.stencil_value_error;
   }
-  else if (early_dependency & LATE_SURFACE) {
+  else if ((early_dependency & LATE_SURFACE) && mat.planar_probe_error.empty()) {
     mat.stencil_marker_error =
         "Early stencil marker coverage and geometry cannot depend on scene color, refraction, "
         "screen raycasts or lighting results";
@@ -583,6 +637,11 @@ static void gpu_material_stencil_errors_append(const GPUMaterial &mat,
                                                const bNodeTree &source_tree,
                                                GPUMaterialFromNodeTreeResult &result)
 {
+  for (const bNode *node : mat.planar_probe_error_nodes) {
+    if (!mat.planar_probe_error.empty()) {
+      result.errors.append({node, mat.planar_probe_error});
+    }
+  }
   const bool marker = mat.source_material &&
                       mat.source_material->stencil_mode != MA_STENCIL_STANDARD;
   const std::string &message = marker ? mat.stencil_marker_error : mat.stencil_value_error;
@@ -699,6 +758,8 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     localtree = cached_surface;
     /* Preprocessing has inverted Mix factors into BSDF weights. Reuse the validation of the
      * original closure graph, not the rewritten weights, which no longer express coverage. */
+    mat->planar_probe_error = cached_surface_owner->planar_probe_error;
+    mat->planar_probe_error_nodes = cached_surface_owner->planar_probe_error_nodes;
     mat->stencil_value_error = cached_surface_owner->stencil_value_error;
     mat->stencil_marker_error = cached_surface_owner->stencil_marker_error;
     owns_localtree = false;
@@ -1347,7 +1408,9 @@ gpu::Shader *GPU_material_get_shader(GPUMaterial *material)
 
 GPUMaterialStatus GPU_material_status(GPUMaterial *mat)
 {
-  if (!mat->stencil_value_error.empty() || !mat->inline_node_error.empty()) {
+  if (!mat->planar_probe_error.empty() || !mat->stencil_value_error.empty() ||
+      !mat->inline_node_error.empty())
+  {
     return GPU_MAT_FAILED;
   }
   switch (GPU_pass_status(mat->pass)) {
@@ -1362,6 +1425,9 @@ GPUMaterialStatus GPU_material_status(GPUMaterial *mat)
 
 std::string GPU_material_error_message(GPUMaterial *material)
 {
+  if (!material->planar_probe_error.empty()) {
+    return material->planar_probe_error;
+  }
   if (!material->inline_node_error.empty()) {
     return material->inline_node_error;
   }
@@ -1518,6 +1584,16 @@ void GPU_material_recompile_serial_clear(const Material *material)
 
   std::lock_guard lock(g_material_recompile_serials_mutex);
   g_material_recompile_serials.erase(material);
+}
+
+void GPU_material_planar_probe_used_set(GPUMaterial *mat, bool used)
+{
+  mat->uses_planar_probe = used;
+}
+
+bool GPU_material_planar_probe_used(const GPUMaterial *mat)
+{
+  return mat != nullptr && mat->uses_planar_probe;
 }
 
 void GPU_material_stencil_value_used_set(GPUMaterial *mat)

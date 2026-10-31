@@ -1280,11 +1280,12 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
 }
 
 static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &info,
-                                               eMaterialPipeline pipeline_type,
-                                               eMaterialGeometry geometry_type,
-                                               const bool use_shader_to_rgba,
-                                               const bool has_depth_offset,
-                                               const bool use_lightprobe_data)
+                                              eMaterialPipeline pipeline_type,
+                                              eMaterialGeometry geometry_type,
+                                              const bool use_shader_to_rgba,
+                                              const bool has_depth_offset,
+                                              const bool use_lightprobe_data,
+                                              const bool use_planar_probe_data)
 {
   using namespace blender::gpu::shader;
 
@@ -1472,7 +1473,26 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
             /* Until every vertex shader are ported, we need to bridge the gap here by defining the
              * pipeline. */
             info.fragment_source("eevee_surf_deferred.bsl.hh");
-            if (use_lightprobe_data) {
+            if (use_planar_probe_data) {
+              if (use_lightprobe_data) {
+                pipeline_info_name =
+                    has_depth_offset ?
+                        "eevee_surf_deferred_lightprobe_planar_depth_offset_infos_" :
+                        "eevee_surf_deferred_lightprobe_planar_infos_";
+                info.fragment_function(has_depth_offset ?
+                                           "eevee_surf_deferred_lightprobe_planar_depth_offset" :
+                                           "eevee_surf_deferred_lightprobe_planar");
+              }
+              else {
+                pipeline_info_name = has_depth_offset ?
+                                         "eevee_surf_deferred_planar_depth_offset_infos_" :
+                                         "eevee_surf_deferred_planar_infos_";
+                info.fragment_function(has_depth_offset ?
+                                           "eevee_surf_deferred_planar_depth_offset" :
+                                           "eevee_surf_deferred_planar");
+              }
+            }
+            else if (use_lightprobe_data) {
               pipeline_info_name = has_depth_offset ?
                                        "eevee_surf_deferred_lightprobe_depth_offset_infos_" :
                                        "eevee_surf_deferred_lightprobe_infos_";
@@ -1801,6 +1821,20 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       pipeline_type == MAT_PIPE_BAKE_COLOR ||
       (material_graph_uses_lightprobe_data &&
        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD));
+  const GPUGraphOutput &planar_graph = pipeline_type == MAT_PIPE_DEFERRED_NPR ? codegen.npr :
+                                                                                          codegen.surface;
+  bool planar_graph_reads_capture = material_graph_serialized_contains(planar_graph,
+                                                                      "node_planar_probe(");
+  for (const GPUGraphOutput &graph : codegen.material_functions) {
+    planar_graph_reads_capture |= material_graph_serialized_contains(graph, "node_planar_probe(");
+  }
+  const bool use_planar_probe_data =
+      GPU_material_planar_probe_used(gpumat) && planar_graph_reads_capture &&
+      probe_capture == MAT_PROBE_NONE &&
+      !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD, MAT_PIPE_DEFERRED_NPR);
+  /* GPU execution supplies an early hint; inactive graphs must not acquire resources. */
+  GPU_material_planar_probe_used_set(gpumat, use_planar_probe_data);
   const bool pipeline_create_info_has_lightprobe_data = ELEM(
       pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD);
 
@@ -1841,7 +1875,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                                  geometry_type,
                                                  use_front_light_shader_in_surface_pass,
                                                  has_depth_offset,
-                                                 use_lightprobe_data);
+                                                 use_lightprobe_data,
+                                                 use_planar_probe_data);
   if (shell_self_occlusion) {
     add_create_info_and_reserve(info, slots, "eevee_outline_shell_self_occlusion");
   }
@@ -2025,6 +2060,14 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       info.define("LIGHT_SHADER_TEXTURE_EVAL");
       GPU_material_glsl_light_shader_eval_set(gpumat);
     }
+  }
+  if (use_planar_probe_data) {
+    info.define("MAT_PLANAR_PROBE_ACCESS");
+    if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+      add_create_info_and_reserve(info, slots, "eevee_lightprobe_planar_data");
+    }
+    slots.reserve_sampler(PLANAR_PROBE_RADIANCE_TEX_SLOT);
+    slots.reserve_sampler(PLANAR_PROBE_DEPTH_TEX_SLOT);
   }
   if (use_lightprobe_data && !pipeline_create_info_has_lightprobe_data) {
     add_create_info_and_reserve(info, slots, "eevee_LightprobeRenderData");
@@ -2632,6 +2675,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
     if (material_pass_uses_glsl_light_access) {
       dependencies_set.add("eevee_shadow_tracing.bsl.hh");
+    }
+    if (use_planar_probe_data) {
+      dependencies_set.add("eevee_lightprobe_plane.bsl.hh");
+      dependencies_set.add("eevee_reverse_z_lib.bsl.hh");
     }
     if (use_lightprobe_data || pipeline_type == MAT_PIPE_DEFERRED_NPR) {
       dependencies_set.add("eevee_lightprobe.bsl.hh");

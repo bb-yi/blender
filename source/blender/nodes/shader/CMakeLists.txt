@@ -99,6 +99,7 @@ set(SRC
   nodes/node_shader_stencil_value.cc
   nodes/node_shader_world_environment.cc
   nodes/node_shader_light_probe_color.cc
+  nodes/node_shader_planar_probe.cc
   nodes/node_shader_world_to_tangent.cc
   nodes/node_shader_basis_transform.cc
   nodes/node_shader_sdf_primitive.cc

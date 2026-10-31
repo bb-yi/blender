@@ -303,6 +303,11 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
         )
         self.node_operator(
             layout,
+            "ShaderNodePlanarProbe",
+            poll=object_or_npr_eevee_shader_nodes_poll(context),
+        )
+        self.node_operator(
+            layout,
             "ShaderNodeLightInfo",
             poll=object_or_npr_eevee_shader_nodes_poll(context),
         )

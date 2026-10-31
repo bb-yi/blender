@@ -1979,6 +1979,9 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat,
       material_pass->bind_resources(inst_.planar_probes.dummy_resources);
     }
   }
+  if (GPU_material_planar_probe_used(gpumat)) {
+    material_pass->bind_resources(inst_.planar_probes);
+  }
   /* Set stencil for some deferred specialized shaders. */
   uint8_t material_stencil_bits = 0u;
   if (!draw_state.is_outline_shell && (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW)) {
@@ -2025,6 +2028,9 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   }
   material_pass->push_constant("use_split_radiance", &use_split_radiance_);
   material_pass->push_constant("use_radiance_input_for_combined", false);
+  if (GPU_material_planar_probe_used(gpumat)) {
+    material_pass->bind_resources(inst_.planar_probes);
+  }
 
   return material_pass;
 }

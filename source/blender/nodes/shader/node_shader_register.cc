@@ -93,6 +93,7 @@ void register_shader_nodes()
   register_node_type_sh_stencil_value();
   register_node_type_sh_world_environment();
   register_node_type_sh_light_probe_color();
+  register_node_type_sh_planar_probe();
   register_node_type_sh_world_to_tangent();
   register_node_type_sh_basis_transform();
   register_node_type_sh_sdf_primitive();

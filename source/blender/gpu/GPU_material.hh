@@ -299,6 +299,8 @@ void GPU_material_uniform_buffer_create(GPUMaterial *material, ListBaseT<LinkDat
 
 bool GPU_material_has_surface_output(GPUMaterial *mat);
 /* Separate metadata: eGPUMaterialFlag already occupies all 32 bits. */
+void GPU_material_planar_probe_used_set(GPUMaterial *mat, bool used = true);
+bool GPU_material_planar_probe_used(const GPUMaterial *mat);
 void GPU_material_stencil_value_used_set(GPUMaterial *mat);
 bool GPU_material_stencil_value_used(const GPUMaterial *mat);
 void GPU_material_render_texture_register(GPUMaterial *mat, int uid);

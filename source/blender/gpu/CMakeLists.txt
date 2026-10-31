@@ -690,6 +690,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_stencil_value.glsl
   shaders/material/gpu_shader_material_world_environment.glsl
   shaders/material/gpu_shader_material_light_probe_color.glsl
+  shaders/material/gpu_shader_material_planar_probe.glsl
   shaders/material/gpu_shader_material_world_to_tangent.glsl
   shaders/material/gpu_shader_material_basis_transform.glsl
   shaders/material/gpu_shader_material_sdf_util.glsl

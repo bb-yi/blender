@@ -21,9 +21,10 @@
 
 #include "BLT_translation.hh"
 
+#include "DNA_image_types.h"
+#include "DNA_lightprobe_types.h"
 #include "DNA_node_types.h"
 #include "DNA_object_types.h"
-#include "DNA_image_types.h"
 #include "DNA_texture_types.h"
 
 #include "BKE_animsys.h"
@@ -871,6 +872,13 @@ static void rna_NodeFilterMask_collection_set(PointerRNA *ptr,
     id_us_plus(new_id);
     node->id = new_id;
   }
+}
+
+static bool rna_NodePlanarProbe_object_poll(PointerRNA * /*ptr*/, PointerRNA value)
+{
+  const Object *object = static_cast<const Object *>(value.data);
+  return object && object->type == OB_LIGHTPROBE && object->data &&
+         id_cast<const LightProbe *>(object->data)->type == LIGHTPROBE_TYPE_PLANE;
 }
 
 static bool rna_NodeFilterMask_renderable_object_poll(PointerRNA * /*ptr*/, PointerRNA value)
@@ -8041,6 +8049,31 @@ static void def_sh_tex_coord(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
+static void def_sh_planar_probe(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem items[] = {
+      {0, "AUTO", 0, "Auto", "Choose a captured planar probe using position and normal"},
+      {1, "OBJECT", 0, "Object", "Read the selected planar probe object"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  PropertyRNA *prop = RNA_def_property(srna, "selection", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, items);
+  RNA_def_property_ui_text(prop, "Probe Selection", "How to select the planar reflection capture");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "probe_object", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "id");
+  RNA_def_property_struct_type(prop, "Object");
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_pointer_funcs(
+      prop, nullptr, nullptr, nullptr, "rna_NodePlanarProbe_object_poll");
+  RNA_def_property_ui_text(
+      prop, "Probe", "Planar probe object; unavailable or wrong types return invalid");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update_relations");
+}
+
 static void def_sh_light_info(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   PropertyRNA *prop;
@@ -14730,6 +14763,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeStencilValue");
   define("ShaderNode", "ShaderNodeWorldEnvironment");
   define("ShaderNode", "ShaderNodeLightProbeColor");
+  define("ShaderNode", "ShaderNodePlanarProbe", def_sh_planar_probe);
   define("ShaderNode", "ShaderNodeWorldToTangent", def_sh_world_to_tangent);
   define("ShaderNode", "ShaderNodeBasisTransform", def_sh_basis_transform);
   define("ShaderNode", "ShaderNodeSdfPrimitive", def_sh_sdf_primitive);

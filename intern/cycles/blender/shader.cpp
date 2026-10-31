@@ -1372,6 +1372,16 @@ static void add_nodes_inlined(Scene *scene,
         output_map[b_link.tosock] = proxy->outputs[0];
       }
     }
+    else if (b_node->is_type("ShaderNodePlanarProbe"_ustr)) {
+      for (blender::bNodeSocket *output : b_node->output_sockets()) {
+        const SocketType::Type type = convert_socket_type(*output);
+        if (type == SocketType::UNDEFINED) {
+          continue;
+        }
+        ConvertNode *zero = graph->create_node<ConvertNode>(type, type, true);
+        output_map[output] = zero->outputs[0];
+      }
+    }
     else if (b_node->is_group()) {
       blender::bNodeTree *b_group_ntree = blender::id_cast<blender::bNodeTree *>(b_node->id);
 

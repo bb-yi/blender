@@ -893,6 +893,7 @@ endif()
 if(WITH_GPU_RENDER_TESTS)
   # Self-contained NPR material regressions. Keep user data and generated fixtures isolated.
   set(npr_material_tests
+    planar_probe
     glsl_sampler_cube
     glsl_sampler_failure_memory
     filter_free_resolution

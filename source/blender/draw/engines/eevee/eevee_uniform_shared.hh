@@ -98,7 +98,8 @@ struct [[host_shared]] PipelineInfoData {
    * The value is valid only if `MAT_RAYCAST` is defined. */
   bool32_t can_raycast;
   uint draw_context;
-  bool32_t _pad2;
+  /* The current view has completed all of its planar captures. */
+  bool32_t planar_probe_ready;
 };
 
 struct [[host_shared]] SceneData {
