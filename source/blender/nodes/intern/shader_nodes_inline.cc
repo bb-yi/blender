@@ -1199,15 +1199,53 @@ class ShaderNodesInliner {
     const NodeInContext evaluate_node = socket.owner_node();
     const auto &storage = *static_cast<const NodeEvaluateClosure *>(evaluate_node->storage);
     std::optional<SocketInContext> uv_socket;
-    for (const int i : IndexRange(storage.input_items.items_num)) {
-      if (STREQ(storage.input_items.items[i].name, "UV")) {
-        uv_socket = evaluate_node.input_socket(i + 1);
-        if (!value_by_socket_.contains(*uv_socket)) {
-          this->schedule_socket(*uv_socket);
-          return;
+    /* Only the native image adapter accepts the old coordinate key. The canonical key wins
+     * regardless of item order or which input is linked, including when UV is invalid. */
+    for (const char *key : {"UV", "Vector"}) {
+      for (const int i : IndexRange(storage.input_items.items_num)) {
+        if (STREQ(storage.input_items.items[i].name, key)) {
+          uv_socket = evaluate_node.input_socket(i + 1);
+          break;
         }
+      }
+      if (uv_socket) {
         break;
       }
+    }
+
+    std::string coordinate_error;
+    if (!uv_socket) {
+      coordinate_error =
+          "Image closure coordinates require a 'UV' vector input (legacy 'Vector' "
+          "is also accepted); synchronize the Evaluate Closure interface";
+    }
+    else {
+      const bNodeSocket &uv = **uv_socket;
+      const auto shape = storage.input_items.items[uv.index() - 1].structure_type;
+      const int dimensions = uv.type == SOCK_VECTOR ?
+                                 uv.default_value_typed<bNodeSocketValueVector>()->dimensions :
+                                 0;
+      if (uv.type != SOCK_VECTOR || !ELEM(dimensions, 0, 3) ||
+          !ELEM(shape,
+                NodeSocketInterfaceStructureType::Auto,
+                NodeSocketInterfaceStructureType::Single))
+      {
+        coordinate_error = fmt::format(
+            "Image closure coordinates '{}' must be a single 3D vector; synchronize the "
+            "Evaluate Closure interface",
+            uv.name);
+      }
+    }
+    if (!coordinate_error.empty()) {
+      params_.r_error_messages.append({evaluate_node.node, std::move(coordinate_error), true});
+      for (const int i : IndexRange(storage.output_items.items_num)) {
+        this->store_socket_value_fallback(evaluate_node.output_socket(i));
+      }
+      return;
+    }
+    if (!value_by_socket_.contains(*uv_socket)) {
+      this->schedule_socket(*uv_socket);
+      return;
     }
 
     bNode &sample_node = *this->add_node("ShaderNodeImageClosureSample"_ustr);
@@ -1219,15 +1257,11 @@ class ShaderNodesInliner {
     if (!(this->node_copy_flag() & LIB_ID_CREATE_NO_USER_REFCOUNT)) {
       id_us_plus(sample_node.id);
     }
-    if (uv_socket) {
-      /* The destination tree's topology cache is not built while nodes are being inserted. */
-      bNodeSocket &sample_input = *static_cast<bNodeSocket *>(sample_node.inputs.first);
-      const SocketValue uv = this->handle_implicit_conversion(
-          value_by_socket_.lookup(*uv_socket),
-          *(*uv_socket)->typeinfo,
-          *sample_input.typeinfo);
-      this->set_input_socket_value(*evaluate_node, sample_node, sample_input, uv);
-    }
+    /* The destination tree's topology cache is not built while nodes are being inserted. */
+    bNodeSocket &sample_input = *static_cast<bNodeSocket *>(sample_node.inputs.first);
+    const SocketValue uv = this->handle_implicit_conversion(
+        value_by_socket_.lookup(*uv_socket), *(*uv_socket)->typeinfo, *sample_input.typeinfo);
+    this->set_input_socket_value(*evaluate_node, sample_node, sample_input, uv);
 
     for (const int i : IndexRange(storage.output_items.items_num)) {
       const SocketInContext output = evaluate_node.output_socket(i);

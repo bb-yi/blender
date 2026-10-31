@@ -62,6 +62,7 @@ struct BundleSyncState {
 struct ClosureSyncState {
   NodeSyncState state;
   std::optional<nodes::ClosureSignature> source_signature;
+  bool all_sources_are_images = false;
 };
 
 static int normalized_vector_dimensions(const int dimensions)
@@ -747,7 +748,14 @@ static ClosureSyncState get_sync_state_evaluate_closure(
   const nodes::ClosureSignature &current_signature =
       nodes::ClosureSignature::from_evaluate_closure_node(evaluate_closure_node, true);
   if (*merged_signature != current_signature) {
-    return {NodeSyncState::CanBeSynced, merged_signature};
+    const bool all_sources_are_images = snode.edittree->type == NTREE_SHADER &&
+                                        std::all_of(linked_signatures.items.begin(),
+                                                    linked_signatures.items.end(),
+                                                    [](const LinkedClosureSignatures::Item &item) {
+                                                      return item.socket->owner_node().is_type(
+                                                          "ShaderNodeImageToClosure"_ustr);
+                                                    });
+    return {NodeSyncState::CanBeSynced, merged_signature, all_sources_are_images};
   }
   return {NodeSyncState::Synced};
 }
@@ -950,7 +958,7 @@ void sync_sockets_evaluate_closure(SpaceNode &snode,
   nodes::socket_items::clear<nodes::EvaluateClosureInputItemsAccessor>(evaluate_closure_node);
   nodes::socket_items::clear<nodes::EvaluateClosureOutputItemsAccessor>(evaluate_closure_node);
 
-  Set<std::string> preserved_inputs;
+  Map<std::string, std::string> preserved_inputs;
   Set<std::string> preserved_outputs;
   for (const nodes::ClosureSignature::Item &item : sync_state.source_signature->inputs) {
     NodeEvaluateClosureInputItem &new_item =
@@ -958,11 +966,22 @@ void sync_sockets_evaluate_closure(SpaceNode &snode,
             nodes::EvaluateClosureInputItemsAccessor>(
             *snode.edittree, evaluate_closure_node, item.type->type, item.key.c_str());
     new_item.structure_type = item.structure_type;
-    const int old_index = old_signature.inputs.index_of_try_as(item.key);
-    if (old_index != -1 && can_preserve_socket(old_signature.inputs[old_index], item)) {
-      if (const std::optional<int> old_identifier = old_input_identifiers.lookup_try(item.key)) {
-        new_item.identifier = *old_identifier;
-        preserved_inputs.add(item.key);
+    /* A legacy image coordinate has the same transport ABI but a different key. Preserve its
+     * socket identifier, links and default when explicitly migrating to the canonical interface.
+     * Custom closures (including image/custom mixed sources) keep exact key matching. */
+    const std::string old_key = sync_state.all_sources_are_images && item.key == "UV" &&
+                                        !old_signature.inputs.contains_as("UV") ?
+                                    "Vector" :
+                                    item.key;
+    const int old_index = old_signature.inputs.index_of_try_as(old_key);
+    if (old_index != -1) {
+      ClosureSignature::Item old_item = old_signature.inputs[old_index];
+      old_item.key = item.key;
+      if (can_preserve_socket(old_item, item)) {
+        if (const std::optional<int> old_identifier = old_input_identifiers.lookup_try(old_key)) {
+          new_item.identifier = *old_identifier;
+          preserved_inputs.add(item.key, old_key);
+        }
       }
     }
   }
@@ -989,7 +1008,8 @@ void sync_sockets_evaluate_closure(SpaceNode &snode,
     const bool preserved = preserved_inputs.contains(item.key);
     apply_closure_item_ui_data(item, socket, !preserved);
     if (preserved) {
-      restore_closure_item_default_value(old_signature.inputs.as_span(), item.key, socket);
+      restore_closure_item_default_value(
+          old_signature.inputs.as_span(), preserved_inputs.lookup(item.key), socket);
     }
   }
   for (const int i : sync_state.source_signature->outputs.index_range()) {
@@ -1002,6 +1022,9 @@ void sync_sockets_evaluate_closure(SpaceNode &snode,
     }
   }
   BKE_ntree_update_tag_node_property(snode.edittree, &evaluate_closure_node);
+  if (preserved_inputs.lookup_default("UV", "") == "Vector") {
+    BKE_report(reports, RPT_INFO, "Migrated legacy image coordinate 'Vector' to 'UV'");
+  }
 }
 
 void sync_sockets_closure(SpaceNode &snode,

@@ -142,6 +142,8 @@ Image Sample.Color / Alpha → Closure Output → 函数 sampler2D
 `texture(image, vec2(0))` 采当前像素；Pixel 模式下 `(1,0)` 表示右移一个像素。需要透明度时接出独立 Alpha，不能只保留 RGB。Shadertoy 的反馈/多 pass 仍需显式实现或说明近似，不能靠 sampler 自动补齐运行时。
 
 Image to Closure 可经转接点、Bundle、嵌套节点组传递，保留资源与采样设置。接到空 Evaluate Closure 或 Sync 后，接口为 UV Vector → Color、Alpha；2D 取 XY、3D LUT 取 XYZ、Cube 取方向，未连接 UV 使用数值默认值 `(0,0,0)`。
+这里的 `UV` 是闭包参数键。原生图像闭包兼容旧键 `Vector`，但明确存在 `UV` 时始终使用 `UV`（与插口顺序、是否连线无关）；坐标必须是单个三维向量。缺少坐标输入项或类型不符会在 Evaluate Closure 上报告编译错误，不再静默使用内部默认坐标。
+仅当同步来源全部是 Image to Closure 时，显式 Sync 会将旧 `Vector` 迁移为 `UV`，保留兼容插口的标识、连线和默认值；普通自定义 Closure 和混合来源继续严格按各自参数键匹配。已存在但未连接的 `UV` 仍正常使用该插口的数值默认值。
 解算 Color 保留 RGBA，同时另出 Alpha，别重复相乘。采样遵循原生 sampler，不额外套用 Image Texture 的 LOD 偏置/Alpha 处理；不增加 UDIM 支持，Cubic/Smart 仍使用既有线性过滤。
 
 ### Typed Closure callback

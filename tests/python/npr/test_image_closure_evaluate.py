@@ -131,7 +131,9 @@ def route(tree, source, kind):
     raise AssertionError(kind)
 
 
-def sync(tree, node, group_path=()):
+def sync(tree, node, group_path=(), input_keys=('UV',)):
+    tree.interface_update(bpy.context)
+    bpy.context.view_layer.update()
     area = bpy.context.screen.areas[0]
     area.type = 'NODE_EDITOR'
     space = area.spaces.active
@@ -148,7 +150,8 @@ def sync(tree, node, group_path=()):
                                    node=node, active_node=node, edit_tree=edit_tree,
                                    node_tree=edit_tree):
         assert bpy.ops.node.sockets_sync() == {'FINISHED'}
-    assert [(i.name, i.socket_type) for i in node.input_items] == [('UV', 'VECTOR')]
+    assert sorted((i.name, i.socket_type) for i in node.input_items) == sorted(
+        (key, 'VECTOR') for key in input_keys)
     assert [(i.name, i.socket_type) for i in node.output_items] == [('Color', 'RGBA'), ('Alpha', 'FLOAT')]
     space.path.start(tree)
 
@@ -416,6 +419,8 @@ def test_three_dimensional_images():
         ev, color = encoded_evaluation(tree,source,coord)
         tree.links.new(average(tree,fn.outputs['Result'],color),emission.inputs['Color'])
         check_pixel(kind,expected)
+        ev.input_items[0].name = 'Vector'
+        check_pixel(kind + '_legacy_coordinate', expected)
         # Changing resource dimension must not silently reinterpret a 3D/cube texture as 2D.
         wrong = glsl(tree,SOURCE,'sample_image')
         tree.links.new(source,wrong.inputs['image'])
@@ -423,7 +428,222 @@ def test_three_dimensional_images():
         assert wrong.parse_status == 'ERROR', kind
 
 
+def coordinate_evaluator(tree, source, keys=('Vector',), socket_type='VECTOR'):
+    """Author the old interface explicitly, without editor auto synchronization."""
+    node = tree.nodes.new('NodeEvaluateClosure')
+    for key in keys:
+        node.input_items.new(socket_type, key)
+    node.output_items.new('RGBA', 'Color')
+    node.output_items.new('FLOAT', 'Alpha')
+    tree.links.new(source, node.inputs['Closure'])
+    return node
+
+
+def test_legacy_coordinates():
+    for kind in ('direct', 'reroutes', 'bundle', 'nested_bundle', 'join_bundle',
+                 'groups', 'muted_group', 'bundle_group', 'mixed'):
+        _, mat, emission = scene()
+        tree = mat.node_tree
+        image = new_image(tree)
+        ev = coordinate_evaluator(tree, route(tree, image.outputs[0], kind))
+        ev.inputs['Vector'].default_value = (0.75, 0.75, 0)
+        tree.links.new(ev.outputs['Color'], emission.inputs['Color'])
+        check_pixel('legacy_' + kind, COLORS[3][:3])
+        ev.inputs['Vector'].default_value = (0.75, 0.25, 0)
+        check_pixel('legacy_' + kind + '_changed', COLORS[1][:3])
+        tree.links.new(ev.outputs['Alpha'], emission.inputs['Color'])
+        check_pixel('legacy_' + kind + '_alpha', (0.5,) * 3)
+
+
+def test_coordinate_sync():
+    for linked in (False, True):
+        _, mat, emission = scene()
+        tree = mat.node_tree
+        ev = coordinate_evaluator(tree, new_image(tree).outputs[0])
+        uv = (0.75, 0.25, 0)
+        ev.inputs['Vector'].default_value = uv
+        identifier = ev.inputs['Vector'].identifier
+        color_identifier = ev.outputs['Color'].identifier
+        alpha_identifier = ev.outputs['Alpha'].identifier
+        if linked:
+            coords = tree.nodes.new('ShaderNodeCombineXYZ')
+            for socket, value in zip(coords.inputs, (0.25, 0.75, 0)):
+                socket.default_value = value
+            tree.links.new(coords.outputs[0], ev.inputs['Vector'])
+        tree.links.new(ev.outputs['Color'], emission.inputs['Color'])
+        sync(tree, ev)
+        assert 'Vector' not in ev.inputs
+        assert ev.inputs['UV'].identifier == identifier
+        assert ev.outputs['Color'].identifier == color_identifier
+        assert ev.outputs['Alpha'].identifier == alpha_identifier
+        assert ev.outputs['Color'].is_linked
+        near(tuple(ev.inputs['UV'].default_value), uv)
+        if linked:
+            assert ev.inputs['UV'].links[0].from_node == coords
+        check_pixel('coordinate_sync_' + str(linked), COLORS[2 if linked else 1][:3])
+        # A second sync must leave both identity and the authored default unchanged.
+        sync(tree, ev)
+        assert ev.inputs['UV'].identifier == identifier
+        near(tuple(ev.inputs['UV'].default_value), uv)
+
+    # Shared consumer group: sync follows the edited instance through nested routing.
+    _, mat, emission = scene()
+    tree = mat.node_tree
+    group, inp, out = group_interface('Legacy Image Consumer', [
+        ('Image', 'INPUT', 'NodeSocketClosure'), ('Color', 'OUTPUT', 'NodeSocketColor')])
+    ev = coordinate_evaluator(group, route(group, inp.outputs['Image'], 'mixed'))
+    ev.inputs['Vector'].default_value = (0.75, 0.75, 0)
+    identifier = ev.inputs['Vector'].identifier
+    group.links.new(ev.outputs['Color'], out.inputs['Color'])
+    instance = tree.nodes.new('ShaderNodeGroup')
+    instance.node_tree = group
+    tree.links.new(new_image(tree).outputs[0], instance.inputs['Image'])
+    tree.links.new(instance.outputs['Color'], emission.inputs['Color'])
+    sync(tree, ev, [instance])
+    assert ev.inputs['UV'].identifier == identifier
+    near(tuple(ev.inputs['UV'].default_value), (0.75, 0.75, 0))
+    check_pixel('coordinate_sync_group', COLORS[3][:3])
+
+
+def test_coordinate_precedence():
+    # The declared UV always wins, even when Vector appears first or has a link.
+    for keys in (('Vector', 'UV'), ('UV', 'Vector')):
+        _, mat, emission = scene()
+        tree = mat.node_tree
+        ev = coordinate_evaluator(tree, new_image(tree).outputs[0], keys)
+        ev.inputs['UV'].default_value = (0.75, 0.25, 0)
+        coords = tree.nodes.new('ShaderNodeCombineXYZ')
+        coords.inputs['X'].default_value = 0.25
+        coords.inputs['Y'].default_value = 0.75
+        tree.links.new(coords.outputs[0], ev.inputs['Vector'])
+        identifier = ev.inputs['UV'].identifier
+        tree.links.new(ev.outputs['Color'], emission.inputs['Color'])
+        check_pixel('coordinate_precedence_' + keys[0], COLORS[1][:3])
+        sync(tree, ev)
+        assert ev.inputs['UV'].identifier == identifier and 'Vector' not in ev.inputs
+        near(tuple(ev.inputs['UV'].default_value), (0.75, 0.25, 0))
+        assert not ev.inputs['UV'].is_linked
+        check_pixel('coordinate_precedence_synced_' + keys[0], COLORS[1][:3])
+
+
+def test_custom_coordinate_key():
+    _, mat, emission = scene()
+    tree = mat.node_tree
+    inp = tree.nodes.new('NodeClosureInput')
+    out = tree.nodes.new('NodeClosureOutput')
+    inp.pair_with_output(out)
+    out.input_items.new('VECTOR', 'Vector').structure_type = 'SINGLE'
+    out.output_items.new('RGBA', 'Color').structure_type = 'SINGLE'
+    out.output_items.new('FLOAT', 'Alpha').structure_type = 'SINGLE'
+    tree.links.new(inp.outputs['Vector'], out.inputs['Color'])
+    out.inputs['Alpha'].default_value = 1
+    ev = coordinate_evaluator(tree, route(tree, out.outputs[0], 'mixed'))
+    value = (0.2, 0.4, 0.6)
+    ev.inputs['Vector'].default_value = value
+    tree.links.new(ev.outputs['Color'], emission.inputs['Color'])
+    check_pixel('custom_vector_key', value)
+    identifier = ev.inputs['Vector'].identifier
+    sync(tree, ev, input_keys=('Vector',))
+    assert ev.inputs['Vector'].identifier == identifier
+    near(tuple(ev.inputs['Vector'].default_value), value)
+    # This source's key is Vector. UV must not become a global alias for it.
+    ev.input_items[0].name = 'UV'
+    check_pixel('custom_uv_not_alias', (0, 0, 0))
+    # Synchronization restores the actual custom signature, not the image signature.
+    sync(tree, ev, input_keys=('Vector',))
+    ev.inputs['Vector'].default_value = value
+    check_pixel('custom_vector_synced', value)
+
+    # Join Bundle exposes multiple candidate signatures: retain their separate keys.
+    packets = []
+    for source in (new_image(tree).outputs[0], out.outputs[0]):
+        packet = tree.nodes.new('NodeCombineBundle')
+        packet.bundle_items.new('CLOSURE', 'Image')
+        tree.links.new(source, packet.inputs['Image'])
+        packets.append(packet)
+    join = tree.nodes.new('NodeJoinBundle')
+    tree.links.new(packets[0].outputs[0], join.inputs[0])
+    custom_link = tree.links.new(packets[1].outputs[0], join.inputs[0])
+    separate = tree.nodes.new('NodeSeparateBundle')
+    separate.bundle_items.new('CLOSURE', 'Image')
+    tree.links.new(join.outputs[0], separate.inputs[0])
+    tree.links.new(separate.outputs['Image'], ev.inputs['Closure'])
+    identifier = ev.inputs['Vector'].identifier
+    sync(tree, ev, input_keys=('UV', 'Vector'))
+    assert ev.inputs['Vector'].identifier == identifier
+    assert ev.inputs['UV'].identifier != identifier
+    near(tuple(ev.inputs['Vector'].default_value), value)
+    ev.inputs['UV'].default_value = (0.75, 0.25, 0)
+    tree.links.remove(custom_link)
+    check_pixel('mixed_image_coordinate', COLORS[1][:3])
+    tree.links.new(out.outputs[0], ev.inputs['Closure'])
+    check_pixel('mixed_custom_coordinate', value)
+
+
+def legacy_file():
+    _, mat, emission = scene()
+    tree = mat.node_tree
+    image = new_image(tree)
+    image.image.pack()
+    ev = coordinate_evaluator(tree, route(tree, image.outputs[0], 'mixed'))
+    ev.inputs['Vector'].default_value = (0.75, 0.75, 0)
+    tree.links.new(ev.outputs['Color'], emission.inputs['Color'])
+    assets = OUT / 'assets'
+    assets.mkdir(exist_ok=True)
+    filepath = assets / 'image_closure_legacy_vector.blend'
+    bpy.ops.wm.save_as_mainfile(filepath=str(filepath))
+    return filepath
+
+
+def test_coordinate_reload():
+    filepath = legacy_file()
+    output = background_child(Path(__file__), ('--reload-vector', str(filepath)))
+    (OUT / 'legacy_vector_reload.log').write_text(output, encoding='utf-8')
+    assert 'IMAGE_CLOSURE_LEGACY_RELOAD_OK' in output, output
+
+
+def invalid_coordinates(kind):
+    _, mat, emission = scene()
+    tree = mat.node_tree
+    keys = () if kind == 'missing' else ('Coordinates',) if kind == 'unknown' else ('UV',)
+    ev = coordinate_evaluator(tree, new_image(tree).outputs[0], keys,
+                              'FLOAT' if kind == 'wrong_type' else 'VECTOR')
+    if kind == 'wrong_type':
+        # An invalid canonical UV must be diagnosed instead of silently choosing Vector.
+        ev.input_items.new('VECTOR', 'Vector')
+        ev.inputs['Vector'].default_value = (0.75, 0.75, 0)
+    tree.links.new(ev.outputs['Color'], emission.inputs['Color'])
+    check_pixel('invalid_coordinates_' + kind, (1, 0, 1))
+    # Correcting the interface in the same material must recover from its prior error.
+    ev.input_items.clear()
+    ev.input_items.new('VECTOR', 'UV')
+    ev.inputs['UV'].default_value = (0.75, 0.25, 0)
+    check_pixel('invalid_coordinates_recovered_' + kind, COLORS[1][:3])
+    print('IMAGE_CLOSURE_COORDINATE_ERROR_OK=' + kind, flush=True)
+
+
+def test_coordinate_diagnostics():
+    for kind in ('missing', 'unknown', 'wrong_type'):
+        output = background_child(Path(__file__), ('--invalid-coordinates', kind))
+        (OUT / ('invalid_coordinates_' + kind + '.log')).write_text(output, encoding='utf-8')
+        assert 'Image closure coordinates' in output, output
+        assert 'IMAGE_CLOSURE_COORDINATE_ERROR_OK=' + kind in output, output
+
+
 def main():
+    if '--write-legacy' in sys.argv:
+        print('IMAGE_CLOSURE_LEGACY_FILE=' + str(legacy_file()), flush=True)
+        return
+    if '--reload-vector' in sys.argv:
+        bpy.ops.wm.open_mainfile(filepath=sys.argv[sys.argv.index('--reload-vector') + 1])
+        gpu.init()
+        check_pixel('legacy_vector_cold_reload', COLORS[3][:3])
+        print('IMAGE_CLOSURE_LEGACY_RELOAD_OK', flush=True)
+        return
+    if '--invalid-coordinates' in sys.argv:
+        gpu.init()
+        invalid_coordinates(sys.argv[sys.argv.index('--invalid-coordinates') + 1])
+        return
     if '--reload' in sys.argv:
         bpy.ops.wm.open_mainfile(filepath=sys.argv[sys.argv.index('--reload')+1])
         gpu.init()
@@ -435,7 +655,9 @@ def main():
     print('IMAGE_CLOSURE_BUILD='+bpy.app.build_hash.decode(),flush=True)
     tests = (test_editor_connection, test_routes, test_group_instances,
              test_source_group_and_signature_edit, test_native_texture_operations,
-             test_bundle_group_input_and_addressing, test_three_dimensional_images)
+             test_bundle_group_input_and_addressing, test_three_dimensional_images,
+             test_legacy_coordinates, test_coordinate_sync, test_coordinate_precedence,
+             test_custom_coordinate_key, test_coordinate_reload, test_coordinate_diagnostics)
     selected = sys.argv[sys.argv.index('--test')+1].split(',') if '--test' in sys.argv else None
     if selected:
         assert set(selected) <= {test.__name__ for test in tests}, selected
