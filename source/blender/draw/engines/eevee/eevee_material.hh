@@ -309,7 +309,7 @@ struct SurfaceDrawState {
   eMaterialZTestMode ztest_mode;
   bool color_write;
   bool depth_write;
-  /* Skips stencil state, the refraction layer and outline-specific behavior. */
+  /* Skips body-only stencil and Outline Control behavior, but shares its refraction layer. */
   bool is_outline_shell;
 };
 

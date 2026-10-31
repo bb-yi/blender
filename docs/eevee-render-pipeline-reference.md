@@ -587,6 +587,10 @@ deferred 主阶段结束后释放 GBuffer。
 - `NPR foreach light`
 - `NPR refraction`
 
+`Refraction Layer` 使用对象上的层级编号，按编号升序处理并保留正常深度测试。开启光线追踪透射时，Deferred `Outline Shell` 的预通道和着色通道与主体进入同一层；本层 NPR Refraction 读取此前层完成后的背景，包含较低层的描边，但不包含本层自己的描边。相同编号仍为同一层，不进行同层物体之间的递归透射。Forward/Blended 描边继续在现有 Forward 阶段绘制。
+
+多层复用反馈纹理时，只有本层 NPR 要读取与 Clamp 写入目标相同的背景纹理，才临时保存只读背景快照；NPR 完成后释放，并将本层最终结果传给下一层。场景没有不透明几何时，仅第一个非空折射层按首层处理，后续层仍保留完整背景反馈。无需新增独立描边层级或旧文件迁移。
+
 这些都会直接影响主表面阶段的耗时结构。
 
 ### 4. GLSL Function / Raycast / NPR Tree

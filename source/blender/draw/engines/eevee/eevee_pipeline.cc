@@ -2177,8 +2177,21 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     }
   }
 
+  /* Refraction layers share their ray-tracing buffer. Clamping writes the current layer into
+   * its feedback before NPR runs, so preserve an aliased background for NPR Refraction reads.
+   * Other layers keep reading the existing texture without an additional allocation or copy. */
+  TextureFromPool npr_refraction_background = {"NPR Refraction Background"};
+  if (has_npr_refraction_ && use_feedback_output_ && use_clamp_direct_ && radiance_behind_tx &&
+      radiance_behind_tx == rt_buffer.radiance_feedback_tx.gpu_texture())
+  {
+    npr_refraction_background.acquire_2d(extent, GPU_texture_format(radiance_behind_tx), usage_rw);
+    GPU_texture_copy(npr_refraction_background, radiance_behind_tx);
+  }
+
   radiance_feedback_tx_ = rt_buffer.feedback_ensure(!use_feedback_output_, extent);
-  radiance_back_tx_ = radiance_behind_tx ? radiance_behind_tx : radiance_feedback_tx_;
+  radiance_back_tx_ = npr_refraction_background.is_valid() ?
+                          npr_refraction_background.gpu_texture() :
+                          (radiance_behind_tx ? radiance_behind_tx : radiance_feedback_tx_);
 
   if (use_feedback_output_ && use_clamp_direct_) {
     /* We need to do a copy before the combine pass (otherwise we have a dependency issue) to save
@@ -2216,6 +2229,11 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     }
     npr_radiance_input_tx_ = nullptr;
     npr_radiance_input.release();
+  }
+
+  if (npr_refraction_background.is_valid()) {
+    radiance_back_tx_ = nullptr;
+    npr_refraction_background.release();
   }
 
   if (use_feedback_output_) {
@@ -2352,12 +2370,23 @@ void DeferredPipeline::end_sync()
         "stencil_source_tx", &stencil_source_tx_, GPUSamplerState::default_sampler());
     stencil_snapshot_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   }
-  opaque_layer_.end_sync(true, refraction_layers_.empty(), !refraction_layers_.empty());
+  DeferredLayer *last_refraction_layer = nullptr;
+  for (auto &[index, layer] : refraction_layers_) {
+    if (!layer->is_empty()) {
+      last_refraction_layer = layer.get();
+    }
+  }
+  opaque_layer_.end_sync(true, last_refraction_layer == nullptr, last_refraction_layer != nullptr);
 
-  if (!refraction_layers_.empty()) {
-    const short last_index = refraction_layers_.rbegin()->first;
-    for (auto &[index, layer] : refraction_layers_) {
-      layer->end_sync(opaque_layer_.is_empty(), index == last_index, index != last_index);
+  /* An empty opaque pass makes only the first non-empty refraction layer the first pass.
+   * Later layers need full-size feedback even in a scene containing only refractive objects. */
+  bool is_first_pass = opaque_layer_.is_empty();
+  for (auto &[index, layer] : refraction_layers_) {
+    const bool is_empty = layer->is_empty();
+    const bool is_last_pass = layer.get() == last_refraction_layer;
+    layer->end_sync(is_first_pass, is_last_pass, !is_empty && !is_last_pass);
+    if (!is_empty) {
+      is_first_pass = false;
     }
   }
 
@@ -2533,9 +2562,8 @@ PassMain::Sub *DeferredPipeline::prepass_add(blender::Material *blender_mat,
                                              bool hide_from_raycast,
                                              bool force_write_id)
 {
-  if (!draw_state.is_outline_shell && !use_combined_lightprobe_eval &&
-      (blender_mat->blend_flag & MA_BL_SS_REFRACTION))
-  {
+  /* Shell depth and shading belong to the same refraction layer as their owner. */
+  if (!use_combined_lightprobe_eval && (blender_mat->blend_flag & MA_BL_SS_REFRACTION)) {
     return get_refraction_layer(refraction_layer)
         .prepass_add(draw_state, gpumat, has_motion, hide_from_raycast, force_write_id);
   }
@@ -2548,9 +2576,7 @@ PassMain::Sub *DeferredPipeline::material_add(blender::Material *blender_mat,
                                               GPUMaterial *gpumat,
                                               short refraction_layer)
 {
-  if (!draw_state.is_outline_shell && !use_combined_lightprobe_eval &&
-      (blender_mat->blend_flag & MA_BL_SS_REFRACTION))
-  {
+  if (!use_combined_lightprobe_eval && (blender_mat->blend_flag & MA_BL_SS_REFRACTION)) {
     return get_refraction_layer(refraction_layer).material_add(blender_mat, draw_state, gpumat);
   }
   return opaque_layer_.material_add(blender_mat, draw_state, gpumat);
