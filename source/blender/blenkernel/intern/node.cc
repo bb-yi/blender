@@ -473,6 +473,22 @@ static void node_foreach_path(ID *id, BPathForeachPathData *bpath_data)
   bNodeTree *ntree = reinterpret_cast<bNodeTree *>(id);
 
   switch (ntree->type) {
+    case NTREE_COMPOSIT: {
+      for (bNode *node : ntree->all_nodes()) {
+        if (node->type_legacy == CMP_NODE_LUT) {
+          auto &settings = *static_cast<NodeCompositorLUT *>(node->storage);
+          if (settings.packed_file && (bpath_data->flag & BKE_BPATH_FOREACH_PATH_SKIP_PACKED) != 0)
+          {
+            continue;
+          }
+          if (settings.filepath[0]) {
+            BKE_bpath_foreach_path_fixed_process(
+                bpath_data, settings.filepath, sizeof(settings.filepath));
+          }
+        }
+      }
+      break;
+    }
     case NTREE_SHADER: {
       for (bNode *node : ntree->all_nodes()) {
         if (node->type_legacy == SH_NODE_SCRIPT) {

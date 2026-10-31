@@ -1701,6 +1701,87 @@ class NODE_OT_viewer_shortcut_get(Operator):
         return {'FINISHED'}
 
 
+class NODE_OT_add_display_lut(Operator):
+    """Add an AgX display conversion, editable LUT node, and output conversion"""
+    bl_idname = "node.add_display_lut"
+    bl_label = "Display LUT Setup (AgX)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    configure_output: BoolProperty(
+        name="Use Standard / sRGB Scene Output",
+        description="Configure scene output to avoid applying AgX a second time; affects the whole scene",
+        default=True,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        space = context.space_data
+        return (space is not None and space.type == 'NODE_EDITOR' and
+                space.tree_type == 'CompositorNodeTree' and space.edit_tree is not None and
+                space.edit_tree.is_editable)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        self.layout.label(text="Apply the LUT after an AgX view transform.")
+        self.layout.prop(self, "configure_output")
+
+    def execute(self, context):
+        tree = context.space_data.edit_tree
+
+        def conversion_group(name, display):
+            group = bpy.data.node_groups.new(name, 'CompositorNodeTree')
+            group.interface.new_socket(name="Image", in_out='INPUT', socket_type='NodeSocketColor')
+            group.interface.new_socket(name="Image", in_out='OUTPUT', socket_type='NodeSocketColor')
+            source = group.nodes.new('NodeGroupInput')
+            straight = group.nodes.new('CompositorNodePremulKey')
+            straight.inputs['Type'].default_value = 'To Straight'
+            convert = group.nodes.new('CompositorNodeConvertToDisplay' if display else
+                                      'CompositorNodeConvertColorSpace')
+            if display:
+                convert.display_settings.display_device = 'sRGB'
+                convert.view_settings.view_transform = 'AgX'
+                convert.view_settings.look = 'None'
+            else:
+                convert.from_color_space = 'sRGB'
+                # The default target is the scene_linear role, including custom working spaces.
+            premul = group.nodes.new('CompositorNodePremulKey')
+            premul.inputs['Type'].default_value = 'To Premultiplied'
+            target = group.nodes.new('NodeGroupOutput')
+            chain = (source, straight, convert, premul, target)
+            for index, node in enumerate(chain):
+                node.location = (index * 210, 0)
+            for before, after in zip(chain, chain[1:]):
+                group.links.new(before.outputs['Image'], after.inputs['Image'])
+            node = tree.nodes.new('CompositorNodeGroup')
+            node.node_tree = group
+            return node
+
+        before = conversion_group("Scene to AgX Display", True)
+        lut = tree.nodes.new('CompositorNodeLUT')
+        lut.preset = 'RAW'
+        after = conversion_group("sRGB Display to Working Space", False)
+        frame = tree.nodes.new('NodeFrame')
+        frame.label = "Display LUT - use Standard / sRGB scene output"
+        frame.location = context.space_data.cursor_location
+        for node, x in ((before, 0), (lut, 250), (after, 550)):
+            node.parent = frame
+            node.location = (x, 0)
+        tree.links.new(before.outputs['Image'], lut.inputs['Image'])
+        tree.links.new(lut.outputs['Image'], after.inputs['Image'])
+        for node in tree.nodes:
+            node.select = node == lut
+        tree.nodes.active = lut
+        if self.configure_output:
+            context.scene.display_settings.display_device = 'sRGB'
+            context.scene.view_settings.view_transform = 'Standard'
+            context.scene.view_settings.look = 'None'
+        else:
+            self.report({'INFO'}, "Display LUT setup expects Standard / sRGB scene output")
+        return {'FINISHED'}
+
+
 class NODE_FH_image_node(FileHandler):
     bl_idname = "NODE_FH_image_node"
     bl_label = "Image node"
@@ -1721,6 +1802,7 @@ classes = (
     NodeSetting,
 
     NODE_FH_image_node,
+    NODE_OT_add_display_lut,
 
     NODE_OT_add_node,
     NODE_OT_filter_material_new,
