@@ -657,6 +657,7 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
         render_view, rbufs.depth_tx, prepass_fb_, transparent_fb_, combined_fb_, slot.extent);
   }
 
+  inst_.outline_shell.release();
   for (const int index : capture_slots) {
     slot_extract(index, rbufs);
     data_[index].info.w &= ~RENDER_TEXTURE_SLOT_CAPTURING;

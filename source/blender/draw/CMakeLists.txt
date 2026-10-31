@@ -118,6 +118,7 @@ set(SRC
   engines/eevee/eevee_motion_blur.cc
   engines/eevee/eevee_native_postfx_output.cc
   engines/eevee/eevee_outline.cc
+  engines/eevee/eevee_outline_shell.cc
   engines/eevee/eevee_pipeline.cc
   engines/eevee/eevee_precompute.cc
   engines/eevee/eevee_raytrace.cc
@@ -224,6 +225,7 @@ set(SRC
   engines/eevee/eevee_motion_blur.hh
   engines/eevee/eevee_native_postfx_output.hh
   engines/eevee/eevee_outline.hh
+  engines/eevee/eevee_outline_shell.hh
   engines/eevee/eevee_pipeline.hh
   engines/eevee/eevee_precompute.hh
   engines/eevee/eevee_raytrace.hh
@@ -497,6 +499,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_outline_jfa_init_frag.glsl
   engines/eevee/shaders/eevee_outline_jfa_step_comp.glsl
   engines/eevee/shaders/eevee_outline_lib.glsl
+  engines/eevee/shaders/eevee_outline_shell_lib.bsl.hh
   engines/eevee/shaders/eevee_outline_resolve_frag.glsl
   engines/eevee/shaders/eevee_pipeline.bsl.hh
   engines/eevee/shaders/eevee_ray_denoise.bsl.hh

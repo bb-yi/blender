@@ -71,6 +71,7 @@ static bool material_pipeline_supports_depth_offset(eMaterialPipeline pipeline_t
               MAT_PIPE_PREPASS_FORWARD_VELOCITY,
               MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
               MAT_PIPE_PREPASS_OVERLAP,
+              MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH,
               MAT_PIPE_PREPASS_FORWARD,
               MAT_PIPE_PREPASS_DEFERRED,
               MAT_PIPE_PREPASS_PLANAR,
@@ -1262,6 +1263,7 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
     case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
     case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
     case MAT_PIPE_PREPASS_OVERLAP:
+    case MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH:
     case MAT_PIPE_PREPASS_FORWARD:
     case MAT_PIPE_PREPASS_DEFERRED:
     case MAT_PIPE_PREPASS_PLANAR:
@@ -1349,6 +1351,15 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
            * pipeline. */
           info.fragment_source("eevee_surf_depth.bsl.hh");
           info.fragment_function("eevee_surf_depthTtrue");
+          break;
+        case MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH:
+          pipeline_info_name = "eevee_surf_depthTfalse_infos_";
+          info.name_ += "_outline_shell_self_depth";
+          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
+          info.define("MAT_DEPTH");
+          info.define("closure_to_rgba", "closure_to_rgba_depth");
+          info.fragment_source("eevee_surf_depth.bsl.hh");
+          info.fragment_function("eevee_surf_depthTfalse");
           break;
         case MAT_PIPE_PREPASS_OVERLAP:
           pipeline_info_name = "eevee_surf_depthTfalse_infos_";
@@ -1688,8 +1699,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       info.define("MAT_OUTLINE_SHELL_BLENDED");
     }
   }
-  if (outline_shell ? GPU_material_outline_shell_has_alpha(gpumat) :
-                      GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT))
+  const bool shell_self_occlusion = outline_shell && pipeline_type != MAT_PIPE_SHADOW &&
+                                    (blender_mat->outline_shell_flag &
+                                     MA_OUTLINE_SHELL_SELF_OCCLUSION);
+  if (shell_self_occlusion) {
+    info.define("MAT_OUTLINE_SHELL_SELF_OCCLUSION");
+  }
+  if (pipeline_type != MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH &&
+      (outline_shell ? GPU_material_outline_shell_has_alpha(gpumat) :
+                       GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT)))
   {
     if (pipeline_type != MAT_PIPE_SHADOW || transparent_shadows) {
       info.define("MAT_TRANSPARENT");
@@ -1824,6 +1842,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                                  use_front_light_shader_in_surface_pass,
                                                  has_depth_offset,
                                                  use_lightprobe_data);
+  if (shell_self_occlusion) {
+    add_create_info_and_reserve(info, slots, "eevee_outline_shell_self_occlusion");
+  }
   if (material_codegen_uses_render_info(codegen)) {
     add_create_info_and_reserve(info, slots, "eevee_sampling_data");
   }
@@ -3121,6 +3142,9 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
   /* Tessellation settings also live on the primary material output and must match the
    * draw-call expansion in every pass. */
   const bool needs_npr_tessellation = compile_npr_graph && geometry_type == MAT_GEOM_MESH_TESS;
+  /* The self-depth pipeline must execute material output nodes too: they carry displacement,
+   * tessellation and Depth Offset. Its fragment entry point never calls nodetree_surface(), so
+   * body Alpha and full surface shading are still excluded from the depth draw. */
   const bool compile_surface_graph = outline_shell ||
                                      (pipeline_type != MAT_PIPE_DEFERRED_NPR) ||
                                      needs_npr_vertex_displacement || needs_npr_depth_offset ||
@@ -3138,9 +3162,12 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       tessellation_settings.normal_mode == SHD_TESSELLATION_NORMAL_GEOMETRY;
 
   /* Shell modes are independent of the body's transparency settings. Shell graphs do not
-   * use an NPR tree key, so reserve their extra-key space for the transparency mode. */
+   * use an NPR tree key, so reserve their extra-key space for shell options. */
   const uint64_t graph_key = outline_shell ?
-                                 uint64_t(blender_mat->outline_shell_transparency_method) :
+                                 uint64_t(blender_mat->outline_shell_transparency_method) |
+                                     (uint64_t(pipeline_type != MAT_PIPE_SHADOW &&
+                                               bool(blender_mat->outline_shell_flag &
+                                                    MA_OUTLINE_SHELL_SELF_OCCLUSION)) << 2) :
                                  npr_tree_key;
   const char blend_flags = outline_shell ?
                                (blender_mat->blend_flag | MA_BL_TRANSPARENT_SHADOW) :
@@ -3343,6 +3370,20 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
   constexpr GPUPrimType prim_type = GPU_PRIM_TRIS;
 
   switch (pipeline_type) {
+    case MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH: {
+      r_info.pipeline_state()
+          .primitive(prim_type)
+          .state(GPU_WRITE_DEPTH,
+                 GPU_BLEND_NONE,
+                 GPU_CULL_NONE,
+                 GPU_DEPTH_GREATER_EQUAL,
+                 GPU_STENCIL_NONE,
+                 GPU_STENCIL_OP_NONE,
+                 GPU_VERTEX_LAST)
+          .viewports(1)
+          .depth_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH);
+      break;
+    }
     case MAT_PIPE_OUTLINE_FREESTYLE: {
       r_info.pipeline_state()
           .primitive(GPU_PRIM_LINES)

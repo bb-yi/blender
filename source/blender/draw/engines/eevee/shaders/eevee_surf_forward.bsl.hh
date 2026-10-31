@@ -23,6 +23,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_geom_iface_info)
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_outline_lib.glsl"
 #include "eevee_surf_common.bsl.hh"
+#include "eevee_outline_shell_lib.bsl.hh"
 #include "eevee_transparency.bsl.hh"
 #include "eevee_volume_lib.bsl.hh"
 
@@ -127,6 +128,12 @@ SurfaceForwardFragOut surf_forward_impl(
     const bool front_face)
 {
   SurfaceForwardFragOut frag_out = {};
+#ifdef MAT_OUTLINE_SHELL_SELF_OCCLUSION
+  if (outline_shell_self_occluded()) {
+    gpu_discard_fragment();
+    return frag_out;
+  }
+#endif
   auto &interp_flat = interface_get(eevee_geom_iface_info, interp_flat);
   draw::ID id{interp_flat.resource_id_raw};
   const uint resource_id = id.resource_id<1>();

@@ -607,7 +607,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     case GPU_MAT_QUEUED:
       queued_shaders_count++;
       shader_queued = true;
-      if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell || stencil_marker) {
+      if (pipeline_type == MAT_PIPE_DEFERRED_NPR ||
+          pipeline_type == MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH || outline_shell || stencil_marker) {
         inst_.telemetry.material_sync_add(shader_queued,
                                           optimize_queued,
                                           false,
@@ -634,7 +635,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                           blender_mat->id.name + 2,
                           GPU_material_stencil_marker_error(matpass.gpumat).data());
       }
-      if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell || stencil_marker) {
+      if (pipeline_type == MAT_PIPE_DEFERRED_NPR ||
+          pipeline_type == MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH || outline_shell || stencil_marker) {
         inst_.telemetry.material_sync_add(shader_queued,
                                           optimize_queued,
                                           false,
@@ -720,6 +722,11 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       matpass.sub_pass = &shader_sub->sub(GPU_material_get_name(matpass.gpumat));
       matpass.sub_pass->material_set(
           *inst_.manager, matpass.gpumat, true, inst_.anisotropic_filtering);
+      if (outline_shell && pipeline_type != MAT_PIPE_SHADOW &&
+          (blender_mat->outline_shell_flag & MA_OUTLINE_SHELL_SELF_OCCLUSION))
+      {
+        matpass.sub_pass->bind_resources(inst_.outline_shell);
+      }
       inst_.pipelines.deferred.bind_stencil_read_resources(*matpass.sub_pass, matpass.gpumat);
       if (pipeline_type == MAT_PIPE_FORWARD ||
           (pipeline_type == MAT_PIPE_DEFERRED &&
@@ -1219,6 +1226,24 @@ MaterialArray &MaterialModule::material_array_get(const ObjectHandle &ob_handle,
     }
   }
 
+  bool shell_self_occlusion = false;
+  if (ob->type == OB_MESH && !inst_.is_baking() &&
+      (ob->visibility_flag & OB_HIDE_CAMERA) == 0)
+  {
+    for (const int i : IndexRange(materials_len)) {
+      if (used_slots != nullptr && !used_slots->contains(i)) {
+        continue;
+      }
+      blender::Material *mat = material_override ? material_override : material_from_slot(ob, i);
+      if ((mat->outline_shell_flag & MA_OUTLINE_SHELL_SELF_OCCLUSION) &&
+          node_tree_info_get(mat).has_outline_shell)
+      {
+        shell_self_occlusion = true;
+        break;
+      }
+    }
+  }
+
   for (auto i : IndexRange(materials_len)) {
     if (used_slots != nullptr && !used_slots->contains(i)) {
       material_array_.materials.append(Material{});
@@ -1241,6 +1266,16 @@ MaterialArray &MaterialModule::material_array_get(const ObjectHandle &ob_handle,
     /* \note Perform a whole copy since next material_sync() can move the Material memory location
      * (i.e: because of its container growing) */
     material_array_.materials.append(mat);
+    if (shell_self_occlusion) {
+      material_array_.materials.last().uses_shell_self_occlusion = true;
+      material_array_.materials.last().outline_shell_self_depth = material_pass_get(
+          ob,
+          blender_mat,
+          MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH,
+          geometry_type,
+          MAT_PROBE_NONE,
+          false);
+    }
     material_array_.gpu_materials.append(mat.shading.gpumat);
     material_array_.gpu_materials_npr.append(mat.npr.gpumat);
     GPUMaterial *shell_gpumat = mat.outline_shell_shading.gpumat;

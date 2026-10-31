@@ -513,6 +513,7 @@ class EEVEE_MATERIAL_PT_settings_outline_shell(MaterialButtonsPanel, Panel):
         row.enabled = not blended
         row.prop(mat, "use_outline_shell_depth_write", text="Depth Write")
         col.prop(mat, "use_outline_shell_shadow", text="Cast Shadow")
+        col.prop(mat, "use_outline_shell_self_occlusion", text="Self Occlusion")
         if blended:
             layout.label(text="Blended uses Forward without depth or velocity", icon='INFO')
 
