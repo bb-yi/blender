@@ -559,9 +559,12 @@ namespace blender::eevee
 
     View view = { "Capture.View" };
     GPU_debug_group_begin("World.Capture");
+    const uint32_t previous_draw_context = inst_.pipelines.data.draw_context;
 
     if (update_info->do_render)
     {
+      inst_.pipelines.data.draw_context |= DRAW_CONTEXT_SPHERE_PROBE_CAPTURE;
+      inst_.uniform_data.pipeline.push_update();
       auto render_cubemap = [&](RayPipelineType ray_type)
         {
           if (assign_if_different(inst_.pipelines.data.ray_type, ray_type))
@@ -619,8 +622,9 @@ namespace blender::eevee
                                                    1000000.0);
     }
 
-    if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA))
-    {
+    const bool context_changed = assign_if_different(inst_.pipelines.data.draw_context,
+                                                     previous_draw_context);
+    if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA) || context_changed) {
       inst_.uniform_data.pipeline.push_update();
     }
 
@@ -637,6 +641,7 @@ namespace blender::eevee
     int max_resolution = 0;
     double estimated_work = 0.0;
     int prev_extent = 0;
+    const uint32_t previous_draw_context = inst_.pipelines.data.draw_context;
     while (const auto update_info = inst_.sphere_probes.probe_update_info_pop())
     {
       GPU_debug_group_begin("Probe.Capture");
@@ -647,8 +652,11 @@ namespace blender::eevee
                          double(update_info->cube_target_extent)) /
                         1000000.0;
 
+      const bool context_changed = assign_if_different(
+          inst_.pipelines.data.draw_context,
+          previous_draw_context | uint32_t(DRAW_CONTEXT_SPHERE_PROBE_CAPTURE));
       if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_GLOSSY) ||
-          prev_extent != update_info->cube_target_extent)
+          prev_extent != update_info->cube_target_extent || context_changed)
       {
         /* Set correct thickness for raycast node in probe pipelines. */
         float4x4 win_m4 = math::projection::perspective(-0.1f, 0.1f, -0.1f, 0.1f, 0.1f, 10.0f);
@@ -736,8 +744,9 @@ namespace blender::eevee
                                              max_resolution,
                                              estimated_work);
 
-    if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA))
-    {
+    const bool context_changed = assign_if_different(inst_.pipelines.data.draw_context,
+                                                     previous_draw_context);
+    if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA) || context_changed) {
       inst_.uniform_data.pipeline.push_update();
     }
   }

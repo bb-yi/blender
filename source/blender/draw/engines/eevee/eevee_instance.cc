@@ -782,6 +782,15 @@ namespace blender::eevee
       light_probes.end_sync();
       sphere_probes.end_sync();
       planar_probes.end_sync();
+      uint32_t draw_context = 0;
+      SET_FLAG_FROM_TEST(draw_context, is_viewport(), DRAW_CONTEXT_VIEWPORT);
+      SET_FLAG_FROM_TEST(draw_context, is_image_render, DRAW_CONTEXT_IMAGE_RENDER);
+      SET_FLAG_FROM_TEST(draw_context, is_pre_fx_render, DRAW_CONTEXT_PRE_FX_RENDER);
+      SET_FLAG_FROM_TEST(draw_context, is_playback, DRAW_CONTEXT_PLAYBACK);
+      SET_FLAG_FROM_TEST(draw_context, is_navigating, DRAW_CONTEXT_NAVIGATING);
+      if (assign_if_different(pipelines.data.draw_context, draw_context) && is_viewport()) {
+        sampling.reset();
+      }
       uniform_data.push_update();
     }
 

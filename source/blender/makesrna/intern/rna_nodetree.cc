@@ -10096,6 +10096,130 @@ static void def_sh_image_to_closure(BlenderRNA * /*brna*/, StructRNA *srna)
       prop, NC_NODE | NA_EDITED, "rna_ShaderNodeImageToClosure_settings_update");
 }
 
+static void def_sh_draw_info(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem query_items[] = {
+      {SHD_DRAW_INFO_OUTLINE_SHELL,
+       "OUTLINE_SHELL",
+       0,
+       "Is Outline Shell",
+       "The current material graph is being evaluated for an outline shell"},
+      {SHD_DRAW_INFO_SHADOW_PASS,
+       "SHADOW_PASS",
+       0,
+       "Is Shadow Pass",
+       "The current draw writes a shadow map"},
+      {SHD_DRAW_INFO_RENDER_TEXTURE_CAPTURE,
+       "RENDER_TEXTURE_CAPTURE",
+       0,
+       "Is Render Texture Capture",
+       "The current draw belongs to a Render Texture capture"},
+      {SHD_DRAW_INFO_PROBE_CAPTURE,
+       "PROBE_CAPTURE",
+       0,
+       "Is Probe Capture",
+       "The current draw captures a reflection probe or irradiance surfels"},
+      {SHD_DRAW_INFO_IMAGE_RENDER,
+       "IMAGE_RENDER",
+       0,
+       "Is Image Render",
+       "The host task is a final image render or a viewport image render"},
+      {SHD_DRAW_INFO_COLOR_BAKE,
+       "COLOR_BAKE",
+       0,
+       "Is Color Bake",
+       "The current material graph is evaluated for Eevee color baking"},
+      {SHD_DRAW_INFO_VIEWPORT,
+       "VIEWPORT",
+       0,
+       "Is Viewport",
+       "The host task draws a viewport, including viewport image rendering"},
+      {SHD_DRAW_INFO_DEPTH_PREPASS,
+       "DEPTH_PREPASS",
+       0,
+       "Is Depth Prepass",
+       "The current draw evaluates a depth prepass, excluding shadow maps"},
+      {SHD_DRAW_INFO_DEFERRED,
+       "DEFERRED",
+       0,
+       "Is Deferred",
+       "The current draw evaluates a deferred GBuffer, hybrid, or NPR shading pass"},
+      {SHD_DRAW_INFO_FORWARD,
+       "FORWARD",
+       0,
+       "Is Forward",
+       "The current draw evaluates a forward shading pass"},
+      {SHD_DRAW_INFO_NPR_EVALUATION,
+       "NPR_EVALUATION",
+       0,
+       "Is NPR Evaluation",
+       "The current graph is evaluated in an NPR shader context"},
+      {SHD_DRAW_INFO_FILTER_PASS,
+       "FILTER_PASS",
+       0,
+       "Is Filter Pass",
+       "The current material graph is evaluated as a full-screen Filter material"},
+      {SHD_DRAW_INFO_WORLD,
+       "WORLD",
+       0,
+       "Is World",
+       "The current material graph is evaluated as a World shader"},
+      {SHD_DRAW_INFO_VERTEX_EVALUATION,
+       "VERTEX_EVALUATION",
+       0,
+       "Is Vertex Evaluation",
+       "The current expression runs in the vertex shader"},
+      {SHD_DRAW_INFO_FRAGMENT_EVALUATION,
+       "FRAGMENT_EVALUATION",
+       0,
+       "Is Fragment Evaluation",
+       "The current expression runs in the fragment shader"},
+      {SHD_DRAW_INFO_VOLUME_EVALUATION,
+       "VOLUME_EVALUATION",
+       0,
+       "Is Volume Evaluation",
+       "The current material graph evaluates volume properties"},
+      {SHD_DRAW_INFO_SPHERE_PROBE_CAPTURE,
+       "SPHERE_PROBE_CAPTURE",
+       0,
+       "Is Sphere Probe Capture",
+       "The current draw captures a spherical reflection probe"},
+      {SHD_DRAW_INFO_PLANAR_PROBE_CAPTURE,
+       "PLANAR_PROBE_CAPTURE",
+       0,
+       "Is Planar Probe Capture",
+       "The current draw captures a planar reflection probe"},
+      {SHD_DRAW_INFO_IRRADIANCE_CAPTURE,
+       "IRRADIANCE_CAPTURE",
+       0,
+       "Is Irradiance Capture",
+       "The current draw captures surfels for irradiance baking"},
+      {SHD_DRAW_INFO_PRE_FX_RENDER,
+       "PRE_FX_RENDER",
+       0,
+       "Is Pre-FX Render",
+       "The current draw belongs to a Pre-FX companion render"},
+      {SHD_DRAW_INFO_PLAYBACK,
+       "PLAYBACK",
+       0,
+       "Is Playback",
+       "The host viewport is playing animation"},
+      {SHD_DRAW_INFO_NAVIGATING,
+       "NAVIGATING",
+       0,
+       "Is Navigating",
+       "The host viewport is being navigated"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop = RNA_def_property(srna, "query", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, query_items);
+  RNA_def_property_enum_default(prop, SHD_DRAW_INFO_OUTLINE_SHELL);
+  RNA_def_property_ui_text(prop, "Query", "Drawing context to test");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
 static void def_sh_render_info(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   RNA_def_struct_ui_text(
@@ -14465,6 +14589,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodePortalOut", def_sh_portal_out);
   define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
   define("ShaderNode", "ShaderNodeRenderInfo", def_sh_render_info);
+  define("ShaderNode", "ShaderNodeDrawInfo", def_sh_draw_info);
   define("ShaderNode", "ShaderNodeStencilValue");
   define("ShaderNode", "ShaderNodeWorldEnvironment");
   define("ShaderNode", "ShaderNodeLightProbeColor");

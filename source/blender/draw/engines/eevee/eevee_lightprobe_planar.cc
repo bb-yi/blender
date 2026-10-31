@@ -125,6 +125,11 @@ void PlanarProbeModule::set_view(const draw::View &main_view, int2 main_view_ext
 
   int resource_index = 0;
   int display_index = 0;
+  const uint32_t previous_draw_context = inst_.pipelines.data.draw_context;
+  if (num_probes > 0) {
+    inst_.pipelines.data.draw_context |= DRAW_CONTEXT_PLANAR_PROBE_CAPTURE;
+    inst_.uniform_data.pipeline.push_update();
+  }
   for (PlanarProbe &probe : inst_.light_probes.planar_map_.values()) {
     if (resource_index == PLANAR_PROBE_MAX) {
       break;
@@ -186,6 +191,11 @@ void PlanarProbeModule::set_view(const draw::View &main_view, int2 main_view_ext
     }
 
     resource_index++;
+  }
+
+  if (num_probes > 0) {
+    inst_.pipelines.data.draw_context = previous_draw_context;
+    inst_.uniform_data.pipeline.push_update();
   }
 
   inst_.light_probes.probe_cost_accumulate("Planar Probes",

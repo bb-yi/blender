@@ -70,6 +70,17 @@ enum [[host_shared]] RayPipelineType : uint32_t {
   RAY_TYPE_GLOSSY,
 };
 
+enum [[host_shared]] DrawContextFlag : uint32_t {
+  DRAW_CONTEXT_VIEWPORT = 1u << 0,
+  DRAW_CONTEXT_IMAGE_RENDER = 1u << 1,
+  DRAW_CONTEXT_PRE_FX_RENDER = 1u << 2,
+  DRAW_CONTEXT_PLAYBACK = 1u << 3,
+  DRAW_CONTEXT_NAVIGATING = 1u << 4,
+  DRAW_CONTEXT_RENDER_TEXTURE_CAPTURE = 1u << 5,
+  DRAW_CONTEXT_SPHERE_PROBE_CAPTURE = 1u << 6,
+  DRAW_CONTEXT_PLANAR_PROBE_CAPTURE = 1u << 7,
+};
+
 struct [[host_shared]] PipelineInfoData {
   float alpha_hash_scale;
   enum RayPipelineType ray_type;
@@ -86,7 +97,7 @@ struct [[host_shared]] PipelineInfoData {
   /* True if the pipeline can use the raycast node.
    * The value is valid only if `MAT_RAYCAST` is defined. */
   bool32_t can_raycast;
-  bool32_t _pad1;
+  uint draw_context;
   bool32_t _pad2;
 };
 

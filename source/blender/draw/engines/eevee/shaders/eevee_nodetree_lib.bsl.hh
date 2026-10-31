@@ -187,6 +187,12 @@ ObjectInfos drw_object_infos()
 #  include "eevee_outline_lib.glsl"
 #endif
 
+uint draw_info_context_flags()
+{
+  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
+  return uni.pipeline_buf.draw_context;
+}
+
 float2 render_info_samples()
 {
 #ifdef CREATE_INFO_eevee_Sampling
