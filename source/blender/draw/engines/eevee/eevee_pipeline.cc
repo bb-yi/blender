@@ -2042,7 +2042,8 @@ gpu::Texture *DeferredLayer::render(View &main_view,
 {
   const bool run_early_stencil = early_stencil_stage &&
                                  (inst_.pipelines.deferred.has_early_stencil_ ||
-                                  inst_.pipelines.deferred.has_stencil_readers_);
+                                  inst_.pipelines.deferred.has_stencil_readers_ ||
+                                  inst_.pipelines.deferred.has_stencil_surface_readers_);
   if (this->is_empty() && !run_early_stencil) {
     return radiance_behind_tx;
   }
@@ -2262,6 +2263,35 @@ gpu::Texture *DeferredLayer::render(View &main_view,
  * Closure data are written to intermediate buffer allowing screen space processing.
  * \{ */
 
+PassMain::Sub *DeferredPipeline::stencil_surface_add(blender::Material *material,
+                                                     GPUMaterial *gpumat)
+{
+  if (gpumat == nullptr || GPU_material_status(gpumat) != GPU_MAT_SUCCESS) {
+    return nullptr;
+  }
+  if (!GPU_material_stencil_marker_error(gpumat).is_empty()) {
+    inst_.info_append("Material {}: {}",
+                      material->id.name + 2,
+                      GPU_material_stencil_marker_error(gpumat).data());
+    return nullptr;
+  }
+  has_stencil_surface_writers_ = true;
+  PassMain::Sub &pass = stencil_surface_ps_.sub(GPU_material_get_name(gpumat));
+  pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH |
+                 DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state |
+                 material_surface_cull_state(material_surface_cull_method(material)));
+  pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+  pass.bind_resources(inst_.uniform_data);
+  pass.bind_resources(inst_.velocity);
+  pass.bind_resources(inst_.sampling);
+  pass.bind_resources(inst_.lights);
+  pass.bind_resources(inst_.render_textures);
+  pass.material_set(*inst_.manager, gpumat, true);
+  pass.push_constant("surface_cull_mode", int(material_surface_cull_method(material)));
+  pass.push_constant("stencil_writer_reference", int(material->stencil_reference & 15));
+  return &pass;
+}
+
 PassMain::Sub *DeferredPipeline::early_stencil_add(blender::Material *material,
                                                    GPUMaterial *gpumat)
 {
@@ -2312,6 +2342,16 @@ PassMain::Sub *DeferredPipeline::early_stencil_add(blender::Material *material,
 
 void DeferredPipeline::bind_stencil_read_resources(PassMain::Sub &pass, GPUMaterial *gpumat)
 {
+  if (GPU_material_stencil_surface_readable(gpumat)) {
+    has_stencil_surface_readers_ = true;
+    pass.bind_texture("stencil_surface_value_tx",
+                      &inst_.render_buffers.stencil_surface_value_tx,
+                      GPUSamplerState::default_sampler());
+    pass.bind_texture("stencil_surface_depth_tx",
+                      &inst_.render_buffers.stencil_surface_depth_tx,
+                      GPUSamplerState::default_sampler());
+    pass.push_constant("stencil_surface_extent", &stencil_surface_extent_);
+  }
   if (GPU_material_stencil_value_readable(gpumat)) {
     has_stencil_readers_ = true;
     pass.bind_texture("stencil_value_tx",
@@ -2322,6 +2362,32 @@ void DeferredPipeline::bind_stencil_read_resources(PassMain::Sub &pass, GPUMater
 
 void DeferredPipeline::render_early_stencil(View &view, Framebuffer &prepass_fb)
 {
+  if (has_stencil_surface_readers_) {
+    RenderBuffers &buffers = inst_.render_buffers;
+    stencil_surface_extent_ = buffers.extent_get();
+    const int divisor = 1 << math::clamp(inst_.scene->eevee.stencil_surface_resolution, 0, 2);
+    const int2 extent = has_stencil_surface_writers_ ?
+                            math::max((stencil_surface_extent_ + int2(divisor - 1)) / divisor,
+                                      int2(1)) :
+                            int2(1);
+    const eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_ATTACHMENT;
+    buffers.stencil_surface_value_tx.acquire_2d(extent, gpu::TextureFormat::UINT_8, usage);
+    buffers.stencil_surface_depth_tx.acquire_2d(
+        extent, gpu::TextureFormat::SFLOAT_32_DEPTH, usage);
+    buffers.stencil_surface_value_tx.clear(uint4(0));
+    buffers.stencil_surface_depth_tx.clear(float4(0.0f));
+    if (has_stencil_surface_writers_) {
+      /* Reuse the depth shader's object-ID output location; other prepass outputs are discarded.
+       * This depth attachment is independent of ordinary scene depth and never written by readers.
+       */
+      stencil_surface_fb_.ensure(GPU_ATTACHMENT_TEXTURE(buffers.stencil_surface_depth_tx),
+                                 GPU_ATTACHMENT_NONE,
+                                 GPU_ATTACHMENT_TEXTURE(buffers.stencil_surface_value_tx));
+      stencil_surface_fb_.bind();
+      inst_.manager->submit(stencil_surface_ps_, view);
+      GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+    }
+  }
   if (has_early_stencil_) {
     early_stencil_fb_.ensure(GPU_ATTACHMENT_TEXTURE(inst_.render_buffers.depth_tx));
     early_stencil_fb_.bind();
@@ -2349,6 +2415,9 @@ void DeferredPipeline::render_early_stencil(View &view, Framebuffer &prepass_fb)
 
 void DeferredPipeline::begin_sync()
 {
+  has_stencil_surface_writers_ = false;
+  has_stencil_surface_readers_ = false;
+  stencil_surface_ps_.init();
   has_early_stencil_ = false;
   /* A viewport preview is a reader too, even when no material contains a Stencil Value node. */
   has_stencil_readers_ = inst_.is_viewport() && inst_.v3d != nullptr &&

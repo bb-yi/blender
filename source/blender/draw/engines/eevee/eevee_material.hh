@@ -481,6 +481,7 @@ struct Material {
   MaterialPass npr;
   MaterialPass prepass;
   MaterialPass stencil;
+  MaterialPass stencil_writer_surface;
   MaterialPass outline_shell_prepass;
   MaterialPass outline_shell_shading;
   MaterialPass outline_shell_shadow;
@@ -636,7 +637,11 @@ class MaterialModule {
                                  bool register_pass = true,
                                  const SurfaceDrawState *state = nullptr,
                                  bool outline_shell = false,
-                                 bool stencil_marker = false);
+                                 bool stencil_marker = false,
+                                 bool stencil_writer_surface = false);
+  MaterialPass stencil_writer_surface_get(Object *ob,
+                                          blender::Material *material,
+                                          eMaterialGeometry geometry_type);
 
   ShaderGroups default_materials_load(bool block_until_ready = false);
 };

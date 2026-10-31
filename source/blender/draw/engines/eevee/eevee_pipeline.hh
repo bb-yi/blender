@@ -625,8 +625,13 @@ class DeferredPipeline {
 
   PassSortable early_stencil_ps_ = {"Stencil.EarlyMarkers"};
   PassSimple stencil_snapshot_ps_ = {"Stencil.Snapshot"};
+  PassMain stencil_surface_ps_ = {"Stencil.WriterSurface"};
   Framebuffer early_stencil_fb_ = {"Stencil.EarlyMarkers"};
   Framebuffer stencil_snapshot_fb_ = {"Stencil.Snapshot"};
+  Framebuffer stencil_surface_fb_ = {"Stencil.WriterSurface"};
+  int2 stencil_surface_extent_ = int2(1);
+  bool has_stencil_surface_writers_ = false;
+  bool has_stencil_surface_readers_ = false;
   gpu::Texture *stencil_source_tx_ = nullptr;
   bool has_early_stencil_ = false;
   bool has_stencil_readers_ = false;
@@ -641,6 +646,7 @@ class DeferredPipeline {
   void end_sync();
 
   PassMain::Sub *early_stencil_add(blender::Material *material, GPUMaterial *gpumat);
+  PassMain::Sub *stencil_surface_add(blender::Material *material, GPUMaterial *gpumat);
   void bind_stencil_read_resources(PassMain::Sub &pass, GPUMaterial *gpumat);
 
   PassMain::Sub *prepass_add(blender::Material *blender_mat,

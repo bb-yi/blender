@@ -1290,6 +1290,11 @@ static ShaderOutput *node_find_output_by_name(blender::bNode &b_node,
                                               blender::bNodeSocket &b_socket)
 {
   using blender::operator""_ustr;
+  if (b_node.is_type("ShaderNodeStencilValue"_ustr)) {
+    /* All Eevee-only sample outputs use the same explicit zero fallback. Unmapped outputs
+     * would silently leave downstream input defaults connected instead. */
+    return node->output("Value");
+  }
   string name = b_socket.identifier;
   ShaderOutput *output = node->output(name.c_str());
 

@@ -269,6 +269,7 @@ void SyncModule::sync_common_passes(const Material &material,
 {
   sync_cb(material.capture);
   sync_cb(material.stencil);
+  sync_cb(material.stencil_writer_surface);
   sync_cb(material.shadow);
   sync_cb(material.prepass);
   sync_cb(material.shading);

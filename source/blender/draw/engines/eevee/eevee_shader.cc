@@ -1608,6 +1608,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                  outline_shell);
   UNUSED_VARS(uuid_depth_offset_affect_lighting);
 
+  const bool stencil_writer_surface = pipeline_type == MAT_PIPE_PREPASS_DEFERRED &&
+                                      geometry_type_has_surface(geometry_type) &&
+                                      ((shader_uuid >> 24u) & 1u) != 0;
+
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
   bool use_shader_to_rgba = material_graph_serialized_contains(codegen.surface,
@@ -1701,6 +1705,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
   info.compilation_constant(gpu::shader::Type::bool_t, "use_transparency", use_transparency);
+  if (stencil_writer_surface) {
+    info.define("MAT_STENCIL_WRITER_SURFACE");
+    info.push_constant(gpu::shader::Type::int_t, "stencil_writer_reference");
+  }
 
   const bool use_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST) &&
                            ELEM(pipeline_type,
@@ -1833,6 +1841,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   {
     GPU_material_stencil_value_readable_set(gpumat);
     info.define("MAT_STENCIL_VALUE");
+  }
+  if (GPU_material_stencil_surface_used(gpumat) && probe_capture == MAT_PROBE_NONE &&
+      !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+  {
+    GPU_material_stencil_surface_readable_set(gpumat);
+    info.define("MAT_STENCIL_SURFACE");
   }
   if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
     reserve_deferred_npr_pass_samplers(slots);
@@ -2028,6 +2043,12 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
      * fixed binding can exceed the OpenGL texture-binding API limit even with few samplers. */
     slots.reserve_slots(info);
     info.sampler(slots.get_next_sampler(), ImageType::Uint2D, "stencil_value_tx");
+  }
+  if (GPU_material_stencil_surface_readable(gpumat)) {
+    slots.reserve_slots(info);
+    info.sampler(slots.get_next_sampler(), ImageType::Uint2D, "stencil_surface_value_tx");
+    info.sampler(slots.get_next_sampler(), ImageType::Float2D, "stencil_surface_depth_tx");
+    info.push_constant(gpu::shader::Type::int2_t, "stencil_surface_extent");
   }
 
   for (auto &resource : info.batch_resources_) {
@@ -3091,7 +3112,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
                                                blender::Material *default_mat,
                                                bool use_outline,
                                                bool outline_shell,
-                                               const MaterialNodeTreeInfo *node_tree_info)
+                                               const MaterialNodeTreeInfo *node_tree_info,
+                                               bool stencil_writer_surface)
 {
   eMaterialDisplacement displacement_type = outline_shell ?
                                                 MAT_DISPLACEMENT_VERTEX_WITH_BUMP :
@@ -3154,7 +3176,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       blend_flags,
       outline_shell ? false : use_outline,
       outline_shell ? false : material_depth_offset_affects_lighting(blender_mat),
-      (graph_key << 1) | uint64_t(use_tessellation_geometry_normal),
+      (graph_key << 2) | (uint64_t(use_tessellation_geometry_normal) << 1) |
+          uint64_t(stencil_writer_surface),
       outline_shell);
 
   bool is_default_material = default_mat == nullptr;
@@ -3176,7 +3199,7 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       deferred_compilation,
       codegen_callback,
       &thunk,
-      is_default_material ? nullptr : pass_replacement_cb,
+      (is_default_material || stencil_writer_surface) ? nullptr : pass_replacement_cb,
       outline_shell);
   /* A cached GPUPass bypasses create-info amendment. Resource demand belongs to every material
    * instance/lookup, not just the first shader compilation. */
@@ -3185,6 +3208,12 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
   {
     GPU_material_stencil_value_readable_set(material_from_tree.material);
+  }
+  if (GPU_material_stencil_surface_used(material_from_tree.material) &&
+      probe_capture == MAT_PROBE_NONE && !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+  {
+    GPU_material_stencil_surface_readable_set(material_from_tree.material);
   }
   store_node_tree_errors(material_from_tree);
   return material_from_tree.material;

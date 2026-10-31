@@ -2747,6 +2747,9 @@ struct SceneEEVEE {
 
   int taa_samples = 16;
   int taa_render_samples = 64;
+  /** Writer-surface buffer size: full, half or quarter per dimension. */
+  int stencil_surface_resolution = 0;
+  char _pad_stencil_surface[4] = {};
 
   float volumetric_start = 0.1f;
   float volumetric_end = 100.0f;

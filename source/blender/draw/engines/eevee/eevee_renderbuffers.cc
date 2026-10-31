@@ -149,6 +149,8 @@ void RenderBuffers::release()
   // depth_tx.release();
   combined_tx.release();
   stencil_value_tx.release();
+  stencil_surface_value_tx.release();
+  stencil_surface_depth_tx.release();
 
   const bool do_motion_vectors_swizzle = vector_tx_format() == gpu::TextureFormat::SFLOAT_16_16;
   if (do_motion_vectors_swizzle) {

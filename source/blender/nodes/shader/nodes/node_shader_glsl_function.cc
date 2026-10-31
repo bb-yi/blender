@@ -6382,17 +6382,18 @@ namespace blender
     static bool is_glsl_matrix_access_identifier(const StringRef identifier)
     {
       return ELEM(identifier,
-        "glsl_view_matrix",
-        "glsl_view_matrix_inverse",
-        "glsl_projection_matrix",
-        "glsl_projection_matrix_inverse",
-        "glsl_view_projection_matrix",
-        "glsl_view_projection_matrix_inverse",
-        "glsl_model_matrix",
-        "glsl_model_matrix_inverse",
-        "glsl_model_view_matrix",
-        "glsl_model_view_projection_matrix",
-        "glsl_normal_matrix");
+                  "glsl_view_matrix",
+                  "glsl_view_matrix_inverse",
+                  "glsl_projection_matrix",
+                  "glsl_projection_matrix_inverse",
+                  "glsl_stencil_uv",
+                  "glsl_view_projection_matrix",
+                  "glsl_view_projection_matrix_inverse",
+                  "glsl_model_matrix",
+                  "glsl_model_matrix_inverse",
+                  "glsl_model_view_matrix",
+                  "glsl_model_view_projection_matrix",
+                  "glsl_normal_matrix");
     }
 
     static bool glsl_expression_uses_identifier(const StringRef expression,
@@ -8800,6 +8801,19 @@ mat3 glsl_normal_matrix()
   return mat3(1.0);
 }
 #endif
+
+/* Convert normalized draw-view projection coordinates to Stencil Value / Render Info UVs. */
+vec2 glsl_stencil_uv(vec2 view_uv)
+{
+#if defined(GPU_FRAGMENT_SHADER) && \
+    (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
+  return view_uv * vec2(uniform_buf.film.render_extent) /
+         max(vec2(uniform_buf.film.extent), vec2(1.0)) *
+         uniform_buf.camera.uv_scale + uniform_buf.camera.uv_bias;
+#else
+  return view_uv;
+#endif
+}
 
 )GLSL";
     }
