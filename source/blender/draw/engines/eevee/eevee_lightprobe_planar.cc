@@ -74,8 +74,15 @@ void PlanarProbeModule::end_sync()
   }
 }
 
+void PlanarProbeModule::invalidate()
+{
+  inst_.pipelines.data.planar_probe_ready = false;
+  inst_.uniform_data.pipeline.push_update();
+}
+
 void PlanarProbeModule::ensure_resources()
 {
+  invalidate();
   /* Unused hybrid subpasses still bind these resources. Preserve full-size textures so the
    * main view does not have to recreate them after a normal capture. */
   const eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_ATTACHMENT;
@@ -91,6 +98,7 @@ void PlanarProbeModule::ensure_resources()
 
 void PlanarProbeModule::set_view(const draw::View &main_view, int2 main_view_extent)
 {
+  invalidate();
   GBuffer &gbuf = inst_.gbuffer;
 
   const int64_t num_probes = inst_.light_probes.planar_map_.size();
@@ -102,7 +110,7 @@ void PlanarProbeModule::set_view(const draw::View &main_view, int2 main_view_ext
 
   /* TODO resolution percentage. */
   int2 extent = main_view_extent;
-  int layer_count = num_probes;
+  int layer_count = int(std::min<int64_t>(num_probes, PLANAR_PROBE_MAX));
 
   const gpu::TextureFormat depth_format = gpu::TextureFormat::SFLOAT_32_DEPTH;
 
@@ -122,6 +130,20 @@ void PlanarProbeModule::set_view(const draw::View &main_view, int2 main_view_ext
   depth_tx_.ensure_layer_views();
 
   do_display_draw_ = inst_.draw_overlays && num_probes > 0;
+
+  Vector<PlanarProbe *> captured;
+  for (PlanarProbe &probe : inst_.light_probes.planar_map_.values()) {
+    if (captured.size() == PLANAR_PROBE_MAX) {
+      break;
+    }
+    captured.append(&probe);
+  }
+  for (PlanarProbe *probe : captured) {
+    probe->instance_rank = 0;
+    for (const PlanarProbe *other : captured) {
+      probe->instance_rank += uint(other->selection_key.stable_less_than(probe->selection_key));
+    }
+  }
 
   int resource_index = 0;
   int display_index = 0;
@@ -205,6 +227,9 @@ void PlanarProbeModule::set_view(const draw::View &main_view, int2 main_view_ext
     probe_planar_buf_[resource_index].layer_id = -1;
   }
   probe_planar_buf_.push_update();
+  GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
+  inst_.pipelines.data.planar_probe_ready = resource_index > 0;
+  inst_.uniform_data.pipeline.push_update();
 
   do_display_draw_ = display_index > 0;
   if (do_display_draw_) {

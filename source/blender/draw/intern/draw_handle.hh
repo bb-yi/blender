@@ -510,6 +510,34 @@ class ObjectKey {
     hash_value_ = get_default_hash(hash_value_, get_default_hash(sub_key_));
   }
 
+  /* Compare persistent object/instance identity, never addresses or hash-map order. */
+  bool stable_less_than(const ObjectKey &other) const
+  {
+    const auto uid = [](const Object *object) -> uint32_t {
+      if (object == nullptr) {
+        return 0;
+      }
+      return object->id.orig_id ? object->id.orig_id->session_uid : object->id.session_uid;
+    };
+    if (uid(ob_) != uid(other.ob_)) {
+      return uid(ob_) < uid(other.ob_);
+    }
+    if (uid(parent_) != uid(other.parent_)) {
+      return uid(parent_) < uid(other.parent_);
+    }
+    if (parent_ && other.parent_) {
+      for (int i : IndexRange(MAX_DUPLI_RECUR)) {
+        if (id_[i] != other.id_[i]) {
+          return id_[i] < other.id_[i];
+        }
+        if (id_[i] == std::numeric_limits<int>::max()) {
+          break;
+        }
+      }
+    }
+    return sub_key_ < other.sub_key_;
+  }
+
   uint64_t hash() const
   {
     return hash_value_;

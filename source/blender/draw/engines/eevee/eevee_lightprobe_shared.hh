@@ -116,9 +116,10 @@ struct [[host_shared]] PlanarProbeData {
   int layer_id;
   /** Parallax effect for forward evaluation. */
   float parallax_distance;
-  float _pad0;
-  float _pad1;
-  float _pad2;
+  /** Original object identity, independent of capture layer ordering. */
+  uint object_uid;
+  uint instance_rank;
+  uint is_instance;
 };
 
 /** Viewport Display Pass. */

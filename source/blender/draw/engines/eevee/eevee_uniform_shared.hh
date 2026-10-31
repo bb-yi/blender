@@ -86,7 +86,8 @@ struct [[host_shared]] PipelineInfoData {
   /* True if the pipeline can use the raycast node.
    * The value is valid only if `MAT_RAYCAST` is defined. */
   bool32_t can_raycast;
-  bool32_t _pad1;
+  /* The current view has completed all of its planar captures. */
+  bool32_t planar_probe_ready;
   bool32_t _pad2;
 };
 

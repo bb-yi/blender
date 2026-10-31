@@ -465,4 +465,153 @@ void surf_deferred_lightprobe_depth_offset(
   frag_out.gbuf_closure2 = result.gbuf_closure2;
 }
 
+/* Deferred materials only expose LightprobeRenderData when the material graph actually needs it.
+ */
+[[fragment]] [[early_fragment_tests]]
+void surf_deferred_planar([[resource_table]] PipelineConstants &pipe,
+                          [[resource_table]] SurfaceDeferred &srt,
+                          [[resource_table]] gbuffer::PackParameters &gbuf_params,
+                          [[resource_table]] eevee::LightprobePlaneRenderData & /*planar_probes*/,
+                          [[resource_table]] RenderPassOutput &render_passes,
+                          [[resource_table]] CryptomatteOutput &cryptomatte,
+                          [[resource_table]] const draw::Infos &infos,
+                          [[resource_table]] const draw::View &views,
+                          [[resource_table]] const Uniform &uni,
+                          [[resource_table]] const Sampling &sampling,
+                          [[resource_table]] const UtilityTexture &util_tx,
+                          [[frag_coord]] const float4 frag_co,
+                          [[out]] DeferredFragOut &frag_out,
+                          [[front_facing]] const bool front_face)
+{
+  DeferredFragOut result = surf_deferred_impl(pipe,
+                                              srt,
+                                              gbuf_params,
+                                              render_passes,
+                                              cryptomatte,
+                                              infos,
+                                              views,
+                                              uni,
+                                              sampling,
+                                              util_tx,
+                                              frag_co,
+                                              front_face);
+  frag_out.radiance = result.radiance;
+  frag_out.gbuf_header = result.gbuf_header;
+  frag_out.gbuf_normal = result.gbuf_normal;
+  frag_out.gbuf_closure1 = result.gbuf_closure1;
+  frag_out.gbuf_closure2 = result.gbuf_closure2;
+}
+
+[[fragment]]
+void surf_deferred_planar_depth_offset(
+    [[resource_table]] PipelineConstants &pipe,
+    [[resource_table]] SurfaceDeferred &srt,
+    [[resource_table]] gbuffer::PackParameters &gbuf_params,
+    [[resource_table]] eevee::LightprobePlaneRenderData & /*planar_probes*/,
+    [[resource_table]] RenderPassOutput &render_passes,
+    [[resource_table]] CryptomatteOutput &cryptomatte,
+    [[resource_table]] const draw::Infos &infos,
+    [[resource_table]] const draw::View &views,
+    [[resource_table]] const Uniform &uni,
+    [[resource_table]] const Sampling &sampling,
+    [[resource_table]] const UtilityTexture &util_tx,
+    [[frag_coord]] const float4 frag_co,
+    [[out]] DeferredFragOut &frag_out,
+    [[front_facing]] const bool front_face)
+{
+  DeferredFragOut result = surf_deferred_impl(pipe,
+                                              srt,
+                                              gbuf_params,
+                                              render_passes,
+                                              cryptomatte,
+                                              infos,
+                                              views,
+                                              uni,
+                                              sampling,
+                                              util_tx,
+                                              frag_co,
+                                              front_face);
+  frag_out.radiance = result.radiance;
+  frag_out.gbuf_header = result.gbuf_header;
+  frag_out.gbuf_normal = result.gbuf_normal;
+  frag_out.gbuf_closure1 = result.gbuf_closure1;
+  frag_out.gbuf_closure2 = result.gbuf_closure2;
+}
+
+/* Deferred materials only expose LightprobeRenderData when the material graph actually needs it.
+ */
+[[fragment]] [[early_fragment_tests]]
+void surf_deferred_lightprobe_planar(
+    [[resource_table]] PipelineConstants &pipe,
+    [[resource_table]] SurfaceDeferred &srt,
+    [[resource_table]] gbuffer::PackParameters &gbuf_params,
+    [[resource_table]] eevee::LightprobeRenderData & /*lightprobes*/,
+    [[resource_table]] eevee::LightprobePlaneRenderData & /*planar_probes*/,
+    [[resource_table]] RenderPassOutput &render_passes,
+    [[resource_table]] CryptomatteOutput &cryptomatte,
+    [[resource_table]] const draw::Infos &infos,
+    [[resource_table]] const draw::View &views,
+    [[resource_table]] const Uniform &uni,
+    [[resource_table]] const Sampling &sampling,
+    [[resource_table]] const UtilityTexture &util_tx,
+    [[frag_coord]] const float4 frag_co,
+    [[out]] DeferredFragOut &frag_out,
+    [[front_facing]] const bool front_face)
+{
+  DeferredFragOut result = surf_deferred_impl(pipe,
+                                              srt,
+                                              gbuf_params,
+                                              render_passes,
+                                              cryptomatte,
+                                              infos,
+                                              views,
+                                              uni,
+                                              sampling,
+                                              util_tx,
+                                              frag_co,
+                                              front_face);
+  frag_out.radiance = result.radiance;
+  frag_out.gbuf_header = result.gbuf_header;
+  frag_out.gbuf_normal = result.gbuf_normal;
+  frag_out.gbuf_closure1 = result.gbuf_closure1;
+  frag_out.gbuf_closure2 = result.gbuf_closure2;
+}
+
+[[fragment]]
+void surf_deferred_lightprobe_planar_depth_offset(
+    [[resource_table]] PipelineConstants &pipe,
+    [[resource_table]] SurfaceDeferred &srt,
+    [[resource_table]] gbuffer::PackParameters &gbuf_params,
+    [[resource_table]] eevee::LightprobeRenderData & /*lightprobes*/,
+    [[resource_table]] eevee::LightprobePlaneRenderData & /*planar_probes*/,
+    [[resource_table]] RenderPassOutput &render_passes,
+    [[resource_table]] CryptomatteOutput &cryptomatte,
+    [[resource_table]] const draw::Infos &infos,
+    [[resource_table]] const draw::View &views,
+    [[resource_table]] const Uniform &uni,
+    [[resource_table]] const Sampling &sampling,
+    [[resource_table]] const UtilityTexture &util_tx,
+    [[frag_coord]] const float4 frag_co,
+    [[out]] DeferredFragOut &frag_out,
+    [[front_facing]] const bool front_face)
+{
+  DeferredFragOut result = surf_deferred_impl(pipe,
+                                              srt,
+                                              gbuf_params,
+                                              render_passes,
+                                              cryptomatte,
+                                              infos,
+                                              views,
+                                              uni,
+                                              sampling,
+                                              util_tx,
+                                              frag_co,
+                                              front_face);
+  frag_out.radiance = result.radiance;
+  frag_out.gbuf_header = result.gbuf_header;
+  frag_out.gbuf_normal = result.gbuf_normal;
+  frag_out.gbuf_closure1 = result.gbuf_closure1;
+  frag_out.gbuf_closure2 = result.gbuf_closure2;
+}
+
 }  // namespace eevee

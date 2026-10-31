@@ -540,6 +540,7 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
   inst_.camera.override(rt_camera, true);
   inst_.uniform_data.push_update();
 
+  inst_.planar_probes.invalidate();
   View main_view = {"RenderTexture.Main"};
   View render_view = {"RenderTexture.Render"};
   main_view.sync(rt_camera.viewmat, rt_camera.winmat);

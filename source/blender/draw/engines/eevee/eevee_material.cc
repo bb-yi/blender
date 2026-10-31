@@ -634,6 +634,12 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                           blender_mat->id.name + 2,
                           GPU_material_stencil_marker_error(matpass.gpumat).data());
       }
+      else {
+        const std::string error = GPU_material_error_message(matpass.gpumat);
+        if (!error.empty()) {
+          inst_.info_append("Material {}: {}", blender_mat->id.name + 2, error);
+        }
+      }
       if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell || stencil_marker) {
         inst_.telemetry.material_sync_add(shader_queued,
                                           optimize_queued,
