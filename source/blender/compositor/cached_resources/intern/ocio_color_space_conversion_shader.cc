@@ -2,12 +2,18 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "BLI_assert.h"
 #include "BLI_hash.hh"
+#include "BLI_fileops.h"
+#include "BLI_hash_md5.hh"
+#include "BLI_path_utils.hh"
 #include "BLI_map.hh"
 #include "BLI_string_ref.hh"
 #include "BLI_vector.hh"
@@ -17,6 +23,11 @@
 #include "GPU_shader.hh"
 #include "GPU_texture.hh"
 #include "GPU_uniform_buffer.hh"
+
+#include "DNA_node_types.h"
+#include "DNA_packedFile_types.h"
+#include "BKE_appdir.hh"
+#include "IMB_imbuf.hh"
 
 #include "gpu_shader_create_info.hh"
 
@@ -56,11 +67,12 @@ using namespace blender::gpu::shader;
  * finally create the shader. */
 class GPUShaderCreator : public OCIO::GpuShaderCreator {
  public:
-  static std::shared_ptr<GPUShaderCreator> Create(ResultPrecision precision)
+  static std::shared_ptr<GPUShaderCreator> Create(ResultPrecision precision, bool lut = false)
   {
     std::shared_ptr<GPUShaderCreator> instance = std::make_shared<GPUShaderCreator>();
     instance->setLanguage(OCIO::GPU_LANGUAGE_GLSL_4_0);
     instance->precision_ = precision;
+    instance->lut_ = lut;
     return instance;
   }
 
@@ -240,12 +252,20 @@ class GPUShaderCreator : public OCIO::GpuShaderCreator {
     {
       texture = GPU_texture_create_1d(
           texture_name, width, 1, texture_format, GPU_TEXTURE_USAGE_SHADER_READ, values);
-      shader_create_info_.sampler(textures_.size() + 1, ImageType::Float1D, resource_name);
+      shader_create_info_.sampler(
+          textures_.size() + 1 + int(lut_), ImageType::Float1D, resource_name);
+      if (lut_ && interpolation == OCIO::INTERP_LINEAR) {
+        linear_samplers_.add(resource_name, 1);
+      }
     }
     else {
       texture = GPU_texture_create_2d(
           texture_name, width, height, 1, texture_format, GPU_TEXTURE_USAGE_SHADER_READ, values);
-      shader_create_info_.sampler(textures_.size() + 1, ImageType::Float2D, resource_name);
+      shader_create_info_.sampler(
+          textures_.size() + 1 + int(lut_), ImageType::Float2D, resource_name);
+      if (lut_ && interpolation == OCIO::INTERP_LINEAR) {
+        linear_samplers_.add(resource_name, 2);
+      }
     }
     GPU_texture_filter_mode(texture, interpolation != OCIO::INTERP_NEAREST);
 
@@ -274,7 +294,11 @@ class GPUShaderCreator : public OCIO::GpuShaderCreator {
     /* Don't use the name argument directly since ShaderCreateInfo only stores references to
      * resource names, instead, use the name that is stored in resource_names_. */
     const std::string &resource_name = *resource_names_[resource_names_.size() - 1];
-    shader_create_info_.sampler(textures_.size() + 1, ImageType::Float3D, resource_name);
+    shader_create_info_.sampler(
+        textures_.size() + 1 + int(lut_), ImageType::Float3D, resource_name);
+    if (lut_ && interpolation == OCIO::INTERP_LINEAR) {
+      linear_samplers_.add(resource_name, 3);
+    }
 
     gpu::Texture *texture = GPU_texture_create_3d(
         texture_name,
@@ -320,6 +344,11 @@ class GPUShaderCreator : public OCIO::GpuShaderCreator {
 
     shader_create_info_.local_group_size(16, 16);
     shader_create_info_.sampler(0, ImageType::Float2D, input_sampler_name());
+    if (lut_) {
+      shader_create_info_.define("OCIO_LUT");
+      shader_create_info_.sampler(1, ImageType::Float2D, "factor_tx");
+      use_precise_lut_sampling();
+    }
     shader_create_info_.builtins(BuiltinBits::GLOBAL_INVOCATION_ID);
     shader_create_info_.push_constant(Type::bool_t, "premultiply_output");
     shader_create_info_.image(0,
@@ -387,6 +416,7 @@ class GPUShaderCreator : public OCIO::GpuShaderCreator {
       GPU_uniformbuf_unbind(buffer);
       GPU_uniformbuf_free(buffer);
     }
+    uniform_buffers_.clear();
 
     for (gpu::Texture *texture : textures_.values()) {
       GPU_texture_unbind(texture);
@@ -415,6 +445,77 @@ class GPUShaderCreator : public OCIO::GpuShaderCreator {
   }
 
  private:
+  /* Keep OCIO's coordinates and transforms, but interpolate LUTs in float rather than using
+   * hardware weights. Short 1D shapers otherwise visibly diverge from the CPU processor. */
+  void use_precise_lut_sampling()
+  {
+    bool dimensions[4] = {};
+    for (const auto item : linear_samplers_.items()) {
+      dimensions[item.value] = true;
+      const std::string call = "texture(" + item.key + ",";
+      size_t position = 0;
+      while ((position = shader_code_.find(call, position)) != std::string::npos) {
+        shader_code_.replace(position, 7, "ocio_lut_linear");
+        position += 15;
+      }
+    }
+    std::string helpers;
+    if (dimensions[1]) {
+      helpers += R"GLSL(
+float4 ocio_lut_linear(sampler1D tx, float coordinate)
+{
+  int extent = textureSize(tx, 0);
+  float position = coordinate * float(extent) - 0.5f;
+  int first = int(floor(position));
+  float weight = position - float(first);
+  return mix(texelFetch(tx, clamp(first, 0, extent - 1), 0),
+             texelFetch(tx, clamp(first + 1, 0, extent - 1), 0), weight);
+}
+)GLSL";
+    }
+    if (dimensions[2]) {
+      helpers += R"GLSL(
+float4 ocio_lut_linear(sampler2D tx, float2 coordinate)
+{
+  int2 extent = textureSize(tx, 0);
+  float2 position = coordinate * float2(extent) - 0.5f;
+  int2 first = int2(floor(position));
+  float2 weight = position - float2(first);
+  int2 last = extent - 1;
+  float4 low = mix(texelFetch(tx, clamp(first, int2(0), last), 0),
+                   texelFetch(tx, clamp(first + int2(1, 0), int2(0), last), 0), weight.x);
+  float4 high = mix(texelFetch(tx, clamp(first + int2(0, 1), int2(0), last), 0),
+                    texelFetch(tx, clamp(first + int2(1, 1), int2(0), last), 0), weight.x);
+  return mix(low, high, weight.y);
+}
+)GLSL";
+    }
+    if (dimensions[3]) {
+      helpers += R"GLSL(
+float4 ocio_lut_linear(sampler3D tx, float3 coordinate)
+{
+  int3 extent = textureSize(tx, 0);
+  float3 position = coordinate * float3(extent) - 0.5f;
+  int3 first = int3(floor(position));
+  float3 weight = position - float3(first);
+  int3 last = extent - 1;
+  float4 low_y0 = mix(texelFetch(tx, clamp(first, int3(0), last), 0),
+                      texelFetch(tx, clamp(first + int3(1, 0, 0), int3(0), last), 0), weight.x);
+  float4 low_y1 = mix(texelFetch(tx, clamp(first + int3(0, 1, 0), int3(0), last), 0),
+                      texelFetch(tx, clamp(first + int3(1, 1, 0), int3(0), last), 0), weight.x);
+  float4 high_y0 = mix(texelFetch(tx, clamp(first + int3(0, 0, 1), int3(0), last), 0),
+                       texelFetch(tx, clamp(first + int3(1, 0, 1), int3(0), last), 0), weight.x);
+  float4 high_y1 = mix(texelFetch(tx, clamp(first + int3(0, 1, 1), int3(0), last), 0),
+                       texelFetch(tx, clamp(first + int3(1, 1, 1), int3(0), last), 0), weight.x);
+  return mix(mix(low_y0, low_y1, weight.y), mix(high_y0, high_y1, weight.y), weight.z);
+}
+)GLSL";
+    }
+    shader_code_ = helpers + shader_code_;
+  }
+
+  Map<std::string, int> linear_samplers_;
+
   /* The processor shader and the ShaderCreateInfo used to construct it. Constructed and
    * initialized in the finalize() method. */
   gpu::Shader *shader_ = nullptr;
@@ -460,7 +561,326 @@ class GPUShaderCreator : public OCIO::GpuShaderCreator {
 
   /* The precision of the OCIO resources as well as the output image. */
   ResultPrecision precision_;
+  bool lut_ = false;
 };
+
+/* --------------------------------------------------------------------
+ * File LUT.
+ */
+
+int ocio_lut_image_size(const int width, const int height)
+{
+  if (width <= 0 || height <= 0) {
+    return 0;
+  }
+  const int64_t pixels = int64_t(width) * height;
+  /* OCIO's maximum 3D LUT grid size is 129. */
+  for (int size = 2; size <= 129; size++) {
+    if (int64_t(size) * size * size == pixels && width % size == 0 && height % size == 0) {
+      return size;
+    }
+  }
+  return 0;
+}
+
+static OCIO::Lut3DTransformRcPtr image_lut_transform(const NodeCompositorLUT &settings,
+                                                     const char *data,
+                                                     const size_t size,
+                                                     const char *filepath,
+                                                     std::string &error)
+{
+  /* LUT texels are encoded table values. Never apply image gamma or alpha premultiplication. */
+  const ImBufFlags flags = ImBufFlags::ByteData | ImBufFlags::NoColorspaceConvert |
+                           ImBufFlags::AlphaChannelPacked;
+  char colorspace[IM_MAX_SPACE] = "Non-Color";
+  const auto *bytes = reinterpret_cast<const unsigned char *>(data);
+  std::unique_ptr<ImBuf, decltype(&IMB_freeImBuf)> image(
+      IMB_load_image_from_memory(
+          bytes, size, flags | ImBufFlags::Test, filepath, filepath, colorspace),
+      IMB_freeImBuf);
+  if (!image) {
+    error = "LUT: could not read the image";
+    return nullptr;
+  }
+  const int grid_size = ocio_lut_image_size(image->x, image->y);
+  if (!grid_size) {
+    error =
+        "LUT: image must contain N square slices of N x N pixels (N = 2..129), without padding";
+    return nullptr;
+  }
+  const int width = image->x, height = image->y;
+  image.reset(IMB_load_image_from_memory(bytes, size, flags, filepath, filepath, colorspace));
+  if (!image || image->x != width || image->y != height ||
+      (!image->float_data() && !image->byte_data()))
+  {
+    error = "LUT: could not decode the image pixels";
+    return nullptr;
+  }
+  const int channels = image->channels ? image->channels : 4;
+  if (image->float_data() && channels < 3) {
+    error = "LUT: the image must have RGB channels";
+    return nullptr;
+  }
+  const int columns = width / grid_size;
+  auto lut = OCIO::Lut3DTransform::Create(grid_size);
+  for (int b = 0; b < grid_size; b++) {
+    for (int g = 0; g < grid_size; g++) {
+      const int green = (settings.image_flags & CMP_NODE_LUT_IMAGE_FLIP_GREEN) ?
+                            grid_size - 1 - g :
+                            g;
+      const int y = (b / columns) * grid_size + green;
+      /* ImBuf rows start at the bottom. Default atlas ordering starts at the file's top-left. */
+      const int row = (settings.image_flags & CMP_NODE_LUT_IMAGE_FLIP_Y) ? y : height - 1 - y;
+      for (int r = 0; r < grid_size; r++) {
+        const int x = (b % columns) * grid_size + r;
+        const int64_t index = int64_t(row) * width + x;
+        float rgb[3];
+        for (int c = 0; c < 3; c++) {
+          rgb[c] = image->float_data() ? image->float_data()[index * channels + c] :
+                                         image->byte_data()[index * 4 + c] / 255.0f;
+          if (!std::isfinite(rgb[c])) {
+            error = "LUT: the image contains non-finite RGB values";
+            return nullptr;
+          }
+        }
+        lut->setValue(r, g, b, rgb[0], rgb[1], rgb[2]);
+      }
+    }
+  }
+  return lut;
+}
+
+struct OCIOLUT::Impl {
+  OCIO::ConstCPUProcessorRcPtr cpu;
+  OCIO::ConstGPUProcessorRcPtr gpu;
+  std::shared_ptr<GPUShaderCreator> shader;
+  ResultPrecision precision;
+  std::string error;
+};
+
+OCIOLUT::OCIOLUT(Context &context, const NodeCompositorLUT &settings, const std::string &filepath)
+    : impl_(std::make_unique<Impl>())
+{
+  impl_->precision = context.get_precision();
+  constexpr size_t max_size = 64 * 1024 * 1024;
+  if (!settings.packed_file &&
+      !BLI_path_extension_check_n(
+          filepath.c_str(), ".cube", ".png", ".exr", ".tif", ".tiff", nullptr))
+  {
+    impl_->error = "LUT: select a .cube, PNG, TIFF, or EXR file";
+    return;
+  }
+  const size_t size = settings.packed_file ? size_t(settings.packed_file->size) :
+                                             BLI_file_size(filepath.c_str());
+  if (size == 0 || size > max_size) {
+    impl_->error = "LUT: file is missing, empty, or exceeds 64 MiB";
+    return;
+  }
+
+  size_t read_size = 0;
+  auto free_data = [](char *data) {
+    if (data) {
+      MEM_delete(data);
+    }
+  };
+  std::unique_ptr<char, decltype(free_data)> owned_data(
+      settings.packed_file ?
+          nullptr :
+          static_cast<char *>(BLI_file_read_binary_as_mem(filepath.c_str(), 0, &read_size)),
+      free_data);
+  const char *data = settings.packed_file ? static_cast<const char *>(settings.packed_file->data) :
+                                            owned_data.get();
+  if (!data || (!settings.packed_file && read_size != size)) {
+    impl_->error = "LUT: could not read the file";
+    return;
+  }
+
+  const eImbFileType type = IMB_test_image_type_from_memory(
+      reinterpret_cast<const unsigned char *>(data), size);
+  const bool is_image = ELEM(type, IMB_FTYPE_PNG, IMB_FTYPE_TIF, IMB_FTYPE_OPENEXR);
+  if ((!is_image && type != IMB_FTYPE_NONE) ||
+      (!is_image && !settings.packed_file && !BLI_path_extension_check(filepath.c_str(), ".cube")))
+  {
+    impl_->error = "LUT: invalid or unsupported image; use PNG, TIFF, or flat EXR";
+    return;
+  }
+
+  /* OCIO caches file contents by path. Immutable content-addressed snapshots allow both reload
+   * and packed files without flushing global caches or changing the user's OCIO configuration. */
+  char snapshot[FILE_MAX] = "";
+  if (!is_image) {
+    unsigned char digest[16];
+    char hex[33];
+    BLI_hash_md5_buffer(data, size, digest);
+    BLI_hash_md5_to_hexdigest(digest, hex);
+    BLI_path_join(snapshot,
+                  sizeof(snapshot),
+                  BKE_tempdir_session(),
+                  "compositor_lut",
+                  (std::string(hex) + ".cube").c_str());
+    {
+      static std::mutex snapshot_mutex;
+      std::lock_guard lock(snapshot_mutex);
+      if (!BLI_exists(snapshot)) {
+        if (!BLI_file_ensure_parent_dir_exists(snapshot)) {
+          impl_->error = "LUT: could not create the temporary cache directory";
+          return;
+        }
+        FILE *file = BLI_fopen(snapshot, "wb");
+        if (!file) {
+          impl_->error = "LUT: could not create the temporary file";
+          return;
+        }
+        const bool written = fwrite(data, 1, size, file) == size;
+        const bool closed = fclose(file) == 0;
+        if (!written || !closed) {
+          BLI_delete(snapshot, false, false);
+          impl_->error = "LUT: could not write the temporary file";
+          return;
+        }
+      }
+    }
+  }
+  try {
+    const OCIO::ConstConfigRcPtr config = OCIO::GetCurrentConfig();
+    OCIO::GroupTransformRcPtr group = OCIO::GroupTransform::Create();
+    const bool raw = settings.preset == CMP_NODE_LUT_RAW;
+    const char *input_space = settings.preset == CMP_NODE_LUT_CUSTOM ? settings.input_color_space :
+                              settings.preset == CMP_NODE_LUT_SRGB   ? "sRGB" :
+                                                                       "scene_linear";
+    const char *output_space = settings.preset == CMP_NODE_LUT_CUSTOM &&
+                                       !settings.output_matches_input ?
+                                   settings.output_color_space :
+                                   input_space;
+    if (settings.direction) {
+      std::swap(input_space, output_space);
+    }
+    if (!raw) {
+      auto conversion = OCIO::ColorSpaceTransform::Create();
+      conversion->setSrc("scene_linear");
+      conversion->setDst(input_space);
+      group->appendTransform(conversion);
+    }
+    const OCIO::Interpolation interpolation[] = {
+        OCIO::INTERP_BEST, OCIO::INTERP_LINEAR, OCIO::INTERP_TETRAHEDRAL};
+    const auto method = interpolation[std::clamp(settings.interpolation, 0, 2)];
+    const auto direction = settings.direction ? OCIO::TRANSFORM_DIR_INVERSE :
+                                                OCIO::TRANSFORM_DIR_FORWARD;
+    OCIO::TransformRcPtr lut;
+    if (is_image) {
+      auto image_lut = image_lut_transform(settings, data, size, filepath.c_str(), impl_->error);
+      if (!image_lut) {
+        return;
+      }
+      image_lut->setInterpolation(method);
+      image_lut->setDirection(direction);
+      lut = image_lut;
+    }
+    else {
+      auto file_lut = OCIO::FileTransform::Create();
+      file_lut->setSrc(snapshot);
+      file_lut->setInterpolation(method);
+      file_lut->setDirection(direction);
+      lut = file_lut;
+    }
+    group->appendTransform(lut);
+    if (!raw) {
+      auto conversion = OCIO::ColorSpaceTransform::Create();
+      conversion->setSrc(output_space);
+      conversion->setDst("scene_linear");
+      group->appendTransform(conversion);
+    }
+    const auto processor = config->getProcessor(group);
+    impl_->cpu = processor->getDefaultCPUProcessor();
+    impl_->gpu = processor->getDefaultGPUProcessor();
+  }
+  catch (const OCIO::Exception &error) {
+    impl_->error = "LUT: " + std::string(error.what());
+  }
+}
+
+OCIOLUT::~OCIOLUT() = default;
+
+const std::string &OCIOLUT::error() const
+{
+  return impl_->error;
+}
+
+void OCIOLUT::apply_rgb(float rgb[3]) const
+{
+  impl_->cpu->applyRGB(rgb);
+}
+
+gpu::Shader *OCIOLUT::bind_shader_and_resources()
+{
+  if (!impl_->error.empty()) {
+    return nullptr;
+  }
+  if (!impl_->shader) {
+    try {
+      impl_->shader = GPUShaderCreator::Create(impl_->precision, true);
+      auto ocio_shader_creator = std::static_pointer_cast<OCIO::GpuShaderCreator>(impl_->shader);
+      impl_->gpu->extractGpuShaderInfo(ocio_shader_creator);
+    }
+    catch (const OCIO::Exception &error) {
+      impl_->error = "LUT GPU: " + std::string(error.what());
+      return nullptr;
+    }
+  }
+  gpu::Shader *shader = impl_->shader->bind_shader_and_resources();
+  if (!shader) {
+    impl_->error = "LUT: GPU shader compilation failed";
+  }
+  return shader;
+}
+
+void OCIOLUT::unbind_shader_and_resources()
+{
+  impl_->shader->unbind_shader_and_resources();
+}
+
+void OCIOLUTContainer::reset()
+{
+  map_.remove_if([](auto item) { return !item.value->needed; });
+  for (auto &value : map_.values()) {
+    value->needed = false;
+  }
+}
+
+OCIOLUT &OCIOLUTContainer::get(Context &context,
+                               const NodeCompositorLUT &settings,
+                               const std::string &filepath)
+{
+  BLI_stat_t stat = {};
+  if (!settings.packed_file) {
+    if (BLI_stat(filepath.c_str(), &stat) != 0) {
+      stat = {};
+    }
+  }
+  std::string key;
+  auto append = [&](const std::string &value) {
+    key.append(value);
+    key.push_back('\0');
+  };
+  append(filepath);
+  append(settings.packed_file ? settings.packed_hash : "external");
+  append(std::to_string(stat.st_mtime));
+  append(std::to_string(stat.st_size));
+  append(std::to_string(settings.reload_version));
+  append(std::to_string(settings.preset));
+  append(std::to_string(settings.interpolation));
+  append(std::to_string(settings.direction));
+  append(settings.input_color_space);
+  append(settings.output_color_space);
+  append(std::to_string(settings.output_matches_input));
+  append(std::to_string(settings.image_flags));
+  append(OCIO::GetCurrentConfig()->getCacheID());
+  append(std::to_string(int(context.get_precision())));
+  OCIOLUT &resource = *map_.lookup_or_add_cb(
+      key, [&]() { return std::make_unique<OCIOLUT>(context, settings, filepath); });
+  resource.needed = true;
+  return resource;
+}
 
 /* ------------------------------------------------------------------------------------------------
  * OCIO Color Space Conversion Shader Key.
@@ -633,7 +1053,11 @@ OCIOToDisplayShader::OCIOToDisplayShader(Context &context,
 
 gpu::Shader *OCIOToDisplayShader::bind_shader_and_resources()
 {
-  return shader_creator_->bind_shader_and_resources();
+  gpu::Shader *shader = shader_creator_->bind_shader_and_resources();
+  if (shader) {
+    GPU_shader_uniform_1b(shader, "premultiply_output", false);
+  }
+  return shader;
 }
 
 void OCIOToDisplayShader::unbind_shader_and_resources()

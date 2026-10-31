@@ -5980,6 +5980,52 @@ static void rna_NodeConvertColorSpace_to_color_space_set(PointerRNA *ptr, int va
   }
 }
 
+static int rna_NodeLUT_input_color_space_get(PointerRNA *ptr)
+{
+  auto &settings = *static_cast<NodeCompositorLUT *>(ptr->data_as<bNode>()->storage);
+  return IMB_colormanagement_colorspace_get_named_index(settings.input_color_space);
+}
+
+static void rna_NodeLUT_input_color_space_set(PointerRNA *ptr, int value)
+{
+  auto &settings = *static_cast<NodeCompositorLUT *>(ptr->data_as<bNode>()->storage);
+  if (const char *name = IMB_colormanagement_colorspace_get_indexed_name(value)) {
+    STRNCPY_UTF8(settings.input_color_space, name);
+  }
+}
+
+static int rna_NodeLUT_output_color_space_get(PointerRNA *ptr)
+{
+  auto &settings = *static_cast<NodeCompositorLUT *>(ptr->data_as<bNode>()->storage);
+  return IMB_colormanagement_colorspace_get_named_index(settings.output_color_space);
+}
+
+static void rna_NodeLUT_output_color_space_set(PointerRNA *ptr, int value)
+{
+  auto &settings = *static_cast<NodeCompositorLUT *>(ptr->data_as<bNode>()->storage);
+  if (const char *name = IMB_colormanagement_colorspace_get_indexed_name(value)) {
+    STRNCPY_UTF8(settings.output_color_space, name);
+    settings.output_matches_input = false;
+  }
+}
+
+static bool rna_NodeLUT_is_packed_get(PointerRNA *ptr)
+{
+  return static_cast<NodeCompositorLUT *>(ptr->data_as<bNode>()->storage)->packed_file != nullptr;
+}
+
+static void rna_NodeLUT_filepath_set(PointerRNA *ptr, const char *value)
+{
+  auto &settings = *static_cast<NodeCompositorLUT *>(ptr->data_as<bNode>()->storage);
+  if (STREQ(settings.filepath, value)) {
+    return;
+  }
+  STRNCPY_UTF8(settings.filepath, value);
+  if (!settings.packed_file) {
+    settings.file_info[0] = '\0';
+  }
+}
+
 static void rna_reroute_node_socket_type_set(PointerRNA *ptr, const char *value)
 {
   const bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
@@ -9817,6 +9863,97 @@ static void def_cmp_convert_color_space(BlenderRNA * /*brna*/, StructRNA *srna)
                               "rna_NodeConvertColorSpace_to_color_space_set",
                               "rna_NodeConvertColorSpace_color_space_itemf");
   RNA_def_property_ui_text(prop, "To", "Color space of the output image");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
+static void def_cmp_lut(BlenderRNA *, StructRNA *srna)
+{
+  RNA_def_struct_sdna_from(srna, "NodeCompositorLUT", "storage");
+  static const EnumPropertyItem presets[] = {
+      {CMP_NODE_LUT_SRGB,
+       "SRGB",
+       0,
+       "sRGB Look",
+       "Look up sRGB values before the scene view transform"},
+      {CMP_NODE_LUT_LINEAR,
+       "LINEAR",
+       0,
+       "Scene Linear",
+       "LUT input and output use the scene working space"},
+      {CMP_NODE_LUT_CUSTOM,
+       "CUSTOM",
+       0,
+       "Custom",
+       "Specify the LUT input and output color spaces"},
+      {CMP_NODE_LUT_RAW, "RAW", 0, "Raw Lookup", "Apply the LUT without color space conversion"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem interpolations[] = {
+      {0, "AUTO", 0, "Automatic", "Linear for 1D LUTs and tetrahedral for 3D LUTs"},
+      {1, "LINEAR", 0, "Linear", "Linear interpolation (trilinear for 3D LUTs)"},
+      {2, "TETRAHEDRAL", 0, "Tetrahedral", "Tetrahedral interpolation for 3D LUTs"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem directions[] = {
+      {0, "FORWARD", 0, "Forward", "Apply the LUT in its authored direction"},
+      {1,
+       "INVERSE",
+       0,
+       "Inverse",
+       "Use the OCIO inverse; clipped or many-to-one colors cannot be recovered exactly"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  PropertyRNA *prop = RNA_def_property(srna, "filepath", PROP_STRING, PROP_FILEPATH);
+  RNA_def_property_string_funcs(prop, nullptr, nullptr, "rna_NodeLUT_filepath_set");
+  RNA_def_property_ui_text(prop, "LUT", "Path to a .cube or sliced PNG, TIFF, or EXR LUT file");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  prop = RNA_def_property(srna, "preset", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, presets);
+  RNA_def_property_ui_text(prop, "Color Preset", "Color space used to interpret the LUT");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  prop = RNA_def_property(srna, "interpolation", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, interpolations);
+  RNA_def_property_ui_text(
+      prop, "Interpolation", "LUT interpolation; unsupported choices use the format default");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  prop = RNA_def_property(srna, "direction", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, directions);
+  RNA_def_property_ui_text(prop, "Direction", "LUT transform direction");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  for (int i = 0; i < 2; i++) {
+    prop = RNA_def_property(
+        srna, i == 0 ? "input_color_space" : "output_color_space", PROP_ENUM, PROP_NONE);
+    RNA_def_property_flag(prop, PROP_ENUM_NO_CONTEXT);
+    RNA_def_property_enum_items(prop, rna_enum_color_space_convert_default_items);
+    RNA_def_property_enum_funcs(
+        prop,
+        i == 0 ? "rna_NodeLUT_input_color_space_get" : "rna_NodeLUT_output_color_space_get",
+        i == 0 ? "rna_NodeLUT_input_color_space_set" : "rna_NodeLUT_output_color_space_set",
+        "rna_NodeConvertColorSpace_color_space_itemf");
+    RNA_def_property_ui_text(prop, i == 0 ? "LUT Input" : "LUT Output", "LUT color space");
+    RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  }
+  prop = RNA_def_property(srna, "is_packed", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_funcs(prop, "rna_NodeLUT_is_packed_get", nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Packed", "The LUT is stored inside the blend file");
+  prop = RNA_def_property(srna, "use_same_color_space", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "output_matches_input", 0);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_ui_text(
+      prop, "Output Matches Input", "Use the LUT input color space for its output");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  prop = RNA_def_property(srna, "image_flip_y", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "image_flags", CMP_NODE_LUT_IMAGE_FLIP_Y);
+  RNA_def_property_ui_text(prop,
+                           "Flip Image Vertically",
+                           "Read image LUT rows from bottom to top instead of top to bottom");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  prop = RNA_def_property(srna, "image_flip_green", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "image_flags", CMP_NODE_LUT_IMAGE_FLIP_GREEN);
+  RNA_def_property_ui_text(prop,
+                           "Reverse Green Axis",
+                           "Reverse green within each image LUT slice, keeping slice order");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
@@ -14560,6 +14697,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("CompositorNode", "CompositorNodeConvolve");
   define("CompositorNode", "CompositorNodeCombineColor", def_cmp_combsep_color);
   define("CompositorNode", "CompositorNodeConvertColorSpace", def_cmp_convert_color_space);
+  define("CompositorNode", "CompositorNodeLUT", def_cmp_lut);
   define("CompositorNode", "CompositorNodeConvertToDisplay", def_cmp_convert_to_display);
   define("CompositorNode", "CompositorNodeCornerPin");
   define("CompositorNode", "CompositorNodeCrop");

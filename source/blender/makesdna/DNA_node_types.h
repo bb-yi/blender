@@ -57,6 +57,7 @@ struct ID;
 struct Image;
 struct ImBuf;
 struct Material;
+struct PackedFile;
 struct PreviewImage;
 struct Tex;
 struct bGPdata;
@@ -2874,6 +2875,35 @@ struct NodeConvertColorSpace {
 
   char from_color_space[64] = "";
   char to_color_space[64] = "";
+};
+
+struct NodeCompositorLUT {
+  DNA_DEFINE_CXX_METHODS(NodeCompositorLUT)
+
+  char filepath[1024] = "";
+  char input_color_space[64] = "sRGB";
+  char output_color_space[64] = "sRGB";
+  PackedFile *packed_file = nullptr;
+  char packed_hash[40] = "";
+  char file_info[128] = "";
+  int preset = 0;
+  int interpolation = 0;
+  int direction = 0;
+  int reload_version = 0;
+  int output_matches_input = 1;
+  int image_flags = 0;
+};
+
+enum {
+  CMP_NODE_LUT_SRGB = 0,
+  CMP_NODE_LUT_LINEAR = 1,
+  CMP_NODE_LUT_CUSTOM = 2,
+  CMP_NODE_LUT_RAW = 3,
+};
+
+enum {
+  CMP_NODE_LUT_IMAGE_FLIP_Y = 1 << 0,
+  CMP_NODE_LUT_IMAGE_FLIP_GREEN = 1 << 1,
 };
 
 struct NodeConvertToDisplay {
