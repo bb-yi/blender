@@ -538,6 +538,8 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
   inst_.lights.sync_render_extent(slot.extent);
   const int hiz_created = inst_.hiz_buffer.sync();
   inst_.camera.override(rt_camera, true);
+  const uint32_t previous_draw_context = inst_.pipelines.data.draw_context;
+  inst_.pipelines.data.draw_context |= DRAW_CONTEXT_RENDER_TEXTURE_CAPTURE;
   inst_.uniform_data.push_update();
 
   View main_view = {"RenderTexture.Main"};
@@ -673,6 +675,8 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
     }
   }
 
+  inst_.pipelines.data.draw_context = previous_draw_context;
+  inst_.uniform_data.pipeline.push_update();
   data_.push_update();
 }
 

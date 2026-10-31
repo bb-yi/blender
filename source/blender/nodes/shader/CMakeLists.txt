@@ -167,6 +167,9 @@ set(SRC
   node_shader_tree.cc
   node_shader_util.cc
 
+  # Preserve existing Unity batches when adding the new node.
+  nodes/node_shader_draw_info.cc
+
   node_shader_register.hh
   node_shader_util.hh
   include/NOD_filter_graph.hh
