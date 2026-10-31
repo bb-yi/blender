@@ -608,7 +608,9 @@ struct Object {
   /** Current deformation group, NOTE: index starts at 1. */
   DNA_DEPRECATED unsigned short actdef = 0;
   /** Current face map, NOTE: index starts at 1. */
-  char _pad2[2] = {};
+  /** Opt this object's Forward surfaces into NPR refraction background layers. */
+  char use_npr_refraction_background = false;
+  char _pad2[1] = {};
   /** Object color (in most cases the material color is used for drawing). */
   float color[4] = {1, 1, 1, 1};
 

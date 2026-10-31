@@ -573,7 +573,7 @@ class RENDER_PT_eevee_light_paths(RenderButtonsPanel, Panel):
         return (context.engine in cls.COMPAT_ENGINES)
 
     def draw(self, context):
-        pass
+        self.layout.prop(context.scene.eevee, "npr_forward_refraction_mode")
 
 
 class RENDER_PT_eevee_clamping(RenderButtonsPanel, Panel):

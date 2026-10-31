@@ -387,8 +387,22 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
 #  ifdef MAT_NPR_REFRACTION_VOLUME
       /* Color may come from an offset texel; volume segment stays on the refractor camera column. */
       const float back_depth_volume = texelFetch(hiz_back_tx, front_texel, 0).r;
-      back_color = npr_volume_compose_back_color(
-          back_color, volume_uv, front_depth, back_depth_volume);
+      if (npr_background_resolved) {
+        /* Match the visible depth used by the layer fog resolve. Depth Offset can keep
+         * the original shading depth in the GBuffer when Affect Lighting is disabled. */
+        const float visible_depth = texelFetch(hiz_tx, front_texel, 0).r;
+        VolumeResolveSample front = npr_volume_resolve(volume_uv, visible_depth);
+        const float epsilon = 1.0e-4f;
+        const bool3 visible = greaterThan(front.transmittance, float3(epsilon));
+        back_color.rgb = mix(float3(0.0f),
+            (back_color.rgb - front.scattering) / max(front.transmittance, float3(epsilon)), visible);
+        float alpha_t = average(front.transmittance);
+        back_color.a = alpha_t > epsilon ? clamp(back_color.a / alpha_t, 0.0f, 1.0f) : 0.0f;
+      }
+      else {
+        back_color = npr_volume_compose_back_color(
+            back_color, volume_uv, front_depth, back_depth_volume);
+      }
 #  endif
       return back_color;
     }
@@ -566,6 +580,7 @@ float4 closure_to_rgba(Closure cl)
   return out_color;
 }
 
+
 void main()
 {
   material_surface_cull_discard();
@@ -596,5 +611,6 @@ void main()
   g_specular_indirect = float4(dc.specular_indirect, 1.0f);
 
   out_radiance = swap_alpha(nodetree_npr());
+  npr_layer_coverage = 1u;
   nodetree_surface(0.0f);
 }

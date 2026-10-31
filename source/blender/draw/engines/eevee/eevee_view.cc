@@ -307,6 +307,7 @@ namespace blender::eevee
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry,
         TelemetryStageId::MainFilterBeforeVolumeFog);
+      inst_.pipelines.forward.filter_volume_begin(render_view_, combined_fb_);
       gpu::Texture* filtered_tx = inst_.filter_materials.render_stage(
         render_view_, rbufs.combined_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG);
       if (filtered_tx != nullptr && filtered_tx != rbufs.combined_tx)
@@ -315,6 +316,7 @@ namespace blender::eevee
         GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
           GPU_BARRIER_FRAMEBUFFER);
       }
+      inst_.pipelines.forward.filter_volume_end(render_view_, combined_fb_);
     }
 
     {
@@ -326,7 +328,9 @@ namespace blender::eevee
 
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainVolumeResolve);
-      inst_.volume.draw_resolve(main_view_);
+      if (!inst_.pipelines.forward.volume_resolved()) {
+        inst_.volume.draw_resolve(main_view_);
+      }
     }
 
     {

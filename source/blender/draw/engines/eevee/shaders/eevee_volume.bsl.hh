@@ -441,6 +441,48 @@ void resolve_frag([[resource_table]] const Uniform &uni,
       int2(frag_co.xy), uni.uniform_buf.render_pass.volume_light_id, float4(vol.scattering, 1.0f));
 }
 
+/** Fog is applied once to newly shaded layer coverage; inverse is used around pre-fog filters. */
+struct LayerResolve {
+  [[sampler(0)]] sampler2D layer_color_tx;
+  [[sampler(1)]] usampler2D layer_coverage_tx;
+  [[push_constant]] int operation;
+};
+struct LayerResolveOut {
+  [[frag_color(0)]] float4 color;
+};
+[[fragment]]
+void layer_resolve_frag([[resource_table]] const LayerResolve &srt,
+                        [[resource_table]] const Uniform &uni,
+                        [[resource_table]] const UnifiedVolumeData &volumes,
+                        [[resource_table]] const HiZ &hiz,
+                        [[frag_coord]] const float4 frag_co,
+                        [[out]] LayerResolveOut &result)
+{
+  int2 texel = int2(frag_co.xy);
+  float4 color = texelFetch(srt.layer_color_tx, texel, 0);
+  if (srt.operation == 0 && texelFetch(srt.layer_coverage_tx, texel, 0).r == 0u) {
+    result.color = color;
+    return;
+  }
+  float2 uv = frag_co.xy * uni.uniform_buf.volumes.main_view_extent_inv;
+  float depth = texelFetch(hiz.hiz_tx, texel, 0).r;
+  VolumeResolveSample vol = volumes.resolve(float3(uv, depth));
+  float alpha_t = saturate(average(vol.transmittance));
+  if (srt.operation == 1) {
+    const float epsilon = 1.0e-4f;
+    color.rgb = mix(float3(0.0f),
+                    (color.rgb - vol.scattering) / max(vol.transmittance, float3(epsilon)),
+                    greaterThan(vol.transmittance, float3(epsilon)));
+    color.a = alpha_t > epsilon ? saturate(color.a / alpha_t) : 0.0f;
+  }
+  else {
+    color.rgb = color.rgb * vol.transmittance + vol.scattering;
+    color.a *= alpha_t;
+  }
+  result.color = color;
+}
+PipelineGraphic layer_resolve(resolve_vert, layer_resolve_frag);
+
 PipelineCompute scatter(scatter_main, Scatter{.use_volume_light = false});
 PipelineCompute scatter_with_lights(scatter_main, Scatter{.use_volume_light = true});
 PipelineCompute integration(integration_main);

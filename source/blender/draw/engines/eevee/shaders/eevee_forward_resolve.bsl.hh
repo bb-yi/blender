@@ -17,11 +17,14 @@ namespace eevee::forward {
 
 struct ForwardResolve {
 
+  [[image(RBUFS_COLOR_SLOT, read_write, SFLOAT_16_16_16_16)]] image2DArray rp_color_img;
+
   [[sampler(0)]] sampler2D transparency_r_tx;
   [[sampler(1)]] sampler2D transparency_g_tx;
   [[sampler(2)]] sampler2D transparency_b_tx;
   [[sampler(3)]] sampler2D transparency_a_tx;
   [[sampler(4)]] sampler2D combined_tx;
+  [[push_constant]] bool accumulate_transparent;
 };
 
 [[vertex]]
@@ -35,9 +38,8 @@ struct ForwardResolveFragOut {
 };
 
 [[fragment]]
-void resolve_frag([[resource_table]] const ForwardResolve &srt,
+void resolve_frag([[resource_table]] ForwardResolve &srt,
                   [[resource_table]] const eevee::Uniform &uni,
-                  [[resource_table]] RenderPassOutput &render_passes,
                   [[frag_coord]] const float4 frag_co,
                   [[out]] ForwardResolveFragOut &frag_out)
 {
@@ -76,9 +78,16 @@ void resolve_frag([[resource_table]] const ForwardResolve &srt,
   const float half_max = 65504.0f;
   radiance = min(radiance, half_max);
 
-  render_passes.store_color(texel,
-                            uni.uniform_buf.render_pass.transparent_id,
-                            float4(radiance.rgb, transmittance.a));
+  float4 transparent_pass = float4(radiance.rgb, transmittance.a);
+  const int transparent_id = uni.uniform_buf.render_pass.transparent_id;
+  if (srt.accumulate_transparent && transparent_id >= 0) {
+    float4 previous = imageLoad(srt.rp_color_img, int3(texel, transparent_id));
+    transparent_pass.rgb += previous.rgb * transmittance.rgb;
+    transparent_pass.a *= previous.a;
+  }
+  if (transparent_id >= 0) {
+    imageStoreFast(srt.rp_color_img, int3(texel, transparent_id), transparent_pass);
+  }
 
   float4 combined = texelFetch(srt.combined_tx, texel, 0);
   frag_out.combined = radiance + combined * transmittance;

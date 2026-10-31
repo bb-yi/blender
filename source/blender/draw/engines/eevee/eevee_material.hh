@@ -347,7 +347,8 @@ struct MaterialKey {
               eMaterialPipeline pipeline,
               short visibility_flags,
               short refraction_layer,
-              bool use_outline)
+              bool use_outline,
+              bool npr_refraction_background = false)
       : mat(mat_)
   {
     options = shader_uuid_from_material_type(pipeline,
@@ -363,6 +364,7 @@ struct MaterialKey {
     options = (options << 1) | (visibility_flags & OB_HIDE_PROBE_CUBEMAP ? 0 : 1);
     options = (options << 1) | (visibility_flags & OB_HIDE_PROBE_PLANAR ? 0 : 1);
     options = (options << 1) | (visibility_flags & OB_HIDE_RAYCAST ? 0 : 1);
+    options = (options << 1) | uint64_t(npr_refraction_background);
     options = (options << 16) | uint16_t(refraction_layer);
     options = (options << 3) | uint64_t(material_ztest_mode_get(*mat_));
     options = (options << 1) | uint64_t(material_color_write_get(*mat_));
@@ -422,7 +424,8 @@ struct ShaderKey {
             eMaterialProbe probe_capture,
             short refraction_layer,
             bool hide_from_raycast,
-            const SurfaceDrawState &state)
+            const SurfaceDrawState &state,
+            bool npr_refraction_background = false)
   {
     shader = GPU_material_get_shader(gpumat);
     options = uint64_t(shader_closure_bits_from_flag(gpumat));
@@ -439,6 +442,7 @@ struct ShaderKey {
     options = (options << 16) | uint16_t(refraction_layer);
     options = (options << 1) | (hide_from_raycast ? 1 : 0);
     options = (options << 1) | (state.is_outline_shell ? 1 : 0);
+    options = (options << 1) | uint64_t(npr_refraction_background);
   }
 
   uint64_t hash() const

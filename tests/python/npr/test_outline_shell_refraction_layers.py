@@ -81,8 +81,12 @@ def shell_node(mat):
     return next(n for n in mat.node_tree.nodes if n.bl_idname == 'ShaderNodeOutputOutlineShell')
 
 
-def setup_scene():
-    bpy.ops.wm.read_factory_settings(use_empty=True)
+def setup_scene(reset=True):
+    if reset:
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+    else:
+        for obj in list(bpy.data.objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
     scene = bpy.context.scene
     scene.render.engine = 'BLENDER_EEVEE'
     scene.render.resolution_x = scene.render.resolution_y = RES
@@ -99,6 +103,7 @@ def setup_scene():
     scene.view_settings.look = 'None'
     bpy.ops.object.camera_add(location=(0, 0, 5))
     scene.camera = bpy.context.object
+    scene.camera.rotation_euler = (0, 0, 0)
     scene.camera.data.type = 'ORTHO'
     scene.camera.data.ortho_scale = 3
     world = bpy.data.worlds.new('Refraction world')

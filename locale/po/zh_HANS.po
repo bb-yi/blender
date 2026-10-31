@@ -165718,3 +165718,15 @@ msgstr "是否正在导航"
 
 msgid "Drawing context to test"
 msgstr "要判断的绘制上下文"
+
+
+msgid "Forward Refraction Layers"
+msgstr "Forward 折射分层"
+
+
+msgid "Forward Refraction"
+msgstr "Forward 折射"
+
+
+msgid "Participate in Refraction Background"
+msgstr "参与折射背景"

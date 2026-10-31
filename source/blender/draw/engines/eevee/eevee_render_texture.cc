@@ -654,7 +654,9 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
     if (!volume_compute_done) {
       inst_.volume.draw_compute(main_view, slot.extent);
     }
-    inst_.volume.draw_resolve(main_view);
+    if (!inst_.pipelines.forward.volume_resolved()) {
+      inst_.volume.draw_resolve(main_view);
+    }
     inst_.ambient_occlusion.render_pass(render_view);
     inst_.pipelines.forward.render(
         render_view, rbufs.depth_tx, prepass_fb_, transparent_fb_, combined_fb_, slot.extent);
