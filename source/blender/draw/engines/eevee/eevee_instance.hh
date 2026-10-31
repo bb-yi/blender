@@ -48,6 +48,7 @@
 #include "eevee_motion_blur.hh"
 #include "eevee_native_postfx_output.hh"
 #include "eevee_outline.hh"
+#include "eevee_outline_shell.hh"
 #include "eevee_pipeline.hh"
 #include "eevee_raytrace.hh"
 #include "eevee_render_texture.hh"
@@ -152,6 +153,7 @@ namespace blender::eevee
     RenderTextureModule render_textures;
     FilterMaterialModule filter_materials;
     OutlineModule outline;
+    OutlineShellModule outline_shell;
     Dlss5Module dlss5;
     DlssSrModule dlss_sr;
     NativePostFXOutputModule native_postfx_outputs;
@@ -249,6 +251,7 @@ namespace blender::eevee
       render_textures(*this),
       filter_materials(*this),
       outline(*this),
+      outline_shell(*this),
       dlss5(*this),
       dlss_sr(*this),
       native_postfx_outputs(*this),

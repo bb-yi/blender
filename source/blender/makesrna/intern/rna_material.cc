@@ -1514,6 +1514,15 @@ void RNA_def_material(BlenderRNA *brna)
       prop, "Outline Shell Depth Write", "Write depth for the additional surface");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 
+  prop = RNA_def_property(srna, "use_outline_shell_self_occlusion", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(
+      prop, nullptr, "outline_shell_flag", MA_OUTLINE_SHELL_SELF_OCCLUSION);
+  RNA_def_property_ui_text(prop,
+                           "Outline Shell Self Occlusion",
+                           "Hide shell fragments behind this object's nearest body surface, "
+                           "independently of body transparency (uses an additional depth pass)");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
   prop = RNA_def_property(srna, "use_outline_shell_shadow", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(
       prop, nullptr, "outline_shell_flag", MA_OUTLINE_SHELL_CAST_SHADOW);

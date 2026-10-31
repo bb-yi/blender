@@ -605,6 +605,7 @@ namespace blender::eevee
       ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginNPRPost);
       filter_materials.begin_sync();
       outline.begin_sync();
+      outline_shell.begin_sync();
       ambient_occlusion.sync();
       volume_probes.sync();
       lookdev.sync();

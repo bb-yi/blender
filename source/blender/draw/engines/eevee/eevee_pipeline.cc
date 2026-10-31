@@ -2502,6 +2502,9 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
   switch (pipeline_type) {
     case MAT_PIPE_OUTLINE_FREESTYLE:
       return inst_.outline.material_add(gpumat);
+    case MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH:
+      /* Registered per instance, in its own depth-only framebuffer. */
+      return nullptr;
     case MAT_PIPE_PREPASS_DEFERRED:
       return deferred.prepass_add(
           blender_mat, draw_state, gpumat, false, ob->refraction_layer_index, hide_from_raycast);
@@ -2672,6 +2675,7 @@ void DeferredPipeline::render(View &main_view,
                               RayTraceBuffer &rt_buffer_refract_layer,
                               bool &volume_compute_done)
 {
+  inst_.outline_shell.render(render_view, extent);
   gpu::Texture *feedback_tx = nullptr;
 
   GPU_debug_group_begin("Deferred.Opaque");
@@ -2716,6 +2720,9 @@ void DeferredPipeline::render(View &main_view,
 
 void DeferredPipeline::render_prepass_only(View &render_view, Framebuffer &prepass_fb)
 {
+  const int2 extent(GPU_texture_width(inst_.render_buffers.depth_tx),
+                    GPU_texture_height(inst_.render_buffers.depth_tx));
+  inst_.outline_shell.render(render_view, extent);
   opaque_layer_.render_prepass_only(render_view, prepass_fb);
   for (auto &entry : refraction_layers_) {
     entry.second->render_prepass_only(render_view, prepass_fb);
@@ -2726,6 +2733,9 @@ void DeferredPipeline::render_gbuffer_only(View &render_view,
                                            Framebuffer &prepass_fb,
                                            Framebuffer &gbuffer_fb)
 {
+  const int2 extent(GPU_texture_width(inst_.render_buffers.depth_tx),
+                    GPU_texture_height(inst_.render_buffers.depth_tx));
+  inst_.outline_shell.render(render_view, extent);
   opaque_layer_.render_gbuffer_only(render_view, prepass_fb, gbuffer_fb);
   for (auto &entry : refraction_layers_) {
     entry.second->render_gbuffer_only(render_view, prepass_fb, gbuffer_fb);

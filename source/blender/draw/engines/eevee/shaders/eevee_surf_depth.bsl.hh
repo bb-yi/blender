@@ -18,6 +18,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_geom_iface_info)
 #include "eevee_nodetree_frag_lib.glsl"
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_surf_common.bsl.hh"
+#include "eevee_outline_shell_lib.bsl.hh"
 #include "eevee_transparency.bsl.hh"
 #include "eevee_utility_tx.bsl.hh"
 #include "eevee_velocity.bsl.hh"
@@ -68,6 +69,12 @@ void surf_depth([[resource_table]] PipelineConstants &pipe,
                 [[out]] SurfaceDepthFragOut<with_velocity> &frag_out,
                 [[front_facing]] const bool front_face)
 {
+#ifdef MAT_OUTLINE_SHELL_SELF_OCCLUSION
+  if (outline_shell_self_occluded()) {
+    gpu_discard_fragment();
+    return;
+  }
+#endif
   if (pipe.use_transparency) [[static_branch]] {
     const ViewMatrices view = views.get(0);
 

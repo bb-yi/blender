@@ -116,19 +116,19 @@ static inline void material_type_from_shader_uuid(uint64_t shader_uuid,
                                                   bool &outline_shell)
 {
   const uint64_t geometry_mask = ((1u << 4u) - 1u);
-  const uint64_t pipeline_mask = ((1u << 4u) - 1u);
+  const uint64_t pipeline_mask = ((1u << 5u) - 1u);
   const uint64_t thickness_mask = ((1u << 1u) - 1u);
   const uint64_t displacement_mask = ((1u << 1u) - 1u);
   const uint64_t probe_mask = ((1u << 2u) - 1u);
   geometry_type = static_cast<eMaterialGeometry>(shader_uuid & geometry_mask);
   pipeline_type = static_cast<eMaterialPipeline>((shader_uuid >> 4u) & pipeline_mask);
-  displacement_type = static_cast<eMaterialDisplacement>((shader_uuid >> 8u) & displacement_mask);
-  thickness_type = static_cast<eMaterialThickness>((shader_uuid >> 9u) & thickness_mask);
-  probe_capture = static_cast<eMaterialProbe>((shader_uuid >> 10u) & probe_mask);
-  transparent_shadows = (shader_uuid >> 12u) & 1u;
-  use_outline = (shader_uuid >> 13u) & 1u;
-  depth_offset_affect_lighting = (shader_uuid >> 14u) & 1u;
-  outline_shell = (shader_uuid >> 15u) & 1u;
+  displacement_type = static_cast<eMaterialDisplacement>((shader_uuid >> 9u) & displacement_mask);
+  thickness_type = static_cast<eMaterialThickness>((shader_uuid >> 10u) & thickness_mask);
+  probe_capture = static_cast<eMaterialProbe>((shader_uuid >> 11u) & probe_mask);
+  transparent_shadows = (shader_uuid >> 13u) & 1u;
+  use_outline = (shader_uuid >> 14u) & 1u;
+  depth_offset_affect_lighting = (shader_uuid >> 15u) & 1u;
+  outline_shell = (shader_uuid >> 16u) & 1u;
 }
 
 static inline uint64_t shader_uuid_from_material_type(
@@ -147,26 +147,26 @@ static inline uint64_t shader_uuid_from_material_type(
   BLI_assert(int64_t(thickness_type) < (1 << 1));
   BLI_assert(int64_t(probe_capture) < (1 << 2));
   BLI_assert(int64_t(geometry_type) < (1 << 4));
-  BLI_assert(int64_t(pipeline_type) < (1 << 4));
+  BLI_assert(int64_t(pipeline_type) < (1 << 5));
   uint64_t transparent_shadows = blend_flags & MA_BL_TRANSPARENT_SHADOW ? 1 : 0;
   uint64_t blend_flag_bits = uint64_t(static_cast<unsigned char>(blend_flags));
 
   uint64_t uuid;
   uuid = geometry_type;
   uuid |= pipeline_type << 4;
-  uuid |= displacement_type << 8;
-  uuid |= thickness_type << 9;
-  uuid |= uint64_t(probe_capture) << 10;
-  uuid |= transparent_shadows << 12;
-  uuid |= uint64_t(use_outline) << 13;
-  uuid |= uint64_t(depth_offset_affect_lighting) << 14;
-  uuid |= uint64_t(outline_shell) << 15;
+  uuid |= displacement_type << 9;
+  uuid |= thickness_type << 10;
+  uuid |= uint64_t(probe_capture) << 11;
+  uuid |= transparent_shadows << 13;
+  uuid |= uint64_t(use_outline) << 14;
+  uuid |= uint64_t(depth_offset_affect_lighting) << 15;
+  uuid |= uint64_t(outline_shell) << 16;
   /* Keep the full blend flag in the shader key. Beyond transparent shadows, flags such as
    * raytraced transmission affect prepass replacement and auxiliary passes. */
-  uuid |= blend_flag_bits << 16;
+  uuid |= blend_flag_bits << 17;
   /* Higher bits are intentionally ignored by material_type_from_shader_uuid(). They separate
    * graph-dependent variants such as different NPR trees attached to the same material/world. */
-  uuid |= extra_key << 24;
+  uuid |= extra_key << 25;
   return uuid;
 }
 
@@ -468,6 +468,7 @@ struct Material {
   bool is_alpha_blend_transparent;
   bool is_outline_shell_blended;
   bool has_outline_shell_transparent_shadows;
+  bool uses_shell_self_occlusion = false;
   bool has_transparent_shadows;
   bool has_surface;
   bool has_volume;
@@ -484,6 +485,7 @@ struct Material {
   MaterialPass outline_shell_prepass;
   MaterialPass outline_shell_shading;
   MaterialPass outline_shell_shadow;
+  MaterialPass outline_shell_self_depth;
   /* Absolute unlinked Strength value of the Outline Shell Output node.
    * Used to inflate the object bounds for vertex offsets. */
   float outline_shell_bounds_inflation;

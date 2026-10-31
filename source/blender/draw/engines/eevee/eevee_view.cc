@@ -161,8 +161,11 @@ namespace blender::eevee
     if (normals) {
       buffers.prepass_normal_tx.clear(float4(0.0f));
     }
+    inst_.outline_shell.render(main_view_, extent_);
+    prepass_fb_.bind();
     inst_.pipelines.deferred.render_dlss_guides(main_view_, prepass_fb_);
     inst_.pipelines.forward.render_dlss_guides(main_view_, prepass_fb_);
+    inst_.outline_shell.release();
     GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_FRAMEBUFFER);
     film.process_dlss(main_view_, inst_);
     buffers.release();
@@ -337,6 +340,7 @@ namespace blender::eevee
       inst_.pipelines.forward.render(
         render_view_, rbufs.depth_tx, prepass_fb_, transparent_fb_, combined_fb_, extent_);
     }
+    inst_.outline_shell.release();
 
     if (inst_.outline.enabled()) {
       inst_.outline.render(render_view_, extent_);

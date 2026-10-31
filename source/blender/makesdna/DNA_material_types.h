@@ -195,6 +195,7 @@ enum eMaterial_OutlineShellTransparencyMethod : char {
 /** #Material::outline_shell_flag */
 enum eMaterial_OutlineShellFlag : char {
   MA_OUTLINE_SHELL_CAST_SHADOW = 1 << 0,
+  MA_OUTLINE_SHELL_SELF_OCCLUSION = 1 << 1,
 };
 
 /** #Material::volume_intersection_method */

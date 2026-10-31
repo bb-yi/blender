@@ -353,6 +353,11 @@ void SyncModule::sync_alpha_blended_passes(const ObjectHandle &ob_handle,
     if (prepass != nullptr) {
       sync_cb(MaterialPass{material.overlap_masking.gpumat, prepass}, instance);
     }
+    if (matpass != nullptr && outline_shell &&
+        (blender_mat->outline_shell_flag & MA_OUTLINE_SHELL_SELF_OCCLUSION))
+    {
+      matpass->bind_resources(inst_.outline_shell);
+    }
     sync_cb(MaterialPass{shading.gpumat, matpass}, instance);
   }
 }
@@ -514,6 +519,9 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
     }
   }
   for (const Material &material : material_array.materials) {
+    if (material.outline_shell_self_depth.gpumat != nullptr) {
+      attribute_materials.add(material.outline_shell_self_depth.gpumat);
+    }
     if (material.outline_freestyle.gpumat != nullptr) {
       attribute_materials.add(material.outline_freestyle.gpumat);
     }
@@ -537,6 +545,14 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
     inst_.outline.sync_object(
         ob_handle.object, ob_handle.res_handle, material.outline_freestyle.sub_pass, i);
     material.tessellation_level = material_tessellation_budget(inst_, ob_handle, material);
+    if (material.uses_shell_self_occlusion) {
+      for (const int instance : IndexRange(ob_handle.instances_count())) {
+        const ResourceHandle handle = ob_handle.res_handle.sub_handle(instance);
+        const MaterialPass &depth = material.outline_shell_self_depth;
+        PassMain::Sub *pass = inst_.outline_shell.material_add(handle, depth.gpumat);
+        geometry_call(pass, geom, handle, material_pass_tessellation_level(material, depth.gpumat));
+      }
+    }
     synced_materials.append(&material);
 
     if (material.has_volume) {
