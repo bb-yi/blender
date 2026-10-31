@@ -23,8 +23,9 @@
 #include "eevee_subsurface.hh"
 #include "eevee_uniform_shared.hh"
 
-#include <memory>
+#include <chrono>
 #include <map>
+#include <memory>
 
 namespace blender {
 
@@ -270,9 +271,30 @@ class Prepass {
  * Handles alpha blended surfaces and NPR materials (using Closure to RGBA).
  * \{ */
 
-class ForwardPipeline {
+struct ForwardShared {
+  struct TransparencyBuffer {
+    /* Channels are packed separately for technical reason (see eevee_surf_forward_frag.glsl for
+     * explanation). In the case of monochromatic transparency, the #r_channel_tx actually
+     * contains the whole RGBA and the other textures are dummy texture not attached to the
+     * frame-buffer. The #a_channel_tx is only allocated if holdout or film transparency is
+     * enabled. */
+    TextureFromPool r_channel_tx;
+    TextureFromPool g_channel_tx;
+    TextureFromPool b_channel_tx;
+    TextureFromPool a_channel_tx;
+
+    void acquire(int2 extent, bool use_colored_transparency);
+    void release();
+  } transp_buffer;
+  PassSimple resolve_ps = {"Forward.Resolve"};
+  TextureFromPool resolve_input_tx = {"Forward.Resolve.Input"};
+  bool32_t accumulate_transparent = false;
+};
+
+class ForwardLayer {
  private:
   Instance &inst_;
+  ForwardShared &shared_;
 
   PassSortable stencil_ps_ = {"Stencil"};
   Prepass prepass_{inst_};
@@ -294,9 +316,6 @@ class ForwardPipeline {
 
   PassMain outline_occlusion_ps_ = {"Forward.OutlineOcclusion"};
 
-  PassSimple resolve_ps_ = {"Forward.Resolve"};
-  TextureFromPool resolve_input_tx_ = {"Forward.Resolve.Input"};
-
   bool has_opaque_ = false;
   bool has_transparent_ = false;
   bool has_no_depth_ = false;
@@ -305,23 +324,11 @@ class ForwardPipeline {
   bool has_outline_occluders_ = false;
   bool has_stencil_ = false;
 
-  struct TransparencyBuffer {
-    /* Channels are packed separately for technical reason (see eevee_surf_forward_frag.glsl for
-     * explanation). In the case of monochromatic transparency, the #r_channel_tx actually
-     * contains the whole RGBA and the other textures are dummy texture not attached to the
-     * frame-buffer. The #a_channel_tx is only allocated if holdout or film transparency is
-     * enabled. */
-    TextureFromPool r_channel_tx;
-    TextureFromPool g_channel_tx;
-    TextureFromPool b_channel_tx;
-    TextureFromPool a_channel_tx;
 
-    void acquire(int2 extent, bool use_colored_transparency);
-    void release();
-  } transp_buffer_;
 
  public:
-  ForwardPipeline(Instance &inst) : inst_(inst) {}
+  ForwardLayer(Instance &inst, ForwardShared &shared) : inst_(inst), shared_(shared) {}
+  bool rendered = false;
 
   void sync();
   void end_sync();
@@ -362,6 +369,142 @@ class ForwardPipeline {
               Framebuffer &prepass_fb,
               Framebuffer &transparent_fb,
               Framebuffer &combined_fb,
+              int2 extent);
+};
+
+/** Per-layer draw lists; all layers share the same transient transparency targets. */
+class ForwardPipeline {
+ private:
+  Instance &inst_;
+  ForwardShared shared_;
+  ForwardLayer final_;
+  std::map<short, std::unique_ptr<ForwardLayer>> layers_;
+  int max_consumer_layer_ = -32769;
+  bool layered_active_ = false;
+  bool volume_resolved_ = false;
+  bool background_resolved_ = false;
+  TextureFromPool coverage_ = {"NPR Layer Coverage"};
+  TextureFromPool background_color_ = {"NPR Forward Background"};
+  /* Retained through the next Deferred layer's Hi-Z swap, then released after NPR consumption. */
+  gpu::Texture *background_depth_ = nullptr;
+  TextureFromPool volume_input_ = {"NPR Layer Volume Input"};
+  Framebuffer npr_fb_ = {"NPR Covered Layer"};
+  Framebuffer covered_gbuffer_fb_ = {"NPR Covered GBuffer"};
+  bool profile_enabled_ = false;
+  int profile_batches_ = 0;
+  int profile_snapshots_ = 0;
+  uint64_t profile_peak_texture_bytes_ = 0;
+  uint64_t profile_peak_feature_texture_bytes_ = 0;
+  std::chrono::steady_clock::time_point profile_start_;
+  void profile_memory();
+  gpu::Texture *coverage_ref_ = nullptr;
+  bool coverage_enabled_ = false;
+  void volume_transform(View &view, Framebuffer &fb, int operation);
+
+ public:
+  ForwardPipeline(Instance &inst) : inst_(inst), final_(inst, shared_) {}
+  ForwardLayer &layer_for(const Object *ob);
+  void sync();
+  void end_sync();
+  bool layered_active() const
+  {
+    return layered_active_;
+  }
+  bool coverage_enabled() const
+  {
+    return coverage_enabled_;
+  }
+  bool volume_resolved() const
+  {
+    return volume_resolved_;
+  }
+  bool background_resolved() const
+  {
+    return background_resolved_;
+  }
+  gpu::Texture *background_color() const
+  {
+    return background_color_;
+  }
+  gpu::Texture *background_depth() const
+  {
+    return background_depth_;
+  }
+  void begin_view();
+  void begin_deferred_layer(int2 extent);
+  void end_deferred_layer(View &view, Framebuffer &fb);
+  Framebuffer &npr_framebuffer(Framebuffer &fallback);
+  Framebuffer &gbuffer_framebuffer(Framebuffer &fallback);
+  void resolve_background_volume(View &view, int2 extent, bool &volume_compute_done);
+  void snapshot_background();
+  void render_before(short layer,
+                     View &view,
+                     gpu::Texture *depth,
+                     Framebuffer &prepass,
+                     Framebuffer &transparent,
+                     Framebuffer &combined,
+                     int2 extent);
+  void filter_volume_begin(View &view, Framebuffer &fb);
+  void filter_volume_end(View &view, Framebuffer &fb);
+
+  PassMain::Sub *prepass_opaque_add(const Object *ob,
+                                    const SurfaceDrawState &state,
+                                    GPUMaterial *mat,
+                                    bool motion)
+  {
+    return layer_for(ob).prepass_opaque_add(state, mat, motion);
+  }
+  PassMain::Sub *stencil_opaque_add(
+      const Object *ob, blender::Material *mat, GPUMaterial *gpu, bool motion, bool write_id)
+  {
+    return layer_for(ob).stencil_opaque_add(mat, gpu, motion, write_id);
+  }
+  PassMain::Sub *material_opaque_add(const Object *ob,
+                                     const SurfaceDrawState &state,
+                                     GPUMaterial *gpu)
+  {
+    return layer_for(ob).material_opaque_add(ob, state, gpu);
+  }
+  PassMain::Sub *material_no_depth_add(const Object *ob,
+                                       blender::Material *mat,
+                                       const SurfaceDrawState &state,
+                                       GPUMaterial *gpu)
+  {
+    return layer_for(ob).material_no_depth_add(ob, mat, state, gpu);
+  }
+  void transparent_add(const Object *ob,
+                       const float3 &location,
+                       blender::Material *mat,
+                       GPUMaterial *gpu,
+                       PassMain::Sub *&prepass,
+                       PassMain::Sub *&surface,
+                       const SurfaceDrawState *state = nullptr)
+  {
+    layer_for(ob).transparent_add(ob, location, mat, gpu, prepass, surface, state);
+  }
+  PassMain::Sub *outline_occlusion_add(blender::Material *mat, GPUMaterial *gpu)
+  {
+    return final_.outline_occlusion_add(mat, gpu);
+  }
+  bool use_colored_transparency() const
+  {
+    return true;
+  }
+  bool has_outline_occluders() const
+  {
+    return final_.has_outline_occluders();
+  }
+  void render_outline_occlusion(View &view, Framebuffer &fb)
+  {
+    final_.render_outline_occlusion(view, fb);
+  }
+  void render_dlss_guides(View &view, Framebuffer &fb);
+  void render_prepass_only(View &view, Framebuffer &fb);
+  void render(View &view,
+              gpu::Texture *depth,
+              Framebuffer &prepass,
+              Framebuffer &transparent,
+              Framebuffer &combined,
               int2 extent);
 };
 
@@ -525,6 +668,8 @@ class DeferredLayer : DeferredLayerBase {
   /* Reference to ray-tracing results. */
   gpu::Texture *radiance_feedback_tx_ = nullptr;
   gpu::Texture *radiance_back_tx_ = nullptr;
+  gpu::Texture *npr_background_depth_tx_ = nullptr;
+  bool32_t npr_background_resolved_ = false;
   gpu::Texture *npr_radiance_input_tx_ = nullptr;
 
   /**

@@ -2834,7 +2834,9 @@ struct SceneEEVEE {
   char dlss5_mask_aov[64] = "";
   char _pad_dlss_sr[4] = {};
   char use_outline = true;
-  char _pad2[3] = {};
+  /** Zero preserves the traditional Forward-after-Deferred pipeline. */
+  char npr_forward_refraction_mode = 0;
+  char _pad2[2] = {};
   float dlss_sr_viewport_percentage = 80.0f;
   float dlss_sr_render_percentage = 80.0f;
 };

@@ -1006,6 +1006,8 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_volume_occupancy_convert";
     case VOLUME_RESOLVE:
       return "eevee_volume_resolve";
+    case NPR_LAYER_VOLUME:
+      return "eevee_volume_layer_resolve";
     case VOLUME_SCATTER:
       return "eevee_volume_scatter";
     case VOLUME_SCATTER_WITH_LIGHTS:

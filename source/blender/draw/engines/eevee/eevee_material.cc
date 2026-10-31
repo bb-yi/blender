@@ -715,7 +715,9 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                          probe_capture,
                          ob->refraction_layer_index,
                          hide_from_raycast,
-                         state);
+                         state,
+                         ob->use_npr_refraction_background &&
+                             inst_.scene->eevee.npr_forward_refraction_mode == 1);
 
     PassMain::Sub *shader_sub = shader_map_.lookup_or_add_cb(shader_key, [&]() {
       /* First time encountering this shader. Create a sub that will contain materials using it. */
@@ -852,7 +854,9 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                            prepass_pipe,
                            ob->visibility_flag,
                            ob->refraction_layer_index,
-                           use_outline);
+                           use_outline,
+                           ob->use_npr_refraction_background &&
+                               inst_.scene->eevee.npr_forward_refraction_mode == 1);
 
   Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
     Material mat = {};
@@ -1077,10 +1081,8 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       }
       mat.stencil.gpumat = stencil_pass.gpumat;
       mat.stencil.sub_pass = use_forward_stencil_pipeline ?
-                                 inst_.pipelines.forward.stencil_opaque_add(blender_mat,
-                                                                            mat.stencil.gpumat,
-                                                                            has_motion,
-                                                                            false) :
+                                 inst_.pipelines.forward.stencil_opaque_add(
+                                     ob, blender_mat, mat.stencil.gpumat, has_motion, false) :
                                  inst_.pipelines.deferred.stencil_add(
                                      blender_mat,
                                      mat.stencil.gpumat,

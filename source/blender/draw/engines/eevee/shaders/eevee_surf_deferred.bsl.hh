@@ -85,6 +85,7 @@ struct DeferredFragOut {
   [[frag_color(2)]] float2 gbuf_normal;
   [[frag_color(3)]] float4 gbuf_closure1;
   [[frag_color(4)]] float4 gbuf_closure2;
+  [[frag_color(5)]] uint npr_layer_coverage;
 };
 
 DeferredFragOut surf_deferred_impl([[resource_table]] PipelineConstants &pipe,
@@ -322,6 +323,8 @@ DeferredFragOut surf_deferred_impl([[resource_table]] PipelineConstants &pipe,
 
   /* ----- Radiance output ----- */
 
+  frag_out.npr_layer_coverage = 1u;
+
   /* Only output emission during the gbuffer pass. */
   frag_out.radiance = float4(g_emission, 0.0f);
   frag_out.radiance.rgb *= 1.0f - g_holdout;
@@ -364,6 +367,7 @@ void surf_deferred([[resource_table]] PipelineConstants &pipe,
   frag_out.gbuf_normal = result.gbuf_normal;
   frag_out.gbuf_closure1 = result.gbuf_closure1;
   frag_out.gbuf_closure2 = result.gbuf_closure2;
+  frag_out.npr_layer_coverage = result.npr_layer_coverage;
 }
 
 [[fragment]]
@@ -398,6 +402,7 @@ void surf_deferred_depth_offset([[resource_table]] PipelineConstants &pipe,
   frag_out.gbuf_normal = result.gbuf_normal;
   frag_out.gbuf_closure1 = result.gbuf_closure1;
   frag_out.gbuf_closure2 = result.gbuf_closure2;
+  frag_out.npr_layer_coverage = result.npr_layer_coverage;
 }
 
 /* Deferred materials only expose LightprobeRenderData when the material graph actually needs it. */
@@ -434,6 +439,7 @@ void surf_deferred_lightprobe([[resource_table]] PipelineConstants &pipe,
   frag_out.gbuf_normal = result.gbuf_normal;
   frag_out.gbuf_closure1 = result.gbuf_closure1;
   frag_out.gbuf_closure2 = result.gbuf_closure2;
+  frag_out.npr_layer_coverage = result.npr_layer_coverage;
 }
 
 [[fragment]]
@@ -470,6 +476,7 @@ void surf_deferred_lightprobe_depth_offset(
   frag_out.gbuf_normal = result.gbuf_normal;
   frag_out.gbuf_closure1 = result.gbuf_closure1;
   frag_out.gbuf_closure2 = result.gbuf_closure2;
+  frag_out.npr_layer_coverage = result.npr_layer_coverage;
 }
 
 /* Deferred materials only expose LightprobeRenderData when the material graph actually needs it.
@@ -507,6 +514,7 @@ void surf_deferred_planar([[resource_table]] PipelineConstants &pipe,
   frag_out.gbuf_normal = result.gbuf_normal;
   frag_out.gbuf_closure1 = result.gbuf_closure1;
   frag_out.gbuf_closure2 = result.gbuf_closure2;
+  frag_out.npr_layer_coverage = result.npr_layer_coverage;
 }
 
 [[fragment]]
@@ -543,6 +551,7 @@ void surf_deferred_planar_depth_offset(
   frag_out.gbuf_normal = result.gbuf_normal;
   frag_out.gbuf_closure1 = result.gbuf_closure1;
   frag_out.gbuf_closure2 = result.gbuf_closure2;
+  frag_out.npr_layer_coverage = result.npr_layer_coverage;
 }
 
 /* Deferred materials only expose LightprobeRenderData when the material graph actually needs it.
@@ -582,6 +591,7 @@ void surf_deferred_lightprobe_planar(
   frag_out.gbuf_normal = result.gbuf_normal;
   frag_out.gbuf_closure1 = result.gbuf_closure1;
   frag_out.gbuf_closure2 = result.gbuf_closure2;
+  frag_out.npr_layer_coverage = result.npr_layer_coverage;
 }
 
 [[fragment]]
@@ -619,6 +629,7 @@ void surf_deferred_lightprobe_planar_depth_offset(
   frag_out.gbuf_normal = result.gbuf_normal;
   frag_out.gbuf_closure1 = result.gbuf_closure1;
   frag_out.gbuf_closure2 = result.gbuf_closure2;
+  frag_out.npr_layer_coverage = result.npr_layer_coverage;
 }
 
 }  // namespace eevee

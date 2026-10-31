@@ -9892,6 +9892,23 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
   RNA_def_property_update(
       prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
 
+  static const EnumPropertyItem npr_forward_refraction_items[] = {
+      {0, "LEGACY", 0, "Traditional", "Draw Forward surfaces after all Deferred layers"},
+      {1,
+       "LAYERED",
+       0,
+       "Forward Refraction Layers",
+       "Include opted-in Forward objects in the backgrounds sampled by higher NPR refraction "
+       "layers"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "npr_forward_refraction_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "npr_forward_refraction_mode");
+  RNA_def_property_enum_items(prop, npr_forward_refraction_items);
+  RNA_def_property_ui_text(
+      prop, "Forward Refraction", "Forward background scheduling for NPR Refraction");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
   prop = RNA_def_property(srna, "use_outline", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "use_outline", 1);
   RNA_def_property_ui_text(
