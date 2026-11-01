@@ -269,6 +269,23 @@ def finish(error=None):
 def tick():
     try:
         now = time.monotonic()
+        if state['index'] < 0:
+            # Timed GC phases require an actual rendered mesh, not only overlay redraws.
+            pixels = capture('warmup')
+            mean = pixels[..., :3].mean(axis=(0, 1))
+            ready = (np.isfinite(pixels).all() and min(mean) > .3 and max(mean) < .9
+                     and not bpy.app.is_job_running('SHADER_COMPILATION'))
+            elapsed = time.monotonic() - state['since']
+            if not ready:
+                assert elapsed < 90, {'warmup_seconds': elapsed, 'rgb_mean': mean.tolist(),
+                                      'draws': state['draws']}
+                area.tag_redraw()
+                return .5
+            report['warmup_seconds'] = elapsed
+            report['warmup_draws'] = state['draws']
+            report['warmup_rgb_mean'] = mean.tolist()
+            print('GC_VIEWPORT_READY', elapsed, mean.tolist(), flush=True)
+            now = time.monotonic()
         if state['index'] >= 0:
             phase, _, _, duration = phases[state['index']]
             report['samples'].append({'phase': phase, 'seconds': now-state['since'],
