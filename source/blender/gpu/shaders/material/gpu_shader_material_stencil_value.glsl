@@ -25,8 +25,8 @@ void node_stencil_value(float3 uv, float use_uv, out float value, out float dept
 
 [[node]]
 void node_stencil_surface(
-    float3 uv, float use_uv, out float value, out float depth, out float valid,
-    KernelGlobals kg, ShadingData &sd)
+    float3 uv, float use_uv, KernelGlobals kg, ShadingData &sd,
+    out float value, out float depth, out float valid)
 {
   value = 0.0f;
   depth = 0.0f;

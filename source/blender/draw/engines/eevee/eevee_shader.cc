@@ -1380,6 +1380,17 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
   if (pipeline_type == MAT_PIPE_VOLUME_MATERIAL) {
     info.define("MAT_VOLUME");
   }
+  if (ELEM(pipeline_type,
+           MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+           MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+           MAT_PIPE_PREPASS_FORWARD,
+           MAT_PIPE_PREPASS_DEFERRED,
+           MAT_PIPE_PREPASS_PLANAR,
+           MAT_PIPE_PREPASS_OVERLAP,
+           MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH))
+  {
+    info.define("MAT_DEPTH");
+  }
 
   info.compilation_constant(Type::bool_t, "is_mesh", geometry_type == MAT_GEOM_MESH);
   info.compilation_constant(Type::bool_t, "is_curves", geometry_type == MAT_GEOM_CURVES);
@@ -1466,7 +1477,6 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           pipeline_info_name = "eevee_surf_depthTfalse_infos_";
           info.name_ += "_outline_shell_self_depth";
           info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
-          info.define("MAT_DEPTH");
           info.define("closure_to_rgba", "closure_to_rgba_depth");
           info.fragment_source("eevee_surf_depth.bsl.hh");
           info.fragment_function("eevee_surf_depthTfalse");
@@ -1476,7 +1486,6 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           info.name_ += "_outline_occlusion_depth";
           info.define("MAT_OUTLINE_OCCLUSION");
           info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
-          info.define("MAT_DEPTH");
           info.define("closure_to_rgba", "closure_to_rgba_depth");
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
