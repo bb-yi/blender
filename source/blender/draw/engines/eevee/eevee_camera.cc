@@ -121,6 +121,8 @@ bool camera_data_from_object(const Scene *scene,
   r_data.wininv = math::invert(r_data.winmat);
   r_data.persmat = r_data.winmat * r_data.viewmat;
   r_data.persinv = math::invert(r_data.persmat);
+    r_data.shading_viewmat = r_data.viewmat;
+    r_data.shading_viewinv = r_data.viewinv;
   r_data.uv_scale = float2(1.0f);
   r_data.uv_bias = float2(0.0f);
   r_data.equirect_bias = float2(0.0f);
@@ -128,6 +130,17 @@ bool camera_data_from_object(const Scene *scene,
   r_data.equirect_scale_inv = float2(0.0f);
   r_data.fisheye_fov = -1.0f;
   r_data.fisheye_lens = -1.0f;
+    /* CameraData has a user-provided constructor, so `r_data = {}` does not zero its members.
+     * Initialize the added panoramic fields even for non-panoramic auxiliary cameras. They are
+     * compared when deciding whether a capture may retain its ray-tracing history. */
+    r_data.fisheye_polynomial_coefficients = float4(0.0f);
+    r_data.central_cylindrical_range = float4(0.0f);
+    r_data.fisheye_sensor = float2(0.0f);
+    r_data.fisheye_polynomial_bias = 0.0f;
+    r_data.panoramic_view_overscan = 0.0f;
+    r_data.panoramic_front_face_extent = 0.0f;
+    r_data.panoramic_view_mask = 0;
+    r_data._pad1 = 0.0f;
   r_data.clip_near = cam->clip_start;
   r_data.clip_far = cam->clip_end;
   camera_data_update_screen_diagonal(r_data);
