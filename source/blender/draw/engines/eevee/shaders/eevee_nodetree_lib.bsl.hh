@@ -274,19 +274,19 @@ struct KernelGlobals {
 };
 
 #if defined(NPR_SHADER) || defined(MAT_FILTER)
-float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset);
-float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex);
-float4 TextureHandle_eval_uv(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 uv);
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset);
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex);
+float4 TextureHandle_eval_uv(KernelGlobals kg, ShadingData &sd, TextureHandle tex, float2 uv);
 #else
-float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
 {
   return float4(0.0f);
 }
-float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex)
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex)
 {
   return TextureHandle_eval(kg, sd, tex, float2(0.0f), false);
 }
-float4 TextureHandle_eval_uv(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 uv)
+float4 TextureHandle_eval_uv(KernelGlobals kg, ShadingData &sd, TextureHandle tex, float2 uv)
 {
   return TextureHandle_eval(kg, sd, tex, uv, false);
 }

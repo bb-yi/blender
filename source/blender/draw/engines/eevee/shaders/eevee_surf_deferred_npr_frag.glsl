@@ -458,12 +458,12 @@ float4 TextureHandle_eval_impl(KernelGlobals &kg, ShadingData &sd, TextureHandle
   }
 }
 
-float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
 {
   return swap_alpha(TextureHandle_eval_impl(kg, sd, tex, offset, texel_offset));
 }
 
-float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex)
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex)
 {
   return TextureHandle_eval(kg, sd, tex, float2(0.0f), true);
 }
@@ -551,7 +551,7 @@ float4 TextureHandle_eval_uv_impl(KernelGlobals &kg, ShadingData &sd, TextureHan
   }
 }
 
-float4 TextureHandle_eval_uv(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 uv)
+float4 TextureHandle_eval_uv(KernelGlobals kg, ShadingData &sd, TextureHandle tex, float2 uv)
 {
   return swap_alpha(TextureHandle_eval_uv_impl(kg, sd, tex, uv));
 }

@@ -510,7 +510,9 @@ void layer_resolve_frag([[resource_table]] const LayerResolve &srt,
   }
   result.color = color;
 }
-PipelineGraphic layer_resolve(resolve_vert, layer_resolve_frag);
+PipelineGraphic layer_resolve(resolve_vert, layer_resolve_frag,
+                             LightEvalConstants{.light_closure_count_reflect = 1,
+                                                .light_closure_count_transmit = 1});
 
 PipelineCompute scatter(scatter_main,
                         ScatterConstants{.use_volume_light = false},

@@ -193,7 +193,7 @@ float4 filter_scene_position_color(int2 texel, float2 uv)
   return float4(drw_point_screen_to_world(float3(uv, depth)), 1.0f);
 }
 
-float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
 {
   int source_kind = TextureHandle_source_kind(tex);
   tex = filter_graph_input_resolve(tex);
@@ -264,7 +264,7 @@ float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex,
   }
 }
 
-float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex)
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex)
 {
   return TextureHandle_eval(kg, sd, tex, float2(0.0f), true);
 }
@@ -272,7 +272,7 @@ float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex)
 /* Absolute UV sampling: use the provided uv directly (0-1 range), ignoring
  * gl_FragCoord. Enables procedural coordinate sampling (Voronoi, screen
  * coordinate nodes, etc.), matching the old Scene Color Vector input. */
-float4 TextureHandle_eval_uv(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 uv)
+float4 TextureHandle_eval_uv(KernelGlobals kg, ShadingData &sd, TextureHandle tex, float2 uv)
 {
   int source_kind = TextureHandle_source_kind(tex);
   tex = filter_graph_input_resolve(tex);

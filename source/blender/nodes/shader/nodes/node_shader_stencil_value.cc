@@ -44,7 +44,8 @@ static int node_gpu(GPUMaterial *mat,
   const float use_uv = in[0].link != nullptr ? 1.0f : 0.0f;
   if (node->custom1 == 1) {
     GPU_material_stencil_surface_used_set(mat);
-    return GPU_stack_link(mat, node, "node_stencil_surface", in, out, GPU_constant(&use_uv));
+    return GPU_stack_link(mat, node, "node_stencil_surface", in, out, GPU_constant(&use_uv),
+                          GPU_kernel_globals(), GPU_shading_data());
   }
   GPU_material_stencil_value_used_set(mat);
   return GPU_stack_link(mat, node, "node_stencil_value", in, out, GPU_constant(&use_uv));

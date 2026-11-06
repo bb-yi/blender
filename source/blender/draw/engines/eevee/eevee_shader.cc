@@ -1364,6 +1364,23 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
   const bool is_hybrid = pipeline_type == MAT_PIPE_DEFERRED &&
                          (use_shader_to_rgba || use_lighting_nodes);
 
+  /* NPR snippets also consume these tags in legacy GLSL helpers. */
+  if (geometry_type == MAT_GEOM_WORLD) {
+    info.define("MAT_GEOM_WORLD");
+  }
+  if (pipeline_type == MAT_PIPE_SHADOW) {
+    info.define("MAT_SHADOW");
+  }
+  if (pipeline_type == MAT_PIPE_CAPTURE) {
+    info.define("MAT_CAPTURE");
+  }
+  if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
+    info.define("MAT_BAKE_COLOR");
+  }
+  if (pipeline_type == MAT_PIPE_VOLUME_MATERIAL) {
+    info.define("MAT_VOLUME");
+  }
+
   info.compilation_constant(Type::bool_t, "is_mesh", geometry_type == MAT_GEOM_MESH);
   info.compilation_constant(Type::bool_t, "is_curves", geometry_type == MAT_GEOM_CURVES);
   info.compilation_constant(Type::bool_t, "is_pointcloud", geometry_type == MAT_GEOM_POINTCLOUD);

@@ -216,7 +216,7 @@ bool TextureHandle_is_scene_depth(TextureHandle /*tex*/)
   return false;
 }
 
-float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
 {
   if (tex.type == TEX_HANDLE_NULL) {
     return float4(0.0f);
@@ -266,12 +266,12 @@ float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex,
   return float4(0.0f);
 }
 
-float4 TextureHandle_eval(KernelGlobals &kg, ShadingData &sd, TextureHandle tex)
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex)
 {
   return TextureHandle_eval(kg, sd, tex, float2(0.0f), false);
 }
 
-float4 TextureHandle_eval_uv(KernelGlobals &kg, ShadingData &sd, TextureHandle tex, float2 uv)
+float4 TextureHandle_eval_uv(KernelGlobals kg, ShadingData &sd, TextureHandle tex, float2 uv)
 {
   return TextureHandle_eval(kg, sd, tex, uv - float2(0.5f), false);
 }

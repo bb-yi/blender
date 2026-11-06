@@ -278,6 +278,7 @@ static void nodestack_get_vec(float *in, short type_in, bNodeStack *ns, const in
         case SOCK_STRING:
         case SOCK_MENU:
         case SOCK_BUNDLE:
+        case SOCK_IMAGE:
         case SOCK_CLOSURE:
           break;
         default:
@@ -306,6 +307,7 @@ static void nodestack_get_vec(float *in, short type_in, bNodeStack *ns, const in
         case SOCK_STRING:
         case SOCK_MENU:
         case SOCK_BUNDLE:
+        case SOCK_IMAGE:
         case SOCK_CLOSURE:
           break;
         default:
@@ -330,6 +332,7 @@ static void nodestack_get_vec(float *in, short type_in, bNodeStack *ns, const in
         case SOCK_STRING:
         case SOCK_MENU:
         case SOCK_BUNDLE:
+        case SOCK_IMAGE:
         case SOCK_CLOSURE:
           break;
         default:
@@ -358,6 +361,7 @@ static void nodestack_get_vec(float *in, short type_in, bNodeStack *ns, const in
         case SOCK_STRING:
         case SOCK_MENU:
         case SOCK_BUNDLE:
+        case SOCK_IMAGE:
         case SOCK_CLOSURE:
           break;
         default:
@@ -386,6 +390,7 @@ static void nodestack_get_vec(float *in, short type_in, bNodeStack *ns, const in
         case SOCK_STRING:
         case SOCK_MENU:
         case SOCK_BUNDLE:
+        case SOCK_IMAGE:
         case SOCK_CLOSURE:
           break;
         default:
@@ -398,6 +403,7 @@ static void nodestack_get_vec(float *in, short type_in, bNodeStack *ns, const in
     case SOCK_STRING:
     case SOCK_MENU:
     case SOCK_BUNDLE:
+    case SOCK_IMAGE:
     case SOCK_CLOSURE:
       break;
     default:
