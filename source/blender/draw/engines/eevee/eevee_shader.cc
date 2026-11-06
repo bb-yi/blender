@@ -2334,9 +2334,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   if (use_planar_probe_data) {
     info.define("MAT_PLANAR_PROBE_ACCESS");
-    if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
-      add_create_info_and_reserve(info, slots, "eevee_lightprobe_planar_data");
-    }
+    /* Native plane resources are conditional on Forward lighting. The sampling node also
+     * needs them in an otherwise unlit Deferred material. */
+    add_create_info_and_reserve(info, slots, "eevee_LightprobePlaneRenderData");
     slots.reserve_sampler(PLANAR_PROBE_RADIANCE_TEX_SLOT);
     slots.reserve_sampler(PLANAR_PROBE_DEPTH_TEX_SLOT);
   }

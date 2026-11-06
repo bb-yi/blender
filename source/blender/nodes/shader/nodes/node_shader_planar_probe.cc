@@ -90,7 +90,9 @@ static int node_gpu(GPUMaterial *mat,
                         GPU_constant(&explicit_position),
                         GPU_constant(&explicit_normal),
                         GPU_constant(&explicit_uv),
-                        GPU_constant(&supported));
+                        GPU_constant(&supported),
+                        GPU_kernel_globals(),
+                        GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_planar_probe_cc

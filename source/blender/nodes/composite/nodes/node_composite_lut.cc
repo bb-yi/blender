@@ -467,13 +467,13 @@ class LUTOperation : public NodeOperation {
         output.share_data(input);
         return;
       }
-      input.bind_as_texture(shader, "input_tx");
-      factor.bind_as_texture(shader, "factor_tx");
+      gpu::Texture *input_single_value = input.bind_as_texture_or_single_value(shader, "input_tx");
+      gpu::Texture *factor_single_value = factor.bind_as_texture_or_single_value(shader, "factor_tx");
       output.allocate_texture(domain);
       output.bind_as_image(shader, "output_img");
       compute_dispatch_threads_at_least(shader, domain.data_size);
-      input.unbind_as_texture();
-      factor.unbind_as_texture();
+      input.unbind_as_texture_or_single_value(input_single_value);
+      factor.unbind_as_texture_or_single_value(factor_single_value);
       output.unbind_as_image();
       lut.unbind_shader_and_resources();
     }
