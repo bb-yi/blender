@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.3.0 Beta (b'8f7aae950179')\n"
+"Project-Id-Version: Blender 5.3.0 Beta (b'9a146ef5783c')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-12 07:32+0000\n"
+"POT-Creation-Date: 2026-11-02 10:58+0000\n"
 "PO-Revision-Date: 2026-03-19 19:12+0000\n"
 "Last-Translator: Tamás Máté <royalpython132@gmail.com>\n"
 "Language-Team: Hungarian <https://translate.blender.org/projects/blender-ui/ui/hu/>\n"
@@ -6586,72 +6586,72 @@ msgid "Use Material Mask"
 msgstr "Anyagmaszk használata"
 
 
-msgid "Light"
-msgstr "Fényforrás"
+msgid "Show/Hide"
+msgstr "Mutat/Rejt"
 
 
 msgid "Metaball"
 msgstr "Meta test"
 
 
-msgid "Align View"
-msgstr "Nézet igazítása"
-
-
 msgid "Clean Up"
 msgstr "Tisztítás"
-
-
-msgid "Navigation"
-msgstr "Navigáció"
-
-
-msgid "Show/Hide"
-msgstr "Mutat/Rejt"
-
-
-msgid "Local View"
-msgstr "Helyi nézet"
-
-
-msgid "Import"
-msgstr "Importálás"
-
-
-msgid "UV"
-msgstr "UV"
-
-
-msgid "Apply"
-msgstr "Elfogadás"
-
-
-msgid "Keying"
-msgstr "Kulcsozás"
 
 
 msgid "Mirror"
 msgstr "Tükrözés"
 
 
-msgid "Track"
-msgstr "Nyom"
+msgid "Local View"
+msgstr "Helyi nézet"
+
+
+msgid "Navigation"
+msgstr "Navigáció"
+
+
+msgid "Align View"
+msgstr "Nézet igazítása"
+
+
+msgid "Import"
+msgstr "Importálás"
+
+
+msgid "Light"
+msgstr "Fényforrás"
+
+
+msgid "UV"
+msgstr "UV"
 
 
 msgid "Relations"
 msgstr "Kapcsolatok"
 
 
-msgid "Tracking"
-msgstr "Követés"
-
-
 msgid "Rigid Body"
 msgstr "Szilárd test"
 
 
+msgid "Apply"
+msgstr "Elfogadás"
+
+
+msgid "Track"
+msgstr "Nyom"
+
+
+msgid "Keying"
+msgstr "Kulcsozás"
+
+
 msgid "Merge"
 msgstr "Összefésülés"
+
+
+msgid "Tracking"
+msgstr "Követés"
 
 
 msgctxt "MovieClip"
@@ -12743,12 +12743,12 @@ msgid "Detail Size"
 msgstr "Részlet mérete"
 
 
-msgid "Motion Tracking"
-msgstr "Mozgáskövetés"
-
-
 msgid "Render Pass"
 msgstr "Render vezeték"
+
+
+msgid "Motion Tracking"
+msgstr "Mozgáskövetés"
 
 
 msgid "Chain Scaling"
@@ -15061,6 +15061,10 @@ msgid "Clear"
 msgstr "Törlés"
 
 
+msgid "Motion"
+msgstr "Mozgás"
+
+
 msgctxt "Operator"
 msgid "Assign"
 msgstr "Hozzárendelés"
@@ -16777,10 +16781,6 @@ msgstr "Kiterjedés"
 
 msgid "Create Along Paths"
 msgstr "Létrehozás útvonal mentén"
-
-
-msgid "Motion"
-msgstr "Mozgás"
 
 
 msgid "Global Influence:"

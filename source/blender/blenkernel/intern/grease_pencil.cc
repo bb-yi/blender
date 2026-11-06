@@ -87,9 +87,13 @@
 
 #include "MEM_guardedalloc.h"
 
+#include "CLG_log.h"
+
 #include "attribute_storage_access.hh"
 
 namespace blender {
+
+static CLG_LogRef LOG = {"geom.grease_pencil"};
 
 static const char *ATTR_POSITION = "position";
 
@@ -176,9 +180,55 @@ static void grease_pencil_set_runtime_visibilities(ID &id_dst, GreasePencil &gre
   }
 }
 
-static void grease_pencil_initialize_drawing_user_counts_after_read(GreasePencil &grease_pencil)
+/**
+ * End frames have no drawing (`drawing_index` is -1), which much of the code doesn't handle yet.
+ *
+ * They can't be created anymore, but older versions could write them. Replace them with regular
+ * frames using an empty drawing, instead of treating them as corrupt, since there could exist
+ * valid blendfiles containing them.
+ */
+static void grease_pencil_replace_end_frames_after_read(GreasePencil &grease_pencil)
 {
   using namespace blender::bke::greasepencil;
+  int empty_drawing_users = 0;
+  const int empty_drawing_index = grease_pencil.drawings().size();
+  for (Layer *layer : grease_pencil.layers_for_write()) {
+    for (GreasePencilFrame &frame : layer->frames_for_write().values()) {
+      if (frame.is_end()) {
+        empty_drawing_users++;
+        frame.drawing_index = empty_drawing_index;
+        frame.flag |= GP_FRAME_IMPLICIT_HOLD;
+        layer->tag_frames_map_keys_changed();
+      }
+    }
+  }
+  if (empty_drawing_users > 0) {
+    grease_pencil.add_empty_drawings(1);
+    BLI_assert(grease_pencil.drawings().index_range().contains(empty_drawing_index));
+
+    CLOG_WARN(&LOG,
+              "Converted %d end frames to regular frames using an empty drawing in \"%s\"",
+              empty_drawing_users,
+              BKE_id_name(grease_pencil.id));
+  }
+}
+
+static bool grease_pencil_initialize_drawing_user_counts(GreasePencil &grease_pencil)
+{
+  using namespace blender::bke::greasepencil;
+  /* Unknown types have no runtime data, and only the base struct was read. */
+  for (const GreasePencilDrawingBase *drawing_base : grease_pencil.drawings()) {
+    if (!ELEM(drawing_base->type, GP_DRAWING, GP_DRAWING_REFERENCE)) {
+      return false;
+    }
+  }
+  for (const Layer *layer : grease_pencil.layers()) {
+    for (const GreasePencilFrame &value : layer->frames().values()) {
+      if (!grease_pencil.drawings().index_range().contains(value.drawing_index)) {
+        return false;
+      }
+    }
+  }
   const Array<int> user_counts = grease_pencil.count_frame_users_for_drawings();
   BLI_assert(user_counts.size() == grease_pencil.drawings().size());
   for (const int drawing_i : grease_pencil.drawings().index_range()) {
@@ -188,6 +238,7 @@ static void grease_pencil_initialize_drawing_user_counts_after_read(GreasePencil
       drawing.runtime->user_count.store(user_counts[drawing_i]);
     }
   }
+  return true;
 }
 
 static void grease_pencil_copy_data(Main * /*bmain*/,
@@ -232,6 +283,9 @@ static void grease_pencil_copy_data(Main * /*bmain*/,
   }
 
   grease_pencil_set_runtime_visibilities(*id_dst, *grease_pencil_dst);
+
+  /* Duplicating drawings does not copy over their user count. */
+  grease_pencil_initialize_drawing_user_counts(*grease_pencil_dst);
 }
 
 static void grease_pencil_free_data(ID *id)
@@ -338,8 +392,6 @@ static void grease_pencil_blend_read_data(BlendDataReader *reader, ID *id)
   read_drawing_array(*grease_pencil, reader);
   /* Read layer tree. */
   read_layer_tree(*grease_pencil, reader);
-  /* Initialize drawing user counts */
-  grease_pencil_initialize_drawing_user_counts_after_read(*grease_pencil);
 
   CustomData_blend_read(
       reader, &grease_pencil->layers_data_legacy, grease_pencil->layers().size());
@@ -352,6 +404,20 @@ static void grease_pencil_blend_read_data(BlendDataReader *reader, ID *id)
   BLO_read_struct_list(reader, bDeformGroup, &grease_pencil->vertex_group_names);
 
   grease_pencil->runtime = MEM_new<bke::GreasePencilRuntime>(__func__);
+
+  /* End-frames used to be 'encoded' using an invalid drawing index (`-1`), until Blender 5.3. But
+   * most of GP code does not handle them correctly.
+   *
+   * As backward-compatible solution, they are converted into regular frames pointing at an empty
+   * drawing. This will give the same visual result (for rendering e.g.), until proper
+   * implementation of endframes is reworked for Blender 5.4. */
+  grease_pencil_replace_end_frames_after_read(*grease_pencil);
+
+  /* Initialize drawing user counts. Failure means the file is badly corrupted. Done last, because
+   * the ID gets freed after an invalidated read, which requires all of it to be initialized. */
+  if (!grease_pencil_initialize_drawing_user_counts(*grease_pencil)) {
+    BLO_read_data_invalidate(reader, "Invalid Grease Pencil data");
+  }
 }
 
 IDTypeInfo IDType_ID_GP = {
@@ -1672,9 +1738,10 @@ GreasePencilFrame *Layer::add_frame_internal(const FramesMapKeyT frame_number)
   return nullptr;
 }
 
-GreasePencilFrame *Layer::add_frame(const FramesMapKeyT key, const int duration)
+GreasePencilFrame *Layer::add_frame(const FramesMapKeyT key, /* const */ int duration)
 {
-  BLI_assert(duration >= 0);
+  BLI_assert(duration == 0);
+  duration = 0;
   GreasePencilFrame *frame = this->add_frame_internal(key);
   if (frame == nullptr) {
     return nullptr;
@@ -1727,7 +1794,8 @@ bool Layer::remove_frame(const FramesMapKeyT key)
     const GreasePencilFrame &prev_frame = this->frames().lookup(*prev_key_it);
     /* If the previous frame is not an implicit hold (e.g. it has a fixed duration) and it's not an
      * end frame, we cannot just delete the frame. We need to replace it with an end frame. */
-    if (!prev_frame.is_implicit_hold() && !prev_frame.is_end()) {
+    /* FIXME: Disabled for now, do not create end frames ever. */
+    if (false && !prev_frame.is_implicit_hold() && !prev_frame.is_end()) {
       this->frames_for_write().lookup(key) = GreasePencilFrame::end();
       this->tag_frames_map_changed();
       /* Since the original frame was replaced with an end frame, we consider the frame to be
@@ -1872,7 +1940,11 @@ int Layer::get_frame_duration_at(const int frame_number) const
   if (frame->is_end()) {
     return -1;
   }
-  /* Compute the distance in frames between this key and the next key. */
+  /* Last frame without a following end frame (end frames are not created anymore), it is
+   * effectively held indefinitely. */
+  if (std::next(it) == this->sorted_keys().end()) {
+    return 0;
+  } /* Compute the distance in frames between this key and the next key. */
   const int next_frame_number = *(std::next(it));
   return math::distance(key, next_frame_number);
 }
@@ -2534,6 +2606,9 @@ void BKE_grease_pencil_nomain_to_grease_pencil(GreasePencil *grease_pencil_src,
 
   grease_pencil_dst->attribute_storage.wrap() = std::move(
       grease_pencil_src->attribute_storage.wrap());
+
+  /* Duplicating drawings does not copy over their user count. */
+  grease_pencil_initialize_drawing_user_counts(*grease_pencil_dst);
 
   DEG_id_tag_update(&grease_pencil_dst->id, ID_RECALC_GEOMETRY);
 
@@ -3350,6 +3425,12 @@ MutableSpan<GreasePencilDrawingBase *> GreasePencil::drawings()
 
 static void delete_drawing(GreasePencilDrawingBase *drawing_base)
 {
+  /* Unknown types from corrupt files, only the base struct was read. */
+  if (!ELEM(drawing_base->type, GP_DRAWING, GP_DRAWING_REFERENCE)) {
+    MEM_delete(drawing_base);
+    return;
+  }
+
   switch (GreasePencilDrawingType(drawing_base->type)) {
     case GP_DRAWING: {
       GreasePencilDrawing *drawing = reinterpret_cast<GreasePencilDrawing *>(drawing_base);
@@ -3486,7 +3567,7 @@ bool GreasePencil::insert_duplicate_frame(bke::greasepencil::Layer &layer,
    * If we want to make an instance of the source frame, the drawing index gets copied from the
    * source frame. Otherwise, we set the drawing index to the size of the drawings array, since we
    * are going to add a new drawing copied from the source drawing. */
-  const int duration = layer.get_frame_duration_at(src_frame_number);
+  const int duration = 0 /* layer.get_frame_duration_at(src_frame_number) */;
   GreasePencilFrame *dst_frame = layer.add_frame(dst_frame_number, duration);
   if (dst_frame == nullptr) {
     return false;
@@ -3795,7 +3876,7 @@ void GreasePencil::move_duplicate_frames(bke::greasepencil::Layer &layer,
     if (!src_frame) {
       continue;
     }
-    const int duration = src_layer_frames_durations.lookup_default(src_frame_number, 0);
+    const int duration = 0 /* src_layer_frames_durations.lookup_default(src_frame_number, 0) */;
 
     /* Add and overwrite the frame at the destination number. */
     if (layer.frames().contains(dst_frame_number)) {
@@ -4236,7 +4317,7 @@ bke::greasepencil::Layer &GreasePencil::duplicate_layer(
   new_layer->frames_for_write().clear();
   if (duplicate_frames) {
     for (auto [frame_number, frame] : duplicate_layer.frames().items()) {
-      const int duration = duplicate_layer.get_frame_duration_at(frame_number);
+      const int duration = 0 /* duplicate_layer.get_frame_duration_at(frame_number) */;
       bke::greasepencil::Drawing *dst_drawing = this->insert_frame(
           *new_layer, frame_number, duration, eBezTriple_KeyframeType(frame.type));
       if (duplicate_drawings) {
@@ -4796,13 +4877,36 @@ bke::MutableAttributeAccessor GreasePencil::attributes_for_write()
 /** \name Drawing array read/write functions
  * \{ */
 
+static size_t drawing_struct_size(const GreasePencilDrawingType type)
+{
+  switch (type) {
+    case GP_DRAWING:
+      return sizeof(GreasePencilDrawing);
+    case GP_DRAWING_REFERENCE:
+      return sizeof(GreasePencilDrawingReference);
+  }
+  return sizeof(GreasePencilDrawingBase);
+}
+
 static void read_drawing_array(GreasePencil &grease_pencil, BlendDataReader *reader)
 {
   BLO_read_pointer_array_and_validate_size(
       reader, &grease_pencil.drawing_array, &grease_pencil.drawing_array_num);
   for (int i = 0; i < grease_pencil.drawing_array_num; i++) {
-    BLO_read_struct(reader, GreasePencilDrawingBase, &grease_pencil.drawing_array[i]);
+    BLO_read_struct_with_type_size<GreasePencilDrawingBase>(
+        reader, &grease_pencil.drawing_array[i], [](const GreasePencilDrawingBase &drawing) {
+          return drawing_struct_size(GreasePencilDrawingType(drawing.type));
+        });
     GreasePencilDrawingBase *drawing_base = grease_pencil.drawing_array[i];
+
+    /* Replace drawings that failed to read from corrupt files by an empty drawing, since further
+     * reading code expects valid drawings. */
+    if (drawing_base == nullptr) {
+      grease_pencil.drawing_array[i] = reinterpret_cast<GreasePencilDrawingBase *>(
+          MEM_new<bke::greasepencil::Drawing>(__func__));
+      continue;
+    }
+
     switch (GreasePencilDrawingType(drawing_base->type)) {
       case GP_DRAWING: {
         GreasePencilDrawing *drawing = reinterpret_cast<GreasePencilDrawing *>(drawing_base);
@@ -4898,6 +5002,17 @@ static void read_layer(BlendDataReader *reader,
   node->wrap().update_from_dna_read();
 }
 
+static size_t layer_tree_node_struct_size(const GreasePencilLayerTreeNodeType type)
+{
+  switch (type) {
+    case GP_LAYER_TREE_LEAF:
+      return sizeof(GreasePencilLayer);
+    case GP_LAYER_TREE_GROUP:
+      return sizeof(GreasePencilLayerTreeGroup);
+  }
+  return sizeof(GreasePencilLayerTreeNode);
+}
+
 static void read_layer_tree_group(BlendDataReader *reader,
                                   GreasePencilLayerTreeGroup *node,
                                   GreasePencilLayerTreeGroup *parent)
@@ -4905,7 +5020,10 @@ static void read_layer_tree_group(BlendDataReader *reader,
   BLO_read_string(reader, &node->base.name);
   node->base.parent = parent;
   /* Read list of children. */
-  BLO_read_struct_list(reader, GreasePencilLayerTreeNode, &node->children);
+  BLO_read_struct_list_with_type_size<GreasePencilLayerTreeNode>(
+      reader, &node->children, [](const GreasePencilLayerTreeNode &child) {
+        return layer_tree_node_struct_size(child.type);
+      });
   for (GreasePencilLayerTreeNode &child : node->children) {
     switch (child.type) {
       case GP_LAYER_TREE_LEAF: {
@@ -4936,9 +5054,9 @@ static void read_layer_tree(GreasePencil &grease_pencil, BlendDataReader *reader
     grease_pencil.set_active_node(nullptr);
     return;
   }
-  /* Read active layer. */
-  BLO_read_struct(reader, GreasePencilLayerTreeNode, &grease_pencil.active_node);
   read_layer_tree_group(reader, grease_pencil.root_group_ptr, nullptr);
+  /* Read active layer after the tree, so it is null if its node failed to read. */
+  BLO_read_struct(reader, GreasePencilLayerTreeNode, &grease_pencil.active_node);
 
   grease_pencil.root_group_ptr->wrap().update_from_dna_read();
 }

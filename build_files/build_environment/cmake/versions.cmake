@@ -378,7 +378,7 @@ set(RUBBERBAND_COPYRIGHT "Copyright (c) 2025 Particular Programs Ltd")
 # it wants to use in PCbuild/get_externals.bat for the following dependencies:
 # BZIP2 and change the versions in this file as well. For compliance
 # reasons there can be no exceptions to this.
-# Additionally, keep the PYTHON_PIP_VERSION in sync with the pip version bundled
+# Additionally, keep the PYTHON_PIP_VERSION no older than the pip version bundled
 # into Python.
 
 set(PYTHON_VERSION 3.13.13)
@@ -401,11 +401,11 @@ Copyright © 1991-1995 Stichting Mathematisch Centrum. All rights reserved.
 
 # Python bundles pip wheel, and does not track CVEs from it. Add an explicit CPE
 # identifier for pip, so that cve_check can detect vulnerabilities in it.
-# The version needs to be kept in symc with the version bundled in Python.
-# Currently it is done manually by tracking _PIP_VERSION variable in the
-# `Lib/ensurepip/__init__.py`. For example,
+# The bundled pip is upgraded to this version in python_site_packages, so it must
+# not be older than the version bundled in Python. That is tracked by the
+# _PIP_VERSION variable in `Lib/ensurepip/__init__.py`. For example,
 #   https://github.com/python/cpython/tree/v3.11.9/Lib/ensurepip/__init__.py
-set(PYTHON_PIP_VERSION 25.2)
+set(PYTHON_PIP_VERSION 26.2.2)
 set(PYTHON_PIP_CPE "cpe:2.3:a:pypa:pip:${PYTHON_PIP_VERSION}:*:*:*:*:*:*:*")
 
 set(TBB_YEAR 2022)
@@ -455,7 +455,7 @@ set(CHARSET_NORMALIZER_VERSION 3.4.1)
 set(URLLIB3_VERSION 2.4.0)
 set(URLLIB3_CPE "cpe:2.3:a:urllib3:urllib3:${URLLIB3_VERSION}:*:*:*:*:*:*:*")
 # Needed by: Python's `requests` module (so add-ons can authenticate against trusted certificates).
-set(CERTIFI_VERSION 2025.4.26)
+set(CERTIFI_VERSION 2026.10.19)
 # Needed by: Some of Blender's add-ons (to support convenient interaction with online services).
 set(REQUESTS_VERSION 2.32.3)
 # Needed by: Python's `numpy` module (used by some add-ons).
@@ -1047,9 +1047,9 @@ set(SSE2NEON_HOMEPAGE https://github.com/DLTcollab/sse2neon)
 set(SSE2NEON_LICENSE SPDX:MIT)
 set(SSE2NEON_COPYRIGHT "Copyright sse2neon contributors")
 
-set(BROTLI_VERSION 1.0.9)
+set(BROTLI_VERSION 1.0.10)
 set(BROTLI_URI https://github.com/google/brotli/archive/refs/tags/v${BROTLI_VERSION}.tar.gz)
-set(BROTLI_HASH f9e8d81d0405ba66d181529af42a3354f838c939095ff99930da6aa9cdf6fe46)
+set(BROTLI_HASH b517ebdb5266b963d28d6e639b973479874ec72086deb6ee4a2d639e1b13606b)
 set(BROTLI_HASH_TYPE SHA256)
 set(BROTLI_FILE brotli-v${BROTLI_VERSION}.tar.gz)
 set(BROTLI_CPE "cpe:2.3:a:google:brotli:${BROTLI_VERSION}:*:*:*:*:*:*:*")

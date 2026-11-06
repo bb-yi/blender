@@ -152,6 +152,18 @@ VKResourceWithHandle<VkImage> VKImageCache::get_or_create(const VKImageInfo &inf
   return resource;
 }
 
+Vector<VKImageView> VKImageCache::take_image_views(const VKImageInfo &info)
+{
+  VKImageHandle &image_handle = cache_.lookup(info);
+  return std::move(image_handle.image_views);
+}
+
+void VKImageCache::store_image_views(const VKImageInfo &info, Vector<VKImageView> image_views)
+{
+  VKImageHandle &image_handle = cache_.lookup(info);
+  image_handle.image_views = std::move(image_views);
+}
+
 void VKImageCache::reset_unused_cycles_count(const VKImageInfo &info)
 {
   VKImageHandle *image_handle = cache_.lookup_ptr(info);
@@ -443,6 +455,8 @@ Texture *VKTexturePool::acquire_texture_impl(int3 extent,
   /* Get or create a VkImage handle and assign it to the texture. */
   if (image_cache_) {
     texture->resource_ = image_cache_->get_or_create(image_info);
+    /* Reuse views of the cached image, as they are only destroyed together with the image. */
+    texture->image_views_ = image_cache_->take_image_views(image_info);
   }
   else {
     texture->resource_ = create_and_bind_vk_image(image_info, name_str);
@@ -474,16 +488,20 @@ void VKTexturePool::release_texture(Texture *texture)
 
   /* Avoiding WRITE_AFTER_WRITE/READ_AFTER_WRITE hazards (#161990) when reusing the same cached
    * VkImage. Reset the tracked layout to undefined so the next alias to use this memory
-   * transitions from VK_IMAGE_LAYOUT_UNDEFINED, as required for memory aliasing. */
-  VKContext &context = *VKContext::get();
-  render_graph::VKSynchronizationNode::CreateInfo synchronization = {
-      .vk_image = texture_handle.texture->vk_image_handle(),
-      .vk_image_layout = VK_IMAGE_LAYOUT_GENERAL,
-      .vk_image_aspect = to_vk_image_aspect_flag_bits(texture_handle.texture->device_format_get()),
-      .vk_access_flags = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
-      .reset_layout_to_undefined = true,
-  };
-  context.render_graph().add_node(synchronization);
+   * transitions from VK_IMAGE_LAYOUT_UNDEFINED, as required for memory aliasing.
+   * Textures can be released without an active context, when freeing windows. */
+  VKContext *context = VKContext::get();
+  if (context != nullptr) {
+    render_graph::VKSynchronizationNode::CreateInfo synchronization = {
+        .vk_image = texture_handle.texture->vk_image_handle(),
+        .vk_image_layout = VK_IMAGE_LAYOUT_GENERAL,
+        .vk_image_aspect = to_vk_image_aspect_flag_bits(
+            texture_handle.texture->device_format_get()),
+        .vk_access_flags = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+        .reset_layout_to_undefined = true,
+    };
+    context->render_graph().add_node(synchronization);
+  }
 
   if (G.debug & G_DEBUG_GPU) {
     current_usage_data_.acquired_segment_size -= image_info.segment.size;
@@ -494,7 +512,10 @@ void VKTexturePool::release_texture(Texture *texture)
   allocations_.add_overwrite(allocation_handle);
 
   /* Release the pool's reference to the VkImage (the cache owns it when in use). */
-  if (!image_cache_) {
+  if (image_cache_) {
+    image_cache_->store_image_views(image_info, std::move(texture_handle.texture->image_views_));
+  }
+  else {
     VKDevice &device = VKBackend::get().device;
     device.resources.deref_resource(texture_handle.texture->resource_.resource_handle);
   }

@@ -150,6 +150,11 @@ struct VKWorkarounds {
    */
   bool static_viewport_scissor = false;
 
+  /**
+   * Legacy AMD drivers do not perform sRGB conversions when clearing attachments.
+   */
+  bool missing_srgb_clear_conversion = false;
+
   /** Log enabled workarounds. */
   void log() const;
 };

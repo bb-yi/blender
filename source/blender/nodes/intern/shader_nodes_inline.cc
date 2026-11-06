@@ -554,7 +554,8 @@ class ShaderNodesInliner {
 
   bool should_use_link(const bNodeLink &link) const
   {
-    return link.is_used() && (link.flag & NODE_LINK_VALID);
+    return link.is_used() && (link.flag & NODE_LINK_VALID) &&
+           !this->socket_is_ignored(*link.fromsock);
   }
 
   void handle_input_socket(const SocketInContext &socket)
@@ -2608,10 +2609,14 @@ class ShaderNodesInliner {
       if (dst_socket.flag & SOCK_HIDE_VALUE) {
         /* Can't store the primitive value directly on the socket. So create a new input node and
          * link it instead. */
-        const NodeAndSocket node_and_socket = this->primitive_value_to_output_socket(
+        const NodeAndSocket node_and_socket = this->try_primitive_value_to_output_socket(
             *primitive_value);
-        if (dst_tree_.typeinfo->validate_link(node_and_socket.socket->typeinfo->type,
-                                              dst_socket.typeinfo->type))
+        if (!node_and_socket.socket) {
+          /* There is no input node for this value type, so store it on the socket after all. */
+          this->set_primitive_value_on_socket(dst_socket, *primitive_value);
+        }
+        else if (dst_tree_.typeinfo->validate_link(node_and_socket.socket->typeinfo->type,
+                                                   dst_socket.typeinfo->type))
         {
           bke::node_add_link(
               dst_tree_, *node_and_socket.node, *node_and_socket.socket, dst_node, dst_socket);
@@ -2679,7 +2684,7 @@ class ShaderNodesInliner {
     BLI_assert_unreachable();
   }
 
-  NodeAndSocket primitive_value_to_output_socket(const PrimitiveSocketValue &value)
+  NodeAndSocket try_primitive_value_to_output_socket(const PrimitiveSocketValue &value)
   {
     if (const float *value_float = std::get_if<float>(&value.value)) {
       bNode *node = this->add_node("ShaderNodeValue"_ustr);
@@ -2715,6 +2720,10 @@ class ShaderNodesInliner {
       auto *socket_storage = static_cast<bNodeSocketValueRGBA *>(output_socket->default_value);
       copy_v4_v4(socket_storage->value, *value_color);
       return {node, output_socket};
+    }
+    if (std::get_if<std::string>(&value.value) || std::get_if<MenuValue>(&value.value)) {
+      /* There is no node that outputs these values in the destination tree. */
+      return {};
     }
     BLI_assert_unreachable();
     return {};

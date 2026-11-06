@@ -819,8 +819,7 @@ void OneapiDevice::image_alloc(device_image &mem)
                 << string_human_readable_number(mem.memory_size()) << " bytes. ("
                 << string_human_readable_size(mem.memory_size()) << ")";
 
-      sycl::ext::oneapi::experimental::image_mem_handle memHandle =
-          sycl::ext::oneapi::experimental::alloc_image_mem(desc, *queue);
+      memHandle = sycl::ext::oneapi::experimental::alloc_image_mem(desc, *queue);
       if (!memHandle.raw_handle) {
         set_error("GPU image allocation failed: Raw handle is null");
         return;
@@ -881,18 +880,8 @@ void OneapiDevice::image_alloc(device_image &mem)
       tex_info.data = (uint64_t)mem.device_pointer;
     }
 
-    {
-      /* Update image info. */
-      thread_scoped_lock lock(image_info_mutex);
-      const uint image_info_id = mem.image_info_id;
-      if (image_info_id >= image_info.size()) {
-        /* Geometric growth to amortize reallocation cost. */
-        const size_t new_size = max(size_t(image_info_id) + 128, image_info.size() * 2);
-        image_info.host_only_resize(new_size);
-      }
-      image_info[image_info_id] = tex_info;
-      need_image_info = true;
-    }
+    /* Update image info. */
+    image_info_update(mem.image_info_id, tex_info);
   }
   catch (sycl::exception const &e) {
     set_error("GPU image allocation failed: runtime exception \"" + string(e.what()) + "\"");
@@ -904,19 +893,10 @@ void OneapiDevice::image_alloc(device_image &mem)
 
   generic_alloc(mem);
   generic_copy_to(mem);
-  {
-    /* Update image info; device upload happens lazily in load_image_info(). */
-    thread_scoped_lock lock(image_info_mutex);
-    const uint image_info_id = mem.image_info_id;
-    if (image_info_id >= image_info.size()) {
-      /* Geometric growth to amortize reallocation cost. */
-      const size_t new_size = max(size_t(image_info_id) + 128, image_info.size() * 2);
-      image_info.host_only_resize(new_size);
-    }
-    image_info[image_info_id] = mem.info;
-    image_info[image_info_id].data = (uint64_t)mem.device_pointer;
-    need_image_info = true;
-  }
+  /* Update image info; device upload happens lazily in load_image_info(). */
+  KernelImageInfo tex_info = mem.info;
+  tex_info.data = (uint64_t)mem.device_pointer;
+  image_info_update(mem.image_info_id, tex_info);
 #  endif /* !WITH_CYCLES_ONEAPI_SOFTWARE_TEXTURING */
 }
 
@@ -1547,7 +1527,18 @@ std::vector<SyclDeviceEntry> available_sycl_devices(
             if (number_of_eus <= 96 && threads_per_eu == 7) {
               filter_out = true;
             }
-            /* if not already filtered out, check driver version. */
+#  ifndef WITH_CYCLES_ONEAPI_SOFTWARE_TEXTURING
+            /* If not already filtered out, check support for bindless images. */
+            if (!filter_out && !device.has(sycl::aspect::ext_oneapi_bindless_images)) {
+              filter_out = true;
+
+              LOG_WARNING << "Device \"" << device.get_info<sycl::info::device::name>()
+                          << "\" does not support bindless images, which Cycles oneAPI"
+                          << " requires. Build Blender with "
+                          << "WITH_CYCLES_ONEAPI_SOFTWARE_TEXTURING to use this device.";
+            }
+#  endif
+            /* If not already filtered out, check driver version. */
             bool check_driver_version = !filter_out;
             /* We don't know how to check driver version strings for non-Intel GPUs. */
             if (check_driver_version &&

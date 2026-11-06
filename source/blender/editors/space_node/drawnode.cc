@@ -41,6 +41,7 @@
 #include "GPU_shader_shared.hh"
 #include "GPU_state.hh"
 #include "GPU_uniform_buffer.hh"
+#include "GPU_viewport.hh"
 
 #include "DRW_engine.hh"
 
@@ -1799,6 +1800,12 @@ void draw_nodespace_back_pix(const bContext &C,
   Main *bmain = CTX_data_main(&C);
   bNodeInstanceKey active_viewer_key = (snode.nodetree ? snode.nodetree->active_viewer_key :
                                                          bke::NODE_INSTANCE_KEY_NONE);
+
+  /* Only the backdrop is color managed, which the draw manager enables when drawing it. */
+  if (GPUViewport *viewport = WM_draw_region_get_bound_viewport(&region)) {
+    GPU_viewport_colorspace_clear(viewport);
+  }
+
   GPU_matrix_push_projection();
   GPU_matrix_push();
   wmOrtho2_region_pixelspace(&region);
@@ -2095,7 +2102,7 @@ void node_draw_nodesocket(const rctf *rect,
 #define ARROW_SIZE (7 * UI_SCALE_FAC)
 
 /* Reroute arrow shape and mute bar. These are expanded here and shrunk in the GLSL code.
- * See: `gpu_shader_2D_nodelink.bsl.hh`. */
+ * See: `gpu_shader_nodelink.bsl.hh`. */
 static float arrow_verts[3][2] = {{-1.0f, 1.0f}, {0.0f, 0.0f}, {-1.0f, -1.0f}};
 static float arrow_expand_axis[3][2] = {{0.7071f, 0.7071f}, {M_SQRT2, 0.0f}, {0.7071f, -0.7071f}};
 static float mute_verts[3][2] = {{0.7071f, 1.0f}, {0.7071f, 0.0f}, {0.7071f, -1.0f}};

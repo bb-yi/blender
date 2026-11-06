@@ -456,6 +456,17 @@ bool BLI_file_ensure_parent_dir_exists(const char *filepath)
   char di[FILE_MAX];
   BLI_path_split_dir_part(filepath, di, sizeof(di));
 
+  if (di[0] == '\0') {
+    /* This means the filepath did not have any directory component, and thus the current directory
+     * should be made to exist. However, if it doesn't exist, Blender fails (at least on Linux) to
+     * even get the CWD. */
+    BLI_path_abs_from_cwd(di, sizeof(di));
+    if (di[0] == '\0') {
+      /* Still empty, which means getting CWD failed. */
+      return false;
+    }
+  }
+
   /* Make if the dir doesn't exist. */
   return BLI_dir_create_recursive(di);
 }
@@ -959,16 +970,16 @@ static void strbuf_append_path(StrBuf *buf, const char *filename)
   const size_t filename_len = strlen(filename);
   const size_t len = buf->str_len + (has_slash ? 0 : 1) + filename_len;
 
-  if (buf->str_len_alloc < len) {
+  if (buf->str_len_alloc <= len) {
     buf->str = static_cast<char *>(realloc(static_cast<void *>(buf->str), len + 1));
-    buf->str_len_alloc = len;
+    buf->str_len_alloc = len + 1;
   }
   if (has_slash == false) {
     buf->str[buf->str_len++] = SEP;
   }
   memcpy(buf->str + buf->str_len, filename, filename_len + 1);
   buf->str_len += filename_len;
-  BLI_assert(buf->str_len <= buf->str_len_alloc);
+  BLI_assert(buf->str_len < buf->str_len_alloc);
 }
 
 static void strbuf_trim(StrBuf *buf, size_t len)

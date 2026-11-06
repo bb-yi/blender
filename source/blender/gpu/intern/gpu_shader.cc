@@ -344,13 +344,7 @@ void GPU_shader_async_compilation_cancel(AsyncCompilationHandle &handle)
 
 bool GPU_shader_compiler_has_pending_work()
 {
-  return GPUBackend::get()->get_compiler()->is_compiling() ||
-         GPUBackend::get()->pipelines_compiled_since_last_reset();
-}
-
-void GPU_shader_compiler_reset_frame_pipeline_tracking()
-{
-  GPUBackend::get()->reset_pipeline_compilation_tracking();
+  return GPUBackend::get()->get_compiler()->is_compiling();
 }
 
 void GPU_shader_compiler_wait_for_all()
@@ -906,6 +900,7 @@ Shader *ShaderCompiler::compile(const shader::ShaderCreateInfo &orig_info, bool 
   std::string resources = shader->resources_declare(info);
 
   defines += info.resource_guard_defines(info.compilation_constants_);
+  defines += info.iface_guard_defines();
 
   if (!info.compute_entry_fn_.is_empty()) {
     defines += "#define ENTRY_POINT_" + info.compute_entry_fn_ + "\n";

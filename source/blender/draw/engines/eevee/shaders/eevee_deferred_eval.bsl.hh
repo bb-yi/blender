@@ -155,7 +155,6 @@ void light_eval_frag([[resource_table]] LightEval &srt,
 
   ctx.P = P;
   ctx.Ng = Ng;
-  ctx.V = V;
   ctx.texel = frag_co.xy;
   ctx.thickness = thickness;
   ctx.receiver_light_set = 0;
@@ -405,7 +404,6 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
   light::EvalCtx<false> ctx;
   ctx.P = P;
   ctx.Ng = Ng;
-  ctx.V = V;
   ctx.texel = frag_co.xy;
   ctx.thickness = thickness;
   ctx.receiver_light_set = 0;
@@ -625,7 +623,6 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
   light::EvalCtx<false> ctx;
   ctx.P = P;
   ctx.Ng = Ng;
-  ctx.V = V;
   ctx.texel = frag_co.xy;
   ctx.thickness = thickness;
   ctx.receiver_light_set = 0;

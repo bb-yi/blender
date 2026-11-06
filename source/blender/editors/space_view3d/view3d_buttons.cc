@@ -155,15 +155,6 @@ struct TransformCoordsOrig {
   /** Size & pivot when the drag began, every scale is relative to these. */
   float3 dims;
   float3 pivot;
-  /**
-   * Median edits accumulated since the drag began, in object space.
-   *
-   * A drag can cover the median buttons too (see #multibut_states_tag) and restoring the
-   * coordinates would undo those edits, so fold them into the scale matrix as a translation.
-   * Moving the stored coordinates instead needs the inverse of the scale, which doesn't
-   * exist once a dimension reaches zero.
-   */
-  float3 location_offset = float3(0.0f);
 
   /* For the update in progress. */
 
@@ -587,6 +578,15 @@ struct CurvesPointSelectionStatus {
 };
 
 /**
+ * Points in a layer scaled to zero are left out of the median & size. The panel can't move them,
+ * and scaling them would overwrite the layer-space coordinate on the zero axis.
+ */
+static bool grease_pencil_layer_is_skipped(const float4x4 &grease_pencil_layer_to_object)
+{
+  return math::determinant(float3x3(grease_pencil_layer_to_object)) == 0.0f;
+}
+
+/**
  * \param grease_pencil_layer_to_object: Grease pencil strokes are in layer space, the median &
  * bounds in object space. Null when the points are already in object space.
  */
@@ -683,8 +683,8 @@ static CurvesPointSelectionStatus init_curves_point_selection_status(
 /**
  * Return the object to layer matrix.
  *
- * A layer that scales an axis to zero has no true inverse, #invert_m4_m4_safe_ortho fills that
- * axis in from the others, so an edit still reaches the points on the axes that are left.
+ * Layers scaled to zero are skipped by callers, see #grease_pencil_layer_is_skipped.
+ * #invert_m4_m4_safe_ortho only guards against a near singular matrix that check misses.
  */
 static float4x4 object_to_grease_pencil_layer_calc(const float4x4 &grease_pencil_layer_to_object)
 {
@@ -1353,6 +1353,9 @@ static void v3d_editvertex_buts(
               const MutableDrawingInfo &info = drawings[drawing];
               const float4x4 grease_pencil_layer_to_object =
                   grease_pencil.layer(info.layer_index).to_object_space(*ob);
+              if (grease_pencil_layer_is_skipped(grease_pencil_layer_to_object)) {
+                continue;
+              }
               value = CurvesPointSelectionStatus::sum(
                   value,
                   init_curves_point_selection_status(
@@ -1952,9 +1955,6 @@ static void v3d_editvertex_buts(
         dims_mat = median_dims_scale_matrix_calc(
             *ob, bounds_matrix, coords_orig->pivot, coords_orig->dims, dims_new);
         if (dims_mat) {
-          /* Keep median edits made in the same drag, see #TransformCoordsOrig::location_offset. */
-          coords_orig->location_offset += float3(median_basis.generic.location);
-          dims_mat->location() += coords_orig->location_offset;
           coords_orig->coords_index = 0;
         }
       }
@@ -1964,7 +1964,12 @@ static void v3d_editvertex_buts(
     const bool apply_vcos = (tot == 1) || dims_mat.has_value() ||
                             (len_squared_v3(median_basis.generic.location) != 0.0f);
 
-    /* Scaling takes the coordinate from the drag start, the median is folded into `dims_mat`. */
+    /* Scaling takes the coordinate from the drag start.
+     *
+     * NOTE(@ideasman42): dragging location & dimensions together isn't supported,
+     * dimensions take priority and location edits are ignored.
+     * Preventing both being dragged at once is possible, however the buttons are far apart
+     * so this is unlikely in practice and not worth the hassle. */
     auto apply_coord_fn = [&](float co[3]) {
       if (dims_mat) {
         coords_orig->apply(*dims_mat, *reinterpret_cast<float3 *>(co));
@@ -2113,6 +2118,10 @@ static void v3d_editvertex_buts(
         bke::CurvesGeometry &curves = info.drawing.strokes_for_write();
         const float4x4 grease_pencil_layer_to_object =
             grease_pencil.layer(info.layer_index).to_object_space(*ob);
+        /* Must match the measurement, #tot and #coords_orig only count these points. */
+        if (grease_pencil_layer_is_skipped(grease_pencil_layer_to_object)) {
+          return;
+        }
         if (apply_to_curves_point_selection(tot,
                                             median_basis.curves,
                                             ve_median_basis.curves,
@@ -2480,7 +2489,7 @@ static void view3d_panel_vgroup(const bContext *C, Panel *panel)
 /** \name Transform Buttons
  * \{ */
 
-static void v3d_transform_butsR(const bContext *C, ui::Layout &layout, PointerRNA *ptr)
+static void v3d_transform_butsR(ui::Layout &layout, PointerRNA *ptr)
 {
   ui::Layout *split = &layout.split(0.8f, false);
 
@@ -2563,7 +2572,7 @@ static void v3d_transform_butsR(const bContext *C, ui::Layout &layout, PointerRN
 
   ui::Layout &row = layout.row(/*align=*/true);
   row.prop(ptr, "rotation_mode", UI_ITEM_NONE, "", ICON_NONE);
-  row.op_menu_enum(C, "ANIM_OT_rotation_mode_convert", "mode", "", ICON_DOWNARROW_HLT);
+  row.menu("ANIM_MT_rotation_mode_convert", "", ICON_DOWNARROW_HLT);
 
   split = &layout.split(0.8f, false);
   colsub = &split->column(true);
@@ -2575,7 +2584,7 @@ static void v3d_transform_butsR(const bContext *C, ui::Layout &layout, PointerRN
       ptr, "lock_scale", ui::ITEM_R_TOGGLE | ui::ITEM_R_ICON_ONLY, "", ICON_DECORATE_UNLOCKED);
 }
 
-static void v3d_posearmature_buts(const bContext *C, ui::Layout &layout, Object *ob)
+static void v3d_posearmature_buts(ui::Layout &layout, Object *ob)
 {
   bPoseChannel *pchan = BKE_pose_channel_active_if_bonecoll_visible(ob);
 
@@ -2591,7 +2600,7 @@ static void v3d_posearmature_buts(const bContext *C, ui::Layout &layout, Object 
   /* XXX: RNA buts show data in native types (i.e. quaternion, 4-component axis/angle, etc.)
    * but old-school UI shows in eulers always. Do we want to be able to still display in Eulers?
    * Maybe needs RNA/UI options to display rotations as different types. */
-  v3d_transform_butsR(C, col, &pchanptr);
+  v3d_transform_butsR(col, &pchanptr);
 }
 
 static void v3d_editarmature_buts(ui::Layout &layout, Object *ob)
@@ -2741,11 +2750,11 @@ static void view3d_panel_transform(const bContext *C, Panel *panel)
     }
   }
   else if (ob->mode & OB_MODE_POSE) {
-    v3d_posearmature_buts(C, col, ob);
+    v3d_posearmature_buts(col, ob);
   }
   else {
     PointerRNA obptr = RNA_id_pointer_create(&ob->id);
-    v3d_transform_butsR(C, col, &obptr);
+    v3d_transform_butsR(col, &obptr);
 
     /* Dimensions and editmode are mostly the same check. */
     if (OB_TYPE_SUPPORT_EDITMODE(ob->type) || ELEM(ob->type, OB_VOLUME, OB_LIGHTPROBE)) {
@@ -2883,7 +2892,7 @@ static void handle_curves_knot_mode(bContext *C, void * /*arg1*/, void * /*arg2*
         const Span<float> src_custom_knots = curves.nurbs_custom_knots();
         const ImplicitSharingInfo *knots_sharing_info = curves.runtime->custom_knots_sharing_info;
         if (knots_sharing_info != nullptr) {
-          knots_sharing_info->add_weak_user();
+          knots_sharing_info->add_user();
         }
 
         Array<int8_t> src_knot_modes;
@@ -2905,7 +2914,7 @@ static void handle_curves_knot_mode(bContext *C, void * /*arg1*/, void * /*arg2*
         update_custom_knots(src_custom_knots_by_curve, src_knot_modes, src_custom_knots, curves);
 
         if (knots_sharing_info != nullptr) {
-          knots_sharing_info->remove_weak_user_and_delete_if_last();
+          knots_sharing_info->remove_user_and_delete_if_last();
         }
       });
 }
@@ -2927,7 +2936,7 @@ static void handle_curves_order(bContext *C, void * /*arg1*/, void * /*arg2*/)
         const Span<float> src_custom_knots = curves.nurbs_custom_knots();
         const ImplicitSharingInfo *knots_sharing_info = curves.runtime->custom_knots_sharing_info;
         if (knots_sharing_info != nullptr) {
-          knots_sharing_info->add_weak_user();
+          knots_sharing_info->add_user();
         }
 
         bool knot_modes_changed = false;
@@ -2952,7 +2961,7 @@ static void handle_curves_order(bContext *C, void * /*arg1*/, void * /*arg2*/)
         }
 
         if (knots_sharing_info != nullptr) {
-          knots_sharing_info->remove_weak_user_and_delete_if_last();
+          knots_sharing_info->remove_user_and_delete_if_last();
         }
       });
 }

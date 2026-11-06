@@ -129,19 +129,25 @@ static void rna_Main_ID_remove(Main *bmain,
     return;
   }
 
-  /* Volume light probes being baked cannot be removed. */
+  const LightProbe *light_probe = nullptr;
   if (GS(id->name) == ID_OB) {
-    Object *ob = reinterpret_cast<Object *>(id);
-    if (ob->type == OB_LIGHTPROBE &&
-        (reinterpret_cast<LightProbe *>(ob->data))->type == LIGHTPROBE_TYPE_VOLUME)
-    {
-      wmWindowManager *wm = bmain->wm.first();
-      if (wm && WM_jobs_has_running(wm, nullptr, WM_JOB_TYPE_LIGHT_BAKE)) {
-        BKE_reportf(reports,
-                    RPT_ERROR,
-                    "Cannot remove volume light probes while light probe baking is running");
-        return;
-      }
+    const Object *ob = reinterpret_cast<Object *>(id);
+    if (ob->type == OB_LIGHTPROBE) {
+      light_probe = reinterpret_cast<LightProbe *>(ob->data);
+    }
+  }
+  else if (GS(id->name) == ID_LP) {
+    light_probe = reinterpret_cast<LightProbe *>(id);
+  }
+
+  /* Volume light probes being baked cannot be removed. */
+  if (light_probe && light_probe->type == LIGHTPROBE_TYPE_VOLUME) {
+    wmWindowManager *wm = bmain->wm.first();
+    if (wm && WM_jobs_has_running(wm, nullptr, WM_JOB_TYPE_LIGHT_BAKE)) {
+      BKE_reportf(reports,
+                  RPT_ERROR,
+                  "Cannot remove volume light probes while light probe baking is running");
+      return;
     }
   }
 
@@ -191,57 +197,6 @@ static ID *rna_Main_pack_linked_ids_hierarchy(struct BlendData *blenddata,
   BKE_main_id_newptr_and_tag_clear(bmain);
 
   return packed_root_id;
-}
-
-static void rna_Main_blender_project_init(struct BlendData * /* blenddata */,
-                                          ReportList *reports,
-                                          const char *name,
-                                          const char *project_root)
-{
-  if (!BKE_blender_project_init(name, project_root)) {
-    BKE_reportf(reports,
-                RPT_ERROR,
-                "Failed to initialize project. Ensure that both the name and project_root "
-                "parameters are non-empty.");
-  }
-
-  /* Force full redraw of all windows, and refresh their title. */
-  WM_main_add_notifier(NC_WINDOW, nullptr);
-  WM_main_add_notifier(NC_WM | ND_PROJECT_CHANGED, nullptr);
-}
-
-static void rna_Main_blender_project_init_from_root_path(struct BlendData *blenddata,
-                                                         ReportList *reports,
-                                                         const char *project_root)
-{
-  Main *bmain = reinterpret_cast<Main *>(blenddata);
-  if (!BKE_blender_project_init_from_root_path(bmain, project_root)) {
-    BKE_reportf(reports,
-                RPT_ERROR,
-                "Failed to initialize project. Ensure that project_root path is correct.");
-  }
-
-  /* Force full redraw of all windows, and refresh their title. */
-  WM_main_add_notifier(NC_WINDOW, nullptr);
-  WM_main_add_notifier(NC_WM | ND_PROJECT_CHANGED, nullptr);
-}
-
-static void rna_Main_blender_project_save(struct BlendData *blenddata, ReportList *reports)
-{
-  Main *bmain = reinterpret_cast<Main *>(blenddata);
-  if (!BKE_blender_project_config_file_write(bmain)) {
-    BKE_reportf(reports, RPT_ERROR, "Failed to save project config.");
-  }
-}
-
-static void rna_Main_blender_project_clear(struct BlendData * /* blenddata */,
-                                           ReportList * /* reports */)
-{
-  BKE_blender_project_clear();
-
-  /* Force full redraw of all windows, and refresh their title. */
-  WM_main_add_notifier(NC_WINDOW, nullptr);
-  WM_main_add_notifier(NC_WM | ND_PROJECT_CHANGED, nullptr);
 }
 
 static Camera *rna_Main_cameras_new(Main *bmain, const char *name)
@@ -973,31 +928,6 @@ void RNA_api_main(StructRNA *srna)
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
   parm = RNA_def_pointer(func, "packed_id", "ID", "", "The packed ID matching the given root ID");
   RNA_def_function_return(func, parm);
-
-  func = RNA_def_function(srna, "project_init", "rna_Main_blender_project_init");
-  RNA_def_function_ui_description(func, "Initialize a new active project");
-  RNA_def_function_flag(func, FUNC_USE_REPORTS);
-  parm = RNA_def_string(func, "name", nullptr, 0, nullptr, "The project's name");
-  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
-  parm = RNA_def_string_dir_path(
-      func, "project_root", nullptr, 0, nullptr, "The filepath of the project's root folder");
-  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
-
-  func = RNA_def_function(
-      srna, "project_init_from_root_path", "rna_Main_blender_project_init_from_root_path");
-  RNA_def_function_ui_description(func, "Initialize a new active project from the provided path");
-  RNA_def_function_flag(func, FUNC_USE_REPORTS);
-  parm = RNA_def_string_dir_path(
-      func, "project_root", nullptr, 0, nullptr, "The filepath of the project's root folder");
-  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
-
-  func = RNA_def_function(srna, "project_save", "rna_Main_blender_project_save");
-  RNA_def_function_ui_description(func, "Save the current project config to disk");
-  RNA_def_function_flag(func, FUNC_USE_REPORTS);
-
-  func = RNA_def_function(srna, "project_clear", "rna_Main_blender_project_clear");
-  RNA_def_function_ui_description(func, "Clear the currently active project");
-  RNA_def_function_flag(func, FUNC_USE_REPORTS);
 }
 
 void RNA_def_main_cameras(BlenderRNA *brna, PropertyRNA *cprop)

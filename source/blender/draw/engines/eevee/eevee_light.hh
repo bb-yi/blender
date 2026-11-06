@@ -115,7 +115,8 @@ struct Light : public LightData, NonCopyable {
             float4x4 object_to_world,
             char visibility_flag,
             const blender::Light *la,
-            const LightLinking *light_linking,
+            uint64_t light_set_membership,
+            uint64_t shadow_set_membership,
             float light_shader_range_scale,
             float threshold,
             int lightgroup_id = 0);

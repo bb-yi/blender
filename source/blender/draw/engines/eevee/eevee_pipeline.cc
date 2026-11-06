@@ -1629,10 +1629,15 @@ bool DeferredLayer::do_merge_direct_indirect_eval(const Instance &inst)
   return !inst.raytracing.use_raytracing();
 }
 
+bool DeferredLayer::do_modify_radiance(const Instance &inst)
+{
+  return inst.sampling.use_clamp_direct() || inst.sampling.use_clamp_indirect() ||
+         inst.sampling.use_direct_scale() || inst.sampling.use_indirect_scale();
+}
+
 bool DeferredLayer::do_split_direct_indirect_radiance(const Instance &inst)
 {
-  return do_merge_direct_indirect_eval(inst) &&
-         (inst.sampling.use_clamp_direct() || inst.sampling.use_clamp_indirect());
+  return do_merge_direct_indirect_eval(inst) && do_modify_radiance(inst);
 }
 
 void DeferredLayer::end_sync(bool is_first_pass,
@@ -1649,17 +1654,15 @@ void DeferredLayer::end_sync(bool is_first_pass,
   const bool has_reflect_closure = (closure_bits_ & (CLOSURE_REFLECTION | CLOSURE_DIFFUSE));
   const bool has_transparent_shader_to_rgba = (closure_bits_ & CLOSURE_TRANSPARENCY) &&
                                               (closure_bits_ & CLOSURE_SHADER_TO_RGBA);
-  const bool use_direct_scale = inst_.sampling.use_direct_scale();
-  const bool use_indirect_scale = inst_.sampling.use_indirect_scale();
   use_raytracing_ = (has_transmit_closure || has_reflect_closure) &&
                     inst_.raytracing.use_raytracing();
   use_clamp_direct_ = inst_.sampling.use_clamp_direct();
   use_clamp_indirect_ = inst_.sampling.use_clamp_indirect();
   const bool use_npr_radiance = inst_.pipelines.deferred.header_layer_count() >=
                                 GBUF_NPR_HEADER_LAYER_COUNT;
-  /* Is the radiance split for the combined pass. */
-  use_split_radiance_ = use_raytracing_ || use_clamp_direct_ || use_clamp_indirect_ ||
-                        use_indirect_scale || use_direct_scale || use_npr_radiance;
+  /* Is the radiance split for the combined pass. Must match what the light evaluation writes:
+   * either ray-tracing writes the indirect radiance, or the light-probe evaluation does. */
+  use_split_radiance_ = use_raytracing_ || do_split_direct_indirect_radiance(inst_) || use_npr_radiance;
 
   /* The first pass will never have any surfaces behind it. Nothing is refracted except the
    * environment. So in this case, disable tracing and fallback to probe. */
@@ -1835,7 +1838,7 @@ void DeferredLayer::end_sync(bool is_first_pass,
                                    (rbuf_data.specular_color_id != -1));
       pass.specialize_constant(sh, "use_split_radiance", use_split_radiance_);
       pass.specialize_constant(
-          sh, "use_radiance_feedback", use_feedback_output_ && use_clamp_direct_);
+          sh, "use_radiance_feedback", use_feedback_output_ && do_modify_radiance(inst_));
       pass.specialize_constant(sh, "render_pass_normal_enabled", rbuf_data.normal_id != -1);
       pass.specialize_constant(sh, "render_pass_position_enabled", rbuf_data.position_id != -1);
       pass.specialize_constant(
@@ -2110,6 +2113,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   }
   inst_.lights.eval_light_shaders(render_view, extent);
 
+  /* Only three layers of closures are ever written,. */
   direct_radiance_txs_.acquire_2d_array(
       extent, max_ii(3, closure_count_), gpu::TextureFormat::DEFERRED_RADIANCE_FORMAT, usage_rw);
   direct_radiance_txs_.ensure_layer_views();
@@ -2150,7 +2154,9 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   radiance_feedback_tx_ = rt_buffer.feedback_ensure(!use_feedback_output_, extent);
   radiance_back_tx_ = radiance_behind_tx ? radiance_behind_tx : radiance_feedback_tx_;
 
-  if (use_feedback_output_ && use_clamp_direct_) {
+  const bool modify_radiance = do_modify_radiance(inst_);
+
+  if (use_feedback_output_ && modify_radiance) {
     /* We need to do a copy before the combine pass (otherwise we have a dependency issue) to save
      * the emission and the previous layer's radiance. */
     GPU_texture_copy(radiance_feedback_tx_, rb.combined_tx);

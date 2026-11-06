@@ -536,18 +536,30 @@ static Strip *strip_by_key_find(Scene *scene, SeqRetimingKey *key)
 {
   Editing *ed = seq::editing_get(scene);
   VectorSet strips = seq::query_all_strips_recursive(&ed->seqbase);
-
   for (Strip *strip : strips) {
-    const int retiming_keys_count = seq::retiming_keys_count(strip);
-    SeqRetimingKey *first = strip->retiming_keys;
-    SeqRetimingKey *last = strip->retiming_keys + retiming_keys_count - 1;
-
-    if (key >= first && key <= last) {
+    if (seq::retiming_keys_get(strip).contains_ptr(key)) {
       return strip;
     }
   }
 
   return nullptr;
+}
+
+static std::optional<std::string> rna_Strip_retiming_key_path(const PointerRNA *ptr)
+{
+  Scene *scene = id_cast<Scene *>(ptr->owner_id);
+  SeqRetimingKey *key = static_cast<SeqRetimingKey *>(ptr->data);
+  const Strip *strip = strip_by_key_find(scene, key);
+
+  if (strip == nullptr) {
+    return "";
+  }
+
+  char name_esc[(sizeof(strip->name) - 2) * 2];
+  BLI_str_escape(name_esc, strip->name + 2, sizeof(name_esc));
+  return fmt::format("sequence_editor.strips_all[\"{}\"].retiming_keys[{}]",
+                     name_esc,
+                     seq::retiming_key_index_get(strip, key));
 }
 
 static void rna_Strip_retiming_key_remove(ID *id, SeqRetimingKey *key)
@@ -575,7 +587,7 @@ static int rna_Strip_retiming_key_frame_get(PointerRNA *ptr)
     return 0;
   }
 
-  return strip->content_start() + key->strip_frame_index;
+  return seq::retiming_key_frame_get(scene, strip, key);
 }
 
 static void rna_Strip_retiming_key_frame_set(PointerRNA *ptr, int value)
@@ -2186,6 +2198,7 @@ static void rna_def_retiming_key(BlenderRNA *brna)
       "Retiming Key",
       "Key mapped to particular frame that can be moved to change playback speed");
   RNA_def_struct_sdna(srna, "SeqRetimingKey");
+  RNA_def_struct_path_func(srna, "rna_Strip_retiming_key_path");
 
   prop = RNA_def_property(srna, "timeline_frame", PROP_INT, PROP_NONE);
   RNA_def_property_int_funcs(

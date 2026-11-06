@@ -18,6 +18,7 @@
 #include "BLI_uuid.hh"
 
 #include "BKE_blender_project.hh"
+#include "BKE_global.hh"
 #include "BKE_preferences.h"
 
 #include "DNA_asset_types.h"
@@ -190,11 +191,6 @@ struct TomlProjectVariable {
 static void project_variable_add(BlenderProject *project, TomlProjectVariable project_variable)
 {
   ProjectVariable *new_var = project->new_variable(project_variable.name, project_variable.type);
-  /* Setup RNA relation to the project so that the variable knows which project it belongs to. */
-  RNA_pointer_create_with_parent(RNA_pointer_create_discrete(nullptr, RNA_BlenderProject, project),
-                                 RNA_ProjectVariable,
-                                 new_var);
-
   toml::value value = project_variable.value;
 
   switch (project_variable.type) {
@@ -219,19 +215,22 @@ static void project_variable_add(BlenderProject *project, TomlProjectVariable pr
 }
 
 struct TomlAssetLibrary {
+  /* Common variables. */
   std::string name;
+  int import_method; /* eAssetImportMethod enum */
+  /* Remote library variables. */
+  bool is_remote_asset_lib =
+      false; /* Only used to keep track if "url" was defined when parsing. */
+  std::string url;
+  std::string access_token;
+  /* Local library variables. */
   std::string path;
   bool use_relative_path;
-  int import_method; /* eAssetImportMethod enum */
   std::string uuid;
 
   void from_toml(const toml::value &v)
   {
     this->name = toml::find<std::string>(v, "name");
-
-    this->path = toml::find<std::string>(v, "path");
-
-    this->use_relative_path = toml::find<bool>(v, "use_relative_path");
 
     std::string import_method_str = toml::find<std::string>(v, "import_method");
     if (!RNA_enum_value_from_identifier(
@@ -248,12 +247,35 @@ struct TomlAssetLibrary {
       throw toml::type_error(err, var.location());
     }
 
+    if (v.contains("url")) {
+      this->is_remote_asset_lib = true;
+      this->url = toml::find<std::string>(v, "url");
+
+      this->access_token = toml::find_or(v, "access_token", "");
+      return;
+    }
+
+    this->path = toml::find<std::string>(v, "path");
+
+    this->use_relative_path = toml::find<bool>(v, "use_relative_path");
+
     this->uuid = toml::find_or(v, "uuid", "");
   }
 };
 
 static void project_asset_library_add(TomlAssetLibrary project_asset_library)
 {
+  if (project_asset_library.is_remote_asset_lib) {
+    bUserAssetLibrary *new_library = BKE_preferences_project_remote_asset_library_add(
+        &U,
+        project_asset_library.name.c_str(),
+        project_asset_library.url.c_str(),
+        project_asset_library.access_token.c_str());
+
+    new_library->import_method = project_asset_library.import_method;
+    return;
+  }
+
   std::optional<UUID> uuid = {};
   bool invalid_uuid = false;
   if (project_asset_library.uuid != "") {
@@ -401,8 +423,6 @@ static toml::ordered_array project_asset_libraries_to_toml()
   toml::ordered_array toml_array;
   for (auto &user_library : U.asset_libraries.items_mutable()) {
     if ((user_library.flag & ASSET_LIBRARY_PROJECT_DEFINED)) {
-      UUID uuid = UUID(user_library.uuid);
-
       const char *import_method;
       if (RNA_enum_id_from_value(rna_enum_asset_import_method_items,
                                  int(user_library.import_method),
@@ -411,13 +431,26 @@ static toml::ordered_array project_asset_libraries_to_toml()
         /* This lookup should never fail. */
         BLI_assert_unreachable();
       }
-      toml::ordered_table asset_library_data = {
-          {"name", user_library.name},
-          {"path", user_library.dirpath},
-          {"use_relative_path", bool(user_library.flag & ASSET_LIBRARY_RELATIVE_PATH)},
-          {"import_method", std::string(import_method)},
-          {"uuid", uuid.str()}};
-
+      toml::ordered_table asset_library_data;
+      if (user_library.flag & ASSET_LIBRARY_USE_REMOTE_URL) {
+        /* remote asset library */
+        asset_library_data = {{"name", user_library.name},
+                              {"import_method", std::string(import_method)},
+                              {"url", user_library.remote_url}};
+        if (user_library.flag & ASSET_LIBRARY_USE_AUTH_TOKEN && user_library.auth_token) {
+          asset_library_data["access_token"] = std::string(user_library.auth_token);
+        }
+      }
+      else {
+        /* Local asset library */
+        UUID uuid = UUID(user_library.uuid);
+        asset_library_data = {
+            {"name", user_library.name},
+            {"import_method", std::string(import_method)},
+            {"path", user_library.dirpath},
+            {"use_relative_path", bool(user_library.flag & ASSET_LIBRARY_RELATIVE_PATH)},
+            {"uuid", uuid.str()}};
+      }
       toml_array.push_back(asset_library_data);
     }
   }
@@ -454,6 +487,18 @@ static toml::ordered_table create_toml_from_blender_project(BlenderProject *proj
 
 }  // namespace bke
 
+void BKE_blender_project_config_autosave(Main *bmain)
+{
+  if (!(U.pref_flag & USER_PREF_FLAG_PROJECT_SAVE)) {
+    return;
+  }
+  const bool is_dirty = BKE_blender_project_read_callback(
+      bmain, [](const bke::BlenderProject *project) { return project && project->is_dirty; });
+  if (is_dirty) {
+    BKE_blender_project_config_file_write(bmain);
+  }
+}
+
 bool BKE_blender_project_config_file_write(Main *bmain)
 {
   bke::BlenderProject *project = BKE_blender_project_get(bmain);
@@ -462,13 +507,13 @@ bool BKE_blender_project_config_file_write(Main *bmain)
     return false;
   }
   /* Create the directory for new projects. */
-  const std::string config_dir = project->get_root_path() + SEP_STR + ".blender_project";
+  const std::string config_dir = project->get_root_path() + SEP_STR + BLENDER_PROJECT_CONFIG_DIR;
   if (!BLI_dir_create_recursive(config_dir.c_str())) {
     CLOG_ERROR(&LOG, "Failed to create project config directory '%s'", config_dir.c_str());
     return false;
   }
 
-  std::string toml_path = config_dir + SEP_STR + "project.toml";
+  std::string toml_path = config_dir + SEP_STR + BLENDER_PROJECT_CONFIG_FILE;
 
   toml::ordered_table toml_config = create_toml_from_blender_project(project);
 
@@ -488,6 +533,13 @@ bool BKE_blender_project_config_file_write(Main *bmain)
   }
 
   project->is_dirty = false;
+
+  if (!G.background) {
+    /* Update the recent projects in case the project name changed (or if this is a new project).
+     */
+    BKE_blender_project_recent_update(bmain);
+  }
+
   return true;
 }
 
@@ -497,8 +549,8 @@ bool BKE_blender_project_init_from_root_path(Main *bmain, std::string project_ro
     CLOG_ERROR(&LOG, "Project root path '%s', is not a directory", project_root_path.c_str());
     return false;
   }
-  std::string toml_path = project_root_path + SEP_STR + ".blender_project" + SEP_STR +
-                          "project.toml";
+  std::string toml_path = project_root_path + SEP_STR + BLENDER_PROJECT_CONFIG_DIR + SEP_STR +
+                          BLENDER_PROJECT_CONFIG_FILE;
   if (!BLI_is_file(toml_path.c_str())) {
     CLOG_ERROR(&LOG, "Project has no project.toml file");
     return false;

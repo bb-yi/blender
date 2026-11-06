@@ -574,7 +574,7 @@ static PyObject *Vector_resize(VectorObject *self, PyObject *value)
     return nullptr;
   }
 
-  if ((vec_num = PyC_Long_AsI32(value)) == -1) {
+  if (((vec_num = PyC_Long_AsI32(value)) == -1) && PyErr_Occurred()) {
     PyErr_SetString(PyExc_TypeError,
                     "Vector.resize(size): "
                     "expected size argument to be an integer");
@@ -619,12 +619,16 @@ static PyObject *Vector_resized(VectorObject *self, PyObject *value)
   int vec_num;
   float *vec;
 
-  if ((vec_num = PyLong_AsLong(value)) == -1) {
+  if (((vec_num = PyC_Long_AsI32(value)) == -1) && PyErr_Occurred()) {
     return nullptr;
   }
 
   if (vec_num < 2) {
     PyErr_SetString(PyExc_RuntimeError, "Vector.resized(): invalid size");
+    return nullptr;
+  }
+
+  if (BaseMath_ReadCallback(self) == -1) {
     return nullptr;
   }
 
@@ -637,8 +641,11 @@ static PyObject *Vector_resized(VectorObject *self, PyObject *value)
     return nullptr;
   }
 
-  std::fill_n(vec, vec_num, 0.0f);
-  memcpy(vec, self->vec, self->vec_num * sizeof(float));
+  const int vec_num_copy = std::min(self->vec_num, vec_num);
+  memcpy(vec, self->vec, vec_num_copy * sizeof(float));
+  if (vec_num_copy != vec_num) {
+    std::fill_n(vec + vec_num_copy, vec_num - vec_num_copy, 0.0f);
+  }
 
   return Vector_CreatePyObject_alloc(vec, vec_num, nullptr);
 }
@@ -1215,17 +1222,17 @@ static PyObject *Vector_angle(VectorObject *self, PyObject *args)
     return nullptr;
   }
 
+  if (self->vec_num > 4) {
+    PyErr_SetString(PyExc_ValueError, "Vector must be 2D, 3D or 4D");
+    return nullptr;
+  }
+
   /* don't use clamped size, rule of thumb is vector sizes must match,
    * even though n this case 'w' is ignored */
   if (mathutils_array_parse(
           tvec, self->vec_num, self->vec_num, value, "Vector.angle(other), invalid 'other' arg") ==
       -1)
   {
-    return nullptr;
-  }
-
-  if (self->vec_num > 4) {
-    PyErr_SetString(PyExc_ValueError, "Vector must be 2D, 3D or 4D");
     return nullptr;
   }
 
@@ -1342,7 +1349,7 @@ PyDoc_STRVAR(
     "   .. note:: 2D vectors raise an :exc:`AttributeError`.\n");
 static PyObject *Vector_rotation_difference(VectorObject *self, PyObject *value)
 {
-  float quat[4], vec_a[3], vec_b[3];
+  float quat[4], vec_a[3], vec_b[MAX_DIMENSIONS];
 
   if (self->vec_num < 3 || self->vec_num > 4) {
     PyErr_SetString(PyExc_ValueError,
@@ -2977,8 +2984,9 @@ static int Vector_swizzle_set(VectorObject *self, PyObject *value, void *closure
 
   /* We must first copy current vec into tvec, else some org values may be lost.
    * See #31760.
-   * Assuming self->vec_num can't be higher than MAX_DIMENSIONS! */
-  memcpy(tvec, self->vec, self->vec_num * sizeof(float));
+   * Swizzle axes are limited to #MAX_DIMENSIONS, values after them are left as-is. */
+  const int tvec_num = std::min(self->vec_num, MAX_DIMENSIONS);
+  memcpy(tvec, self->vec, tvec_num * sizeof(float));
 
   while (swizzleClosure & SWIZZLE_VALID_AXIS) {
     axis_to = swizzleClosure & SWIZZLE_AXIS;
@@ -2989,7 +2997,7 @@ static int Vector_swizzle_set(VectorObject *self, PyObject *value, void *closure
 
   /* We must copy back the whole tvec into vec, else some changes may be lost (e.g. xz...).
    * See #31760. */
-  memcpy(self->vec, tvec, self->vec_num * sizeof(float));
+  memcpy(self->vec, tvec, tvec_num * sizeof(float));
   /* continue with BaseMathObject_WriteCallback at the end */
 
   if (BaseMath_WriteCallback(self) == -1) {

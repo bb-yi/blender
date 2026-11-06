@@ -165,6 +165,9 @@ static void file_exit(wmWindowManager *wm, ScrArea *area)
     sfile->previews_timer = nullptr;
   }
 
+  wmWindow *win = WM_window_find_by_area(wm, area);
+  file_params_smoothscroll_timer_clear(wm, win, sfile);
+
   ED_fileselect_exit(wm, sfile);
 }
 
@@ -391,7 +394,7 @@ static void file_listener(const wmSpaceTypeListenerParams *listener_params)
   /* context changes */
   switch (wmn->category) {
     case NC_UI:
-      if (wmn->data == ND_UI_LANG && sfile) {
+      if (wmn->data == ND_UI_LANG && sfile && sfile->files) {
         filelist_tag_force_reset(sfile->files);
       }
       break;
@@ -910,6 +913,13 @@ static void file_space_subtype_set(ScrArea *area, int value)
   for (ARegion &region : area->regionbase) {
     region.v2d.flag &= ~V2D_IS_INIT;
   }
+
+  /* Exit all data specific to the current browse mode when that changes. */
+  if (sfile->browse_mode != eFileBrowse_Mode(value)) {
+    wmWindowManager *wm = G_MAIN->wm.first();
+    file_exit(wm, area);
+  }
+
   sfile->browse_mode = eFileBrowse_Mode(value);
 }
 
@@ -1028,6 +1038,7 @@ void ED_spacetype_file()
 
   st->spaceid = SPACE_FILE;
   STRNCPY_UTF8(st->name, "File");
+  st->struct_size = sizeof(SpaceFile);
 
   st->create = file_create;
   st->free = file_free;

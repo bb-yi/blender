@@ -878,7 +878,6 @@ static void buttons_area_listener(const wmSpaceTypeListenerParams *params)
     case NC_BRUSH:
       buttons_area_redraw(area, BCONTEXT_TEXTURE);
       buttons_area_redraw(area, BCONTEXT_TOOL);
-      sbuts->preview = 1;
       break;
     case NC_TEXTURE:
     case NC_IMAGE:
@@ -1109,6 +1108,7 @@ void ED_spacetype_buttons()
 
   st->spaceid = SPACE_PROPERTIES;
   STRNCPY_UTF8(st->name, "Buttons");
+  st->struct_size = sizeof(SpaceProperties);
 
   st->create = buttons_create;
   st->free = buttons_free;

@@ -22,6 +22,7 @@
 #include "BLI_math_vector_c.hh"
 #include "BLI_offset_indices.hh"
 #include "BLI_ordered_edge.hh"
+#include "BLI_vector.hh"
 
 #include "BLT_translation.hh"
 
@@ -37,6 +38,8 @@
 
 #include "CLG_log.h"
 #include "IO_validate.hh"
+
+#include <algorithm>
 
 namespace blender {
 
@@ -725,11 +728,38 @@ static bool has_animated_geom_params(const ICompoundProperty arbGeomParams)
   return false;
 }
 
+/* Copy of #IPolyMeshSchema::getFaceSetNames(), to avoid ASAN false positive
+ * when the std::vector is passed from ASAN enabled Blender code to the
+ * Alembic library built without ASAN. */
+static Vector<std::string> get_face_set_names(const IPolyMeshSchema &schema)
+{
+  const IObject object = schema.getObject();
+
+  Vector<std::string> names;
+  for (size_t i = 0; i < object.getNumChildren(); i++) {
+    const Alembic::AbcCoreAbstract::ObjectHeader &header = object.getChildHeader(i);
+    if (IFaceSet::matches(header)) {
+      names.append(header.getName());
+    }
+  }
+
+  std::sort(names.begin(), names.end());
+  return names;
+}
+
 /* Specialization of #has_animations() as defined in abc_reader_object.h. */
 template<> bool has_animations(Alembic::AbcGeom::IPolyMeshSchema &schema, ImportSettings *settings)
 {
   if (settings->is_sequence || !schema.isConstant()) {
     return true;
+  }
+
+  for (const std::string &face_set_name : get_face_set_names(schema)) {
+    const IFaceSet face_set = schema.getFaceSet(face_set_name);
+    const IFaceSetSchema &face_set_schema = face_set.getSchema();
+    if (!face_set_schema.isConstant()) {
+      return true;
+    }
   }
 
   IV2fGeomParam uvsParam = schema.getUVsParam();
@@ -902,20 +932,20 @@ Mesh *AbcMeshReader::read_mesh(Mesh *existing_mesh,
                                     r_err_str,
                                     m_is_reading_a_file_sequence);
 
-  if (new_mesh != existing_mesh) {
-    /* Here we assume that the number of materials doesn't change, i.e. that
-     * the material slots that were created when the object was loaded from
-     * Alembic are still valid now. */
-    size_t num_faces = new_mesh->faces_num;
-    if (num_faces > 0) {
-      std::map<std::string, int> mat_map;
-      bke::MutableAttributeAccessor attributes = new_mesh->attributes_for_write();
-      bke::SpanAttributeWriter<int> material_indices =
-          attributes.lookup_or_add_for_write_span<int>("material_index", bke::AttrDomain::Face);
-      assign_facesets_to_material_indices(sample_sel, material_indices.span, mat_map);
-      material_indices.finish();
-    }
+  /* Here we assume that the number of materials doesn't change, i.e. that
+   * the material slots that were created when the object was loaded from
+   * Alembic are still valid now. */
+  size_t num_faces = new_mesh->faces_num;
+  if (num_faces > 0) {
+    std::map<std::string, int> mat_map;
+    bke::MutableAttributeAccessor attributes = new_mesh->attributes_for_write();
+    bke::SpanAttributeWriter<int> material_indices = attributes.lookup_or_add_for_write_span<int>(
+        "material_index", bke::AttrDomain::Face);
+    assign_facesets_to_material_indices(sample_sel, material_indices.span, mat_map);
+    material_indices.finish();
+  }
 
+  if (new_mesh != existing_mesh) {
     return new_mesh;
   }
 
@@ -926,14 +956,16 @@ void AbcMeshReader::assign_facesets_to_material_indices(const ISampleSelector &s
                                                         MutableSpan<int> material_indices,
                                                         std::map<std::string, int> &r_mat_map)
 {
-  std::vector<std::string> face_sets;
-  m_schema.getFaceSetNames(face_sets);
+  const Vector<std::string> face_sets = get_face_set_names(m_schema);
 
-  if (face_sets.empty()) {
+  if (face_sets.is_empty()) {
     return;
   }
 
   int current_mat = 0;
+
+  /* Avoid preserving old assignments. */
+  material_indices.fill(0);
 
   for (const std::string &grp_name : face_sets) {
     if (!r_mat_map.contains(grp_name)) {

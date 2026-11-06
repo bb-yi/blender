@@ -131,14 +131,22 @@ void surf_depth([[resource_table]] KernelGlobals &kg,
 
   if constexpr (with_velocity) {
     if (pipe.use_velocity) [[static_branch]] {
+      const ViewMatrices view = views.get(0);
+      float3 P_prv = interp.P + motion.prev;
+      float3 P = interp.P;
+      float3 P_nxt = interp.P + motion.next;
 #  ifdef MAT_DEPTH_OFFSET
-      frag_out.velocity = geo_vel.camera.surface_velocity_depth_offset(
-          interp.P + motion.prev, interp.P, interp.P + motion.next, depth_offset);
-#  else
-      frag_out.velocity = geo_vel.camera.surface_velocity(
-          interp.P + motion.prev, interp.P, interp.P + motion.next);
+      P_prv = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_prev.viewmat,
+                                                  geo_vel.camera.camera_prev.viewinv,
+                                                  P_prv, depth_offset);
+      P = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_curr.viewmat,
+                                              geo_vel.camera.camera_curr.viewinv,
+                                              P, depth_offset);
+      P_nxt = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_next.viewmat,
+                                                  geo_vel.camera.camera_next.viewinv,
+                                                  P_nxt, depth_offset);
 #  endif
-      frag_out.velocity = velocity::pack(frag_out.velocity);
+      frag_out.velocity = velocity::pack(geo_vel.camera.surface_velocity_local(view, P_prv, P, P_nxt));
     }
   }
 

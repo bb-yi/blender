@@ -899,7 +899,8 @@ static void rna_uiTemplateFilePath(Layout *layout,
                                    const char *text,
                                    const char *text_ctxt,
                                    bool translate,
-                                   const char *placeholder)
+                                   const char *placeholder,
+                                   const bool split_name)
 {
   PropertyRNA *prop = RNA_struct_find_property(ptr, propname);
 
@@ -918,8 +919,15 @@ static void rna_uiTemplateFilePath(Layout *layout,
     placeholder_final = rna_translate_ui_text(placeholder, text_ctxt, nullptr, prop, translate);
   }
 
-  template_filepath(
-      layout, C, ptr, propname, pathselect_op, filter_glob, text_final, placeholder_final);
+  template_filepath(layout,
+                    C,
+                    ptr,
+                    propname,
+                    pathselect_op,
+                    filter_glob,
+                    text_final,
+                    placeholder_final,
+                    split_name);
 }
 
 void rna_template_list(Layout *layout,
@@ -1556,8 +1564,12 @@ void RNA_api_ui_layout(StructRNA *srna)
       "",
       "Identifier of the boolean property that determines whether the panel is open or closed");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
-  parm = RNA_def_pointer(func, "layout_header", "UILayout", "", "Sub-layout to put items in");
-  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
+  parm = RNA_def_pointer(
+      func,
+      "layout_header",
+      "UILayout",
+      "",
+      "Sub-layout to put items in. Will be none if the property does not exists.");
   RNA_def_function_output(func, parm);
   parm = RNA_def_pointer(func,
                          "layout_body",
@@ -1851,7 +1863,7 @@ void RNA_api_ui_layout(StructRNA *srna)
                     -FLT_MAX,
                     FLT_MAX,
                     "Search Weight",
-                    "Influences the sorting when using menu-seach",
+                    "Influences the sorting when using menu-search",
                     -FLT_MAX,
                     FLT_MAX);
     }
@@ -2201,6 +2213,12 @@ void RNA_api_ui_layout(StructRNA *srna)
                         "",
                         "Placeholder text to display in the text widget when no path is set");
   RNA_def_property_clear_flag(prop, PROP_NEVER_NULL);
+  RNA_def_boolean(func,
+                  "split_name",
+                  false,
+                  "",
+                  "Edit the parent directory and the file or directory name in separate text "
+                  "widgets");
 
   func = RNA_def_function(srna, "template_path_builder", "rna_uiTemplatePathBuilder");
   parm = RNA_def_pointer(func, "data", "AnyType", "", "Data from which to take property");
@@ -2734,6 +2752,11 @@ void RNA_api_ui_layout(StructRNA *srna)
 
   func = RNA_def_function(srna, "template_bone_collection_tree", "template_bone_collection_tree");
   RNA_def_function_ui_description(func, "Show bone collections tree");
+  RNA_def_function_flag(func, FUNC_USE_CONTEXT);
+
+  func = RNA_def_function(
+      srna, "template_project_asset_libraries_tree", "template_project_asset_libraries_tree");
+  RNA_def_function_ui_description(func, "Show current project's asset library tree");
   RNA_def_function_flag(func, FUNC_USE_CONTEXT);
 
   func = RNA_def_function(

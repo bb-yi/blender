@@ -431,6 +431,9 @@ static void wm_file_read_setup_wm_use_new(bContext *C,
   BKE_libblock_free_data(&old_wm->id, false);
   BKE_libblock_free_data_py(&old_wm->id);
   MEM_delete(old_wm);
+
+  wmWindow *win = wm->runtime->winactive ? wm->runtime->winactive : wm->windows.first();
+  wm_window_make_drawable(wm, win);
 }
 
 /**
@@ -855,13 +858,20 @@ static void wm_file_read_post(bContext *C,
 
 static void wm_read_callback_pre_wrapper(bContext *C, const char *filepath)
 {
+  Main *bmain = CTX_data_main(C);
   /* NOTE: either #BKE_CB_EVT_LOAD_POST or #BKE_CB_EVT_LOAD_POST_FAIL must run.
    * Runs at the end of this function, don't return beforehand. */
-  BKE_callback_exec_string(CTX_data_main(C), filepath, BKE_CB_EVT_LOAD_PRE);
+  BKE_callback_exec_string(bmain, filepath, BKE_CB_EVT_LOAD_PRE);
 
-  /* The handlers above switch to the project of the new file, immediately update
+  /* Auto save (if enabled) the project config and then see if we should load in a
+   * new project if the project root path has changed.
+   */
+  BKE_blender_project_config_autosave(bmain);
+  BKE_blender_project_refresh(bmain, filepath);
+
+  /* The function above switch to the project of the new file, immediately update
    * color management to match as blend file read needs the project config. */
-  IMB_colormanagement_project_read_post(CTX_data_main(C));
+  IMB_colormanagement_project_read_post(bmain);
 }
 
 static void wm_read_callback_post_wrapper(bContext *C, const char *filepath, const bool success)
@@ -1393,6 +1403,11 @@ void wm_homefile_read_ex(bContext *C,
         skip_flags |= BLO_READ_SKIP_USERDEF;
       }
     }
+  }
+
+  /* Open last project on startup. */
+  if (params_homefile->is_first_time && use_data && wm_init_last_project_on_startup(bmain)) {
+    IMB_colormanagement_project_read_post(bmain);
   }
 
   if ((app_template != nullptr) && (app_template[0] != '\0')) {
@@ -2316,8 +2331,14 @@ static bool wm_file_write(bContext *C,
   BKE_callback_exec_string(
       bmain, filepath, success ? BKE_CB_EVT_SAVE_POST : BKE_CB_EVT_SAVE_POST_FAIL);
 
+  /* Auto save (if enabled) the project config and then see if we should load in a
+   * new project if the project root path has changed.
+   */
+  BKE_blender_project_config_autosave(bmain);
+  BKE_blender_project_refresh(bmain, bmain->filepath);
+
   /* Prevent background mode scripts from clobbering history.
-   * After SAVE_POST which activates the project. */
+   * After BKE_blender_project_refresh which activates the project. */
   const bool do_history_file_update = (G.background == false) &&
                                       (CTX_wm_manager(C)->op_undo_depth == 0);
   if (success && do_history_file_update) {
@@ -3465,7 +3486,8 @@ static bool wm_open_mainfile_check(bContext * /*C*/, wmOperator *op)
 
   /* Excluded paths can't be trusted, unless the command line overrides the preference. */
   if (((U.flag & USER_SCRIPT_AUTOEXEC_DISABLE) == 0) && !G.autoexec_override.has_value()) {
-    if (BKE_autoexec_match(filepath, true, true)) {
+    /* The file selector may start without a path, e.g. an unsaved session. */
+    if ((filepath[0] != '\0') && BKE_autoexec_match(filepath, true, true)) {
       RNA_property_boolean_set(op->ptr, prop, false);
       is_untrusted = true;
     }

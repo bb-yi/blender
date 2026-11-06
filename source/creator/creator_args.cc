@@ -784,6 +784,7 @@ static void print_help(bArgs *ba, bool all)
   if (defs.with_vulkan_backend) {
     BLI_args_print_arg_doc(ba, "--debug-gpu-vulkan-local-read");
   }
+  BLI_args_print_arg_doc(ba, "--debug-gpu-no-hw-raytracing");
   BLI_args_print_arg_doc(ba, "--debug-wm");
   if (defs.with_xr_openxr) {
     BLI_args_print_arg_doc(ba, "--debug-xr");
@@ -1454,12 +1455,15 @@ static const char arg_handle_debug_mode_generic_set_doc_gpu_device_no_fallback[]
     "Fail instead of falling back when '--gpu-device' does not match a usable Vulkan device.";
 static const char arg_handle_debug_mode_generic_set_doc_gpu_backend_no_fallback[] =
     "\n\t"
-    "Fail instead of falling back to another GPU backend when the selected one is not supported. "
-    "Skips the GPU backend support check.";
+    "Fail instead of falling back to another GPU backend when the selected one is not supported.\n"
+    "\tSkips the GPU backend support check.";
+static const char arg_handle_debug_mode_generic_set_doc_gpu_no_hw_raytracing_set_doc[] =
+    "\n\t"
+    "Force disable hardware raytracing support (Vulkan only).";
 
 static int arg_handle_debug_mode_generic_set(int /*argc*/, const char ** /*argv*/, void *data)
 {
-  G.debug |= POINTER_AS_INT(data);
+  G.debug |= reinterpret_cast<uint64_t>(data);
   return 0;
 }
 
@@ -3371,6 +3375,11 @@ void main_args_setup(bContext *C, bArgs *ba, bool all)
                  CB_EX(arg_handle_debug_mode_generic_set, gpu_force_vulkan_local_read),
                  reinterpret_cast<void *>(G_DEBUG_GPU_FORCE_VULKAN_LOCAL_READ));
   }
+  BLI_args_add(ba,
+               nullptr,
+               "--debug-gpu-no-hw-raytracing",
+               CB_EX(arg_handle_debug_mode_generic_set, gpu_no_hw_raytracing_set_doc),
+               reinterpret_cast<void *>(G_DEBUG_GPU_NO_HW_RAYTRACING));
   BLI_args_add(ba, nullptr, "--debug-exit-on-error", CB(arg_handle_debug_exit_on_error), nullptr);
 
   BLI_args_add(ba, nullptr, "--verbose", CB(arg_handle_verbosity_set), nullptr);

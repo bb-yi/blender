@@ -214,7 +214,7 @@ static void gpu_node_input_link(GPUNode *node, GPUNodeLink *link, const GPUType 
     name = outnode->name;
     input = outnode->inputs.first();
 
-    if (STR_ELEM(name, "set_value", "set_rgb", "set_rgba") && (input->type == type)) {
+    if (STR_ELEM(name, "set_value", "set_vec2", "set_rgb", "set_rgba") && (input->type == type)) {
       input = MEM_dupalloc(outnode->inputs.first());
 
       switch (input->source) {
@@ -440,34 +440,27 @@ GPUNodeLink *GPU_uniform(const GPUNodeStack &stack)
       stack.value);
 }
 
-static const char *gpu_uniform_set_function_from_type(eNodeSocketDatatype type)
+static const char *gpu_uniform_set_function_from_type(GPUType type)
 {
   switch (type) {
-    case SOCK_FLOAT:
+    case GPU_FLOAT:
       return "set_value";
-    case SOCK_INT:
+    case GPU_INT:
       return "set_int";
-    case SOCK_BOOLEAN:
+    case GPU_BOOL:
       return "set_bool";
-    case SOCK_VECTOR:
+    case GPU_VEC2:
+      return "set_vec2";
+    case GPU_VEC3:
       return "set_rgb";
-    case SOCK_RGBA:
+    case GPU_VEC4:
       return "set_rgba";
     default:
-      BLI_assert_msg(0, "No gpu function for non-supported eNodeSocketDatatype");
-      return nullptr;
-  }
-}
-
-static const char *gpu_uniform_set_function_from_socket(const bNodeSocket &socket)
-{
-  if (socket.type == SOCK_VECTOR) {
-    const bNodeSocketValueVector *value = static_cast<const bNodeSocketValueVector *>(
-        socket.default_value);
-    return (value != nullptr && value->dimensions == 4) ? "set_rgba" : "set_rgb";
+      break;
   }
 
-  return gpu_uniform_set_function_from_type(eNodeSocketDatatype(socket.type));
+  BLI_assert_msg(0, "No gpu function for non-supported GPUType");
+  return nullptr;
 }
 
 /**
@@ -503,10 +496,7 @@ static GPUNodeLink *gpu_uniformbuffer_link(GPUMaterial *mat,
   GPUNodeLink *link = GPU_uniform(*stack);
 
   if (in_out == SOCK_IN) {
-    GPU_link(mat,
-             gpu_uniform_set_function_from_socket(*socket),
-             link,
-             &stack->link);
+    GPU_link(mat, gpu_uniform_set_function_from_type(stack->type), link, &stack->link);
   }
 
   return link;

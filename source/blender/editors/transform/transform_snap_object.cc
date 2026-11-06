@@ -897,7 +897,7 @@ void cb_snap_face_midpoint(void *userdata,
 
 static eSnapMode snap_polygon(SnapObjectContext *sctx, eSnapMode snap_to_flag)
 {
-  if (sctx->ret.ob->type != OB_MESH || !sctx->ret.data || GS(sctx->ret.data->name) != ID_ME) {
+  if (!sctx->ret.data || GS(sctx->ret.data->name) != ID_ME) {
     return SCE_SNAP_TO_NONE;
   }
 
@@ -907,7 +907,7 @@ static eSnapMode snap_polygon(SnapObjectContext *sctx, eSnapMode snap_to_flag)
 
 static eSnapMode snap_edge_points(SnapObjectContext *sctx, const float dist_px_sq_orig)
 {
-  if (sctx->ret.ob->type != OB_MESH || !sctx->ret.data || GS(sctx->ret.data->name) != ID_ME) {
+  if (!sctx->ret.data || GS(sctx->ret.data->name) != ID_ME) {
     return SCE_SNAP_TO_EDGE;
   }
 
@@ -984,7 +984,10 @@ static eSnapMode snap_obj_fn(SnapObjectContext *sctx,
        * #SNAP_GEOM_FINAL. */
       retval = SCE_SNAP_TO_NONE;
     }
-    retval = snap_object_mesh(sctx, ob_eval, ob_data, obmat, sctx->runtime.snap_to_flag, use_hide);
+    else {
+      retval = snap_object_mesh(
+          sctx, ob_eval, ob_data, obmat, sctx->runtime.snap_to_flag, use_hide);
+    }
   }
 
   switch (ob_eval->type) {
@@ -1100,7 +1103,14 @@ void snap_object_context_destroy(SnapObjectContext *sctx)
 void snap_object_context_set_editmesh_target(SnapObjectContext *sctx,
                                              const SnapEditMeshTarget target)
 {
+  if (sctx->editmesh_target == target) {
+    return;
+  }
   sctx->editmesh_target = target;
+
+  /* Rebuild the meshes too, as they are not checked for updates during transform. When snapping
+   * to the base, the selection is restored to its original positions. */
+  sctx->editmesh_caches.clear();
 }
 
 static bool snap_object_context_runtime_init(SnapObjectContext *sctx,

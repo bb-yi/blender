@@ -280,13 +280,13 @@ static void outliner_main_region_listener(const wmRegionListenerParams *params)
           ED_region_tag_redraw(region);
           break;
         case ND_KEYFRAME:
-          if (!ELEM(space_outliner->outlinevis, SO_ID_ORPHANS, SO_LIBRARIES)) {
+          if (space_outliner->outlinevis != SO_ID_ORPHANS) {
             if ((space_outliner->outlinevis == SO_DATA_API) ||
                 ELEM(wmn->action, NA_ADDED, NA_REMOVED))
             {
               ED_region_tag_redraw(region);
             }
-            else {
+            else if (space_outliner->outlinevis != SO_LIBRARIES) {
               ED_region_tag_redraw_no_rebuild(region);
             }
           }
@@ -343,6 +343,13 @@ static void outliner_main_region_listener(const wmRegionListenerParams *params)
           ELEM(space_outliner->outlinevis, SO_LIBRARIES, SO_DATA_API))
       {
         ED_region_tag_redraw(region);
+      }
+      break;
+    case NC_BRUSH:
+      if (wmn->action == NA_SELECTED) {
+        if (space_outliner->outlinevis == SO_DATA_API) {
+          ED_region_tag_redraw(region);
+        }
       }
       break;
   }
@@ -695,6 +702,7 @@ void ED_spacetype_outliner()
 
   st->spaceid = SPACE_OUTLINER;
   STRNCPY_UTF8(st->name, "Outliner");
+  st->struct_size = sizeof(SpaceOutliner);
 
   st->create = outliner_create;
   st->free = outliner_free;

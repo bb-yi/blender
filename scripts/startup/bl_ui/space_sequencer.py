@@ -770,8 +770,7 @@ class SEQUENCER_MT_add_clip(Menu):
         layout = self.layout
         layout.operator_context = 'INVOKE_REGION_WIN'
 
-        for clip in bpy.data.movieclips:
-            layout.operator("sequencer.movieclip_strip_add", text=clip.name, translate=False).clip = clip.name
+        layout.operator_enum("sequencer.movieclip_strip_add", "clip")
 
 
 class SEQUENCER_MT_add_mask(Menu):
@@ -781,8 +780,7 @@ class SEQUENCER_MT_add_mask(Menu):
         layout = self.layout
         layout.operator_context = 'INVOKE_REGION_WIN'
 
-        for mask in bpy.data.masks:
-            layout.operator("sequencer.mask_strip_add", text=mask.name, translate=False).mask = mask.name
+        layout.operator_enum("sequencer.mask_strip_add", "mask")
 
 
 class SEQUENCER_MT_add_transitions(Menu):
@@ -1497,7 +1495,7 @@ class SEQUENCER_MT_view_pie(Menu):
         pie = layout.menu_pie()
         pie.operator("sequencer.view_all")
         pie.operator("sequencer.view_selected", text="Frame Selected", icon='ZOOM_SELECTED')
-        pie.separator()
+        pie.operator("sequencer.view_frame")
         if context.sequencer_scene.use_preview_range:
             pie.operator("anim.scene_range_frame", text="Frame Preview Range")
         else:
@@ -2054,7 +2052,7 @@ class SEQUENCER_PT_edit_mode(Panel):
 
         col.prop(sequencer_tool_settings, "ripple_insert")
 
-        col = layout.column(heading="Delete")
+        col = layout.column(heading="Remove")
         col.use_property_split = True
 
         col.prop(sequencer_tool_settings, "ripple_clear_ranges")

@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.3.0 Beta (b'8f7aae950179')\n"
+"Project-Id-Version: Blender 5.3.0 Beta (b'9a146ef5783c')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-12 07:32+0000\n"
+"POT-Creation-Date: 2026-11-02 10:58+0000\n"
 "PO-Revision-Date: 2026-02-16 18:12+0000\n"
 "Last-Translator: Deniz Jones <sdfoakes@gmail.com>\n"
 "Language-Team: English (United Kingdom) <https://translate.blender.org/projects/blender-ui/ui/en_GB/>\n"
@@ -34674,304 +34674,304 @@ msgid "Editor menu containing buttons"
 msgstr "Editor menu containing buttons"
 
 
-msgid "Light"
-msgstr "Light"
-
-
-msgid "Metaball"
-msgstr "Metaball"
-
-
-msgid "Select More/Less"
-msgstr "Select More/Less"
-
-
-msgid "View Regions"
-msgstr "View Regions"
-
-
-msgid "Align View to Active"
-msgstr "Align View to Active"
-
-
-msgid "Align View"
-msgstr "Align View"
-
-
-msgid "Read"
-msgstr "Read"
-
-
-msgid "Clean Up"
-msgstr "Clean Up"
-
-
-msgid "Math"
-msgstr "Maths"
-
-
-msgid "Navigation"
-msgstr "Navigation"
-
-
 msgid "Show/Hide"
 msgstr "Show/Hide"
-
-
-msgid "Write"
-msgstr "Write"
-
-
-msgid "Viewpoint"
-msgstr "Viewpoint"
-
-
-msgid "Hooks"
-msgstr "Hooks"
-
-
-msgid "Link/Transfer Data"
-msgstr "Link/Transfer Data"
-
-
-msgid "Primitives"
-msgstr "Primitives"
-
-
-msgid "Deprecated"
-msgstr "Deprecated"
-
-
-msgid "Utilities"
-msgstr "Utilities"
-
-
-msgid "Local View"
-msgstr "Local View"
-
-
-msgid "Convert"
-msgstr "Convert"
-
-
-msgid "Set Face Strength"
-msgstr "Set Face Strength"
-
-
-msgid "Select by Face Strength"
-msgstr "Select by Face Strength"
-
-
-msgid "Face Data"
-msgstr "Face Data"
-
-
-msgid "Make Single User"
-msgstr "Make Single User"
-
-
-msgid "Import"
-msgstr "Import"
-
-
-msgid "Sample"
-msgstr "Sample"
-
-
-msgid "Asset"
-msgstr "Asset"
-
-
-msgid "Kerning"
-msgstr "Kerning"
-
-
-msgid "Layout"
-msgstr "Layout"
-
-
-msgid "Special Characters"
-msgstr "Special Characters"
-
-
-msgid "Linked"
-msgstr "Linked"
 
 
 msgid "Creative"
 msgstr "Creative"
 
 
-msgid "Mesh Select Mode"
-msgstr "Mesh Select Mode"
+msgid "Special Characters"
+msgstr "Special Characters"
 
 
-msgid "Quick Effects"
-msgstr "Quick Effects"
+msgid "Kerning"
+msgstr "Kerning"
 
 
-msgid "Disable Bone Options"
-msgstr "Disable Bone Options"
-
-
-msgid "Enable Bone Options"
-msgstr "Enable Bone Options"
-
-
-msgid "Toggle Bone Options"
-msgstr "Toggle Bone Options"
-
-
-msgid "Instances"
-msgstr "Instances"
-
-
-msgid "UV"
-msgstr "UV"
-
-
-msgid "Gizmo"
-msgstr "Gizmo"
-
-
-msgid "Apply"
-msgstr "Apply"
+msgid "Metaball"
+msgstr "Metaball"
 
 
 msgid "Names"
 msgstr "Names"
 
 
-msgid "Bone Collections"
-msgstr "Bone Collections"
-
-
-msgid "Keying"
-msgstr "Keying"
-
-
-msgid "Adjust"
-msgstr "Adjust"
-
-
-msgid "Light Probe"
-msgstr "Light Probe"
-
-
-msgid "Propagate"
-msgstr "Propagate"
-
-
-msgid "In-Betweens"
-msgstr "In-Betweens"
-
-
-msgid "UV Mapping"
-msgstr "UV Mapping"
-
-
-msgid "Clear Transform"
-msgstr "Clear Transform"
-
-
-msgid "Snap"
-msgstr "Snap"
-
-
-msgid "Mirror"
-msgstr "Mirror"
-
-
-msgid "Assign Material"
-msgstr "Assign Material"
-
-
-msgid "Random Mask"
-msgstr "Random Mask"
-
-
-msgid "Face Sets Init"
-msgstr "Face Sets Init"
-
-
-msgid "Sculpt Set Pivot"
-msgstr "Sculpt Set Pivot"
-
-
-msgid "Mask Edit"
-msgstr "Mask Edit"
-
-
-msgid "Vertex Group Locks"
-msgstr "Vertex Group Locks"
-
-
-msgid "Trim/Add"
-msgstr "Trim/Add"
-
-
-msgid "Select Loops"
-msgstr "Select Loops"
-
-
 msgid "Bone Roll"
 msgstr "Bone Roll"
 
 
-msgid "Face Sets Edit"
-msgstr "Face Sets Edit"
-
-
-msgid "Select Linked"
-msgstr "Select Linked"
-
-
-msgid "Automasking"
-msgstr "Automasking"
-
-
-msgid "Proportional Editing Falloff"
-msgstr "Proportional Editing Falloff"
-
-
-msgid "Render Preview"
-msgstr "Render Preview"
-
-
-msgid "Track"
-msgstr "Track"
-
-
-msgid "Select All by Trait"
-msgstr "Select All by Trait"
-
-
-msgid "Select Similar"
-msgstr "Select Similar"
-
-
-msgid "Relations"
-msgstr "Relations"
-
-
-msgid "Add Image"
-msgstr "Add Image"
+msgid "Clean Up"
+msgstr "Clean Up"
 
 
 msgid "Pivot Point"
 msgstr "Pivot Point"
 
 
-msgid "Tracking"
-msgstr "Tracking"
+msgid "Snap"
+msgstr "Snap"
+
+
+msgid "Proportional Editing Falloff"
+msgstr "Proportional Editing Falloff"
+
+
+msgid "Mask Edit"
+msgstr "Mask Edit"
+
+
+msgid "Automasking"
+msgstr "Automasking"
+
+
+msgid "Face Sets Edit"
+msgstr "Face Sets Edit"
+
+
+msgid "Vertex Group Locks"
+msgstr "Vertex Group Locks"
+
+
+msgid "Math"
+msgstr "Maths"
+
+
+msgid "Utilities"
+msgstr "Utilities"
+
+
+msgid "Mirror"
+msgstr "Mirror"
+
+
+msgid "UV Mapping"
+msgstr "UV Mapping"
+
+
+msgid "Local View"
+msgstr "Local View"
+
+
+msgid "Read"
+msgstr "Read"
+
+
+msgid "Viewpoint"
+msgstr "Viewpoint"
+
+
+msgid "Sample"
+msgstr "Sample"
+
+
+msgid "Navigation"
+msgstr "Navigation"
+
+
+msgid "Write"
+msgstr "Write"
+
+
+msgid "Align View"
+msgstr "Align View"
+
+
+msgid "Align View to Active"
+msgstr "Align View to Active"
+
+
+msgid "Primitives"
+msgstr "Primitives"
+
+
+msgid "View Regions"
+msgstr "View Regions"
+
+
+msgid "Select More/Less"
+msgstr "Select More/Less"
+
+
+msgid "Select Similar"
+msgstr "Select Similar"
+
+
+msgid "Select All by Trait"
+msgstr "Select All by Trait"
+
+
+msgid "Select Linked"
+msgstr "Select Linked"
+
+
+msgid "Select Loops"
+msgstr "Select Loops"
+
+
+msgid "Gizmo"
+msgstr "Gizmo"
+
+
+msgid "Instances"
+msgstr "Instances"
+
+
+msgid "Assign Material"
+msgstr "Assign Material"
+
+
+msgid "Import"
+msgstr "Import"
+
+
+msgid "Deprecated"
+msgstr "Deprecated"
+
+
+msgid "Light"
+msgstr "Light"
+
+
+msgid "Render Preview"
+msgstr "Render Preview"
+
+
+msgid "Light Probe"
+msgstr "Light Probe"
+
+
+msgid "UV"
+msgstr "UV"
+
+
+msgid "Add Image"
+msgstr "Add Image"
+
+
+msgid "Relations"
+msgstr "Relations"
 
 
 msgid "Rigid Body"
 msgstr "Rigid Body"
 
 
+msgid "Apply"
+msgstr "Apply"
+
+
+msgid "Track"
+msgstr "Track"
+
+
+msgid "Quick Effects"
+msgstr "Quick Effects"
+
+
+msgid "Asset"
+msgstr "Asset"
+
+
+msgid "Make Single User"
+msgstr "Make Single User"
+
+
+msgid "Convert"
+msgstr "Convert"
+
+
+msgid "Link/Transfer Data"
+msgstr "Link/Transfer Data"
+
+
+msgid "Hooks"
+msgstr "Hooks"
+
+
+msgid "Trim/Add"
+msgstr "Trim/Add"
+
+
+msgid "Sculpt Set Pivot"
+msgstr "Sculpt Set Pivot"
+
+
+msgid "Face Sets Init"
+msgstr "Face Sets Init"
+
+
+msgid "Random Mask"
+msgstr "Random Mask"
+
+
+msgid "Clear Transform"
+msgstr "Clear Transform"
+
+
+msgid "In-Betweens"
+msgstr "In-Betweens"
+
+
+msgid "Propagate"
+msgstr "Propagate"
+
+
+msgid "Bone Collections"
+msgstr "Bone Collections"
+
+
+msgid "Linked"
+msgstr "Linked"
+
+
+msgid "Layout"
+msgstr "Layout"
+
+
+msgid "Toggle Bone Options"
+msgstr "Toggle Bone Options"
+
+
+msgid "Enable Bone Options"
+msgstr "Enable Bone Options"
+
+
+msgid "Disable Bone Options"
+msgstr "Disable Bone Options"
+
+
+msgid "Mesh Select Mode"
+msgstr "Mesh Select Mode"
+
+
+msgid "Face Data"
+msgstr "Face Data"
+
+
+msgid "Select by Face Strength"
+msgstr "Select by Face Strength"
+
+
+msgid "Set Face Strength"
+msgstr "Set Face Strength"
+
+
+msgid "Adjust"
+msgstr "Adjust"
+
+
+msgid "Keying"
+msgstr "Keying"
+
+
 msgid "Merge"
 msgstr "Merge"
+
+
+msgid "Tracking"
+msgstr "Tracking"
 
 
 msgid "Keyframe Insert Pie"
@@ -52790,15 +52790,6 @@ msgid "Unassign Slot"
 msgstr "Unassign Slot"
 
 
-msgid "Update f-curves/drivers affecting Transform constraints (use it with files from 2.70 and earlier)"
-msgstr "Update f-curves/drivers affecting Transform constraints (use it with files from 2.70 and earlier)"
-
-
-msgctxt "Operator"
-msgid "Update Animated Transform Constraints"
-msgstr "Update Animated Transform Constraints"
-
-
 msgctxt "Operator"
 msgid "Version Bone Hide Property"
 msgstr "Version Bone Hide Property"
@@ -54583,11 +54574,6 @@ msgstr "Load and apply a Blender XML theme file"
 msgctxt "Operator"
 msgid "Install Theme..."
 msgstr "Install Theme..."
-
-
-msgctxt "Operator"
-msgid "Add Asset Library"
-msgstr "Add Asset Library"
 
 
 msgid "Add or remove a white balance preset"
@@ -56961,18 +56947,6 @@ msgstr "Set Start Frame"
 
 msgid "Set the current frame as the preview or scene start frame"
 msgstr "Set the current frame as the preview or scene start frame"
-
-
-msgid "Convert to Radians"
-msgstr "Convert to Radians"
-
-
-msgid ""
-"Convert f-curves/drivers affecting rotations to radians.\n"
-"Warning: Use this only once"
-msgstr ""
-"Convert f-curves/drivers affecting rotations to radians.\n"
-"Warning: Use this only once"
 
 
 msgid "Moves any F-Curves for the `hide` property of selected armatures into the action of the object. This will only operate on the first layer and strip of the action"
@@ -61929,14 +61903,6 @@ msgid "Export full hierarchy, including intermediate collections"
 msgstr "Export full hierarchy, including intermediate collections"
 
 
-msgid "Create WebP"
-msgstr "Create WebP"
-
-
-msgid "Creates WebP textures for every texture. For already WebP textures, nothing happens"
-msgstr "Creates WebP textures for every texture. For already WebP textures, nothing happens"
-
-
 msgid "Output format for images. PNG is lossless and generally preferred, but JPEG might be preferable for web applications due to the smaller file size. Alternatively they can be omitted if they are not needed"
 msgstr "Output format for images. PNG is lossless and generally preferred, but JPEG might be preferable for web applications due to the smaller file size. Alternatively they can be omitted if they are not needed"
 
@@ -61971,14 +61937,6 @@ msgstr "Image Quality"
 
 msgid "Quality of image export"
 msgstr "Quality of image export"
-
-
-msgid "WebP Fallback"
-msgstr "WebP Fallback"
-
-
-msgid "For all WebP textures, create a PNG fallback texture"
-msgstr "For all WebP textures, create a PNG fallback texture"
 
 
 msgid "Lighting Mode"
@@ -79146,6 +79104,11 @@ msgid "Remove existing template with the same ID"
 msgstr "Remove existing template with the same ID"
 
 
+msgctxt "Operator"
+msgid "Add Asset Library"
+msgstr "Add Asset Library"
+
+
 msgid "Add a directory to be used by the Asset Browser as source of assets"
 msgstr "Add a directory to be used by the Asset Browser as source of assets"
 
@@ -90868,72 +90831,68 @@ msgid "Panel containing UI elements"
 msgstr "Panel containing UI elements"
 
 
-msgid "Grease Pencil Options"
-msgstr "Grease Pencil Options"
+msgid "Active Tool"
+msgstr "Active Tool"
 
 
-msgid "glTF Material Variants"
-msgstr "glTF Material Variants"
-
-
-msgid "Quad View"
-msgstr "Quad View"
-
-
-msgid "glTF Variants"
-msgstr "glTF Variants"
-
-
-msgid "Measurement"
-msgstr "Measurement"
-
-
-msgid "Mesh Edit Mode"
-msgstr "Mesh Edit Mode"
-
-
-msgid "VR"
-msgstr "VR"
-
-
-msgid "VR Info"
-msgstr "VR Info"
+msgid "View Lock"
+msgstr "View Lock"
 
 
 msgid "Selectability & Visibility"
 msgstr "Selectability & Visibility"
 
 
-msgid "Auto-Masking"
-msgstr "Auto-Masking"
+msgid "Shadow Settings"
+msgstr "Shadow Settings"
 
 
-msgid "Active Tool"
-msgstr "Active Tool"
+msgid "SSAO Settings"
+msgstr "SSAO Settings"
 
 
-msgid "Multi Frame"
-msgstr "Multi Frame"
+msgid "Cavity"
+msgstr "Cavity"
 
 
-msgid "Stereoscopy"
-msgstr "Stereoscopy"
+msgid "Render Pass"
+msgstr "Render Pass"
 
 
-msgid "Transform Orientations"
-msgstr "Transform Orientations"
+msgid "Overlays"
+msgstr "Overlays"
 
 
-msgid "Onion Skin"
-msgstr "Onion Skin"
+msgid "Guides"
+msgstr "Guides"
+
+
+msgid "Viewer Node"
+msgstr "Viewer Node"
 
 
 msgid "Motion Tracking"
 msgstr "Motion Tracking"
 
 
-msgid "Viewer Node"
-msgstr "Viewer Node"
+msgid "Mesh Edit Mode"
+msgstr "Mesh Edit Mode"
+
+
+msgid "Measurement"
+msgstr "Measurement"
+
+
+msgid "Curve Edit Mode"
+msgstr "Curve Edit Mode"
+
+
+msgid "Curves Edit Mode"
+msgstr "Curves Edit Mode"
+
+
+msgid "Transform Orientations"
+msgstr "Transform Orientations"
 
 
 msgid "Stroke Placement"
@@ -90944,48 +90903,60 @@ msgid "Drawing Plane"
 msgstr "Drawing Plane"
 
 
-msgid "Cavity"
-msgstr "Cavity"
+msgid "Grease Pencil Options"
+msgstr "Grease Pencil Options"
 
 
-msgid "SSAO Settings"
-msgstr "SSAO Settings"
+msgid "Quad View"
+msgstr "Quad View"
 
 
-msgid "Guides"
-msgstr "Guides"
+msgid "Onion Skin"
+msgstr "Onion Skin"
 
 
-msgid "Shadow Settings"
-msgstr "Shadow Settings"
+msgid "Stereoscopy"
+msgstr "Stereoscopy"
 
 
-msgid "Curves Edit Mode"
-msgstr "Curves Edit Mode"
+msgid "Multi Frame"
+msgstr "Multi Frame"
 
 
-msgid "Curve Edit Mode"
-msgstr "Curve Edit Mode"
+msgid "Auto-Masking"
+msgstr "Auto-Masking"
 
 
-msgid "View Lock"
-msgstr "View Lock"
+msgid "Curves Sculpt Add Curve Options"
+msgstr "Curves Sculpt Add Curve Options"
 
 
-msgid "Viewport Debug"
-msgstr "Viewport Debug"
-
-
-msgid "Overlays"
-msgstr "Overlays"
+msgid "Curves Sculpt Parameter Falloff"
+msgstr "Curves Sculpt Parameter Falloff"
 
 
 msgid "Curves Grow/Shrink Scaling"
 msgstr "Curves Grow/Shrink Scaling"
 
 
-msgid "Curves Sculpt Parameter Falloff"
-msgstr "Curves Sculpt Parameter Falloff"
+msgid "Viewport Debug"
+msgstr "Viewport Debug"
+
+
+msgid "glTF Variants"
+msgstr "glTF Variants"
+
+
+msgid "glTF Material Variants"
+msgstr "glTF Material Variants"
+
+
+msgid "VR"
+msgstr "VR"
+
+
+msgid "VR Info"
+msgstr "VR Info"
 
 
 msgid "glTF"
@@ -90994,14 +90965,6 @@ msgstr "glTF"
 
 msgid "glTF Animations"
 msgstr "glTF Animations"
-
-
-msgid "Curves Sculpt Add Curve Options"
-msgstr "Curves Sculpt Add Curve Options"
-
-
-msgid "Render Pass"
-msgstr "Render Pass"
 
 
 msgid "Import Settings"
@@ -91803,6 +91766,10 @@ msgstr "Helpers"
 
 msgid "High Viscosity Solver"
 msgstr "High Viscosity Solver"
+
+
+msgid "Splash Screen"
+msgstr "Splash Screen"
 
 
 msgid "Show options for the properties editor"
@@ -118264,6 +118231,10 @@ msgid "Render Bounces"
 msgstr "Render Bounces"
 
 
+msgid "Motion"
+msgstr "Motion"
+
+
 msgid "Scatter"
 msgstr "Scatter"
 
@@ -120030,10 +120001,6 @@ msgid "Nothing to bake"
 msgstr "Nothing to bake"
 
 
-msgid "Complete report available on '{:s}' text data-block"
-msgstr "Complete report available on '{:s}' text data-block"
-
-
 msgid "No active bone to copy from"
 msgstr "No active bone to copy from"
 
@@ -120831,6 +120798,11 @@ msgstr "Save New Preferences"
 msgctxt "Operator"
 msgid "Continue"
 msgstr "Continue"
+
+
+msgctxt "Operator"
+msgid "Close"
+msgstr "Close"
 
 
 msgctxt "Operator"
@@ -125778,10 +125750,6 @@ msgid "Revert to Saved Preferences"
 msgstr "Revert to Saved Preferences"
 
 
-msgid "Splash Screen"
-msgstr "Splash Screen"
-
-
 msgid "User Tooltips"
 msgstr "User Tooltips"
 
@@ -127982,11 +127950,6 @@ msgstr "Hide Active Layer"
 msgctxt "Operator"
 msgid "Hide Inactive Layers"
 msgstr "Hide Inactive Layers"
-
-
-msgctxt "Operator"
-msgid "Close"
-msgstr "Close"
 
 
 msgid "To 3D Cursor"
@@ -138660,10 +138623,6 @@ msgid "No active item to rename"
 msgstr "No active item to rename"
 
 
-msgid "No selected data-blocks to copy"
-msgstr "No selected data-blocks to copy"
-
-
 msgid "There is no active data-block"
 msgstr "There is no active data-block"
 
@@ -139045,6 +139004,10 @@ msgstr "(empty)"
 
 msgid "Strip None"
 msgstr "Strip None"
+
+
+msgid "There is no asset library to remove"
+msgstr "There is no asset library to remove"
 
 
 msgid "Cannot reload with running modal operators"
@@ -139587,10 +139550,6 @@ msgid "Extension operator not found \"%s\""
 msgstr "Extension operator not found \"%s\""
 
 
-msgid "There is no asset library to remove"
-msgstr "There is no asset library to remove"
-
-
 msgid "There is no extension repository to remove"
 msgstr "There is no extension repository to remove"
 
@@ -139959,10 +139918,6 @@ msgstr "Cannot navigate when the view offset is locked"
 
 msgid "Depth too large"
 msgstr "Depth too large"
-
-
-msgid "No objects selected to copy"
-msgstr "No objects selected to copy"
 
 
 msgid "No objects to paste"
@@ -144002,10 +143957,6 @@ msgstr "Cannot find '%s' grid"
 
 msgid "Could not generate mesh from grid"
 msgstr "Could not generate mesh from grid"
-
-
-msgid "Motion"
-msgstr "Motion"
 
 
 msgid "Along Normals"
@@ -150584,18 +150535,6 @@ msgstr "Saved copy as \"%s\""
 
 msgid "Saved as \"%s\""
 msgstr "Saved as \"%s\""
-
-
-msgid ""
-"To match renders with the previous working space as closely as possible,\n"
-"colors in all materials, lights and geometry must be converted.\n"
-"\n"
-"Some nodes graphs cannot be converted accurately and may need manual fix-ups."
-msgstr ""
-"To match renders with the previous working space as closely as possible,\n"
-"colours in all materials, lights and geometry must be converted.\n"
-"\n"
-"Some nodes graphs cannot be converted accurately and may need manual fix-ups."
 
 
 msgid "Can't change working space while jobs are running"
