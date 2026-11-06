@@ -64,7 +64,7 @@ void RenderBuffers::init()
   data.aovs = inst_.film.aovs_info;
 }
 
-void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
+int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
 {
   const eViewLayerEEVEEPassType enabled_passes = inst_.film.render_buffer_passes_get();
 
@@ -79,7 +79,13 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
                                            GPU_TEXTURE_USAGE_ATTACHMENT;
 
   /* Depth and combined are always needed. */
-  depth_tx.acquire_2d(extent, depth_format, usage_attachment_read);
+  /* Texture usage must include views from the first allocation: ensure_2d does not compare usage.
+   */
+  int created = depth_tx.ensure_2d(
+      depth_format, extent, usage_attachment_read | GPU_TEXTURE_USAGE_FORMAT_VIEW);
+  /* TODO(fclem): depth_tx should ideally be a texture from pool but we need stencil_view
+   * which is currently unsupported by pool textures. */
+  // depth_tx.acquire(extent, depth_format);
   combined_tx.acquire_2d(extent, color_format);
 
   eGPUTextureUsage usage_attachment_read_write = GPU_TEXTURE_USAGE_ATTACHMENT |
@@ -117,14 +123,12 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
   int value_len = data.value_len + data.aovs.value_len +
                   inst_.native_postfx_outputs.value_len_get();
 
-  rp_color_tx.acquire_2d_array((color_len > 0) ? extent : int2(1),
-                               math::max(1, color_len),
-                               color_format,
-                               usage_attachment_read_write);
-  rp_value_tx.acquire_2d_array((value_len > 0) ? extent : int2(1),
-                               math::max(1, value_len),
-                               float_format,
-                               usage_attachment_read_write);
+  created += rp_color_tx.acquire_2d_array((color_len > 0) ? extent : int2(1),
+                                         math::max(1, color_len), color_format,
+                                         usage_attachment_read_write);
+  created += rp_value_tx.acquire_2d_array((value_len > 0) ? extent : int2(1),
+                                         math::max(1, value_len), float_format,
+                                         usage_attachment_read_write);
 
   const gpu::TextureFormat cryptomatte_format = gpu::TextureFormat::SFLOAT_32_32_32_32;
   cryptomatte_tx.acquire_2d(pass_extent(EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT |
@@ -139,15 +143,25 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
   const int2 outline_extent = use_outline_buffers ? extent : int2(1);
   outline_color_tx.acquire_2d(
       outline_extent, gpu::TextureFormat::SFLOAT_16_16_16_16, outline_usage);
-  outline_info_tx.acquire_2d(outline_extent, gpu::TextureFormat::UINT_32_32_32_32, outline_usage);
+  /* Keep source data in one image binding: the optional third layer holds source and receiver
+   * instance IDs. This also works on backends limited to the existing eight image slots. */
+  outline_info_tx.acquire_2d_array(
+      outline_extent,
+      use_outline_buffers && inst_.scene->eevee.outline_surface_identity == 1 ? 3 : 2,
+      gpu::TextureFormat::UINT_32_32_32_32,
+      outline_usage);
   outline_color_tx.clear(float4(0.0f));
   outline_info_tx.clear(uint4(0u));
+  return created;
 }
 
 void RenderBuffers::release()
 {
   depth_tx.release();
   combined_tx.release();
+  stencil_value_tx.release();
+  stencil_surface_value_tx.release();
+  stencil_surface_depth_tx.release();
 
   const bool do_motion_vectors_swizzle = vector_tx_format() == gpu::TextureFormat::SFLOAT_16_16;
   if (do_motion_vectors_swizzle) {
@@ -169,6 +183,9 @@ void RenderBuffers::release()
 
 gpu::TextureFormat RenderBuffers::vector_tx_format()
 {
+  if (inst_.is_dlss_guide_render) {
+    return gpu::TextureFormat::SFLOAT_16_16;
+  }
   const eViewLayerEEVEEPassType enabled_passes = inst_.film.render_buffer_passes_get();
   bool do_full_vector_render_pass = ((enabled_passes & EEVEE_RENDER_PASS_VECTOR) ||
                                      inst_.motion_blur.postfx_enabled()) &&

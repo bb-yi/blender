@@ -2120,7 +2120,8 @@ static bool file_execute(bContext *C, SpaceFile *sfile)
 {
   Main *bmain = CTX_data_main(C);
   FileSelectParams *params = ED_fileselect_get_active_params(sfile);
-  if (!params) {
+  /* Operators can run before the first refresh initializes the file list. */
+  if (!params || !sfile->files) {
     return false;
   }
   FileDirEntry *file = filelist_file(sfile->files, params->active_file);

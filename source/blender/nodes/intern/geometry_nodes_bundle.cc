@@ -6,8 +6,11 @@
  * \ingroup nodes
  */
 
+#include <algorithm>
+#include <cstring>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <type_traits>
 
 #include "BKE_node_socket_value.hh"
 
@@ -17,6 +20,13 @@
 #include "NOD_geometry_nodes_bundle_signature.hh"
 
 namespace blender::nodes {
+
+bool operator==(const BundleSignature::Item &a, const BundleSignature::Item &b)
+{
+  return a.key == b.key && a.type == b.type && a.structure_type == b.structure_type &&
+         a.dimensions == b.dimensions && a.optional == b.optional &&
+         ((!a.nested && !b.nested) || (a.nested && b.nested && *a.nested == *b.nested));
+}
 
 bool operator==(const BundleSignature &a, const BundleSignature &b)
 {
@@ -403,7 +413,13 @@ BundleSignature BundleSignature::from_combine_bundle_node(const bNode &node,
       const NodeSocketInterfaceStructureType structure_type =
           get_structure_type_for_bundle_signature(
               socket, item.structure_type, allow_auto_structure_type);
-      signature.items.add({item.name, stype, structure_type});
+      BundleSignature::Item signature_item{item.name, stype, structure_type};
+      signature_item.dimensions = item.socket_type == SOCK_VECTOR ?
+                                      (item.vector_socket_dimensions == 0 ?
+                                           3 :
+                                           item.vector_socket_dimensions) :
+                                      0;
+      signature.items.add(std::move(signature_item));
     }
   }
   return signature;
@@ -422,7 +438,13 @@ BundleSignature BundleSignature::from_separate_bundle_node(const bNode &node,
       const NodeSocketInterfaceStructureType structure_type =
           get_structure_type_for_bundle_signature(
               socket, item.structure_type, allow_auto_structure_type);
-      signature.items.add({item.name, stype, structure_type});
+      BundleSignature::Item signature_item{item.name, stype, structure_type};
+      signature_item.dimensions = item.socket_type == SOCK_VECTOR ?
+                                      (item.vector_socket_dimensions == 0 ?
+                                           3 :
+                                           item.vector_socket_dimensions) :
+                                      0;
+      signature.items.add(std::move(signature_item));
     }
   }
   return signature;
@@ -438,20 +460,111 @@ bool LinkedBundleSignatures::has_type_definition() const
   return false;
 }
 
-std::optional<BundleSignature> LinkedBundleSignatures::get_merged_signature() const
+std::optional<BundleSignature> LinkedBundleSignatures::get_merged_signature(
+    std::string *r_error) const
 {
   BundleSignature signature;
-  for (const Item &src_signature : this->items) {
-    for (const BundleSignature::Item &item : src_signature.signature.items) {
-      if (!signature.items.add(item)) {
-        const BundleSignature::Item &existing_item = *signature.items.lookup_key_ptr_as(item.key);
-        if (item.type->type != existing_item.type->type) {
+  signature.strict = std::any_of(this->items.begin(), this->items.end(), [](const Item &item) {
+    return item.signature.strict;
+  });
+  Map<std::string, std::string> origins;
+  for (const Item &src : this->items) {
+    const std::string origin = src.source_socket.socket ?
+                                   std::string(src.source_socket->owner_node().name) + "." +
+                                       src.source_socket->name :
+                                   "nested signature";
+    for (const BundleSignature::Item &item : src.signature.items) {
+      if (signature.items.add(item)) {
+        origins.add(item.key, origin);
+        continue;
+      }
+      auto &merged = const_cast<BundleSignature::Item &>(
+          *signature.items.lookup_key_ptr_as(item.key));
+      const int dim_a = merged.type->type == SOCK_VECTOR && merged.dimensions == 0 ?
+                            3 :
+                            merged.dimensions;
+      const int dim_b = item.type->type == SOCK_VECTOR && item.dimensions == 0 ? 3 :
+                                                                                 item.dimensions;
+      const bool same = merged.type->type == item.type->type;
+      const bool color_alias = signature.strict &&
+                               ELEM(merged.type->type, SOCK_VECTOR, SOCK_RGBA) &&
+                               ELEM(item.type->type, SOCK_VECTOR, SOCK_RGBA) &&
+                               (merged.type->type == SOCK_RGBA || item.type->type == SOCK_RGBA) &&
+                               (dim_a == 0 || dim_b == 0 || dim_a == dim_b) &&
+                               ELEM(std::max(dim_a, dim_b), 0, 3, 4);
+      if ((!same && !color_alias) || (same && item.type->type == SOCK_VECTOR && dim_a != dim_b) ||
+          (signature.strict && same && item.type->type == SOCK_RGBA && dim_a && dim_b &&
+           dim_a != dim_b))
+      {
+        if (r_error) {
+          *r_error = fmt::format(
+              "Bundle field '{}' conflicts between '{}' ({} {}D) and '{}' ({} {}D)",
+              item.key,
+              origins.lookup(item.key),
+              merged.type->idname.c_str(),
+              dim_a,
+              origin,
+              item.type->idname.c_str(),
+              dim_b);
+        }
+        return std::nullopt;
+      }
+      if (color_alias) {
+        merged.type = bke::node_socket_type_find_static(SOCK_RGBA);
+        merged.dimensions = std::max(dim_a, dim_b);
+      }
+      merged.optional = merged.optional && item.optional;
+      /* A shared source must not pick one consumer's default or UI arbitrarily. */
+      auto keep_common = [](auto &a, const auto &b) {
+        if (a != b) {
+          a.reset();
+        }
+      };
+      if (merged.ui.default_value && item.ui.default_value) {
+        const bool same_default = std::visit(
+            [&](const auto &value) {
+              const auto *other = std::get_if<std::decay_t<decltype(value)>>(
+                  &*item.ui.default_value);
+              /* Bitwise comparison also distinguishes +0.0 from -0.0. */
+              return other && std::memcmp(&value, other, sizeof(value)) == 0;
+            },
+            *merged.ui.default_value);
+        if (!same_default) {
+          merged.ui.default_value.reset();
+        }
+      }
+      else {
+        merged.ui.default_value.reset();
+      }
+      keep_common(merged.ui.label, item.ui.label);
+      keep_common(merged.ui.description, item.ui.description);
+      keep_common(merged.ui.subtype, item.ui.subtype);
+      keep_common(merged.ui.min_value, item.ui.min_value);
+      keep_common(merged.ui.max_value, item.ui.max_value);
+      merged.default_is_expression |= item.default_is_expression;
+      if (merged.nested && item.nested) {
+        LinkedBundleSignatures children;
+        children.items.append({*merged.nested, true, {}});
+        children.items.append({*item.nested, true, {}});
+        for (auto &child : children.items) {
+          child.signature.strict |= signature.strict;
+        }
+        std::string nested_error;
+        const auto nested = children.get_merged_signature(&nested_error);
+        if (!nested) {
+          if (r_error) {
+            *r_error = "Bundle member '" + item.key + "' (" + origins.lookup(item.key) + " / " +
+                       origin + "): " + nested_error;
+          }
           return std::nullopt;
         }
-        if (existing_item.structure_type != item.structure_type) {
-          const_cast<BundleSignature::Item &>(existing_item).structure_type =
-              NodeSocketInterfaceStructureType::Dynamic;
-        }
+        merged.nested = std::make_shared<const BundleSignature>(*nested);
+      }
+      else if (item.nested) {
+        merged.nested = item.nested;
+      }
+      if (merged.structure_type != item.structure_type) {
+        merged.structure_type = NodeSocketInterfaceStructureType::Dynamic;
       }
     }
   }

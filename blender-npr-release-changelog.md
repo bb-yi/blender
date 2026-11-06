@@ -615,6 +615,34 @@
 - 修复 `NodeTree.type` 缺少 `FILTER_GRAPH` 枚举项导致的控制台持续报错 `current value '4' matches no enum in 'EeveeFilterGraphNodeTree', 'Eevee Filter Graph', 'type'`，`tree.type` 现在正确返回 `FILTER_GRAPH`。
 - Windows 发布包已完成带 Cycles 的全量清理构建，完整 Release 测试 `116/116` 通过；该结果不代表 Linux 或 macOS 测试覆盖。
 
+## 2026-11-01  NPR 功能整合
+
+#### 新增功能
+- 新增原生合成器 `LUT Color Grade`，支持 `.cube` 与 PNG/TIFF/EXR 切片图片、强度和遮罩、色彩预设、插值、重载及打包。
+- 新增 `Draw Info` 材质输入节点，统一查询描边、阴影、探针及 Render Texture 捕获、着色阶段、烘焙、视口、播放和导航等 22 项上下文。
+- 新增 `Planar Probe` 材质采样节点，以 Position、Normal、UV 三个输入读取探针颜色、线性深度、UV 和有效性，支持自动或对象选择及 Cycles 零值回退。
+- Outline Shell 新增默认关闭的材质级自身遮挡，按物体实例保存辅助深度，保留本体与壳体的独立 Alpha 和现有透明模式。
+- `Stencil Value` 新增 Writer Surface 来源及 Depth、Valid 输出，读取最近合格写入表面的参考值和深度；支持全、半、四分之一分辨率，默认仍使用模板快照。
+- 新增可选 NPR Forward 折射背景分层，按对象参与开关及 Refraction Layer 将较低层 Forward 不透明、半透明和描边壳纳入较高层 NPR 折射背景；传统模式仍为默认。
+
+#### 修复与改进
+- 保留分层折射中的成对颜色/深度、体积雾、滤镜和 Render Texture 捕获隔离，并按对象参与状态区分共享材质的绘制缓存。
+- 修复 Stencil 写入表面捕获与 Shell 自身遮挡整合后的着色器变体识别，保留 Draw Info、Planar Probe 和 Stencil 的独立设置及资源生命周期。
+- 本轮发布同时包含下方图像闭包旧坐标兼容和 Deferred 描边折射分层修复。
+
+## 2026-10-31  图像闭包与 Deferred 描边修复
+
+#### 新增功能
+- 无
+
+#### 修复与改进
+- 修复 `Evaluate Closure` 评估图像闭包时，旧坐标键 `Vector` 被忽略而导致整片采到默认位置的问题。兼容旧 `Vector`，存在 `UV` 时优先使用 `UV`。
+- 图像闭包显式同步接口时，可将旧 `Vector` 迁移为 `UV`，并保留坐标默认值、插口标识和连线。坐标缺失或类型错误时给出明确诊断；普通自定义 Closure 继续严格按参数键匹配。
+- 修复使用 `Outline Shell Output` 且开启 Raytrace Transmission 时，Deferred 描边挡住 NPR Refraction 背景的问题。描边预通道与着色通道跟随对象的 `Refraction Layer`，高层可读取低层完成后的主体和描边，不再读入自身描边壳内部。
+- 修复多个折射层开启 `Clamp Surface Direct` 后，背景反馈被当前层颜色覆盖的问题。仅在反馈纹理读写重叠时保存临时背景，保留 HDR 颜色和 Alpha。
+- 修复没有不透明物体、仅有世界背景时，双层及更多层 NPR Refraction 变黑的问题，正确区分首个有效层和后续层。
+- 补齐旧闭包文件重载、节点组与 Bundle、折射层级跳号、共享材质、动态层级切换、多材质槽、Alpha 动画及 OpenGL/Vulkan 回归，并更新相关使用文档。
+
 ## 暂存
 
 #### 新增功能

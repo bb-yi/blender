@@ -2754,7 +2754,9 @@ struct SceneRenderTexture {
   char source;
   char update_mode;
   char format;
-  char _pad[8];
+  int manual_update;
+  char use_compositor_output;
+  char _pad[3];
 };
 
 struct SceneFilterMaterial {
@@ -2780,6 +2782,9 @@ struct SceneEEVEE {
 
   int taa_samples = 16;
   int taa_render_samples = 64;
+  /** Writer-surface buffer size: full, half or quarter per dimension. */
+  int stencil_surface_resolution = 0;
+  char _pad_stencil_surface[4] = {};
 
   float volumetric_start = 0.1f;
   float volumetric_end = 100.0f;
@@ -2867,7 +2872,12 @@ struct SceneEEVEE {
   char dlss5_mask_aov[64] = "";
   char _pad_dlss_sr[4] = {};
   char use_outline = true;
-  char _pad2[3] = {};
+  /** Zero preserves the traditional Forward-after-Deferred pipeline. */
+  char npr_forward_refraction_mode = 0;
+  /** Viewport outline resolution: 0 = full, 1 = 3/4, 2 = half, 3 = quarter. */
+  char outline_viewport_resolution = 0;
+  /** Outline occlusion identity: 0 = legacy region ID, 1 = draw instance. */
+  char outline_surface_identity = 0;
   float dlss_sr_viewport_percentage = 80.0f;
   float dlss_sr_render_percentage = 80.0f;
 

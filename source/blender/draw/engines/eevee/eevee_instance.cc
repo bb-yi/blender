@@ -22,6 +22,9 @@
 #include "BLI_rect.hh"
 #include "BLI_time.hh"
 #include "BLI_timecode.hh"
+#include "BLI_memory_utils.hh"
+#include "BLI_rect.hh"
+#include "BLI_time.hh"
 
 #include "BLT_translation.hh"
 
@@ -299,6 +302,8 @@ void Instance::init(const int2 &output_res,
 
   anisotropic_filtering = GPU_anisotropic_filtering_flags(scene->r.anisotropic_filter);
 
+  dlss5.init();
+
   sampling.init(scene);
   camera.init();
   filter_materials.init();
@@ -321,7 +326,9 @@ void Instance::init(const int2 &output_res,
   volume.init();
   lookdev.init(&lookdev_rect);
 
-  if (GPU_backend_get_type() == GPU_BACKEND_VULKAN &&
+  /* Offline NR leases its animation session before initializing the device. Warming up
+   * the temporary per-frame session here would create and immediately discard a device. */
+  if (is_viewport() && GPU_backend_get_type() == GPU_BACKEND_VULKAN &&
       scene->eevee.dlss5_mode == SCE_EEVEE_DLSSNR && scene->eevee.dlss5_intensity != 0.0f)
   {
     dlss5.warmup();
@@ -375,6 +382,29 @@ void Instance::init(const int2 &output_res,
   if (!samples_in_flight) {
     /** Allow up to 3 samples in flight on the GPU. */
     samples_in_flight = gpu::WorkInFlight::create(3);
+  }
+  if (is_viewport() && !is_pre_fx_render) {
+    if (film.pre_fx_compositor_requested() &&
+        (depth_of_field.enabled() || motion_blur.postfx_enabled()))
+    {
+      if (!pre_fx_viewport_) {
+        pre_fx_viewport_ = std::make_unique<Instance>();
+        pre_fx_viewport_->is_pre_fx_render = true;
+      }
+      pre_fx_viewport_->init(output_res,
+                             output_rect,
+                             visible_rect,
+                             render_,
+                             depsgraph_,
+                             camera_object_,
+                             render_layer_,
+                             drw_view_,
+                             v3d_,
+                             rv3d_);
+    }
+    else {
+      pre_fx_viewport_.reset();
+    }
   }
 }
 
@@ -499,9 +529,15 @@ void Instance::update_eval_members()
 
 void Instance::begin_sync()
 {
+  sync.begin_sync();
+  if (pre_fx_viewport_) {
+    pre_fx_viewport_->begin_sync();
+  }
   update_eval_members();
+  materials.expression_diagnostics_begin_sync();
   telemetry.maybe_begin_viewport_frame();
   ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncBegin);
+  GPUMaterialProfileContext material_profile(telemetry.material_profile_get());
   dlss5_settings_changed_ = false;
   if (scene != nullptr) {
     const SceneEEVEE &dlss5 = scene->eevee;
@@ -527,6 +563,7 @@ void Instance::begin_sync()
    * If engine shaders are not ready, will skip the pipeline sync. */
   {
     ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginWorld);
+    render_textures.begin_sync();
     world.sync();
   }
 
@@ -559,9 +596,9 @@ void Instance::begin_sync()
 
   {
     ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginNPRPost);
-    render_textures.begin_sync();
     filter_materials.begin_sync();
     outline.begin_sync();
+    outline_shell.begin_sync();
     ambient_occlusion.sync();
     volume_probes.sync();
     lookdev.sync();
@@ -584,7 +621,14 @@ void Instance::begin_sync()
 
 void Instance::object_sync(ObjectRef &ob_ref, Manager & /*manager*/)
 {
+  if (pre_fx_viewport_) {
+    pre_fx_viewport_->object_sync(ob_ref, *manager);
+  }
   ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncObjects);
+  GPUMaterialProfileContext material_profile(telemetry.material_profile_get());
+  if (telemetry.enabled()) {
+    telemetry.object_update_add(get_recalc_flags(ob_ref));
+  }
   if (skip_render_) {
     return;
   }
@@ -643,7 +687,11 @@ void Instance::object_sync(ObjectRef &ob_ref, Manager & /*manager*/)
 
 void Instance::end_sync()
 {
+  if (pre_fx_viewport_) {
+    pre_fx_viewport_->end_sync();
+  }
   ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncEnd);
+  GPUMaterialProfileContext material_profile(telemetry.material_profile_get());
   if (skip_render_) {
     /* We might run in the case where the next check sets skip_render_ to false after the
      * begin_sync was skipped, which would call `end_sync` function with invalid data. */
@@ -677,6 +725,7 @@ void Instance::end_sync()
 
   {
     ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndVolumeShadowsLights);
+    render_textures.end_sync();
     volume.end_sync();  /* Needs to be before shadows. */
     shadows.end_sync(); /* Needs to be before lights. */
     lights.end_sync();
@@ -715,7 +764,6 @@ void Instance::end_sync()
 
   {
     ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndNPRPost);
-    render_textures.end_sync();
     filter_materials.end_sync();
   }
 
@@ -724,6 +772,15 @@ void Instance::end_sync()
     light_probes.end_sync();
     sphere_probes.end_sync();
     planar_probes.end_sync();
+    uint32_t draw_context = 0;
+    SET_FLAG_FROM_TEST(draw_context, is_viewport(), DRAW_CONTEXT_VIEWPORT);
+    SET_FLAG_FROM_TEST(draw_context, is_image_render, DRAW_CONTEXT_IMAGE_RENDER);
+    SET_FLAG_FROM_TEST(draw_context, is_pre_fx_render, DRAW_CONTEXT_PRE_FX_RENDER);
+    SET_FLAG_FROM_TEST(draw_context, is_playback, DRAW_CONTEXT_PLAYBACK);
+    SET_FLAG_FROM_TEST(draw_context, is_navigating, DRAW_CONTEXT_NAVIGATING);
+    if (assign_if_different(pipelines.data.draw_context, draw_context) && is_viewport()) {
+      sampling.reset();
+    }
     uniform_data.push_update();
   }
 
@@ -836,6 +893,7 @@ void Instance::render_sample()
     film.update_sample_table();
     uniform_data.push_update();
 
+    planar_probes.invalidate();
     capture_view.render_world();
     lookdev.rotate_world();
     capture_view.render_probes();
@@ -930,6 +988,31 @@ void Instance::render_read_result(RenderLayer *render_layer, const char *view_na
     }
   }
 
+  /* Render Texture snapshots are exported directly, without main-camera post effects. */
+  for (const SceneRenderTexture *render_texture =
+           static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first);
+       render_texture;
+       render_texture = render_texture->next)
+  {
+    if (!render_texture->use_compositor_output) {
+      continue;
+    }
+    const std::string name = BKE_scene_render_texture_pass_name(*render_texture);
+    RenderPass *rp = RE_pass_find_by_name(render_layer, name.c_str(), view_name);
+    if (!rp) {
+      continue;
+    }
+    const double start = record_readbacks ? BLI_time_now_seconds() : 0.0;
+    if (float *result = render_textures.read_pass(
+            *render_texture, int2(rp->rectx, rp->recty), rp->channels))
+    {
+      record_readback(TelemetryPassReadbackType::RenderPass, name.c_str(), rp, start);
+      BLI_mutex_lock(&render->update_render_passes_mutex);
+      RE_pass_set_buffer_data(rp, result);
+      BLI_mutex_unlock(&render->update_render_passes_mutex);
+    }
+  }
+
   /* Generated native camera post-FX outputs. */
   for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs) {
     if ((output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED) == 0 ||
@@ -976,8 +1059,32 @@ void Instance::render_read_result(RenderLayer *render_layer, const char *view_na
 /** \name Interface
  * \{ */
 
-void Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, const char *view_name)
+bool Instance::render_read_pre_fx(RenderLayer *render_layer, const char *view_name)
 {
+  RenderPass *rp = RE_pass_find_by_name(render_layer, pre_fx_pass_name, view_name);
+  if (!rp) {
+    RE_engine_set_error_message(render, "Pre-FX render pass is missing");
+    return false;
+  }
+  float *result = film.read_pass(EEVEE_RENDER_PASS_COMBINED, 0);
+  if (!result) {
+    RE_engine_set_error_message(render, "Failed to read Pre-FX image");
+    return false;
+  }
+  BLI_mutex_lock(&render->update_render_passes_mutex);
+  RE_pass_set_buffer_data(rp, result);
+  BLI_mutex_unlock(&render->update_render_passes_mutex);
+  return true;
+}
+
+bool Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, const char *view_name)
+{
+  /* init() may already have moved into the shutter interval. Also restore on cancel/error. */
+  BLI_SCOPED_DEFER([&]() {
+    if (!sampling.finished()) {
+      motion_blur.restore_time();
+    }
+  });
   telemetry.render_run_id_set(engine ? engine->render_run_id : 0);
   telemetry.render_view_name_set(view_name);
   telemetry.maybe_begin_final_frame();
@@ -989,16 +1096,19 @@ void Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, con
       RE_engine_set_error_message(engine, info_.c_str());
       info_ = "";
     }
-    return;
+    return false;
   }
 
   DebugScope debug_scope(debug_scope_render_frame, "EEVEE.render_frame");
 
   bool native_retry = false;
 
-  /* TODO: Break on RE_engine_test_break(engine) */
   double start_time = BLI_time_now_seconds();
   while (!sampling.finished()) {
+    if (RE_engine_test_break(engine)) {
+      telemetry.reset();
+      return false;
+    }
     samples_in_flight->begin_work();
     this->render_sample();
 
@@ -1035,9 +1145,14 @@ void Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, con
         sampling.finished())
     {
       /* TODO: Use `fmt`. */
-      std::string re_info = "Rendering " + std::to_string(sampling.sample_index()) + " / " +
+      std::string re_info = std::string(is_pre_fx_render ? "Rendering Pre-FX " : "Rendering ") +
+                            std::to_string(sampling.sample_index()) + " / " +
                             std::to_string(sampling.sample_count()) + " samples";
       RE_engine_update_stats(engine, nullptr, re_info.c_str());
+      const bool has_pre_fx = (view_layer->eevee.render_passes & EEVEE_RENDER_PASS_PRE_FX) != 0;
+      const float progress = float(sampling.sample_index()) / float(sampling.sample_count());
+      RE_engine_update_progress(
+          engine, has_pre_fx ? (is_pre_fx_render ? 0.5f : 0.0f) + progress * 0.5f : progress);
     }
 
     samples_in_flight->end_work();
@@ -1064,7 +1179,23 @@ void Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, con
 
   this->film.cryptomatte_sort();
 
-  this->render_read_result(render_layer, view_name);
+  if (!RE_engine_test_break(engine)) {
+    dlss5.render_final();
+  }
+
+  if (RE_engine_test_break(engine)) {
+    telemetry.reset();
+    return false;
+  }
+  if (is_pre_fx_render) {
+    if (!render_read_pre_fx(render_layer, view_name)) {
+      telemetry.reset();
+      return false;
+    }
+  }
+  else {
+    this->render_read_result(render_layer, view_name);
+  }
   telemetry.maybe_end_final_frame();
   if (telemetry.enabled()) {
     const std::string report = telemetry.render_report();
@@ -1085,7 +1216,9 @@ void Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, con
         engine, RPT_("Errors during render. See the System Console for more info."));
     printf("%s", info_.c_str());
     info_ = "";
+    return false;
   }
+  return true;
 }
 
 void Instance::draw_viewport()
@@ -1117,6 +1250,7 @@ void Instance::draw_viewport()
 
   if (is_viewport_compositor_used) {
     this->film.write_viewport_compositor_passes();
+    this->render_textures.write_viewport_compositor_passes();
   }
 
   /* Do not request redraw during viewport animation to lock the frame-rate to the animation
@@ -1177,11 +1311,17 @@ void Instance::draw_viewport_image_render()
 
   if (is_viewport_compositor_used) {
     this->film.write_viewport_compositor_passes();
+    this->render_textures.write_viewport_compositor_passes();
   }
 }
 
 void Instance::draw(Manager & /*manager*/)
 {
+  /* Write the companion's pass first. Draw the primary instance last so Combined, depth and
+   * overlays still describe the user's normal viewport, including its camera effects. */
+  if (pre_fx_viewport_) {
+    pre_fx_viewport_->draw(*manager);
+  }
   if (is_viewport_image_render) {
     draw_viewport_image_render();
   }
@@ -1204,6 +1344,33 @@ void Instance::store_metadata(RenderResult *render_result)
 void Instance::update_passes(RenderEngine *engine, Scene *scene, ViewLayer *view_layer)
 {
   RE_engine_register_pass(engine, scene, view_layer, RE_PASSNAME_COMBINED, 4, "RGBA", SOCK_RGBA);
+  int enabled_render_textures = 0;
+  for (const SceneRenderTexture *render_texture =
+           static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first);
+       render_texture;
+       render_texture = render_texture->next)
+  {
+    if (!render_texture->enabled || !render_texture->camera) {
+      continue;
+    }
+    if (enabled_render_textures++ == RENDER_TEXTURE_SLOT_MAX) {
+      break;
+    }
+    if (render_texture->use_compositor_output) {
+      const std::string name = BKE_scene_render_texture_pass_name(*render_texture);
+      const bool value = BKE_scene_render_texture_pass_is_value(*render_texture);
+      RE_engine_register_pass(engine,
+                              scene,
+                              view_layer,
+                              name.c_str(),
+                              value ? 1 : 4,
+                              value ? "X" : "RGBA",
+                              value ? SOCK_FLOAT : SOCK_RGBA);
+    }
+  }
+  if (view_layer->eevee.render_passes & EEVEE_RENDER_PASS_PRE_FX) {
+    RE_engine_register_pass(engine, scene, view_layer, pre_fx_pass_name, 4, "RGBA", SOCK_RGBA);
+  }
 
 #define CHECK_PASS_LEGACY(name, type, channels, chanid) \
   if (view_layer->passflag & (SCE_PASS_##name)) { \

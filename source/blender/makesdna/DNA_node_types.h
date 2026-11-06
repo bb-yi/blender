@@ -59,6 +59,7 @@ struct ID;
 struct Image;
 struct ImBuf;
 struct Material;
+struct PackedFile;
 struct PreviewImage;
 struct Tex;
 struct bGPdata;
@@ -675,6 +676,7 @@ enum eNodeImage_Extension : short {
 enum {
   IMA_IMAGE_TO_CLOSURE_TEXTURE_2D = 0,
   IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP = 1,
+  IMA_IMAGE_TO_CLOSURE_TEXTURE_CUBE_STRIP = 2,
 };
 
 /* Image to Closure 3D LUT strip size mode. */
@@ -2906,6 +2908,35 @@ struct NodeConvertColorSpace {
   char to_interop_id[64] = "";
 };
 
+struct NodeCompositorLUT {
+  DNA_DEFINE_CXX_METHODS(NodeCompositorLUT)
+
+  char filepath[1024] = "";
+  char input_color_space[64] = "sRGB";
+  char output_color_space[64] = "sRGB";
+  PackedFile *packed_file = nullptr;
+  char packed_hash[40] = "";
+  char file_info[128] = "";
+  int preset = 0;
+  int interpolation = 0;
+  int direction = 0;
+  int reload_version = 0;
+  int output_matches_input = 1;
+  int image_flags = 0;
+};
+
+enum {
+  CMP_NODE_LUT_SRGB = 0,
+  CMP_NODE_LUT_LINEAR = 1,
+  CMP_NODE_LUT_CUSTOM = 2,
+  CMP_NODE_LUT_RAW = 3,
+};
+
+enum {
+  CMP_NODE_LUT_IMAGE_FLIP_Y = 1 << 0,
+  CMP_NODE_LUT_IMAGE_FLIP_GREEN = 1 << 1,
+};
+
 struct NodeConvertToDisplay {
   DNA_DEFINE_CXX_METHODS(NodeConvertToDisplay)
 
@@ -3335,7 +3366,9 @@ struct NodeShaderScriptExpressionVariable {
   char *name = nullptr;
   /** #eNodeSocketDatatype. */
   short socket_type = 0;
-  char _pad[2] = {};
+  /** Zero preserves the legacy three-dimensional vector. */
+  char vector_dimensions = 0;
+  char separate_alpha = 0;
   /** Generated unique identifier for sockets which stays stable when names or order change. */
   int identifier = 0;
 };
@@ -3347,7 +3380,8 @@ struct NodeShaderScriptExpression {
   NodeShaderScriptExpressionVariable *variables = nullptr;
   /** #eNodeSocketDatatype. */
   short output_socket_type = SOCK_FLOAT;
-  short _pad = 0;
+  /** Zero preserves the legacy three-dimensional vector. */
+  short output_vector_dimensions = 0;
   int variables_num = 0;
   int active_variable_index = 0;
   int next_identifier = 0;
@@ -3478,6 +3512,32 @@ struct NodeShaderTexIES {
   char filepath[/*FILE_MAX*/ 1024] = "";
 };
 
+/** Draw Info query values are also used by gpu_shader_material_draw_info.glsl. */
+enum NodeShaderDrawInfoQuery {
+  SHD_DRAW_INFO_OUTLINE_SHELL = 0,
+  SHD_DRAW_INFO_SHADOW_PASS = 1,
+  SHD_DRAW_INFO_RENDER_TEXTURE_CAPTURE = 2,
+  SHD_DRAW_INFO_PROBE_CAPTURE = 3,
+  SHD_DRAW_INFO_IMAGE_RENDER = 4,
+  SHD_DRAW_INFO_COLOR_BAKE = 5,
+  SHD_DRAW_INFO_VIEWPORT = 6,
+  SHD_DRAW_INFO_DEPTH_PREPASS = 7,
+  SHD_DRAW_INFO_DEFERRED = 8,
+  SHD_DRAW_INFO_FORWARD = 9,
+  SHD_DRAW_INFO_NPR_EVALUATION = 10,
+  SHD_DRAW_INFO_FILTER_PASS = 11,
+  SHD_DRAW_INFO_WORLD = 12,
+  SHD_DRAW_INFO_VERTEX_EVALUATION = 13,
+  SHD_DRAW_INFO_FRAGMENT_EVALUATION = 14,
+  SHD_DRAW_INFO_VOLUME_EVALUATION = 15,
+  SHD_DRAW_INFO_SPHERE_PROBE_CAPTURE = 16,
+  SHD_DRAW_INFO_PLANAR_PROBE_CAPTURE = 17,
+  SHD_DRAW_INFO_IRRADIANCE_CAPTURE = 18,
+  SHD_DRAW_INFO_PRE_FX_RENDER = 19,
+  SHD_DRAW_INFO_PLAYBACK = 20,
+  SHD_DRAW_INFO_NAVIGATING = 21,
+};
+
 struct NodeShaderOutputAOV {
   DNA_DEFINE_CXX_METHODS(NodeShaderOutputAOV)
 
@@ -3518,7 +3578,10 @@ struct NodeEeveeFilterGraphFilterMaterial {
   int active_index = 0;
   int next_identifier = 0;
   float resolution_scale = 1.0f;
-  char _pad[8] = {};
+  int resolution_basis = 0; /* 0: stage, 1: input, 2: fixed pixels. */
+  int resolution_input = 0; /* Stable socket item identifier, not its list index. */
+  int resolution_width = 256;
+  int resolution_height = 256;
 };
 
 struct NodeEeveeFilterGraphAOVInput {
@@ -4586,7 +4649,8 @@ struct NodeCombineBundleItem {
   int identifier = 0;
   eNodeSocketDatatype socket_type = {};
   NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
-  char _pad[1] = {};
+  /** Zero is the legacy three-dimensional vector. */
+  int8_t vector_socket_dimensions = 0;
 };
 
 struct NodeCombineBundle {
@@ -4605,7 +4669,8 @@ struct NodeSeparateBundleItem {
   int identifier = 0;
   eNodeSocketDatatype socket_type = {};
   NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
-  char _pad[1] = {};
+  /** Zero is the legacy three-dimensional vector. */
+  int8_t vector_socket_dimensions = 0;
 };
 
 struct NodeSeparateBundle {

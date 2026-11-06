@@ -61,6 +61,7 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                                        GPUNodeStack *in,
                                        GPUNodeStack *out)
 {
+  const bool default_surface = !in[0].link && !in[1].link;
   if (!in[0].link) {
     GPU_link(mat, "world_position_get", GPU_shading_data(), &in[0].link);
   }
@@ -76,13 +77,25 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
   NodeShaderShaderInfo *storage = static_cast<NodeShaderShaderInfo *>(node->storage);
   const float lightgroup_id_value = float(storage != nullptr ? max_ii(storage->lightgroup_id, 0) : 0);
 
-  GPU_material_flag_set(mat, GPU_MATFLAG_DIFFUSE | GPU_MATFLAG_SHADER_INFO);
+  /* Shader Info evaluates the same per-light custom color/attenuation cache used by GLSL
+   * Function's GLSLLight helpers. Keep the existing light-access create-info path enabled so
+   * ordinary Deferred materials receive LIGHT_SHADER_TEXTURE_EVAL and its front-layer resources. */
+  GPU_material_flag_set(mat,
+                        GPU_MATFLAG_DIFFUSE | GPU_MATFLAG_SHADER_INFO |
+                            GPU_MATFLAG_GLSL_LIGHT_ACCESS);
   if (out[5].hasoutput || out[6].hasoutput) {
     GPU_material_shader_info_shadow_classification_set(mat);
   }
   if (node->custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED) {
+    GPU_material_node_soft_shadow_set(mat);
     GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
     GPU_material_hiz_data_set(mat);
+  }
+  const float cache_eligible = float(default_surface &&
+                                     (out[1].hasoutput || out[5].hasoutput || out[6].hasoutput) &&
+                                     node->custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED);
+  if (cache_eligible != 0.0f) {
+    GPU_material_node_shadow_cache_set(mat, shadow_sample_count);
   }
   return GPU_stack_link(mat,
                         node,
@@ -91,7 +104,8 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                         out,
                         GPU_constant(&shadow_mode),
                         GPU_constant(&stable_shadow_samples),
-                        GPU_constant(&lightgroup_id_value), GPU_kernel_globals(), GPU_shading_data());
+                        GPU_constant(&lightgroup_id_value),
+                        GPU_constant(&cache_eligible), GPU_kernel_globals(), GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_shader_info_cc

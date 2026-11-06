@@ -50,6 +50,7 @@
 #include "eevee_motion_blur.hh"
 #include "eevee_native_postfx_output.hh"
 #include "eevee_outline.hh"
+#include "eevee_outline_shell.hh"
 #include "eevee_pipeline.hh"
 #include "eevee_raytrace.hh"
 #include "eevee_render_texture.hh"
@@ -117,6 +118,8 @@ namespace blender::eevee
     bool shadow_lod_overlay_ = false;
     float shadow_lod_overlay_opacity_ = 0.7f;
     bool skip_render_ = false;
+    /** Persistent viewport companion, with independent lens/shutter-free sampling histories. */
+    std::unique_ptr<Instance> pre_fx_viewport_;
     bool last_viewport_scene_time_valid_ = false;
     float last_viewport_scene_time_ = 0.0f;
     bool discard_viewport_history_ = false;
@@ -156,6 +159,7 @@ namespace blender::eevee
     RenderTextureModule render_textures;
     FilterMaterialModule filter_materials;
     OutlineModule outline;
+    OutlineShellModule outline_shell;
     Dlss5Module dlss5;
     DlssSrModule dlss_sr;
     NativePostFXOutputModule native_postfx_outputs;
@@ -201,6 +205,10 @@ namespace blender::eevee
     bool is_color_bake = false;
     /** True if the instance is created for either viewport image render or final image render. */
     bool is_image_render = false;
+    /** Final-render companion instance: no lens or shutter effects; writes only Pre-FX. */
+    bool is_pre_fx_render = false;
+    /** Unjittered depth/velocity only, for one resolved offline NR image. */
+    bool is_dlss_guide_render = false;
     /** True if the instance is created only for viewport image render. */
     bool is_viewport_image_render = false;
     /** True if current viewport is drawn during playback. */
@@ -252,6 +260,7 @@ namespace blender::eevee
       render_textures(*this),
       filter_materials(*this),
       outline(*this),
+      outline_shell(*this),
       dlss5(*this),
       dlss_sr(*this),
       native_postfx_outputs(*this),
@@ -309,6 +318,11 @@ namespace blender::eevee
       return (loaded_shaders & groups) == groups;
     }
 
+    bool render_is_ready() const
+    {
+      return !skip_render_ && is_loaded(needed_shaders) && film.is_valid_render_extent();
+    }
+
     bool discard_viewport_history() const
     {
       return discard_viewport_history_;
@@ -341,7 +355,9 @@ namespace blender::eevee
 
     void render_sync();
     void wait_for_material_passes();
-    void render_frame(RenderEngine* engine, RenderLayer* render_layer, const char* view_name);
+    bool render_frame(RenderEngine* engine, RenderLayer* render_layer, const char* view_name);
+    bool render_read_pre_fx(RenderLayer *render_layer, const char *view_name);
+    static constexpr const char *pre_fx_pass_name = "Pre-FX";
     void store_metadata(RenderResult* render_result);
 
     int2 render_extent_get() const

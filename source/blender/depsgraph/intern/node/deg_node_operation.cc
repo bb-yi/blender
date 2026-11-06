@@ -231,6 +231,7 @@ std::string OperationNode::full_identifier() const
 
 void OperationNode::tag_update(Depsgraph *graph, eUpdateSource source)
 {
+  graph->pending_update_sources.fetch_or(int(source), std::memory_order_relaxed);
   /* Ensure that there is an entry tag for this update.
    *
    * Note that the node might already be tagged for an update due invisible state of the node

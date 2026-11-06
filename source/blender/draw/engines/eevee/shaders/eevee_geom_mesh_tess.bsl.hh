@@ -4,7 +4,7 @@
 
 /**
  * Vertex shader of tessellated meshes (#MAT_GEOM_MESH_TESS). See `eevee_geom_mesh_tess_lib.glsl`.
- * Must be drawn using primitive expansion of `max_level^2` triangles per mesh triangle.
+ * Must be drawn using primitive expansion of `tessellation_expand^2` triangles per mesh triangle.
  * Keep the outputs in sync with `eevee::geom_mesh`.
  */
 
@@ -102,19 +102,23 @@ struct GeomMeshTess {
 
   float3 lP = tess_phong(tv, tv.lP, tv.weights, settings.phong);
   interp.P = obj.point_object_to_world(lP);
+  interp.P_relative = to_float3x3(obj.model) * lP;
   interp.N = safe_normalize(obj.normal_object_to_world(tess_normal_interpolate(tv, tv.weights)));
   /* Used by #MAT_DISPLACEMENT_GEOM_NORMAL to evaluate the displacement in the fragment shader. */
   interp.P_base = interp.P;
 
-  /* Compute Original Coordinate (ORCO). */
-  float3 lP_orco = lP * ob_infos.orco_mul + ob_infos.orco_add;
+  /* Generated coordinates refer to the original triangle, just like an explicit ORCO layer.
+   * Phong smoothing must not change the result depending on whether that layer exists. */
+  float3 lP_orco = tv.lP * ob_infos.orco_mul + ob_infos.orco_add;
 
   sd = init_globals(pipe, uni, interp, view, true, float4(0.0f));
   init_globals_mesh(interp, sd, float3(0.0f));
   tess_attr_interp(tv.indices, tv.weights);
   attrib_load(MeshVertex{lP, to_float3x3(obj.model_inverse), lP_orco});
 
-  interp.P += nodetree_displacement(kg, sd);
+  float3 displacement = nodetree_displacement(kg, sd);
+  interp.P += displacement;
+  interp.P_relative += displacement;
 
   if (pipe.use_velocity) [[static_branch]] {
     float3 prv0, nxt0, prv1, nxt1, prv2, nxt2;

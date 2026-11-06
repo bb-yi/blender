@@ -15,7 +15,10 @@ namespace nodes::node_shader_render_info_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_output<decl::Vector>("Frag Coord"_ustr);
+  b.add_output<decl::Vector>("Frag Coord"_ustr)
+      .description(
+          "Normalized fragment coordinates; zero outside fragment shading, including "
+          "vertex displacement");
   b.add_output<decl::Float>("Width"_ustr);
   b.add_output<decl::Float>("Height"_ustr);
   b.add_output<decl::Vector>("Resolution"_ustr);

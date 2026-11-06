@@ -130,6 +130,8 @@ class NODE_MT_compositor_node_color_adjust_base(node_add_menu.NodeMenu):
         layout = self.layout
         self.node_operator(layout, "CompositorNodeBrightContrast")
         self.node_operator(layout, "CompositorNodeColorBalance")
+        self.node_operator(layout, "CompositorNodeLUT")
+        layout.operator("node.add_display_lut", text="Display LUT Setup (AgX)")
         self.node_operator(layout, "CompositorNodeColorCorrection")
         self.node_operator(layout, "CompositorNodeExposure")
         self.node_operator(layout, "ShaderNodeGamma")

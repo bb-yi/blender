@@ -67,6 +67,7 @@ struct ImageRuntimeGPUTexture3DLutStrip {
   int width = 0;
   int height = 0;
   int depth = 0;
+  bool is_cube = false;
 };
 
 struct ImageRuntime {

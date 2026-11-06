@@ -171,6 +171,8 @@ class OBJECT_PT_relations(ObjectButtonsPanel, Panel):
 
         col.prop(ob, "pass_index")
         col.prop(ob, "refraction_layer_index")
+        if context.engine == 'BLENDER_EEVEE':
+            col.prop(ob, "use_npr_refraction_background")
 
 
 class COLLECTION_MT_context_menu(Menu):

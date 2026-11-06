@@ -15,6 +15,7 @@
 #include "eevee_nodetree_frag_lib.bsl.hh"
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_surf_common.bsl.hh"
+#include "eevee_outline_shell_lib.bsl.hh"
 #include "eevee_transparency.bsl.hh"
 #include "eevee_thickness_lib.bsl.hh"
 
@@ -76,6 +77,7 @@ struct DeferredFragOut {
   [[frag_color(2)]] float2 gbuf_normal;
   [[frag_color(3)]] float4 gbuf_closure1;
   [[frag_color(4)]] float4 gbuf_closure2;
+  [[frag_color(5)]] uint npr_layer_coverage;
 };
 
 void surf_deferred_impl([[resource_table]] KernelGlobals &kg,
@@ -93,6 +95,12 @@ void surf_deferred_impl([[resource_table]] KernelGlobals &kg,
                    const float4 frag_co,
                    DeferredFragOut &frag_out, float &out_depth, ShadingData &sd)
 {
+#ifdef MAT_OUTLINE_SHELL_SELF_OCCLUSION
+  if (outline_shell_self_occluded()) {
+    gpu_discard_fragment();
+    return;
+  }
+#endif
   draw::ID id{interp.resource_id_raw};
   const uint resource_id = id.resource_id<1>();
 
@@ -299,6 +307,8 @@ void surf_deferred_impl([[resource_table]] KernelGlobals &kg,
   }
 
   /* ----- Radiance output ----- */
+
+  frag_out.npr_layer_coverage = 1u;
 
   /* Only output emission during the gbuffer pass. */
   frag_out.radiance = float4(sd.emission, 0.0f);

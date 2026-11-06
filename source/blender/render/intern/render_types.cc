@@ -173,6 +173,9 @@ void RenderDisplay::draw_unlock()
 
 bool RenderDisplay::test_break()
 {
+  if (GPU_backend_get_error() != nullptr) {
+    return true;
+  }
   if (!test_break_cb) {
     return false;
   }

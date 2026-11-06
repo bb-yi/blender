@@ -300,6 +300,10 @@ struct MeshBatchCache {
   Array<gpu::Batch *> surface_per_mat;
   gpu::BottomLevelAS *surface_blas;
 
+  /* Marked edges grouped by their incident face material, sharing the surface attributes. */
+  Array<gpu::IndexBufPtr> freestyle_lines_per_mat;
+  Array<gpu::Batch *> freestyle_edges_per_mat;
+
   DRWSubdivCache *subdiv_cache;
 
   DRWBatchFlag batch_requested;
@@ -325,7 +329,9 @@ struct MeshBatchCache {
 
   VectorSet<std::string> attr_used, attr_needed, attr_used_over_time;
 
-  int lastmatch;
+  /* Independent last-use times for shaded layers and generic attributes. */
+  int cd_lastmatch = 0;
+  int attr_lastmatch = 0;
 
   /* Valid only if edge_detection is up to date. */
   bool is_manifold;

@@ -170237,6 +170237,12 @@ msgstr "使用文件各层色彩空间"
 msgid "Input Resolution"
 msgstr "输入分辨率"
 
+msgid "Pre-FX"
+msgstr "效果前图像"
+
+msgid "Output the image before depth of field and motion blur are applied"
+msgstr "输出应用景深和运动模糊之前的图像"
+
 msgid "DLSS Super Resolution: custom input resolution using the Quality preset"
 msgstr "DLSS 超分辨率：使用质量预设，自定义输入分辨率"
 
@@ -170245,3 +170251,131 @@ msgstr "输入宽高占输出宽高的百分比，四舍五入到整数像素，
 
 msgid "Interpret multi-layer EXR using each part's color space metadata; fall back to the file or image color space for untagged parts"
 msgstr "使用各部分的色彩空间元数据解释多层 EXR；没有标记的部分回退到文件或图像色彩空间"
+
+msgid "Original Frame"
+msgstr "原画幅"
+
+msgid "Fixed Pixels"
+msgstr "固定像素"
+
+msgid "Material Snapshot"
+msgstr "材质快照"
+
+msgid "Final Stencil"
+msgstr "最终模板"
+
+msgid "Stencil Source"
+msgstr "模板数据来源"
+
+msgid "Which stage's user stencil values to preview"
+msgstr "选择要预览哪个阶段的用户模板值"
+
+msgid "Show the current-frame user stencil values available to the Stencil Value shader node"
+msgstr "显示本帧 Stencil Value 着色器节点实际可读取的用户模板值"
+
+msgid "Show the native user stencil values after surface and Forward rendering"
+msgstr "显示表面着色及前向渲染结束后的原生用户模板值"
+
+
+msgid "Draw Info"
+msgstr "绘制信息"
+
+
+msgid "Is Outline Shell"
+msgstr "是否为描边壳体"
+
+
+msgid "Is Shadow Pass"
+msgstr "是否为阴影绘制"
+
+
+msgid "Is Render Texture Capture"
+msgstr "是否为渲染纹理捕获"
+
+
+msgid "Is Probe Capture"
+msgstr "是否为探针捕获"
+
+
+msgid "Is Image Render"
+msgstr "是否为图像渲染"
+
+
+msgid "Is Color Bake"
+msgstr "是否为颜色烘焙"
+
+
+msgid "Is Depth Prepass"
+msgstr "是否为深度预通道"
+
+
+msgid "Is Deferred"
+msgstr "是否为延迟着色"
+
+
+msgid "Is Forward"
+msgstr "是否为前向着色"
+
+
+msgid "Is NPR Evaluation"
+msgstr "是否为 NPR 求值"
+
+
+msgid "Is Filter Pass"
+msgstr "是否为滤镜绘制"
+
+
+msgid "Is World"
+msgstr "是否为世界材质"
+
+
+msgid "Is Vertex Evaluation"
+msgstr "是否为顶点求值"
+
+
+msgid "Is Fragment Evaluation"
+msgstr "是否为片元求值"
+
+
+msgid "Is Volume Evaluation"
+msgstr "是否为体积求值"
+
+
+msgid "Is Sphere Probe Capture"
+msgstr "是否为球形探针捕获"
+
+
+msgid "Is Planar Probe Capture"
+msgstr "是否为平面探针捕获"
+
+
+msgid "Is Irradiance Capture"
+msgstr "是否为辐照度采集"
+
+
+msgid "Is Pre-FX Render"
+msgstr "是否为 Pre-FX 渲染"
+
+
+msgid "Is Playback"
+msgstr "是否正在播放"
+
+
+msgid "Is Navigating"
+msgstr "是否正在导航"
+
+
+msgid "Drawing context to test"
+msgstr "要判断的绘制上下文"
+
+
+msgid "Forward Refraction Layers"
+msgstr "Forward 折射分层"
+
+
+msgid "Forward Refraction"
+msgstr "Forward 折射"
+
+
+msgid "Participate in Refraction Background"
+msgstr "参与折射背景"

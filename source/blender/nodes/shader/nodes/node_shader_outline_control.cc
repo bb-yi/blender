@@ -12,6 +12,9 @@
 #include "RNA_access.hh"
 #include "RNA_prototypes.hh"
 
+#include "UI_interface_layout.hh"
+#include "UI_resources.hh"
+
 namespace blender {
 
 namespace nodes::node_shader_outline_control_cc {
@@ -127,6 +130,19 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<decl::Bool>("Freestyle Edge"_ustr)
       .default_value(true)
       .description("Draw outlines on mesh edges marked as Freestyle edges");
+
+  PanelDeclarationBuilder &advanced = b.add_panel("Advanced"_ustr).default_closed(true);
+  advanced.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
+    layout.prop(ptr, "id_combine", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    layout.prop(ptr, "edge_priority", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  });
+  advanced.add_input<decl::Float>("Expansion Mask"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description(
+          "Allow expanded outlines on this surface: zero protects this pixel, one allows lines");
 }
 
 static int node_shader_gpu_outline_control(GPUMaterial *mat,
@@ -138,7 +154,7 @@ static int node_shader_gpu_outline_control(GPUMaterial *mat,
   GPU_material_flag_set(mat, GPU_MATFLAG_OBJECT_INFO);
   GPUNodeLink *outlink = nullptr;
 
-  GPUNodeStack outline_in[14] = {};
+  GPUNodeStack outline_in[15] = {};
   outline_in[0] = outline_control_input_or_default(
       *node, in, "Line Color"_ustr, outline_control_default_input(GPU_VEC4, SOCK_RGBA, 0.0f));
   outline_in[1] = outline_control_input_or_default(
@@ -171,9 +187,22 @@ static int node_shader_gpu_outline_control(GPUMaterial *mat,
       *node, in, "ID Edge Width"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_FLOAT, 1.0f));
   outline_in[12] = outline_control_input_or_default(
       *node, in, "Freestyle Edge"_ustr, outline_control_default_input(GPU_BOOL, SOCK_BOOLEAN, 1.0f));
-  outline_in[13].end = true;
+  outline_in[13] = outline_control_input_or_default(
+      *node,
+      in,
+      "Expansion Mask"_ustr,
+      outline_control_default_input(GPU_FLOAT, SOCK_FLOAT, 1.0f));
+  outline_in[14].end = true;
 
-  GPU_stack_link(mat, node, "node_output_outline", outline_in, out,
+  const float id_combine = float(node->custom1);
+  const float edge_priority = float(node->custom2);
+  GPU_stack_link(mat,
+                 node,
+                 "node_output_outline",
+                 outline_in,
+                 out,
+                 GPU_constant(&id_combine),
+                 GPU_constant(&edge_priority),
                  GPU_kernel_globals(), GPU_shading_data(), &outlink);
   GPU_material_add_output_link_outline(mat, outlink);
   return true;

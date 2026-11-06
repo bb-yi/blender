@@ -7075,6 +7075,29 @@ class VIEW3D_PT_shading_cavity(Panel):
             row.prop(shading, "curvature_valley_factor", text="Valley")
 
 
+class VIEW3D_PT_shading_outline(Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'HEADER'
+    bl_label = "Outline"
+    bl_parent_id = "VIEW3D_PT_shading"
+    bl_ui_units_x = 18
+
+    @classmethod
+    def poll(cls, context):
+        space = context.space_data
+        if space is None or space.type != 'VIEW_3D':
+            return False
+        shading = space.shading
+        return shading.type == 'MATERIAL' or (
+            context.engine == 'BLENDER_EEVEE' and shading.type == 'RENDERED')
+
+    def draw(self, context):
+        col = self.layout.column()
+        col.active = context.scene.eevee.use_outline
+        col.prop(context.scene.eevee, "outline_viewport_resolution", text="Resolution")
+        col.prop(context.scene.eevee, "outline_surface_identity", text="Occlusion")
+
+
 class VIEW3D_PT_shading_render_pass(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'HEADER'
@@ -7094,6 +7117,8 @@ class VIEW3D_PT_shading_render_pass(Panel):
 
         layout = self.layout
         layout.prop(shading, "render_pass", text="")
+        if shading.render_pass == 'STENCIL_VALUE':
+            layout.prop(shading, "stencil_preview_source", text="Source")
 
 
 class VIEW3D_PT_shading_compositor(Panel):
@@ -9629,6 +9654,7 @@ classes = (
     VIEW3D_PT_shading_options_shadow,
     VIEW3D_PT_shading_options_ssao,
     VIEW3D_PT_shading_cavity,
+    VIEW3D_PT_shading_outline,
     VIEW3D_PT_shading_render_pass,
     VIEW3D_PT_shading_compositor,
     VIEW3D_PT_gizmo_display,

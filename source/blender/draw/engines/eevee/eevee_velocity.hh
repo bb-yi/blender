@@ -40,6 +40,19 @@ using VelocityObjectBuf = draw::StorageArrayBuffer<float4x4, 16>;
 /** Container for scene velocity data. */
 class VelocityModule {
  public:
+  struct RuntimeStats {
+    uint64_t snapshot_vertices = 0;
+    uint64_t snapshot_copy_bytes = 0;
+    uint64_t geometry_reallocations = 0;
+    uint64_t geometry_shrinks = 0;
+    uint64_t indirection_reallocations = 0;
+    uint64_t indirection_shrinks = 0;
+    uint64_t upload_bytes = 0;
+    uint64_t geometry_capacity_bytes = 0;
+    uint64_t indirection_capacity_bytes = 0;
+    double snapshot_cpu_ms = 0.0;
+  };
+
   struct VelocityObjectData : public VelocityIndex {
     /** ID key to retrieve the corresponding #VelocityGeometryData after copy. */
     uint64_t id;
@@ -112,6 +125,13 @@ class VelocityModule {
   /** Step referenced as next step. */
   eVelocityStep next_step_ = STEP_NEXT;
 
+  /* These counters follow the physical buffers when the history steps rotate. */
+  std::array<uint32_t, 3> geometry_low_usage_count_ = {};
+  uint32_t indirection_low_usage_count_ = 0;
+  int64_t indirection_initialized_size_ = 0;
+  RuntimeStats runtime_stats_;
+  bool runtime_stats_enabled_ = false;
+
  public:
   VelocityModule(Instance &inst) : inst_(inst)
   {
@@ -140,6 +160,11 @@ class VelocityModule {
   }
 
   void init();
+
+  const RuntimeStats &runtime_stats_get() const
+  {
+    return runtime_stats_;
+  }
 
   void step_camera_sync();
   void step_sync(eVelocityStep step, float time);

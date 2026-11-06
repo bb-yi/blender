@@ -30,7 +30,10 @@ class RenderBuffers {
   static constexpr gpu::TextureFormat object_id_format = gpu::TextureFormat::UINT_16;
   static constexpr gpu::TextureFormat prepass_normal_format = gpu::TextureFormat::UNORM_10_10_10_2;
 
-  TextureFromPool depth_tx;
+  Texture depth_tx;
+  TextureFromPool stencil_value_tx;
+  TextureFromPool stencil_surface_value_tx;
+  TextureFromPool stencil_surface_depth_tx;
   TextureFromPool combined_tx;
 
   // TextureFromPool mist_tx; /* Derived from depth_tx during accumulation. */
@@ -74,8 +77,8 @@ class RenderBuffers {
 
   void init();
 
-  /* Acquires (also ensures) the render buffer before rendering to them. */
-  void acquire(int2 extent, gpu::TextureFormat raycast_depth_format = depth_format);
+  /* Acquire render buffers and return the number of persistent textures recreated. */
+  int acquire(int2 extent, gpu::TextureFormat raycast_depth_format = depth_format);
   void release();
 
   /* Return the size of the allocated render buffers. Undefined if called before `acquire()`. */

@@ -402,7 +402,9 @@ static bool compile_ex(shaderc::Compiler &compiler,
   }
 
   /* Removes line directive. */
-  std::string sources = patch_line_directives(shader_module.combined_sources);
+  shader_module.combined_sources = patch_line_directives(
+      std::move(shader_module.combined_sources));
+  const std::string &sources = shader_module.combined_sources;
 
   /* The task scheduler enables flush-to-zero. Some platforms convert floating point literals using
    * floating point instructions, which would then turn denormal literals into zero. That happens

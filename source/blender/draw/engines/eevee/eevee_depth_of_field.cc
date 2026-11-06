@@ -50,8 +50,8 @@ void DepthOfField::init()
                                           camera_object_eval->data) :
                                       nullptr;
 
-  /* TODO: Support depth of field for panoramic camera. */
-  enabled_ = camera && (camera->dof.flag & CAM_DOF_ENABLED) != 0 && camera->type != CAM_PANO;
+  enabled_ = !inst_.is_pre_fx_render && !inst_.is_dlss_guide_render && camera &&
+             (camera->dof.flag & CAM_DOF_ENABLED) != 0 && camera->type != CAM_PANO;
 
   if (enabled_ == false) {
     /* Set to invalid value for update detection */

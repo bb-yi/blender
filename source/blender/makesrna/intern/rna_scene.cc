@@ -2457,6 +2457,15 @@ static void rna_SceneEEVEE_shadow_resolution_update(Main * /*bmain*/,
 static void rna_SceneEEVEE_render_texture_tag_update(Scene *scene)
 {
   DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+  RenderEngine *engine = RE_engine_create(RE_engines_find(scene->r.engine));
+  if (engine) {
+    for (ViewLayer &view_layer : scene->view_layers) {
+      BKE_view_layer_verify_aov(engine, scene, &view_layer);
+    }
+    RE_engine_free(engine);
+  }
+  BKE_ntree_update_tag_id_changed(G_MAIN, &scene->id);
+  BKE_main_ensure_invariants(*G_MAIN);
   WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
 }
 
@@ -2789,6 +2798,24 @@ static void rna_SceneEEVEE_render_texture_remove(ID *id,
       eevee->active_render_texture_index, -1, rna_SceneEEVEE_render_texture_active_index_max(eevee));
 
   rna_SceneEEVEE_render_texture_tag_update(scene);
+}
+
+static void rna_SceneEEVEE_render_texture_request_update(ID *id,
+                                                         SceneEEVEE *eevee,
+                                                         ReportList *reports,
+                                                         int index)
+{
+  SceneRenderTexture *render_texture = static_cast<SceneRenderTexture *>(
+      BLI_findlink(&eevee->render_textures, index));
+  if (render_texture == nullptr) {
+    BKE_reportf(reports, RPT_ERROR, "Render Texture index '%d' not found", index);
+    return;
+  }
+
+  render_texture->manual_update = render_texture->manual_update == INT_MAX ?
+                                      0 :
+                                      render_texture->manual_update + 1;
+  rna_SceneEEVEE_render_texture_tag_update(reinterpret_cast<Scene *>(id));
 }
 
 static void rna_SceneEEVEE_render_texture_move(ID *id,
@@ -6286,6 +6313,14 @@ void rna_def_view_layer_common(BlenderRNA *brna, StructRNA *srna, const bool sce
   }
 
   /* passes */
+  if (scene) {
+    prop = RNA_def_property(srna, "use_pass_pre_fx", PROP_BOOLEAN, PROP_NONE);
+    RNA_def_property_boolean_sdna(prop, nullptr, "eevee.render_passes", EEVEE_RENDER_PASS_PRE_FX);
+    RNA_def_property_ui_text(
+        prop, "Pre-FX", "Output the image before depth of field and motion blur are applied");
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
+  }
+
   prop = RNA_def_property(srna, "use_pass_combined", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "passflag", SCE_PASS_COMBINED);
   RNA_def_property_ui_text(prop, "Combined", "Deliver full combined RGBA buffer");
@@ -9338,6 +9373,12 @@ static void rna_def_scene_eevee_render_textures(BlenderRNA *brna, PropertyRNA *c
       func, "index", -1, INT_MIN, INT_MAX, "Index", "Index to remove", -1, INT_MAX);
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
 
+  func = RNA_def_function(srna, "request_update", "rna_SceneEEVEE_render_texture_request_update");
+  RNA_def_function_ui_description(func, "Request a manual render texture capture");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
+  parm = RNA_def_int(func, "index", -1, INT_MIN, INT_MAX, "Index", "Index to update", -1, INT_MAX);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+
   func = RNA_def_function(srna, "move", "rna_SceneEEVEE_render_texture_move");
   RNA_def_function_ui_description(func, "Move a render texture entry");
   RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
@@ -9593,6 +9634,15 @@ static void rna_def_scene_render_texture(BlenderRNA *brna)
   RNA_def_property_enum_sdna(prop, nullptr, "format");
   RNA_def_property_enum_items(prop, render_texture_format_items);
   RNA_def_property_ui_text(prop, "Format", "Storage format used by this render texture");
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");
+
+  prop = RNA_def_property(srna, "use_compositor_output", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "use_compositor_output", 1);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop,
+                           "Output to Compositor",
+                           "Export this capture as a Render Layers pass at the main image size");
   RNA_def_property_update(
       prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");
 }
@@ -10092,12 +10142,76 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
   RNA_def_property_update(
       prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
 
+  static const EnumPropertyItem stencil_surface_resolution_items[] = {
+      {0, "FULL", 0, "Full", "Use the current render-buffer resolution"},
+      {1, "HALF", 0, "Half", "Use half width and height"},
+      {2, "QUARTER", 0, "Quarter", "Use quarter width and height"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "stencil_surface_resolution", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "stencil_surface_resolution");
+  RNA_def_property_enum_items(prop, stencil_surface_resolution_items);
+  RNA_def_property_enum_default(prop, 0);
+  RNA_def_property_ui_text(
+      prop, "Writer Surface Resolution", "Resolution of stencil writer surface sampling");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_Scene_render_update");
+
+  static const EnumPropertyItem npr_forward_refraction_items[] = {
+      {0, "LEGACY", 0, "Traditional", "Draw Forward surfaces after all Deferred layers"},
+      {1,
+       "LAYERED",
+       0,
+       "Forward Refraction Layers",
+       "Include opted-in Forward objects in the backgrounds sampled by higher NPR refraction "
+       "layers"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "npr_forward_refraction_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "npr_forward_refraction_mode");
+  RNA_def_property_enum_items(prop, npr_forward_refraction_items);
+  RNA_def_property_ui_text(
+      prop, "Forward Refraction", "Forward background scheduling for NPR Refraction");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
   prop = RNA_def_property(srna, "use_outline", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "use_outline", 1);
   RNA_def_property_ui_text(
       prop,
       "Outline",
       "Enable Eevee screen-space outlines from Outline Control nodes and the Outline render pass");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  static const EnumPropertyItem outline_surface_identity_items[] = {
+      {0, "LEGACY", 0, "Outline ID (Compatible)", "Use the outline region ID for occlusion"},
+      {1,
+       "OBJECT_INSTANCE",
+       0,
+       "Object Instance",
+       "Separate surface occlusion from outline regions"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "outline_surface_identity", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, outline_surface_identity_items);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(
+      prop, "Occlusion Identity", "How outlines identify the receiving surface");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  static const EnumPropertyItem outline_viewport_resolution_items[] = {
+      {0, "FULL", 0, "1\xC3\x97", "Full viewport resolution"},
+      {1, "THREE_QUARTERS", 0, "0.75\xC3\x97", "Three-quarter width and height"},
+      {2, "HALF", 0, "0.5\xC3\x97", "Half width and height"},
+      {3, "QUARTER", 0, "0.25\xC3\x97", "Quarter width and height"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "outline_viewport_resolution", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, outline_viewport_resolution_items);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop,
+                           "Viewport Resolution",
+                           "Resolution of screen-space outlines in the viewport. Lower values "
+                           "improve performance but soften or lose fine outlines. Final renders "
+                           "always use full resolution");
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
 
   prop = RNA_def_property(srna, "ray_tracing_method", PROP_ENUM, PROP_NONE);

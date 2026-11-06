@@ -4,7 +4,19 @@
 
 #include "infos/eevee_outline_infos.hh"
 
+#ifdef OUTLINE_DOWNSAMPLED
+#  ifdef OUTLINE_REUSE_NORMALS
+FRAGMENT_SHADER_CREATE_INFO(eevee_outline_detect_scaled_cached)
+#  else
+FRAGMENT_SHADER_CREATE_INFO(eevee_outline_detect_scaled)
+#  endif
+#else
+#ifdef OUTLINE_REUSE_NORMALS
+FRAGMENT_SHADER_CREATE_INFO(eevee_outline_detect_cached)
+#else
 FRAGMENT_SHADER_CREATE_INFO(eevee_outline_detect)
+#endif
+#endif
 
 #include "draw_view_lib.glsl"
 #include "eevee_gbuffer_read_lib.glsl"
@@ -13,16 +25,35 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_outline_detect)
 
 float4 outline_source_color_fetch(int2 texel)
 {
+#ifdef OUTLINE_DOWNSAMPLED
+  texel = outline_source_texel(texel, textureSize(outline_color_tx, 0), outline_extent);
+#endif
   return texelFetch(outline_color_tx, texel, 0);
 }
 
 uint4 outline_source_info_fetch(int2 texel)
 {
-  return texelFetch(outline_info_tx, texel, 0);
+#ifdef OUTLINE_DOWNSAMPLED
+  texel = outline_source_texel(texel, textureSize(outline_info_tx, 0).xy, outline_extent);
+#endif
+  return texelFetch(outline_info_tx, int3(texel, 0), 0);
 }
 
 float outline_screen_depth_fetch(int2 texel)
 {
+  if (outline_width_unpack(outline_source_info_fetch(texel).r) > 0.0f &&
+      outline_source_color_fetch(texel).a > 0.0f)
+  {
+#ifdef OUTLINE_DOWNSAMPLED
+    const int2 source = outline_source_texel(texel, textureSize(depth_tx, 0), outline_extent);
+    return reverse_z::read(uintBitsToFloat(texelFetch(outline_info_tx, int3(source, 1), 0).r));
+#else
+    return reverse_z::read(uintBitsToFloat(texelFetch(outline_info_tx, int3(texel, 1), 0).r));
+#endif
+  }
+#ifdef OUTLINE_DOWNSAMPLED
+  texel = outline_source_texel(texel, textureSize(depth_tx, 0), outline_extent);
+#endif
   return reverse_z::read(texelFetch(depth_tx, texel, 0).r);
 }
 
@@ -88,6 +119,9 @@ float3 outline_reconstruct_normal(int2 texel, int2 extent, float3 current_view_d
 
 bool outline_prepass_normal_available(int2 extent)
 {
+#ifdef OUTLINE_DOWNSAMPLED
+  extent = textureSize(depth_tx, 0);
+#endif
   return all(equal(textureSize(prepass_normal_tx, 0), extent));
 }
 
@@ -96,14 +130,28 @@ float3 outline_surface_normal_or_reconstructed(int2 texel,
                                                bool use_prepass_normal,
                                                out bool has_surface_normal)
 {
-  const gbuffer::Header header = gbuffer::read_header(texel);
+#ifdef OUTLINE_DOWNSAMPLED
+  const int2 source_texel = outline_source_texel(texel, textureSize(depth_tx, 0), outline_extent);
+#else
+  const int2 source_texel = texel;
+#endif
+  if (outline_width_unpack(outline_source_info_fetch(texel).r) > 0.0f &&
+      outline_source_color_fetch(texel).a > 0.0f)
+  {
+    const float3 normal = uintBitsToFloat(texelFetch(outline_info_tx, int3(source_texel, 1), 0).gba);
+    if (dot(normal, normal) > 1e-10f) {
+      has_surface_normal = true;
+      return normalize(normal);
+    }
+  }
+  const gbuffer::Header header = gbuffer::read_header(source_texel);
   if (!header.is_empty()) {
     has_surface_normal = true;
-    return gbuffer::read_normal(texel);
+    return gbuffer::read_normal(source_texel);
   }
 
   if (use_prepass_normal) {
-    const float3 packed_normal = texelFetch(prepass_normal_tx, texel, 0).rgb;
+    const float3 packed_normal = texelFetch(prepass_normal_tx, source_texel, 0).rgb;
     if (any(greaterThan(packed_normal, float3(0.0f)))) {
       has_surface_normal = true;
       return normalize(packed_normal * 2.0f - 1.0f);
@@ -117,15 +165,24 @@ float3 outline_surface_normal_or_reconstructed(int2 texel,
 void main()
 {
   const int2 texel = int2(gl_FragCoord.xy);
+#ifdef OUTLINE_DOWNSAMPLED
+  const int2 extent = outline_extent;
+#else
   const int2 extent = textureSize(depth_tx, 0);
+#endif
   const bool use_prepass_normal = outline_prepass_normal_available(extent);
 
   const float4 outline_color = outline_source_color_fetch(texel);
   const uint4 outline_info = outline_source_info_fetch(texel);
-  const float sr_width_scale = uniform_buf.film.sr_active ?
+  const float sr_width_scale = (uniform_buf.film.sr_active ?
                                    sqrt(uniform_buf.film.sr_render_ratio.x *
                                         uniform_buf.film.sr_render_ratio.y) :
-                                   1.0f;
+                                   1.0f)
+#ifdef OUTLINE_DOWNSAMPLED
+      * sqrt((float(extent.x) / float(textureSize(depth_tx, 0).x)) *
+             (float(extent.y) / float(textureSize(depth_tx, 0).y)))
+#endif
+      ;
   const float line_width = outline_width_unpack(outline_info.r) * sr_width_scale;
   const float depth_threshold_input = outline_depth_threshold_unpack(outline_info.g);
   const float depth_threshold_range_input = outline_depth_threshold_range_unpack(outline_info.r);
@@ -168,6 +225,9 @@ void main()
   float3 center_normal = float3(0.0f);
   float3 true_normal_camera = float3(0.0f);
   float3 current_view_direction = float3(0.0f);
+#ifdef OUTLINE_REUSE_NORMALS
+  float3 normal_left, normal_right, normal_down, normal_up;
+#endif
 
   if (use_geometry_outline) {
     center_position = outline_screen_to_view(texel, extent, center_depth);
@@ -181,7 +241,30 @@ void main()
         if (any(lessThan(sample_texel, int2(0))) || any(greaterThanEqual(sample_texel, extent))) {
           continue;
         }
+#ifdef OUTLINE_REUSE_NORMALS
+        const float3 reconstructed = outline_reconstruct_normal(
+            sample_texel, extent, current_view_direction);
+        true_normal += reconstructed;
+        /* These four samples are needed again by the edge comparison below. */
+        if (y == 0 && x != 0) {
+          if (x < 0) {
+            normal_left = reconstructed;
+          }
+          else {
+            normal_right = reconstructed;
+          }
+        }
+        if (x == 0 && y != 0) {
+          if (y < 0) {
+            normal_down = reconstructed;
+          }
+          else {
+            normal_up = reconstructed;
+          }
+        }
+#else
         true_normal += outline_reconstruct_normal(sample_texel, extent, current_view_direction);
+#endif
       }
     }
     true_normal = normalize(true_normal);
@@ -227,8 +310,15 @@ void main()
     /* Forward/dithered outline materials can miss GBuffer normals; depth-reconstructed geometry
      * still carries valid depth and normal deltas for Malt-style depth/normal edges. */
     if (use_geometry_outline && center_is_not_behind_sample) {
+#ifdef OUTLINE_REUSE_NORMALS
+      const float3 sample_true_normal = (i == 0) ? normal_left :
+                                       (i == 1) ? normal_right :
+                                       (i == 2) ? normal_down :
+                                                  normal_up;
+#else
       const float3 sample_true_normal = outline_reconstruct_normal(
           sample_texel, extent, current_view_direction);
+#endif
       bool sample_has_surface_normal = false;
       const float3 sample_surface_normal = outline_surface_normal_or_reconstructed(
           sample_texel, sample_true_normal, use_prepass_normal, sample_has_surface_normal);
@@ -250,6 +340,19 @@ void main()
       if (use_normal_outline) {
         max_delta_angle = max(max_delta_angle, 1.0f - delta_normal);
       }
+    }
+  }
+
+  const uint id_combine = (outline_info.b >> 16u) & 3u;
+  const uint edge_priority = (outline_info.b >> 18u) & 3u;
+  if (id_combine != 0u) {
+    const bool depth_edge = use_depth_outline && max_delta_distance > depth_threshold;
+    const bool normal_edge = use_normal_outline && max_delta_angle > normal_threshold;
+    has_id_edge = has_id_edge && ((id_combine == 1u) ? depth_edge :
+                                 (id_combine == 2u) ? normal_edge :
+                                                    (depth_edge || normal_edge));
+    if (!has_id_edge) {
+      seed_line_width = line_width;
     }
   }
 
@@ -280,14 +383,32 @@ void main()
                                                    normal_threshold_range,
                                                    normal_edge_width));
     }
-    /* Decouple coverage geometry from width modulation: the JFA flood and the resolve coverage
-     * test must use a single uniform radius (the full seed_line_width) so that the nearest-seed
-     * Voronoi partition stays consistent with the union-of-disks coverage. Storing a per-seed
-     * modulated width here would make a pixel that is euclidean-nearest to a thin seed get dropped
-     * even though it lies inside a wider neighbor's disk, producing gaps / a broken edge layer.
-     * Instead we keep the full width in .a (used by JFA + coverage) and pass the modulation factor
-     * separately in .r (applied to the drawn radius in resolve). seed.rgb is otherwise unused by
-     * resolve, which reads the line color from outline_color_tx. */
-    out_outline_seed = float4(width_factor, 0.0f, 0.0f, seed_line_width);
+    if (edge_priority == 1u && has_id_edge && id_edge_width > 0.0f) {
+      width_factor = id_edge_width;
+    }
+    else if (edge_priority == 2u && use_depth_outline) {
+      const float preferred = outline_edge_width_factor(max_delta_distance,
+                                                        depth_threshold,
+                                                        depth_threshold_range,
+                                                        depth_edge_width);
+      if (preferred > 0.0f) {
+        width_factor = preferred;
+      }
+    }
+    else if (edge_priority == 3u && has_internal_edge) {
+      const float preferred = outline_edge_width_factor(max_delta_angle,
+                                                        normal_threshold,
+                                                        normal_threshold_range,
+                                                        normal_edge_width);
+      if (preferred > 0.0f) {
+        width_factor = preferred;
+      }
+    }
+    /* Keep the width and its modulation separate for the contour-factor blur. JFA compares
+     * distance normalized by their product, so an inactive or narrower seed cannot take
+     * coverage away from a wider contour. Resolve fetches color from outline_color_tx. */
+    if (width_factor > 0.0f) {
+      out_outline_seed = float4(width_factor, 0.0f, 0.0f, seed_line_width);
+    }
   }
 }

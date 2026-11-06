@@ -114,6 +114,46 @@ bool DEG_id_type_updated(const Depsgraph *graph, short id_type)
   return deg_graph->id_type_updated[BKE_idtype_idcode_to_index(id_type)] != 0;
 }
 
+bool DEG_is_evaluating_time_update(const Depsgraph *graph)
+{
+  const deg::Depsgraph *deg_graph = reinterpret_cast<const deg::Depsgraph *>(graph);
+  if (!deg_graph->is_evaluating) {
+    return false;
+  }
+  const int sources = deg_graph->evaluation_update_sources |
+                      deg_graph->pending_update_sources.load(std::memory_order_relaxed);
+  return sources == deg::DEG_UPDATE_SOURCE_TIME;
+}
+
+bool DEG_material_eval_profile_enabled(const Depsgraph *graph)
+{
+  return reinterpret_cast<const deg::Depsgraph *>(graph)->material_eval_profile_enabled;
+}
+
+void DEG_material_eval_profile_add(Depsgraph *graph, const int reason, uint64_t nanoseconds)
+{
+  deg::Depsgraph *dg = reinterpret_cast<deg::Depsgraph *>(graph);
+  if (!dg->material_eval_profile_enabled) {
+    return;
+  }
+  BLI_assert(reason >= 0 && reason < 14);
+  dg->material_eval_reasons[reason].fetch_add(1, std::memory_order_relaxed);
+  dg->material_eval_state_nanoseconds.fetch_add(nanoseconds, std::memory_order_relaxed);
+}
+
+DEGMaterialEvalStats DEG_material_eval_profile_get(const Depsgraph *graph)
+{
+  const deg::Depsgraph *dg = reinterpret_cast<const deg::Depsgraph *>(graph);
+  DEGMaterialEvalStats stats;
+  if (dg->material_eval_profile_enabled) {
+    for (int i = 0; i < 14; i++) {
+      stats.reasons[i] = dg->material_eval_reasons[i].load(std::memory_order_relaxed);
+    }
+    stats.state_nanoseconds = dg->material_eval_state_nanoseconds.load(std::memory_order_relaxed);
+  }
+  return stats;
+}
+
 bool DEG_id_type_any_updated(const Depsgraph *graph)
 {
   const deg::Depsgraph *deg_graph = reinterpret_cast<const deg::Depsgraph *>(graph);

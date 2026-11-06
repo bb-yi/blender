@@ -40,6 +40,8 @@ void GPU_backend_type_selection_set(const GPUBackendType backend);
 GPUBackendType GPU_backend_type_selection_get();
 GPUBackendType GPU_backend_get_type();
 const char *GPU_backend_get_name();
+/** Persistent device/submission failure, or nullptr. A failed backend requires a restart. */
+const char *GPU_backend_get_error();
 
 /**
  * Detect the most suited GPUBackendType.

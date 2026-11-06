@@ -62,6 +62,7 @@ struct GeomMeshVertIn {
   init_interface(interp, id.raw_id);
 
   interp.P = obj.point_object_to_world(vert_in.pos);
+  interp.P_relative = to_float3x3(obj.model) * vert_in.pos;
   interp.N = normalize(obj.normal_object_to_world(vert_in.nor));
   if (pipe.use_velocity) [[static_branch]] {
     float3 prv, nxt;
@@ -87,7 +88,9 @@ struct GeomMeshVertIn {
 
   /* Used by #MAT_DISPLACEMENT_GEOM_NORMAL to evaluate the displacement in the fragment shader. */
   interp.P_base = interp.P;
-  interp.P += nodetree_displacement(kg, sd);
+  float3 displacement = nodetree_displacement(kg, sd);
+  interp.P += displacement;
+  interp.P_relative += displacement;
 
   if (pipe.use_clip_plane) [[static_branch]] {
     clip_interp.clip_distance = dot(clip_srt.clip_plane.plane, float4(interp.P, 1.0f));

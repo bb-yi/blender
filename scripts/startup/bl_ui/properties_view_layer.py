@@ -146,6 +146,7 @@ class VIEWLAYER_PT_eevee_layer_passes_data(ViewLayerButtonsPanel, Panel):
 
         col = layout.column()
         col.prop(view_layer, "use_pass_combined")
+        col.prop(view_layer, "use_pass_pre_fx")
         col.prop(view_layer, "use_pass_z")
         col.prop(view_layer, "use_pass_mist")
         col.prop(view_layer, "use_pass_normal")

@@ -266,6 +266,11 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
             poll=object_shader_nodes_poll(context)
         )
         if eevee_shader_nodes_poll(context):
+            self.node_operator(layout, "ShaderNodeDrawInfo")
+            self.node_operator(
+                layout, "ShaderNodeStencilValue",
+                poll=object_or_npr_eevee_shader_nodes_poll(context),
+            )
             self.node_operator_with_outputs(
                 context, layout, "ShaderNodeRenderInfo",
                 ["Width", "Height"],
@@ -296,6 +301,11 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
         self.node_operator(
             layout,
             "ShaderNodeLightProbeColor",
+            poll=object_or_npr_eevee_shader_nodes_poll(context),
+        )
+        self.node_operator(
+            layout,
+            "ShaderNodePlanarProbe",
             poll=object_or_npr_eevee_shader_nodes_poll(context),
         )
         self.node_operator(
@@ -701,7 +711,7 @@ class NODE_MT_shader_node_texture_base(node_add_menu.NodeMenu):
         self.node_operator(
             layout,
             "ShaderNodeRenderTexture",
-            poll=object_eevee_shader_nodes_poll(context),
+            poll=object_eevee_shader_nodes_poll(context) or filter_eevee_shader_nodes_poll(context),
         )
         self.node_operator(layout, "ShaderNodeTexMagic")
         self.node_operator(layout, "ShaderNodeTexNoise")

@@ -36,6 +36,7 @@ class GLStateManager : public StateManager {
   GPUStateMutable current_mutable_;
   /** Limits. */
   float line_width_range_[2];
+  int texture_unit_count_ = 0;
 
   /**
    * Texture state:

@@ -106,6 +106,7 @@ struct GPUNode {
 using GPUNodeLinkData = std::variant<const float *, const int *, const bool *>;
 
 struct GPUNodeLink {
+  uint32_t uniform_source_index = 0;
   GPUNodeStack *socket = nullptr;
 
   GPUNodeLinkType link_type = GPU_NODE_LINK_NONE;
@@ -160,6 +161,7 @@ bool gpu_constant_to_bool(const GPUInputConstantData &data);
 struct GPUInput {
   GPUInput *next = nullptr;
   GPUInput *prev = nullptr;
+  uint32_t uniform_source_index = 0;
 
   GPUNode *node = nullptr;
   GPUType type = GPU_NONE; /* data-type. */

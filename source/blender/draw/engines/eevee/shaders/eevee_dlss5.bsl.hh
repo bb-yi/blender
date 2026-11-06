@@ -91,7 +91,7 @@ void sr_prepare_frag([[resource_table]] const SrPrepareResources &resources,
   frag_out.velocity = float2(0.0f);
   if (resources.use_motion) {
     [[resource_table]] const CameraVelocity &camera = resources.camera;
-    frag_out.velocity = camera.resolve(views, resources.velocity_tx, texel,
+    frag_out.velocity = camera.resolve_local(views, resources.velocity_tx, texel,
                                        reverse_z::read(depth)).xy *
                         float2(textureSize(resources.velocity_tx, 0));
   }
@@ -290,8 +290,8 @@ void velocity_convert_frag([[resource_table]] const VelocityResources &resources
   const int2 guide_texel = int2((float2(texel) + 0.5f) * ratio) + resources.guide_overscan;
   const float depth = reverse_z::read(texelFetch(resources.depth_tx, guide_texel, 0).r);
   [[resource_table]] const CameraVelocity &camera = resources.camera;
-  const float2 motion = camera.resolve(views, resources.velocity_tx, guide_texel, depth).xy;
-  /* EEVEE resolves previous-current UV motion. NR uses current-previous pixels.
+  const float2 motion = camera.resolve_local(views, resources.velocity_tx, guide_texel, depth).xy;
+  /* EEVEE resolves previous-current UV motion. NR uses the same backward pixel motion.
    * Include overscan in the UV-to-pixel scale, then undo the EEVEE render scale. */
   frag_out.velocity = resources.motion_sign * motion *
                       float2(textureSize(resources.velocity_tx, 0)) / ratio;

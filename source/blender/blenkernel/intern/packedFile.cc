@@ -33,6 +33,9 @@
 
 #include "BLI_fileops.hh"
 #include "BLI_listbase.hh"
+#include "BLI_fileops.hh"
+#include "BLI_hash_md5.hh"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
 #include "BLI_string.hh"
 #include "BLI_utildefines.hh"
@@ -45,6 +48,7 @@
 #include "BKE_main.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
+#include "BKE_node_tree_update.hh"
 #include "BKE_packedFile.hh"
 #include "BKE_report.hh"
 #include "BKE_sound.hh"
@@ -224,6 +228,83 @@ int BKE_packedfile_read(PackedFile *pf, void *data, int size)
   return size;
 }
 
+static int pack_compositor_luts(Main *bmain, ReportList *reports)
+{
+  int count = 0;
+  FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+    if (!ID_IS_EDITABLE(owner_id)) {
+      continue;
+    }
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy != CMP_NODE_LUT) {
+        continue;
+      }
+      auto &settings = *static_cast<NodeCompositorLUT *>(node.storage);
+      if (settings.packed_file || !settings.filepath[0]) {
+        continue;
+      }
+      char filepath[FILE_MAX];
+      STRNCPY(filepath, settings.filepath);
+      BLI_path_abs(filepath, ID_BLEND_PATH(bmain, owner_id));
+      const size_t size = BLI_file_size(filepath);
+      if (!BLI_path_extension_check_n(
+              filepath, ".cube", ".png", ".exr", ".tif", ".tiff", nullptr) ||
+          size == 0 || size > 64 * 1024 * 1024)
+      {
+        BKE_reportf(reports, RPT_ERROR, "Unable to pack LUT '%s': invalid file or size", filepath);
+        continue;
+      }
+      settings.packed_file = BKE_packedfile_new(reports, filepath, BKE_main_blendfile_path(bmain));
+      if (settings.packed_file) {
+        unsigned char digest[16];
+        BLI_hash_md5_buffer(static_cast<const char *>(settings.packed_file->data),
+                            settings.packed_file->size,
+                            digest);
+        BLI_hash_md5_to_hexdigest(digest, settings.packed_hash);
+        BKE_ntree_update_tag_node_property(ntree, &node);
+        DEG_id_tag_update(&ntree->id, ID_RECALC_NTREE_OUTPUT);
+        count++;
+      }
+    }
+  }
+  FOREACH_NODETREE_END;
+  return count;
+}
+
+static void unpack_compositor_luts(Main *bmain, ReportList *reports, ePF_FileStatus how)
+{
+  FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+    if (!ID_IS_EDITABLE(owner_id)) {
+      continue;
+    }
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy != CMP_NODE_LUT) {
+        continue;
+      }
+      auto &settings = *static_cast<NodeCompositorLUT *>(node.storage);
+      if (!settings.packed_file) {
+        continue;
+      }
+      char *filepath = BKE_packedfile_unpack_to_file(reports,
+                                                     BKE_main_blendfile_path(bmain),
+                                                     settings.filepath,
+                                                     settings.filepath,
+                                                     settings.packed_file,
+                                                     how);
+      if (filepath) {
+        BKE_packedfile_free(settings.packed_file);
+        settings.packed_file = nullptr;
+        settings.packed_hash[0] = '\0';
+        STRNCPY(settings.filepath, filepath);
+        MEM_delete(filepath);
+        BKE_ntree_update_tag_node_property(ntree, &node);
+        DEG_id_tag_update(&ntree->id, ID_RECALC_NTREE_OUTPUT);
+      }
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
 PackedFileCount BKE_packedfile_count_all(Main *bmain)
 {
   Image *ima;
@@ -264,6 +345,11 @@ PackedFileCount BKE_packedfile_count_all(Main *bmain)
     }
 
     for (const bNode &node : ntree->nodes) {
+      if (node.type_legacy == CMP_NODE_LUT &&
+          static_cast<const NodeCompositorLUT *>(node.storage)->packed_file)
+      {
+        count.individual_files++;
+      }
       const NodeShaderGLSLFunction *storage = glsl_function_external_source_storage(&node);
       if (storage != nullptr && storage->packed_source != nullptr) {
         count.individual_files++;
@@ -439,6 +525,7 @@ void BKE_packedfile_pack_all(Main *bmain, ReportList *reports, bool verbose)
   }
 
   tot += pack_glsl_function_external_sources(bmain, reports);
+  tot += pack_compositor_luts(bmain, reports);
 
   for (Object &object : bmain->objects) {
     if (ID_IS_LINKED(&object)) {
@@ -971,6 +1058,7 @@ void BKE_packedfile_unpack_all(Main *bmain, ReportList *reports, enum ePF_FileSt
   }
 
   unpack_glsl_function_external_sources(bmain, reports, how);
+  unpack_compositor_luts(bmain, reports, how);
 
   for (Object &object : bmain->objects) {
     if (ID_IS_LINKED(&object)) {

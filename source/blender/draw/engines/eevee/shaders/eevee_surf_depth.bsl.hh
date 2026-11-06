@@ -10,6 +10,7 @@
 #include "eevee_nodetree_frag_lib.bsl.hh"
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_surf_common.bsl.hh"
+#include "eevee_outline_shell_lib.bsl.hh"
 #include "eevee_transparency.bsl.hh"
 #include "eevee_utility_tx.bsl.hh"
 #include "eevee_velocity.bsl.hh"
@@ -65,6 +66,12 @@ void surf_depth([[resource_table]] KernelGlobals &kg,
                 [[bary_coord]] [[condition(use_barycentric)]] const float3 bary_co,
                 [[front_facing]] const bool front_face)
 {
+#ifdef MAT_OUTLINE_SHELL_SELF_OCCLUSION
+  if (outline_shell_self_occluded()) {
+    gpu_discard_fragment();
+    return;
+  }
+#endif
   float out_depth = frag_co.z;
   material_surface_cull_discard(front_face);
     const ViewMatrices view = views.get(0);
@@ -262,7 +269,11 @@ void surf_depth_offset([[resource_table]] KernelGlobals &kg,
 
   /* Always written, but may be optimized out by frame-buffer/subpass setup. */
   frag_out.normal.rgb = normalize(interp.N) * 0.5f + 0.5f;
+#ifdef MAT_STENCIL_WRITER_SURFACE
+  frag_out.object_id = uint(stencil_writer_reference) & 15u;
+#else
   frag_out.object_id = interp.resource_id_raw & uint(0xFFFF);
+#endif
 }
 
 

@@ -15,6 +15,7 @@ void StaticCacheManager::reset()
   smaa_precomputed_textures.reset();
   ocio_color_space_conversion_shaders.reset();
   ocio_to_display_shaders.reset();
+  ocio_luts.reset();
   distortion_grids.reset();
   keying_screens.reset();
   cached_shaders.reset();

@@ -1195,7 +1195,9 @@ inline void PassBase<T>::material_set(Manager &manager,
       const bool use_tile_mapping = tex->tiled_mapping_name[0];
       ImageUser *iuser = tex->iuser_available ? &tex->iuser : nullptr;
 
-      ImageGPUTextures gputex = tex->use_3d_lut_strip ?
+      ImageGPUTextures gputex = tex->use_cube_strip ?
+          BKE_image_acquire_gpu_material_cube_texture(tex->ima, iuser, deferred_texture_loading) :
+          tex->use_3d_lut_strip ?
           BKE_image_acquire_gpu_material_3d_lut_texture(tex->ima, iuser, tex->lut_3d_width,
               tex->lut_3d_height, tex->lut_3d_depth, deferred_texture_loading) :
           BKE_image_acquire_gpu_material_texture(tex->ima, iuser, use_tile_mapping,
@@ -1213,6 +1215,7 @@ inline void PassBase<T>::material_set(Manager &manager,
          * The pointer will be filled in later by #Manager::load_deferred_textures. */
         Manager::DeferredTexture &deferred = manager.add_texture_deferred(
             tex->ima, iuser, use_tile_mapping);
+        deferred.use_cube_strip = tex->use_cube_strip;
         deferred.use_3d_lut_strip = tex->use_3d_lut_strip;
         deferred.lut_dimensions = int3(tex->lut_3d_width, tex->lut_3d_height, tex->lut_3d_depth);
         bind_texture(tex->sampler_name, &deferred.texture, sampler_state);

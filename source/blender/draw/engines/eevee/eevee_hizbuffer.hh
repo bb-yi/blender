@@ -71,7 +71,15 @@ class HiZBuffer {
         gpu::TextureFormat::SFLOAT_32, int2(1), GPU_TEXTURE_USAGE_SHADER_READ, &value);
   };
 
-  void sync();
+  int sync();
+  bool storage_matches_extent(int2 extent) const;
+  void swap_textures(SwapChain<Texture, 2> &textures)
+  {
+    Texture::swap(hiz_tx_.current(), textures.current());
+    Texture::swap(hiz_tx_.previous(), textures.previous());
+    front.ref_tx_ = back.ref_tx_ = dummy_empty_hiz_tx_;
+    set_dirty();
+  }
 
   /**
    * Set source texture for the hiz down-sampling.

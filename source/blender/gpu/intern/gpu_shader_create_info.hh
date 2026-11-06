@@ -25,6 +25,7 @@
 #  include "gpu_shader_create_info_pipeline.hh"
 
 #  include <iostream>
+#  include <memory>
 #endif
 
 #if !defined(GPU_SHADER)

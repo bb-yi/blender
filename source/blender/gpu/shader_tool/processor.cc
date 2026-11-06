@@ -1299,6 +1299,7 @@ void SourceProcessor::parse_library_functions_ast(Parser &parser)
           case Type::sampler2DArray:
           case Type::sampler2D:
           case Type::sampler3D:
+          case Type::samplerCube:
           case Type::Closure:
           case Type::TextureHandle:
           case Type::KernelGlobals:

@@ -43,6 +43,24 @@ bool ShadingView::is_stencil_value_preview() const
 
 void ShadingView::render_stencil_value_preview()
 {
+  if (inst_.v3d->shading.stencil_preview_source == V3D_STENCIL_PREVIEW_SNAPSHOT) {
+    RenderBuffers &buffers = inst_.render_buffers;
+    /* Depth is sampled only to distinguish untouched background. Keep it off the target
+     * framebuffer so OpenGL and Vulkan never read an attached texture. */
+    stencil_preview_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(buffers.combined_tx));
+    PassSimple pass("StencilSnapshotPreview");
+    pass.framebuffer_set(&stencil_preview_fb_);
+    pass.state_set(DRW_STATE_WRITE_COLOR);
+    pass.shader_set(inst_.shaders.static_shader_get(STENCIL_SNAPSHOT_VISUALIZE));
+    pass.bind_texture("stencil_value_tx", &buffers.stencil_value_tx);
+    pass.bind_texture("depth_tx", &buffers.depth_tx);
+    pass.push_constant("background_depth", inst_.film.depth.clear_value);
+    pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+    inst_.manager->submit(pass, render_view_);
+    GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+    return;
+  }
+
   GPU_framebuffer_bind(combined_fb_);
 
   PassSimple pass("StencilValuePreview");
@@ -108,6 +126,41 @@ void ShadingView::sync()
   main_view_.sync(viewmat, winmat);
 
   inst_.uniform_data.pipeline.is_main_view_inverted = main_view_.is_inverted();
+}
+
+void ShadingView::render_dlss_guides(Film &film)
+{
+  if (!is_enabled_) {
+    return;
+  }
+  RenderBuffers &buffers = inst_.render_buffers;
+  buffers.acquire(extent_);
+  const bool raycast = inst_.pipelines.has_raycast;
+  const bool normals = raycast || inst_.outline.enabled() ||
+                       inst_.lights.needs_front_light_shader();
+  prepass_fb_.ensure(GPU_ATTACHMENT_TEXTURE(buffers.depth_tx),
+                     normals ? GPU_ATTACHMENT_TEXTURE(buffers.prepass_normal_tx) :
+                               GPU_ATTACHMENT_NONE,
+                     raycast ? GPU_ATTACHMENT_TEXTURE(buffers.object_id_tx) : GPU_ATTACHMENT_NONE,
+                     GPU_ATTACHMENT_TEXTURE(buffers.vector_tx));
+  prepass_fb_.bind();
+  GPU_framebuffer_clear_depth_stencil(prepass_fb_, inst_.film.depth.clear_value, 0xFFu);
+  const float4 invalid_motion(VELOCITY_INVALID);
+  GPU_texture_clear(buffers.vector_tx, GPU_DATA_FLOAT, &invalid_motion);
+  if (raycast) {
+    buffers.object_id_tx.clear(uint4(0));
+  }
+  if (normals) {
+    buffers.prepass_normal_tx.clear(float4(0.0f));
+  }
+  inst_.outline_shell.render(main_view_, extent_);
+  prepass_fb_.bind();
+  inst_.pipelines.deferred.render_dlss_guides(main_view_, prepass_fb_);
+  inst_.pipelines.forward.render_dlss_guides(main_view_, prepass_fb_);
+  inst_.outline_shell.release();
+  GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_FRAMEBUFFER);
+  film.process_dlss(main_view_, inst_);
+  buffers.release();
 }
 
 void ShadingView::render()
@@ -243,6 +296,7 @@ void ShadingView::render()
   if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG)) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                            TelemetryStageId::MainFilterBeforeVolumeFog);
+    inst_.pipelines.forward.filter_volume_begin(render_view_, combined_fb_);
     gpu::Texture *filtered_tx = inst_.filter_materials.render_stage(
         render_view_, rbufs.combined_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG);
     if (filtered_tx != nullptr && filtered_tx != rbufs.combined_tx) {
@@ -250,6 +304,7 @@ void ShadingView::render()
       GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
                          GPU_BARRIER_FRAMEBUFFER);
     }
+    inst_.pipelines.forward.filter_volume_end(render_view_, combined_fb_);
   }
 
   {
@@ -261,7 +316,9 @@ void ShadingView::render()
 
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainVolumeResolve);
-    inst_.volume.draw_resolve(main_view_);
+    if (!inst_.pipelines.forward.volume_resolved()) {
+      inst_.volume.draw_resolve(main_view_);
+    }
   }
 
   {
@@ -275,6 +332,7 @@ void ShadingView::render()
     inst_.pipelines.forward.render(
         render_view_, rbufs.depth_tx, prepass_fb_, transparent_fb_, combined_fb_, extent_);
   }
+  inst_.outline_shell.release();
 
   if (inst_.outline.enabled()) {
     inst_.outline.render(render_view_, extent_);
@@ -433,7 +491,8 @@ void ShadingView::update_view()
     const float2 pixel_size = render_size / float2(film.film_extent_get());
 
     /* Render extent in final film pixel unit. */
-    const float2 render_extent = float2(film.render_extent_original_get()) / film.render_ratio_get();
+    const float2 render_extent = float2(film.render_extent_original_get()) /
+                                 film.render_ratio_get();
     const float2 overscan_pixels = float2(film.render_overscan_get()) / film.render_ratio_get();
 
     const float2 render_bottom_left = bottom_left - pixel_size * overscan_pixels;
@@ -487,10 +546,13 @@ void CaptureView::render_world()
 
   View view = {"Capture.View"};
   GPU_debug_group_begin("World.Capture");
+  const uint32_t previous_draw_context = inst_.pipelines.data.draw_context;
 
   if (update_info->do_render) {
     inst_.sphere_probes.ensure_cubemap_render_target(update_info->cube_target_extent);
 
+    inst_.pipelines.data.draw_context |= DRAW_CONTEXT_SPHERE_PROBE_CAPTURE;
+    inst_.uniform_data.pipeline.push_update();
     auto render_cubemap = [&](RayPipelineType ray_type) {
       if (assign_if_different(inst_.pipelines.data.ray_type, ray_type)) {
         inst_.uniform_data.pipeline.push_update();
@@ -545,7 +607,9 @@ void CaptureView::render_world()
 
   inst_.sphere_probes.release_render_target();
 
-  if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA)) {
+  const bool context_changed = assign_if_different(inst_.pipelines.data.draw_context,
+                                                   previous_draw_context);
+  if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA) || context_changed) {
     inst_.uniform_data.pipeline.push_update();
   }
 
@@ -562,6 +626,7 @@ void CaptureView::render_probes()
   int max_resolution = 0;
   double estimated_work = 0.0;
   int prev_extent = 0;
+  const uint32_t previous_draw_context = inst_.pipelines.data.draw_context;
   while (const auto update_info = inst_.sphere_probes.probe_update_info_pop()) {
     GPU_debug_group_begin("Probe.Capture");
     updated_probe_count++;
@@ -572,8 +637,11 @@ void CaptureView::render_probes()
                       1000000.0;
 
     inst_.sphere_probes.ensure_cubemap_render_target(update_info->cube_target_extent);
+    const bool context_changed = assign_if_different(
+        inst_.pipelines.data.draw_context,
+        previous_draw_context | uint32_t(DRAW_CONTEXT_SPHERE_PROBE_CAPTURE));
     if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_GLOSSY) ||
-        prev_extent != update_info->cube_target_extent)
+        prev_extent != update_info->cube_target_extent || context_changed)
     {
       /* Set correct thickness for raycast node in probe pipelines. */
       float4x4 win_m4 = math::projection::perspective(-0.1f, 0.1f, -0.1f, 0.1f, 0.1f, 10.0f);
@@ -664,7 +732,9 @@ void CaptureView::render_probes()
 
   inst_.sphere_probes.release_render_target();
 
-  if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA)) {
+  const bool context_changed = assign_if_different(inst_.pipelines.data.draw_context,
+                                                   previous_draw_context);
+  if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA) || context_changed) {
     inst_.uniform_data.pipeline.push_update();
   }
 }

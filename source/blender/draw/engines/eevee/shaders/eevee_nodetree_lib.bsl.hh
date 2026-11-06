@@ -6,6 +6,8 @@
 
 #include "draw_gsplat_lib.bsl.hh"
 #include "draw_intersect.bsl.hh"
+#include "gpu_shader_common_hash.glsl"
+#include "draw_referenced_object_lib.glsl"
 #include "draw_model.bsl.hh"
 #include "draw_view.bsl.hh"
 #include "draw_viewlayer.bsl.hh"
@@ -38,6 +40,7 @@ bool TextureHandle_is_scene_depth(TextureHandle tex);
 #endif
 
 #ifdef MAT_FILTER
+int2 filter_graph_output_extent();
 bool TextureHandle_stores_transmittance_alpha(TextureHandle tex);
 int2 filter_output_extent();
 #endif
@@ -290,6 +293,23 @@ float4 TextureHandle_eval_uv(KernelGlobals &kg, ShadingData &sd, TextureHandle t
   return TextureHandle_eval(kg, sd, tex, uv, false);
 }
 #endif
+
+uint draw_info_context_flags()
+{
+  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
+  return uni.pipeline_buf.draw_context;
+}
+
+float2 render_info_samples()
+{
+#ifdef CREATE_INFO_eevee_Sampling
+  [[resource_table]] const eevee::Sampling &sampling = resource_table_get(eevee::Sampling);
+  return float2(float(sampling.sampling_buf.sample_index),
+                float(max(sampling.sampling_buf.sample_count, 1)));
+#else
+  return float2(0.0f, 1.0f);
+#endif
+}
 
 float3 coordinate_incoming(KernelGlobals &kg, ShadingData &sd, float3 P)
 {

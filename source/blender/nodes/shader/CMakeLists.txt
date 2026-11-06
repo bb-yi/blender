@@ -100,8 +100,10 @@ set(SRC
   nodes/node_shader_portal_out.cc
   nodes/node_shader_render_texture.cc
   nodes/node_shader_render_info.cc
+  nodes/node_shader_stencil_value.cc
   nodes/node_shader_world_environment.cc
   nodes/node_shader_light_probe_color.cc
+  nodes/node_shader_planar_probe.cc
   nodes/node_shader_world_to_tangent.cc
   nodes/node_shader_basis_transform.cc
   nodes/node_shader_sdf_primitive.cc
@@ -170,6 +172,9 @@ set(SRC
   node_shader_register.cc
   node_shader_tree.cc
   node_shader_util.cc
+
+  # Preserve existing Unity batches when adding the new node.
+  nodes/node_shader_draw_info.cc
 
   node_shader_register.hh
   node_shader_util.hh

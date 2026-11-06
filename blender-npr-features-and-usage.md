@@ -90,7 +90,7 @@
 
 `Render Textures` 是场景级的 Eevee 额外渲染纹理系统。
 
-它允许场景预先维护最多 `4` 个 Render Texture 槽位，每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质中通过 `Render Texture` 节点采样。
+它允许场景预先维护最多 `4` 个 Render Texture 槽位，每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质或 Filter Material 中通过 `Render Texture` 节点采样，也可直接输出到合成器。
 
 #### 面板入口
 
@@ -123,9 +123,21 @@
 1. 打开 `Scene Properties > Render Textures`。
 2. 新建一个 `Render Texture` 条目。
 3. 选择 `Source`、`Camera`、分辨率、刷新模式和格式。
-4. 在普通物体材质里添加 `Add > Texture > Render Texture` 节点。
+4. 在普通物体材质或 Filter Material 中添加 `Add > Texture > Render Texture` 节点。
 5. 在节点面板中选择对应的 `Render Texture` 条目。
 6. 使用节点输出的 `Color` / `Alpha` 参与后续材质计算。
+
+`Every Frame` 在一次帧求值中捕获一次；同帧编辑场景和运动模糊的时间步重新求值时会刷新，单纯增加 TAA 样本不会重复捕获。需要在每个 TAA 样本推进反馈时使用 `Every Sample`。
+
+`Manual` 在首次使用或捕获设置改变后生成初始图像，随后保留该图像。点击 `Update Render Texture`，或调用 `scene.eevee.render_textures.request_update(index)`，可请求下一次绘制刷新。改变尺寸、格式、输出类型、绑定相机或重新启用会重建初始捕获；普通场景编辑和时间线切帧不会自动刷新 Manual 图像。
+
+捕获缓存属于当前渲染实例。关闭并重新创建视口渲染实例，或开始一帧独立的最终渲染时，会重新生成初始图像。
+
+仅被当前材质、World、灯光着色器、活动 Filter Pass 引用，或开启 `Output to Compositor` 的条目参与捕获；移除全部引用并关闭合成输出后会回收其全尺寸图像和光追历史。没有 Render Texture 反馈依赖时，同相机、同尺寸且不需要独立光追历史的待刷新条目可以复用一次渲染，分别提取各自输出和格式。Depth/Normal 在材质不依赖光照、场景颜色或模板状态时使用轻量路径；需要这些输入时保留完整捕获路径。Manual 缓存随条目 UID 保留，其他条目的启停、删除、插入或列表重排不会触发其刷新。
+
+没有捕获材质读取条目时，仅保留一张全尺寸输出图；引入反馈后自动恢复历史图，并保留已有 Manual 快照。同尺寸捕获复用临时缓冲，缓存数量受启用条目数限制，停用或移除引用后回收。Normal 轻量捕获只准备探针资源绑定，不额外渲染平面探针。完整管线回退按各捕获视图的可见材质判断；World、灯光以及变形或边界不确定的对象仍使用保守回退。自适应细分提交预算同时覆盖主相机和全部启用的捕获相机。
+
+开启条目的 `Output to Compositor` 后，合成器 `Render Layers` 节点出现 `RT: 条目名称` 输出，无需中转材质或 AOV。Color 输出 RGBA（Alpha 为不透明度），Depth 与 R16F/R32F 输出数值，RGBA 格式的 Normal 保持原有 RGB 编码。导出按主图分辨率和渲染边界适配，不改变原捕获尺寸，也不叠加主相机的景深或运动模糊。通道按 UID 绑定，重命名和重排保留连线；默认关闭导出。Filter 材质中需将 `Texture Coordinate > Window` 连接到 Render Texture 的 `Vector`，按全屏坐标采样。
 
 ### 2. Filter Materials
 
@@ -563,6 +575,32 @@
   - `Reflection` 默认使用当前表面的视线方向
   - `Irradiance` 默认使用当前表面的着色法线方向
 - `Direction` 连接后，可以按指定方向采样 probe 信息
+
+### Planar Probe
+
+入口：`Add > Input > Planar Probe`。用于 Eevee 物体材质和 NPR Tree 的表面颜色求值，
+直接读取当前视图已完成的平面反射捕获，不额外执行反射捕获或接收材质的光照计算。
+
+- 输入为 `Position`、`Normal`、`UV`；输出为 `Color`、`Depth`、`UV`、`Is Valid`。
+- `Probe Selection = Auto` 沿用原生影响范围和法线匹配；`Object` 固定引用平面探针对象，
+  可在影响范围之外读取它当前已捕获的画面。指定对象不可用时不会自动改读其他探针。
+- `Position`、`Normal` 未连接时使用当前表面世界坐标和着色法线。
+- `UV` 未连接时使用原生 Forward 视差近似投影；连接后按指定坐标采样。
+  输入、输出均使用左下角原点的公共 UV；手动 UV 的输出 XY 与输入相同，Z 为 0。
+  使用“向量数学”调整采样坐标；自动投影的 UV 输出也可调整后接入另一个探针设置一致的节点。
+- `Color` 是捕获画面的场景线性 HDR RGB；有效时 Alpha 为 1，无效时为 0，
+  不表示反射物体的透明度。颜色双线性采样，边缘不重复铺排。
+- `Depth` 是镜像相机空间中以场景单位表示的正向线性 Z 深度，使用最近点深度 texel。
+  它不是水面厚度，也不是沿反射光线测得的距离。
+- `Is Valid` 表示当前视图捕获和采样坐标有效。使用 `Depth > 0` 判断深度缓冲是否记录了几何表面。
+  无几何深度时仍保留捕获颜色，Depth 为 0，此时 `Is Valid` 仍可为 1。
+  轮廓处的深度标记不代表双线性颜色的覆盖率。
+- 越界、缺少探针、探针自身及其他探针捕获、无完整捕获的快速 Render Texture 路径，
+  或不支持的求值环境返回无效。Cycles 显式返回零；切回 Eevee 后保留节点和对象引用。
+- 不能用该节点驱动 Alpha、透明着色器混合、位移、细分或 Depth Offset，相关依赖会给出诊断。
+  可以用于纯颜色处理及已证明不透明的着色器混合。
+- 第一版不包含深度步进反射、粗糙度模糊、图像导出或 GLSL 纹理句柄。
+  画面内容和捕获限制沿用原生平面探针，最多读取当前实际捕获的 16 个探针。
 
 ### World To Tangent
 
@@ -1128,6 +1166,14 @@ vec4 pbr_lit(vec3 base_color,
 
 - 输入：`Vector`
 - 输出：`Color`、`Alpha`
+
+#### 坐标与刷新
+
+`Vector` 留空时使用捕获相机投射，节点会显示 `Camera Projection`。采样位置来自物体表面的世界坐标；超出捕获相机画面的部分为黑色。它不会自动把整张捕获图铺到物体上，因此移动显示平面可能只看到局部色块。
+
+要把平面当作显示屏，连接 `Texture Coordinate > UV → Render Texture > Vector`，并确保网格有 UV。`Color` 可以直接连接 `Material Output > Surface`，也可接到 Emission 的 Color。Filter Material 使用 `Texture Coordinate > Window → Vector`。
+
+`Every Frame` 会在时间线或场景改变后刷新，`Every Sample` 在每个渲染样本捕获；`Manual` 保留已有图像，需显式请求更新。若显示物体也出现在捕获相机里，会读取上一张捕获作为反馈，检查画面时应先让显示物体位于捕获画面外。
 
 ### Screenspace Info
 

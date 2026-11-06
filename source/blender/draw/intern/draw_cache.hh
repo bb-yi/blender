@@ -59,7 +59,7 @@ gpu::BottomLevelAS *DRW_cache_object_surface_blas_get(Object *ob);
 gpu::Batch *DRW_cache_mesh_all_verts_get(Object *ob);
 gpu::Batch *DRW_cache_mesh_paint_overlay_verts_get(Object *ob);
 gpu::Batch *DRW_cache_mesh_all_edges_get(Object *ob);
-gpu::Batch *DRW_cache_mesh_freestyle_edges_get(Object *ob);
+gpu::Batch *DRW_cache_mesh_freestyle_edges_get(Object *ob, int material);
 gpu::Batch *DRW_cache_mesh_loose_edges_get(Object *ob);
 gpu::Batch *DRW_cache_mesh_edge_detection_get(Object *ob, bool *r_is_manifold);
 gpu::Batch *DRW_cache_mesh_surface_get(Object *ob);
@@ -67,7 +67,8 @@ gpu::BottomLevelAS *DRW_cache_mesh_surface_blas_get(Object *ob);
 gpu::Batch *DRW_cache_mesh_paint_overlay_surface_get(Object *ob);
 gpu::Batch *DRW_cache_mesh_paint_overlay_edges_get(Object *ob);
 /**
- * Return list of batches with length equal to `max(1, totcol)`.
+ * Return batches indexed by evaluated mesh material slots. Materials only describe attribute
+ * requirements; their count and order need not match those slots.
  */
 Span<gpu::Batch *> DRW_cache_mesh_surface_shaded_get(Object *ob,
                                                      Span<const GPUMaterial *> materials);

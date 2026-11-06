@@ -168,6 +168,7 @@ set(SRC
   NOD_rna_define.hh
   NOD_scene_compositor_effect_inputs_srna.hh
   NOD_shader.h
+  NOD_shader_glsl_bundle.hh
   NOD_shader_light_nodes.hh
   NOD_shader_nodes_inline.hh
   NOD_shader_nodes_multi_function.hh

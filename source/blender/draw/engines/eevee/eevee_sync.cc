@@ -8,13 +8,22 @@
  * Converts the different renderable object types to draw-calls.
  */
 
+#include <cmath>
+#include <limits>
+
+#include "BLI_math_matrix.hh"
+#include "BLI_math_vector.hh"
+
 #include "BKE_paint.hh"
 #include "BKE_paint_bvh.hh"
 #include "DNA_curves_types.h"
+#include "DNA_mesh_types.h"
 #include "DNA_modifier_types.h"
 #include "DNA_particle_types.h"
 #include "DNA_pointcloud_types.h"
 #include "DNA_volume_types.h"
+
+#include "NOD_shader.h"
 
 #include "draw_cache.hh"
 #include "draw_common.hh"
@@ -41,32 +50,18 @@ static void append_npr_and_probe_materials(Vector<GPUMaterial *> &materials,
 {
   for (const Material *material : npr_materials) {
     for (GPUMaterial *gpumat : {material->npr.gpumat,
-                               material->planar_probe_npr.gpumat,
-                               material->lightprobe_sphere_npr.gpumat,
-                               material->outline_shell_prepass.gpumat,
-                               material->outline_shell_shading.gpumat,
-                               material->outline_shell_shadow.gpumat})
+                                material->planar_probe_npr.gpumat,
+                                material->lightprobe_sphere_npr.gpumat,
+                                material->outline_shell_prepass.gpumat,
+                                material->outline_shell_shading.gpumat,
+                                material->outline_shell_shadow.gpumat,
+                                material->outline_freestyle.gpumat})
     {
       if (gpumat != nullptr) {
         materials.append(gpumat);
       }
     }
   }
-}
-
-static bool material_array_uses_outline_control(const MaterialArray &material_array,
-                                                Span<gpu::Batch *> mat_geom)
-{
-  for (const int i : material_array.materials.index_range()) {
-    if (i >= mat_geom.size() || mat_geom[i] == nullptr) {
-      continue;
-    }
-
-    if (material_array.materials[i].uses_outline_control) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /* -------------------------------------------------------------------- */
@@ -106,15 +101,20 @@ static int material_pass_tessellation_level(const Material &material, GPUMateria
   return GPU_material_has_tessellation_output(gpumat) ? material.tessellation_level : 1;
 }
 
-static inline void geometry_call(PassMain::Sub *sub_pass,
-                                 gpu::Batch *geom,
-                                 ResourceHandleRange resource_handle,
-                                 int tessellation_level = 0)
+void SyncModule::geometry_call(PassMain::Sub *sub_pass,
+                               gpu::Batch *geom,
+                               ResourceHandleRange resource_handle,
+                               int tessellation_level)
 {
   if (sub_pass == nullptr || geom == nullptr) {
     return;
   }
   if (tessellation_level > 0) {
+    sub_pass = tessellation_passes_.lookup_or_add_cb({sub_pass, tessellation_level}, [&]() {
+      PassMain::Sub &tess_pass = sub_pass->sub("Tessellation budget");
+      tess_pass.push_constant("tessellation_expand", tessellation_level);
+      return &tess_pass;
+    });
     /* Each triangle is subdivided into level^2 triangles inside the vertex shader.
      * The batch content is only generated after object sync, so the resulting vertex count is
      * unknown here. #GPU_batch_draw_expanded_parameter_get skips overflowing draw-calls. */
@@ -123,6 +123,123 @@ static inline void geometry_call(PassMain::Sub *sub_pass,
     return;
   }
   sub_pass->draw(geom, resource_handle);
+}
+
+/** Bound every original edge's LOD without changing its fractional partitioning.
+ * Evaluated bounds enclose endpoints and their midpoints. All instances share the largest budget.
+ * Displacement and Phong smoothing happen after LOD, so they do not enlarge these bounds. */
+static int material_tessellation_camera_budget(const ObjectHandle &ob_handle,
+                                               const Material &material,
+                                               const ShaderTessellationSettings &settings,
+                                               const CameraData &camera,
+                                               const int2 extent)
+{
+  /* Use the same evaluated mesh as DRW_cache_mesh_surface_shaded_get (also in edit mode). */
+  const Mesh &mesh = DRW_object_get_data_for_drawing<Mesh>(*ob_handle.object);
+  const std::optional<Bounds<float3>> bounds = mesh.bounds_min_max();
+  if (!bounds) {
+    return material.tessellation_level;
+  }
+  int budget = 1;
+  for (const int instance : IndexRange(ob_handle.instances_count())) {
+    const float4x4 &model = ob_handle.object_to_world(instance);
+    float3 world_min(std::numeric_limits<float>::max());
+    float3 world_max(std::numeric_limits<float>::lowest());
+    float2 screen_min(std::numeric_limits<float>::max());
+    float2 screen_max(std::numeric_limits<float>::lowest());
+    for (int corner = 0; corner < 8; corner++) {
+      const float3 local((corner & 1) ? bounds->max.x : bounds->min.x,
+                         (corner & 2) ? bounds->max.y : bounds->min.y,
+                         (corner & 4) ? bounds->max.z : bounds->min.z);
+      const float3 world = math::transform_point(model, local);
+      if (!std::isfinite(world.x) || !std::isfinite(world.y) || !std::isfinite(world.z)) {
+        return material.tessellation_level;
+      }
+      world_min = math::min(world_min, world);
+      world_max = math::max(world_max, world);
+      if (settings.mode == SHD_TESSELLATION_SCREEN_EDGE) {
+        const float4 clip = camera.persmat * float4(world, 1.0f);
+        /* A box crossing/behind the camera plane has no finite projected diameter bound. */
+        if (!(clip.w > 1e-5f)) {
+          return material.tessellation_level;
+        }
+        const float2 pixel = (float2(clip.x, clip.y) / clip.w) * 0.5f * float2(extent);
+        if (!std::isfinite(pixel.x) || !std::isfinite(pixel.y)) {
+          return material.tessellation_level;
+        }
+        screen_min = math::min(screen_min, pixel);
+        screen_max = math::max(screen_max, pixel);
+      }
+    }
+    float factor;
+    if (settings.mode == SHD_TESSELLATION_DISTANCE) {
+      const float3 camera_position = camera.viewinv.location();
+      const float3 closest = math::clamp(camera_position, world_min, world_max);
+      /* Round toward MORE work to cover CPU/GPU transform and distance roundoff. */
+      const float epsilon = 1e-4f * std::max({1.0f,
+                                              math::length(camera_position),
+                                              math::length(world_min),
+                                              math::length(world_max)});
+      const float distance = std::max(0.0f, math::distance(camera_position, closest) - epsilon);
+      const float fac = math::clamp(
+          (distance - settings.near_distance) /
+              std::max(settings.far_distance - settings.near_distance, 1e-6f),
+          0.0f,
+          1.0f);
+      factor = (1.0f - fac) * settings.max_level + fac * settings.min_level;
+      if (fac > 0.0f && fac < 1.0f) {
+        factor += 1e-4f;
+      }
+    }
+    else {
+      factor = math::distance(screen_min, screen_max) / std::max(settings.edge_length, 1.0f);
+      factor += 1e-4f * std::max(1.0f, factor);
+      factor = math::clamp(factor, float(settings.min_level), float(settings.max_level));
+    }
+    if (!std::isfinite(factor)) {
+      return material.tessellation_level;
+    }
+    budget = std::max(budget, int(std::ceil(factor)) | 1);
+    if (budget >= material.tessellation_level) {
+      return material.tessellation_level;
+    }
+  }
+  return std::min(budget, material.tessellation_level);
+}
+
+static int material_tessellation_budget(Instance &inst,
+                                        const ObjectHandle &object,
+                                        const Material &material)
+{
+  if (material.tessellation_level <= 1 || material.shading.gpumat == nullptr) {
+    return material.tessellation_level;
+  }
+  const MaterialNodeTreeInfo &info = inst.materials.node_tree_info_get(
+      GPU_material_get_material(material.shading.gpumat));
+  const ShaderTessellationSettings &settings = info.tessellation;
+  if (!info.has_tessellation || settings.mode == SHD_TESSELLATION_FIXED ||
+      settings.min_level == settings.max_level)
+  {
+    return material.tessellation_level;
+  }
+  int budget = material_tessellation_camera_budget(
+      object, material, settings, inst.camera.data_get(), inst.film.render_extent_get());
+  /* Demand is finalized after object sync. Bound every enabled camera, including a newly
+   * referenced capture, rather than truncating its geometry or submitting the full lattice. */
+  const bool valid = inst.render_textures.foreach_enabled_camera([&](const CameraData &camera) {
+    if (budget < material.tessellation_level) {
+      /* Captures override CameraData, but tess_vertex_get still reads film.render_extent.
+       * Match that shader input even when the capture output has a different resolution. */
+      budget = std::max(budget,
+                        material_tessellation_camera_budget(
+                            object, material, settings, camera, inst.film.render_extent_get()));
+    }
+  });
+  CLOG_INFO(&Instance::log,
+            "RenderTexture tessellation budget=%d full=%d",
+            valid ? budget : material.tessellation_level,
+            material.tessellation_level);
+  return valid ? budget : material.tessellation_level;
 }
 
 static inline void geometry_volume_call(PassMain::Sub *pass,
@@ -152,6 +269,7 @@ void SyncModule::sync_common_passes(const Material &material,
 {
   sync_cb(material.capture);
   sync_cb(material.stencil);
+  sync_cb(material.stencil_writer_surface);
   sync_cb(material.shadow);
   sync_cb(material.prepass);
   sync_cb(material.shading);
@@ -236,13 +354,18 @@ void SyncModule::sync_alpha_blended_passes(const ObjectHandle &ob_handle,
     if (prepass != nullptr) {
       sync_cb(MaterialPass{material.overlap_masking.gpumat, prepass}, instance);
     }
+    if (matpass != nullptr && outline_shell &&
+        (blender_mat->outline_shell_flag & MA_OUTLINE_SHELL_SELF_OCCLUSION))
+    {
+      matpass->bind_resources(inst_.outline_shell);
+    }
     sync_cb(MaterialPass{shading.gpumat, matpass}, instance);
   }
 }
 
 void SyncModule::sync_outline_occlusion_passes(const ObjectHandle &ob_handle,
                                                const Material &material,
-                                               FunctionRef<void(const MaterialPass &, int)> sync_cb)
+                                               FunctionRef<void(const MaterialPass &)> sync_cb)
 {
   const bool hide_on_camera = ob_handle.object->visibility_flag & OB_HIDE_CAMERA;
   if (hide_on_camera || material.outline_occlusion.gpumat == nullptr) {
@@ -251,11 +374,11 @@ void SyncModule::sync_outline_occlusion_passes(const ObjectHandle &ob_handle,
 
   blender::Material *blender_mat = GPU_material_get_material(material.outline_occlusion.gpumat);
 
-  for (int instance : IndexRange(ob_handle.instances_count())) {
-    PassMain::Sub *pass = inst_.pipelines.forward.outline_occlusion_add(
-        blender_mat, material.outline_occlusion.gpumat);
-    sync_cb(MaterialPass{material.outline_occlusion.gpumat, pass}, instance);
-  }
+  /* Unlike alpha blending this pass has no per-instance sorting or bindings. Keep the
+   * object/slot submission order, but use a single draw over its resource handle range. */
+  PassMain::Sub *pass = inst_.pipelines.forward.outline_occlusion_add(
+      blender_mat, material.outline_occlusion.gpumat);
+  sync_cb(MaterialPass{material.outline_occlusion.gpumat, pass});
 }
 
 void SyncModule::sync_common(const ObjectHandle &ob_handle,
@@ -267,7 +390,7 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
   bool has_transparent_shadows = false;
   bool has_time_dependent_shadows = false;
   bool has_view_dependent_shadows = false;
-  bool has_shadow_offset = false;
+  bool has_position_dependent_shadows = false;
   float inflate_bounds = 0.0f;
 
   for (const Material *material : materials) {
@@ -277,6 +400,11 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
     }
 
     GPUMaterial *gpu_material = material->shading.gpumat;
+    /* Marker Only has no surface shader while its marker is compiling/failed, or when baking.
+     * Curves and point clouds still reach this shared sync path in those states. */
+    if (gpu_material == nullptr) {
+      continue;
+    }
     blender::Material *bl_material = GPU_material_get_material(gpu_material);
 
     const bool has_displacement = GPU_material_has_displacement_output(gpu_material) &&
@@ -293,6 +421,7 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
                                                     has_displacement || mat_has_shadow_offset);
     /* View dependent tessellation changes the shadow caster geometry with the camera. */
     has_view_dependent_shadows |= material->tessellation_view_dependent;
+    has_position_dependent_shadows |= material->tessellation_position_dependent;
     has_time_dependent_shadows |= material->outline_shell_shadow.gpumat != nullptr &&
                                   GPU_material_is_time_dependent(
                                       material->outline_shell_shadow.gpumat);
@@ -318,7 +447,7 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
                             has_transparent_shadows,
                             has_time_dependent_shadows,
                             has_view_dependent_shadows,
-                            has_shadow_offset);
+                            has_position_dependent_shadows);
 
   if (has_volume) {
     inst_.volume.object_sync(ob_handle);
@@ -331,8 +460,29 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
   Vector<GPUMaterial *> attribute_materials = non_null_materials(gpu_materials);
   attribute_materials.reserve(attribute_materials.size() + materials.size() * 3);
   append_npr_and_probe_materials(attribute_materials, materials);
-  inst_.manager->extract_object_attributes(
-      ob_handle.res_handle, ob_handle, attribute_materials);
+  const Vector<const GPUUniformAttr *> *requests = object_attribute_requests_.lookup_ptr(
+      attribute_materials);
+  if (requests != nullptr) {
+    object_attribute_request_hits_++;
+  }
+  else {
+    requests = &object_attribute_requests_.lookup_or_add_cb(attribute_materials, [&]() {
+      Map<uint32_t, const GPUUniformAttr *, 4> attributes;
+      for (GPUMaterial *gpumat : attribute_materials) {
+        if (const GPUUniformAttrList *list = GPU_material_uniform_attributes(gpumat)) {
+          for (const GPUUniformAttr &attribute : list->list) {
+            attributes.add(attribute.hash_code, &attribute);
+          }
+        }
+      }
+      Vector<const GPUUniformAttr *> result;
+      for (const GPUUniformAttr *attribute : attributes.values()) {
+        result.append(attribute);
+      }
+      return result;
+    });
+  }
+  inst_.manager->extract_object_attributes(ob_handle.res_handle, ob_handle, requests->as_span());
 }
 
 /** \} */
@@ -360,29 +510,53 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
 
   MaterialArray &material_array = inst_.materials.material_array_get(ob_handle, has_motion);
 
+  VectorSet<GPUMaterial *> attribute_materials;
+  for (const Span<GPUMaterial *> pass_materials :
+       {material_array.gpu_materials.as_span(),
+        material_array.gpu_materials_npr.as_span(),
+        material_array.gpu_materials_outline_shell.as_span()})
+  {
+    for (GPUMaterial *gpumat : pass_materials) {
+      if (gpumat != nullptr) {
+        attribute_materials.add(gpumat);
+      }
+    }
+  }
+  for (const Material &material : material_array.materials) {
+    if (material.outline_shell_self_depth.gpumat != nullptr) {
+      attribute_materials.add(material.outline_shell_self_depth.gpumat);
+    }
+    if (material.outline_freestyle.gpumat != nullptr) {
+      attribute_materials.add(material.outline_freestyle.gpumat);
+    }
+  }
   Span<gpu::Batch *> mat_geom = DRW_cache_object_surface_material_get(
-      ob_handle.object, material_array.gpu_materials);
-  Span<gpu::Batch *> mat_geom_npr = DRW_cache_object_surface_material_get(
-      ob_handle.object, material_array.gpu_materials_npr);
-  Span<gpu::Batch *> mat_geom_shell = DRW_cache_object_surface_material_get(
-      ob_handle.object, material_array.gpu_materials_outline_shell);
+      ob_handle.object, attribute_materials.as_span());
+  mesh_attribute_requests_++;
   if (mat_geom.is_empty()) {
     return;
-  }
-
-  if (material_array_uses_outline_control(material_array, mat_geom)) {
-    inst_.outline.sync_object(ob_handle.object, ob_handle.res_handle);
   }
 
   Vector<Material *, 8> synced_materials;
 
   for (auto i : material_array.gpu_materials.index_range()) {
     gpu::Batch *geom = mat_geom[i];
-    if (geom == nullptr) {
+    if (geom == nullptr || material_array.gpu_materials[i] == nullptr) {
       continue;
     }
 
     Material &material = material_array.materials[i];
+    inst_.outline.sync_object(
+        ob_handle.object, ob_handle.res_handle, material.outline_freestyle.sub_pass, i);
+    material.tessellation_level = material_tessellation_budget(inst_, ob_handle, material);
+    if (material.uses_shell_self_occlusion) {
+      for (const int instance : IndexRange(ob_handle.instances_count())) {
+        const ResourceHandle handle = ob_handle.res_handle.sub_handle(instance);
+        const MaterialPass &depth = material.outline_shell_self_depth;
+        PassMain::Sub *pass = inst_.outline_shell.material_add(handle, depth.gpumat);
+        geometry_call(pass, geom, handle, material_pass_tessellation_level(material, depth.gpumat));
+      }
+    }
     synced_materials.append(&material);
 
     if (material.has_volume) {
@@ -402,31 +576,21 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
       }
     }
 
-    gpu::Batch *geom_npr = (i < mat_geom_npr.size()) ? mat_geom_npr[i] : nullptr;
     sync_common_passes(material, [&](const MaterialPass &pass) {
-      const bool use_npr_geom = pass.gpumat == material.npr.gpumat ||
-                                pass.gpumat == material.planar_probe_npr.gpumat ||
-                                pass.gpumat == material.lightprobe_sphere_npr.gpumat;
       geometry_call(pass.sub_pass,
-                    use_npr_geom ? geom_npr : geom,
+                    geom,
                     ob_handle.res_handle,
                     material_pass_tessellation_level(material, pass.gpumat));
     });
 
-    gpu::Batch *geom_shell = (i < mat_geom_shell.size()) ? mat_geom_shell[i] :
-                                                                     nullptr;
-    geometry_call(
-        material.outline_shell_prepass.sub_pass, geom_shell, ob_handle.res_handle);
-    geometry_call(
-        material.outline_shell_shading.sub_pass, geom_shell, ob_handle.res_handle);
-    geometry_call(
-        material.outline_shell_shadow.sub_pass, geom_shell, ob_handle.res_handle);
+    geometry_call(material.outline_shell_prepass.sub_pass, geom, ob_handle.res_handle);
+    geometry_call(material.outline_shell_shading.sub_pass, geom, ob_handle.res_handle);
+    geometry_call(material.outline_shell_shadow.sub_pass, geom, ob_handle.res_handle);
 
-    sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass,
-                                                           int instance) {
+    sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass) {
       geometry_call(pass.sub_pass,
                     geom,
-                    ob_handle.res_handle.sub_handle(instance),
+                    ob_handle.res_handle,
                     material_pass_tessellation_level(material, pass.gpumat));
     });
 
@@ -434,7 +598,7 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
         ob_handle,
         material,
         [&](const MaterialPass &pass, int instance) {
-          geometry_call(pass.sub_pass, geom_shell, ob_handle.res_handle.sub_handle(instance));
+          geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance));
         },
         true);
   }
@@ -443,7 +607,9 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
   for (auto i : material_array.gpu_materials.index_range()) {
     gpu::Batch *geom = mat_geom[i];
     Material &material = material_array.materials[i];
-    if (geom == nullptr || (material.has_volume && !material.has_surface)) {
+    if (geom == nullptr || material_array.gpu_materials[i] == nullptr ||
+        (material.has_volume && !material.has_surface))
+    {
       continue;
     }
     sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int instance) {
@@ -523,9 +689,8 @@ bool SyncModule::sync_sculpt(const ObjectRef &ob_ref)
       geometry_call(pass.sub_pass, use_npr_geom ? geom_npr : geom, ob_handle.res_handle);
     });
 
-    sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass,
-                                                           int instance) {
-      geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance));
+    sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass) {
+      geometry_call(pass.sub_pass, geom, ob_handle.res_handle);
     });
 
     sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int instance) {
@@ -592,10 +757,8 @@ void SyncModule::sync_pointcloud(const ObjectRef &ob_ref)
 
   sync_common_passes(material, [&](const MaterialPass &pass) { drawcall_add(pass); });
 
-  sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass,
-                                                         int /*instance*/) {
-    drawcall_add(pass);
-  });
+  sync_outline_occlusion_passes(
+      ob_handle, material, [&](const MaterialPass &pass) { drawcall_add(pass); });
 
   sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int /*instance*/) {
     drawcall_add(pass);
@@ -728,10 +891,8 @@ void SyncModule::sync_curves(const ObjectRef &ob_ref, HairParticleInfo const *ha
 
   sync_common_passes(material, [&](const MaterialPass &pass) { drawcall_add(pass); });
 
-  sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass,
-                                                         int /*instance*/) {
-    drawcall_add(pass);
-  });
+  sync_outline_occlusion_passes(
+      ob_handle, material, [&](const MaterialPass &pass) { drawcall_add(pass); });
 
   sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int /*instance*/) {
     drawcall_add(pass);

@@ -491,7 +491,9 @@ void Manager::load_deferred_textures()
   /* Upload to the GPU (create gpu::Texture). This part still requires a valid GPU context and
    * is not easily parallelized. */
   for (std::unique_ptr<DeferredTexture> &deferred : deferred_textures_) {
-    const ImageGPUTextures textures = deferred->use_3d_lut_strip ?
+    const ImageGPUTextures textures = deferred->use_cube_strip ?
+        BKE_image_acquire_gpu_material_cube_texture(deferred->image, deferred->image_user, false) :
+        deferred->use_3d_lut_strip ?
         BKE_image_acquire_gpu_material_3d_lut_texture(deferred->image,
             deferred->image_user, deferred->lut_dimensions.x, deferred->lut_dimensions.y,
             deferred->lut_dimensions.z, false) :

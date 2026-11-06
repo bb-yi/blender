@@ -16,6 +16,7 @@
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_outline_lib.glsl"
 #include "eevee_surf_common.bsl.hh"
+#include "eevee_outline_shell_lib.bsl.hh"
 #include "eevee_transparency.bsl.hh"
 #include "eevee_volume_lib.bsl.hh"
 
@@ -96,6 +97,12 @@ void surf_forward_impl([[resource_table]] KernelGlobals &kg,
                   const float4 frag_co,
                    SurfaceForwardFragOut &frag_out, float &out_depth, ShadingData &sd)
 {
+#ifdef MAT_OUTLINE_SHELL_SELF_OCCLUSION
+  if (outline_shell_self_occluded()) {
+    gpu_discard_fragment();
+    return;
+  }
+#endif
   draw::ID id{interp.resource_id_raw};
   const uint resource_id = id.resource_id<1>();
   const ViewMatrices view = views.get(0);
@@ -166,7 +173,7 @@ void surf_forward_impl([[resource_table]] KernelGlobals &kg,
   }
   sd.P = nodetree_P;
   attenuate_outline(saturate(average(transmittance)));
-  outline_output_flush();
+  outline_output_flush(1.0f - saturate(average(transmittance)), resource_id);
 
   /* Volumetric resolve and compositing. */
   float2 uvs = frag_co.xy * uni.uniform_buf.volumes.main_view_extent_inv;

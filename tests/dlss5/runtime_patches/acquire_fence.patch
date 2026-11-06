@@ -1,0 +1,37 @@
+diff --git a/dlssnr_patcher.py b/dlssnr_patcher.py
+index c2775c8..37e41db 100755
+--- a/dlssnr_patcher.py
++++ b/dlssnr_patcher.py
+@@ -1580,5 +1580,7 @@ def transform_ptx(
+-    # Use the acquire-release fence accepted by older targets in place of
+-    # release-only.
+-    fence_count = output.count("fence.release.gpu;")
+-    output = output.replace("fence.release.gpu;", "fence.acq_rel.gpu;")
+-    stats.add("release_fence", fence_count)
++    # Single-direction fences require sm_90. Strengthen them to the older
++    # acquire-release form while preserving their scope and any predicate.
++    for semantics in ("release", "acquire"):
++        instruction = f"fence.{semantics}.gpu;"
++        fence_count = output.count(instruction)
++        output = output.replace(instruction, "fence.acq_rel.gpu;")
++        stats.add(f"{semantics}_fence", fence_count)
+@@ -1612,0 +1615 @@ def transform_ptx(
++        "fence.acquire.gpu",
+diff --git a/tests/test_patcher.py b/tests/test_patcher.py
+index 3c8265c..dd7d5c8 100644
+--- a/tests/test_patcher.py
++++ b/tests/test_patcher.py
+@@ -568,0 +569,13 @@ mbarrier.try_wait.shared::cta.b64 %p1, [%r18], %rd2;
++    def test_acquire_fence_preserves_scope_and_predicate(self) -> None:
++        source = ".version 9.3\n.target sm_120\n.address_size 64\n@%p1 fence.acquire.gpu;\nfence.release.gpu;\n"
++        for target in (patcher.TURING, patcher.AMPERE, patcher.ADA):
++            with self.subTest(target=target.name):
++                output, stats = patcher.transform_ptx(source, target)
++                self.assertIn("@%p1 fence.acq_rel.gpu;", output)
++                self.assertNotIn("fence.acquire.gpu", output)
++                self.assertEqual(output.count("fence.acq_rel.gpu;"), 2)
++                self.assertEqual(stats.values["acquire_fence"], 1)
++                self.assertEqual(stats.values["release_fence"], 1)
++        output, _stats = patcher.transform_ptx(source, patcher.BLACKWELL)
++        self.assertIn("@%p1 fence.acquire.gpu;", output)
++

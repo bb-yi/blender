@@ -31,25 +31,24 @@ void main()
     return;
   }
 
-  float4 combined = texelFetch(combined_tx, texel, 0);
-  float depth = reverse_z::read(texelFetch(depth_tx, texel, 0).r);
-  bool has_surface = depth < 1.0f;
-  bool has_gbuffer = texelFetch(gbuf_header_tx, int3(texel, 0), 0).r != 0u;
-
   float4 out_color;
 
   switch (output_type) {
     case RENDER_TEXTURE_SOURCE_GRAYSCALE: {
+      float4 combined = texelFetch(combined_tx, texel, 0);
       float luminance = dot(combined.rgb, float3(0.2126f, 0.7152f, 0.0722f));
       out_color = float4(float3(luminance), combined.a);
       break;
     }
     case RENDER_TEXTURE_SOURCE_DEPTH: {
+      float depth = reverse_z::read(texelFetch(depth_tx, texel, 0).r);
+      bool has_surface = depth < 1.0f;
       float depth_value = has_surface ? -drw_depth_screen_to_view(depth) : 0.0f;
       out_color = float4(float3(depth_value), has_surface ? 1.0f : 0.0f);
       break;
     }
     case RENDER_TEXTURE_SOURCE_NORMAL: {
+      bool has_gbuffer = texelFetch(gbuf_header_tx, int3(texel, 0), 0).r != 0u;
       float3 normal = has_gbuffer ? render_texture_gbuffer_normal_unpack(
                                         texelFetch(gbuf_normal_tx, int3(texel, 0), 0).rg) :
                                     float3(0.0f);
@@ -58,7 +57,7 @@ void main()
     }
     case RENDER_TEXTURE_SOURCE_COLOR:
     default:
-      out_color = combined;
+      out_color = texelFetch(combined_tx, texel, 0);
       break;
   }
 

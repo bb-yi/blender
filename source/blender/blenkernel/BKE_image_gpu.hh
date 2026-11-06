@@ -60,6 +60,9 @@ ImageGPUTextures BKE_image_acquire_gpu_material_texture(Image *image,
                                                         const bool try_only);
 
 /* Return whether the material GPU texture of an image is already loaded, without creating it. */
+ImageGPUTextures BKE_image_acquire_gpu_material_cube_texture(Image *image,
+                                                            ImageUser *iuser,
+                                                            bool try_only);
 ImageGPUTextures BKE_image_acquire_gpu_material_3d_lut_texture(
     Image *image, ImageUser *iuser, int width, int height, int depth, bool try_only);
 

@@ -243,6 +243,41 @@ void BKE_image_free_gpu_3d_lut_textures(Image *ima)
   }
 }
 
+static gpu::Texture *image_gpu_texture_cube_error_create()
+{
+  const float pixels[24] = {1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1,
+                            1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1};
+  return GPU_texture_create_cube("Invalid Cube Strip", 1, 1,
+                                  gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                  GPU_TEXTURE_USAGE_SHADER_READ, pixels);
+}
+
+static gpu::Texture *image_gpu_texture_cube_strip_create(Image *image, ImBuf *ibuf)
+{
+  const int size = ibuf->y;
+  if (size <= 0 || int64_t(ibuf->x) != int64_t(size) * 6 || size > GPU_max_texture_size()) {
+    CLOG_ERROR(&LOG, "Cube Strip '%s' requires six square faces in a horizontal strip",
+               image->id.name + 2);
+    return nullptr;
+  }
+  gpu::Texture *texture = GPU_texture_create_cube(image->id.name + 2, size, 9999,
+      gpu::TextureFormat::SFLOAT_32_32_32_32, GPU_TEXTURE_USAGE_SHADER_READ, nullptr);
+  if (texture == nullptr) {
+    return nullptr;
+  }
+  const bool premultiplied = BKE_image_has_gpu_texture_premultiplied_alpha(image, ibuf);
+  float *pixels = MEM_new_array_uninitialized<float>(size_t(size) * size * 4, __func__);
+  for (int face = 0; face < 6; face++) {
+    IMB_colormanagement_imbuf_to_float_texture(
+        pixels, face * size, 0, size, size, ibuf, premultiplied);
+    GPU_texture_update_sub(texture, GPU_DATA_FLOAT, pixels, 0, 0, face, size, size, 1);
+  }
+  MEM_SAFE_DELETE(pixels);
+  GPU_texture_update_mipmap_chain(texture);
+  GPU_texture_mipmap_mode(texture, true, true);
+  return texture;
+}
+
 ImageGPUTextures BKE_image_acquire_gpu_material_3d_lut_texture(
     Image *ima, ImageUser *iuser, int width, int height, int depth, bool try_only)
 {
@@ -257,7 +292,7 @@ ImageGPUTextures BKE_image_acquire_gpu_material_3d_lut_texture(
   }
   bke::ImageRuntimeGPUTexture3DLutStrip *cached = nullptr;
   for (bke::ImageRuntimeGPUTexture3DLutStrip &lut : ima->runtime->gputextures_3d_lut_strip) {
-    if (lut.width == width && lut.height == height && lut.depth == depth) {
+    if (!lut.is_cube && lut.width == width && lut.height == height && lut.depth == depth) {
       cached = &lut;
       break;
     }
@@ -281,6 +316,62 @@ ImageGPUTextures BKE_image_acquire_gpu_material_3d_lut_texture(
     cached->texture = image_gpu_texture_3d_lut_strip_create(ima, ibuf, width, height, depth);
     if (cached->texture == nullptr) {
       cached->texture = GPU_texture_create_error(3, false);
+    }
+    if (cached->texture) {
+      cached->source = ibuf;
+      IMB_refImBuf(ibuf);
+      cached->changeset_id = IMB_partial_update_changeset_id_current();
+    }
+  }
+  ImageGPUTextures result;
+  if (cached && cached->texture) {
+    result.texture = cached->texture;
+    GPU_texture_ref(result.texture);
+  }
+  BKE_image_release_ibuf(ima, ibuf, nullptr);
+  return result;
+}
+
+ImageGPUTextures BKE_image_acquire_gpu_material_cube_texture(
+    Image *ima, ImageUser *iuser, bool try_only)
+{
+  if (ima == nullptr) {
+    return {};
+  }
+  bool load_failed = false;
+  ImBuf *ibuf = BKE_image_acquire_ibuf_gpu(ima, iuser, nullptr, &load_failed, try_only);
+  if (ibuf == nullptr) {
+    return (!try_only || load_failed) ?
+               ImageGPUTextures{image_gpu_texture_cube_error_create()} : ImageGPUTextures{};
+  }
+  const int width = ibuf->y, height = ibuf->y, depth = 6;
+  bke::ImageRuntimeGPUTexture3DLutStrip *cached = nullptr;
+  for (bke::ImageRuntimeGPUTexture3DLutStrip &lut : ima->runtime->gputextures_3d_lut_strip) {
+    if (lut.is_cube && lut.width == width && lut.height == height && lut.depth == depth) {
+      cached = &lut;
+      break;
+    }
+  }
+  IMB_partial_update_flush(ibuf);
+  if (cached && (cached->source != ibuf ||
+                 IMB_partial_update_collect(ibuf, cached->changeset_id).kind != Changes::Kind::None))
+  {
+    GPU_TEXTURE_FREE_SAFE(cached->texture);
+    IMB_freeImBuf(cached->source);
+    cached->source = nullptr;
+  }
+  if ((!cached || !cached->texture) && !try_only) {
+    if (!cached) {
+      cached = MEM_new<bke::ImageRuntimeGPUTexture3DLutStrip>(__func__);
+      cached->is_cube = true;
+      cached->width = width;
+      cached->height = height;
+      cached->depth = depth;
+      BLI_addtail(&ima->runtime->gputextures_3d_lut_strip, cached);
+    }
+    cached->texture = image_gpu_texture_cube_strip_create(ima, ibuf);
+    if (cached->texture == nullptr) {
+      cached->texture = image_gpu_texture_cube_error_create();
     }
     if (cached->texture) {
       cached->source = ibuf;

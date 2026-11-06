@@ -16,6 +16,8 @@ struct StructRNA;
 
 namespace blender::nodes {
 
+std::string script_expression_error_get(const bNode &node);
+
 struct ShScriptExpressionVariablesAccessor : public socket_items::SocketItemsAccessorDefaults {
   using ItemT = NodeShaderScriptExpressionVariable;
   static StructRNA **item_srna;

@@ -3688,6 +3688,14 @@ static void rna_def_object(BlenderRNA *brna)
       prop, "Pass Index", "Index number for the \"Object Index\" render pass");
   RNA_def_property_update(prop, NC_OBJECT, "rna_Object_internal_update_draw");
 
+  prop = RNA_def_property(srna, "use_npr_refraction_background", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "use_npr_refraction_background", 1);
+  RNA_def_property_ui_text(
+      prop,
+      "Participate in Refraction Background",
+      "Draw Forward surfaces in this object's Refraction Layer for higher NPR layers");
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_internal_update_draw");
+
   prop = RNA_def_property(srna, "refraction_layer_index", PROP_INT, PROP_NONE);
   RNA_def_property_int_sdna(prop, nullptr, "refraction_layer_index");
   RNA_def_property_ui_text(prop,

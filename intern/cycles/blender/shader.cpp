@@ -434,6 +434,11 @@ static ShaderNode *add_node(Scene *scene,
     value->set_value(get_node_output_value(b_node, "Value"));
     node = value;
   }
+  else if (b_node.is_type("ShaderNodeStencilValue"_ustr)) {
+    ValueNode *value = graph->create_node<ValueNode>();
+    value->set_value(0.0f);
+    node = value;
+  }
   else if (b_node.is_type("FunctionNodeInputBool"_ustr)) {
     ValueNode *value = graph->create_node<ValueNode>();
     const auto &storage = *static_cast<const blender::NodeInputBool *>(b_node.storage);
@@ -1298,6 +1303,11 @@ static ShaderOutput *node_find_output_by_name(blender::bNode &b_node,
                                               blender::bNodeSocket &b_socket)
 {
   using blender::operator""_ustr;
+  if (b_node.is_type("ShaderNodeStencilValue"_ustr)) {
+    /* All Eevee-only sample outputs use the same explicit zero fallback. Unmapped outputs
+     * would silently leave downstream input defaults connected instead. */
+    return node->output("Value");
+  }
   string name = b_socket.identifier;
   ShaderOutput *output = node->output(name.c_str());
 
@@ -1380,6 +1390,16 @@ static void add_nodes_inlined(Scene *scene,
          * input socket, so this needs to be a multimap. */
         input_map.emplace(b_link.in, proxy->inputs[0]);
         output_map[b_link.out] = proxy->outputs[0];
+      }
+    }
+    else if (b_node->is_type("ShaderNodePlanarProbe"_ustr)) {
+      for (blender::bNodeSocket *output : b_node->output_sockets()) {
+        const SocketType::Type type = convert_socket_type(*output);
+        if (type == SocketType::UNDEFINED) {
+          continue;
+        }
+        ConvertNode *zero = graph->create_node<ConvertNode>(type, type, true);
+        output_map[output] = zero->outputs[0];
       }
     }
     else if (b_node->is_group()) {

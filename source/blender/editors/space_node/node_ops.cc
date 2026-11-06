@@ -118,6 +118,7 @@ void node_operatortypes()
   WM_operatortype_append(NODE_OT_glsl_function_refresh);
   WM_operatortype_append(NODE_OT_glsl_function_new_text);
   WM_operatortype_append(NODE_OT_glsl_function_reset_defaults);
+  WM_operatortype_append(NODE_OT_glsl_bundle_input);
   WM_operatortype_append(NODE_OT_glsl_function_toggle_code_mode);
   WM_operatortype_append(NODE_OT_glsl_function_make_internal);
 

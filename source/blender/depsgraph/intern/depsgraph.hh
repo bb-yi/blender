@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdlib>
+#include <atomic>
 #include <functional>
 
 #include "MEM_guardedalloc.h"
@@ -168,6 +169,13 @@ struct Depsgraph {
   DepsgraphDebug debug;
 
   bool is_evaluating;
+  /* Accumulate sources before evaluation; tags arriving during evaluation remain pending for
+   * the next run and also prevent treating this run as time-only. */
+  std::atomic<int> pending_update_sources{0};
+  int evaluation_update_sources = 0;
+  bool material_eval_profile_enabled = false;
+  std::atomic<uint64_t> material_eval_reasons[14] = {};
+  std::atomic<uint64_t> material_eval_state_nanoseconds{0};
 
   /* Is set to truth for dependency graph which are used for post-processing (compositor and
    * sequencer).

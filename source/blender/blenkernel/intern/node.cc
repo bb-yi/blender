@@ -479,6 +479,22 @@ static void node_foreach_path(ID *id, BPathForeachPathData *bpath_data)
   bNodeTree *ntree = reinterpret_cast<bNodeTree *>(id);
 
   switch (ntree->type) {
+    case NTREE_COMPOSIT: {
+      for (bNode *node : ntree->all_nodes()) {
+        if (node->type_legacy == CMP_NODE_LUT) {
+          auto &settings = *static_cast<NodeCompositorLUT *>(node->storage);
+          if (settings.packed_file && (bpath_data->flag & BKE_BPATH_FOREACH_PATH_SKIP_PACKED) != 0)
+          {
+            continue;
+          }
+          if (settings.filepath[0]) {
+            BKE_bpath_foreach_path_fixed_process(
+                bpath_data, settings.filepath, sizeof(settings.filepath));
+          }
+        }
+      }
+      break;
+    }
     case NTREE_SHADER: {
       for (bNode *node : ntree->all_nodes()) {
         if (node->type_legacy == SH_NODE_SCRIPT) {
@@ -4409,6 +4425,7 @@ bNode *node_copy_with_mapping(bNodeTree *dst_tree,
 {
   bNode *node_dst = MEM_new<bNode>(__func__, node_src);
   node_dst->runtime = MEM_new<bNodeRuntime>(__func__);
+  node_dst->runtime->glsl_bundle_lowering = node_src.runtime->glsl_bundle_lowering;
   if (dst_unique_name) {
     BLI_assert(dst_unique_name->size() < sizeof(node_dst->name));
     STRNCPY_UTF8(node_dst->name, dst_unique_name->c_str());

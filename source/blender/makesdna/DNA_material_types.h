@@ -195,6 +195,7 @@ enum eMaterial_OutlineShellTransparencyMethod : char {
 /** #Material::outline_shell_flag */
 enum eMaterial_OutlineShellFlag : char {
   MA_OUTLINE_SHELL_CAST_SHADOW = 1 << 0,
+  MA_OUTLINE_SHELL_SELF_OCCLUSION = 1 << 1,
 };
 
 /** #Material::volume_intersection_method */
@@ -243,6 +244,13 @@ enum eMaterialZTestMode {
   MA_ZTEST_NOT_EQUAL = 5,
   MA_ZTEST_ALWAYS = 6,
   MA_ZTEST_NEVER = 7,
+};
+
+/** #Material::stencil_mode */
+enum eMaterialStencilMode {
+  MA_STENCIL_STANDARD = 0,
+  MA_STENCIL_EARLY_MARKER = 1,
+  MA_STENCIL_MARKER_ONLY = 2,
 };
 
 /** #Material::stencil_test */
@@ -553,7 +561,8 @@ struct Material {
   char outline_shell_flag = 0;
   eMaterial_OutlineShellTransparencyMethod outline_shell_transparency_method =
       MA_OUTLINE_SHELL_DITHERED;
-  char _pad4[2] = {};
+  char stencil_mode = MA_STENCIL_STANDARD;
+  char _pad4[1] = {};
   float outline_shell_alpha_threshold = 0.5f;
 };
 

@@ -211,6 +211,10 @@ void LightProbeModule::sync_planar(const ObjectRef &ob_ref)
 {
   PlanarProbe &plane = planar_map_.lookup_or_add_default(ObjectKey(ob_ref));
   plane.used = true;
+  plane.selection_key = ObjectKey(ob_ref);
+  const ID &original = ob_ref.object->id.orig_id ? *ob_ref.object->id.orig_id : ob_ref.object->id;
+  plane.object_uid = original.session_uid;
+  plane.is_instance = uint(ob_ref.is_dupli());
   if (inst_.get_recalc_flags(ob_ref) != 0 || plane.initialized == false) {
     const blender::LightProbe &light_probe = DRW_object_get_data_for_drawing<blender::LightProbe>(
         *ob_ref.object);

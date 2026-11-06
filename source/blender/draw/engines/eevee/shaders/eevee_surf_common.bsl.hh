@@ -40,6 +40,7 @@ struct VertOutCommon {
   /* World Position. */
   [[smooth]] float3 P;
   [[smooth]] float3 P_base;
+  [[smooth]] float3 P_relative;
   /* World Normal. */
   [[smooth]] float3 N;
   /* Resource ID. */
@@ -99,7 +100,7 @@ void init_globals_mesh(const VertOutCommon &interp, ShadingData &sd, float3 bary
   float wp_delta = 0.0f;
   float bc_delta = 0.0f;
 #if defined(GPU_FRAGMENT_SHADER) || defined(GLSL_CPP_STUBS)
-  wp_delta = length(gpu_dfdx(interp.P)) + length(gpu_dfdy(interp.P));
+  wp_delta = length(gpu_dfdx(interp.P_relative)) + length(gpu_dfdy(interp.P_relative));
   bc_delta = length(gpu_dfdx(barycentric_co)) + length(gpu_dfdy(barycentric_co));
 #endif
   float rate_of_change = wp_delta * safe_rcp(bc_delta);
@@ -180,7 +181,9 @@ void init_globals_pointcloud(const VertOutPointcloud &ptcloud_interp, ShadingDat
   sd.N = (front_face) ? sd.N : -sd.N;
   sd.Ni = (front_face) ? sd.Ni : -sd.Ni;
 #if defined(GPU_FRAGMENT_SHADER) || defined(GLSL_CPP_STUBS)
-  sd.Ng = safe_normalize(cross(gpu_dfdx(sd.P), gpu_dfdy(sd.P)));
+  float3 dPdx = pipe.is_mesh ? gpu_dfdx(interp.P_relative) : gpu_dfdx(sd.P);
+  float3 dPdy = pipe.is_mesh ? gpu_dfdy(interp.P_relative) : gpu_dfdy(sd.P);
+  sd.Ng = safe_normalize(cross(dPdx, dPdy));
   if (uni.pipeline_buf.is_main_view_inverted) {
     sd.Ng = -sd.Ng;
   }
@@ -193,6 +196,7 @@ void init_interface(VertOutCommon &interp, uint resource_id_raw)
 {
   interp.P = float3(0.0f);
   interp.P_base = float3(0.0f);
+  interp.P_relative = float3(0.0f);
   interp.N = float3(0.0f);
   interp.resource_id_raw = resource_id_raw;
 }

@@ -18,6 +18,7 @@
 #include "GPU_capabilities.hh"
 #include "GPU_context.hh"
 #include "GPU_pass.hh"
+#include "GPU_material_profile.hh"
 #include "GPU_vertex_format.hh"
 #include "gpu_codegen.hh"
 
@@ -35,6 +36,8 @@ static bool gpu_pass_validate(GPUCodegenCreateInfo *create_info);
  * \{ */
 
 struct GPUPass {
+  std::shared_ptr<gpu::ShaderCompileDiagnostics> diagnostics =
+      std::make_shared<gpu::ShaderCompileDiagnostics>();
   static inline std::atomic<uint64_t> compilation_counts = 0;
 
   GPUCodegenCreateInfo *create_info = nullptr;
@@ -71,6 +74,8 @@ struct GPUPass {
         is_optimization_pass(is_optimization_pass)
   {
     BLI_assert(!is_optimization_pass || !should_optimize);
+    create_info->compilation_diagnostics = diagnostics;
+    diagnostics->sources = create_info->expression_sources;
     if (is_optimization_pass && deferred_compilation) {
       // Defer until all non optimization passes are compiled.
       return;
@@ -178,13 +183,25 @@ GPUPassStatus GPU_pass_status(GPUPass *pass)
   return pass->status;
 }
 
+std::string GPU_pass_error_message(GPUPass *pass)
+{
+  std::lock_guard lock(pass->diagnostics->mutex);
+  return pass->diagnostics->message;
+}
+
+std::vector<gpu::ShaderDiagnostic> GPU_pass_expression_errors(GPUPass *pass)
+{
+  std::lock_guard lock(pass->diagnostics->mutex);
+  return pass->diagnostics->errors;
+}
+
 bool GPU_pass_should_optimize(GPUPass *pass)
 {
   /* Returns optimization heuristic prepared during
    * initial codegen.
    * NOTE: Only enabled on Metal, since it doesn't seem to yield any performance improvements for
    * other backends. */
-  return (GPU_backend_get_type() == GPU_BACKEND_METAL) && pass->should_optimize;
+  return pass && (GPU_backend_get_type() == GPU_BACKEND_METAL) && pass->should_optimize;
 }
 
 gpu::Shader *GPU_pass_shader_get(GPUPass *pass)
@@ -375,6 +392,7 @@ GPUPass *GPU_generate_pass(GPUMaterial *material,
                            void *thunk,
                            bool optimize_graph)
 {
+  GPUMaterialProfileTimer profile_codegen(GPUMaterialProfileStage::Codegen);
   gpu_node_graph_prune_unused(graph);
 
   GPUCodegen codegen(material, graph, debug_name);
@@ -402,18 +420,26 @@ GPUPass *GPU_generate_pass(GPUMaterial *material,
   gpu_node_graph_finalize_uniform_attrs(graph);
 
   codegen.generate_graphs();
+  codegen.create_info->expression_sources = GPU_material_expression_diagnostic_sources(material);
 
   GPUPass *pass = nullptr;
 
   /* Cache lookup: Reuse shaders already compiled. */
-  pass = g_cache->get(engine, codegen.hash_get(), deferred_compilation, optimize_graph);
+  profile_codegen.stop();
+  {
+    GPUMaterialProfileTimer profile(GPUMaterialProfileStage::CompileWait);
+    pass = g_cache->get(engine, codegen.hash_get(), deferred_compilation, optimize_graph);
+  }
 
   if (pass) {
+    GPU_material_profile_count(GPUMaterialProfileCounter::PassHits);
     pass->refcount++;
     return pass;
   }
 
   /* The shader is not compiled, continue generating the shader strings. */
+  GPU_material_profile_count(GPUMaterialProfileCounter::PassMisses);
+  GPUMaterialProfileTimer profile_source(GPUMaterialProfileStage::Codegen);
   codegen.generate_attribs();
   codegen.generate_resources();
 
@@ -421,6 +447,8 @@ GPUPass *GPU_generate_pass(GPUMaterial *material,
   finalize_source_cb(thunk, material, &codegen.output);
 
   codegen.create_info->finalize();
+  profile_source.stop();
+  GPUMaterialProfileTimer profile_compile(GPUMaterialProfileStage::CompileWait);
   g_cache->add(engine, codegen, deferred_compilation, optimize_graph);
   codegen.create_info = nullptr;
 

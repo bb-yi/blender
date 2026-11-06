@@ -20,6 +20,7 @@
 #include "BLI_vector.hh"
 
 #include "GPU_material.hh"
+#include "NOD_shader.h"
 
 #include "draw_pass.hh"
 
@@ -31,7 +32,6 @@ namespace blender {
 
 struct bNodeSocketValueFloat;
 struct bNodeSocketValueRGBA;
-struct ShaderTessellationSettings;
 
 namespace eevee {
 
@@ -57,6 +57,19 @@ static inline bool geometry_type_is_mesh(eMaterialGeometry geometry_type)
  */
 bool material_tessellation_settings_get(blender::Material *mat,
                                         ShaderTessellationSettings &r_settings);
+bool material_output_has_depth_offset(bNodeTree *nodetree);
+
+/** Evaluated node-tree properties. Owned by one MaterialModule sync, never shared across frames.
+ */
+struct MaterialNodeTreeInfo {
+  ShaderTessellationSettings tessellation = {};
+  bNodeTree *npr_tree = nullptr;
+  bool has_tessellation = false;
+  bool uses_outline_control = false;
+  bool has_depth_offset = false;
+  bool has_outline_shell = false;
+  float outline_shell_bounds_inflation = 0.0f;
+};
 
 enum eMaterialDisplacement {
   MAT_DISPLACEMENT_BUMP = 0,
@@ -104,19 +117,19 @@ static inline void material_type_from_shader_uuid(uint64_t shader_uuid,
                                                   bool &outline_shell)
 {
   const uint64_t geometry_mask = ((1u << 4u) - 1u);
-  const uint64_t pipeline_mask = ((1u << 4u) - 1u);
+  const uint64_t pipeline_mask = ((1u << 5u) - 1u);
   const uint64_t thickness_mask = ((1u << 1u) - 1u);
   const uint64_t displacement_mask = ((1u << 1u) - 1u);
   const uint64_t probe_mask = ((1u << 2u) - 1u);
   geometry_type = static_cast<eMaterialGeometry>(shader_uuid & geometry_mask);
   pipeline_type = static_cast<eMaterialPipeline>((shader_uuid >> 4u) & pipeline_mask);
-  displacement_type = static_cast<eMaterialDisplacement>((shader_uuid >> 8u) & displacement_mask);
-  thickness_type = static_cast<eMaterialThickness>((shader_uuid >> 9u) & thickness_mask);
-  probe_capture = static_cast<eMaterialProbe>((shader_uuid >> 10u) & probe_mask);
-  transparent_shadows = (shader_uuid >> 12u) & 1u;
-  use_outline = (shader_uuid >> 13u) & 1u;
-  depth_offset_affect_lighting = (shader_uuid >> 14u) & 1u;
-  outline_shell = (shader_uuid >> 15u) & 1u;
+  displacement_type = static_cast<eMaterialDisplacement>((shader_uuid >> 9u) & displacement_mask);
+  thickness_type = static_cast<eMaterialThickness>((shader_uuid >> 10u) & thickness_mask);
+  probe_capture = static_cast<eMaterialProbe>((shader_uuid >> 11u) & probe_mask);
+  transparent_shadows = (shader_uuid >> 13u) & 1u;
+  use_outline = (shader_uuid >> 14u) & 1u;
+  depth_offset_affect_lighting = (shader_uuid >> 15u) & 1u;
+  outline_shell = (shader_uuid >> 16u) & 1u;
 }
 
 static inline uint64_t shader_uuid_from_material_type(
@@ -135,26 +148,26 @@ static inline uint64_t shader_uuid_from_material_type(
   BLI_assert(int64_t(thickness_type) < (1 << 1));
   BLI_assert(int64_t(probe_capture) < (1 << 2));
   BLI_assert(int64_t(geometry_type) < (1 << 4));
-  BLI_assert(int64_t(pipeline_type) < (1 << 4));
+  BLI_assert(int64_t(pipeline_type) < (1 << 5));
   uint64_t transparent_shadows = blend_flags & MA_BL_TRANSPARENT_SHADOW ? 1 : 0;
   uint64_t blend_flag_bits = uint64_t(static_cast<unsigned char>(blend_flags));
 
   uint64_t uuid;
   uuid = geometry_type;
   uuid |= pipeline_type << 4;
-  uuid |= displacement_type << 8;
-  uuid |= thickness_type << 9;
-  uuid |= uint64_t(probe_capture) << 10;
-  uuid |= transparent_shadows << 12;
-  uuid |= uint64_t(use_outline) << 13;
-  uuid |= uint64_t(depth_offset_affect_lighting) << 14;
-  uuid |= uint64_t(outline_shell) << 15;
+  uuid |= displacement_type << 9;
+  uuid |= thickness_type << 10;
+  uuid |= uint64_t(probe_capture) << 11;
+  uuid |= transparent_shadows << 13;
+  uuid |= uint64_t(use_outline) << 14;
+  uuid |= uint64_t(depth_offset_affect_lighting) << 15;
+  uuid |= uint64_t(outline_shell) << 16;
   /* Keep the full blend flag in the shader key. Beyond transparent shadows, flags such as
    * raytraced transmission affect prepass replacement and auxiliary passes. */
-  uuid |= blend_flag_bits << 16;
+  uuid |= blend_flag_bits << 17;
   /* Higher bits are intentionally ignored by material_type_from_shader_uuid(). They separate
    * graph-dependent variants such as different NPR trees attached to the same material/world. */
-  uuid |= extra_key << 24;
+  uuid |= extra_key << 25;
   return uuid;
 }
 
@@ -305,7 +318,7 @@ struct SurfaceDrawState {
   eMaterialZTestMode ztest_mode;
   bool color_write;
   bool depth_write;
-  /* Skips stencil state, the refraction layer and outline-specific behavior. */
+  /* Skips body-only stencil and Outline Control behavior, but shares its refraction layer. */
   bool is_outline_shell;
 };
 
@@ -343,7 +356,8 @@ struct MaterialKey {
               eMaterialPipeline pipeline,
               short visibility_flags,
               short refraction_layer,
-              bool use_outline)
+              bool use_outline,
+              bool npr_refraction_background = false)
       : mat(mat_)
   {
     options = shader_uuid_from_material_type(pipeline,
@@ -359,10 +373,12 @@ struct MaterialKey {
     options = (options << 1) | (visibility_flags & OB_HIDE_PROBE_CUBEMAP ? 0 : 1);
     options = (options << 1) | (visibility_flags & OB_HIDE_PROBE_PLANAR ? 0 : 1);
     options = (options << 1) | (visibility_flags & OB_HIDE_RAYCAST ? 0 : 1);
+    options = (options << 1) | uint64_t(npr_refraction_background);
     options = (options << 16) | uint16_t(refraction_layer);
     options = (options << 3) | uint64_t(material_ztest_mode_get(*mat_));
     options = (options << 1) | uint64_t(material_color_write_get(*mat_));
     options = (options << 1) | uint64_t(material_depth_write_get(*mat_));
+    options = (options << 2) | uint64_t(mat_->stencil_mode);
     const uint64_t stencil_enabled = mat_->stencil_enabled != 0;
     stencil_order = stencil_enabled ? mat_->stencil_order : 0;
     stencil_options = uint32_t(stencil_enabled);
@@ -417,7 +433,8 @@ struct ShaderKey {
             eMaterialProbe probe_capture,
             short refraction_layer,
             bool hide_from_raycast,
-            const SurfaceDrawState &state)
+            const SurfaceDrawState &state,
+            bool npr_refraction_background = false)
   {
     shader = GPU_material_get_shader(gpumat);
     options = uint64_t(shader_closure_bits_from_flag(gpumat));
@@ -434,6 +451,7 @@ struct ShaderKey {
     options = (options << 16) | uint16_t(refraction_layer);
     options = (options << 1) | (hide_from_raycast ? 1 : 0);
     options = (options << 1) | (state.is_outline_shell ? 1 : 0);
+    options = (options << 1) | uint64_t(npr_refraction_background);
   }
 
   uint64_t hash() const
@@ -463,6 +481,7 @@ struct Material {
   bool is_alpha_blend_transparent;
   bool is_outline_shell_blended;
   bool has_outline_shell_transparent_shadows;
+  bool uses_shell_self_occlusion = false;
   bool has_transparent_shadows;
   bool has_surface;
   bool has_volume;
@@ -476,24 +495,28 @@ struct Material {
   MaterialPass npr;
   MaterialPass prepass;
   MaterialPass stencil;
+  MaterialPass stencil_writer_surface;
   MaterialPass outline_shell_prepass;
   MaterialPass outline_shell_shading;
   MaterialPass outline_shell_shadow;
+  MaterialPass outline_shell_self_depth;
   /* Absolute unlinked Strength value of the Outline Shell Output node.
    * Used to inflate the object bounds for vertex offsets. */
   float outline_shell_bounds_inflation;
-  /* Lattice resolution of fully subdivided triangles of tessellated materials
-   * (#node_shader_tessellation_expansion). Zero if not tessellated.
+  /* Lattice resolution budget (#node_shader_tessellation_expansion). Zero if not tessellated.
+   * The per-object material copy may reduce this using a conservative bound on edge LOD.
    * Passes using #MAT_GEOM_MESH_TESS shaders expand each triangle into level^2 triangles. */
   int tessellation_level;
-  /* The tessellated geometry depends on the camera position. */
+  /* Screen-edge LOD depends on projection/resolution; distance LOD only on position. */
   bool tessellation_view_dependent;
+  bool tessellation_position_dependent;
   /* These pipelines need a sub-pass per object/instance, so the returned sub_pass for these are
    * always null and the sub-pass creation is handled directly by the SyncModule.
    * Note that this also applies to the shading MaterialPass in the case of alpha-blended
    * materials. */
   MaterialPass overlap_masking;
   MaterialPass outline_occlusion;
+  MaterialPass outline_freestyle;
   MaterialPass capture;
   MaterialPass lightprobe_sphere_prepass;
   MaterialPass lightprobe_sphere_shading;
@@ -535,6 +558,9 @@ class MaterialModule {
   bool has_time_dependent_materials_ = false;
 
   Map<MaterialKey, Material> material_map_;
+  Map<const blender::Material *, MaterialNodeTreeInfo> node_tree_info_;
+  int64_t node_tree_info_hits_ = 0;
+  int64_t skipped_material_slots_ = 0;
   Map<ShaderKey, PassMain::Sub *> shader_map_;
   Set<blender::Material *> depth_offset_shadow_disabled_mats_;
   Set<blender::Material *> current_depth_offset_shadow_disabled_mats_;
@@ -545,6 +571,9 @@ class MaterialModule {
 
   uint64_t gpu_pass_last_update_ = 0;
   uint64_t gpu_pass_next_update_ = 0;
+  uint64_t expression_sync_epoch_ = 0;
+  std::string expression_context_key_;
+  std::weak_ptr<const void> expression_context_owner_;
 
  public:
   MaterialModule(Instance &inst);
@@ -552,6 +581,8 @@ class MaterialModule {
 
   void begin_sync();
   void end_sync();
+  void expression_diagnostics_begin_sync();
+  void expression_diagnostics_publish(GPUMaterial *material) const;
   bool has_time_dependent_materials() const
   {
     return has_time_dependent_materials_;
@@ -560,7 +591,20 @@ class MaterialModule {
   int raycast_material_count() const;
   int glsl_function_material_count() const;
   bool has_visible_outline_materials() const;
-  bool material_uses_outline_control(const blender::Material *material) const;
+  bool material_uses_outline_control(const blender::Material *material);
+  const MaterialNodeTreeInfo &node_tree_info_get(const blender::Material *material);
+  int64_t node_tree_info_count() const
+  {
+    return node_tree_info_.size();
+  }
+  int64_t node_tree_info_hits() const
+  {
+    return node_tree_info_hits_;
+  }
+  int64_t skipped_material_slots() const
+  {
+    return skipped_material_slots_;
+  }
 
   /**
    * Returned Material references are valid until the next call to this function or material_get().
@@ -604,7 +648,12 @@ class MaterialModule {
                                  eMaterialProbe probe_capture = MAT_PROBE_NONE,
                                  bool register_pass = true,
                                  const SurfaceDrawState *state = nullptr,
-                                 bool outline_shell = false);
+                                 bool outline_shell = false,
+                                 bool stencil_marker = false,
+                                 bool stencil_writer_surface = false);
+  MaterialPass stencil_writer_surface_get(Object *ob,
+                                          blender::Material *material,
+                                          eMaterialGeometry geometry_type);
 
   ShaderGroups default_materials_load(bool block_until_ready = false);
 };

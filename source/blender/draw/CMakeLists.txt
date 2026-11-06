@@ -121,6 +121,7 @@ set(SRC
   engines/eevee/eevee_motion_blur.cc
   engines/eevee/eevee_native_postfx_output.cc
   engines/eevee/eevee_outline.cc
+  engines/eevee/eevee_outline_shell.cc
   engines/eevee/eevee_pipeline.cc
   engines/eevee/eevee_precompute.cc
   engines/eevee/eevee_raytrace.cc
@@ -230,6 +231,7 @@ set(SRC
   engines/eevee/eevee_motion_blur.hh
   engines/eevee/eevee_native_postfx_output.hh
   engines/eevee/eevee_outline.hh
+  engines/eevee/eevee_outline_shell.hh
   engines/eevee/eevee_pipeline.hh
   engines/eevee/eevee_precompute.hh
   engines/eevee/eevee_raytrace.hh
@@ -407,6 +409,7 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/infos/eevee_light_infos.hh
   engines/eevee/shaders/infos/eevee_lightprobe_infos.hh
   engines/eevee/shaders/infos/eevee_native_postfx_output_infos.hh
+  engines/eevee/shaders/infos/eevee_stencil_infos.hh
   engines/eevee/shaders/infos/eevee_outline_infos.hh
   engines/eevee/shaders/infos/eevee_render_texture_infos.hh
   engines/eevee/shaders/infos/eevee_sampling_infos.hh
@@ -521,13 +524,16 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/eevee_occupancy_lib.bsl.hh
   engines/eevee/shaders/eevee_octahedron_lib.bsl.hh
   engines/eevee/shaders/eevee_outline_detect_frag.glsl
+  engines/eevee/shaders/eevee_outline_classify_comp.glsl
+  engines/eevee/shaders/eevee_outline_dispatch_comp.glsl
   engines/eevee/shaders/eevee_outline_factor_blur_frag.glsl
   engines/eevee/shaders/eevee_outline_freestyle_frag.glsl
-  engines/eevee/shaders/eevee_outline_freestyle_vert.glsl
   engines/eevee/shaders/eevee_outline_jfa_init_frag.glsl
   engines/eevee/shaders/eevee_outline_jfa_step_comp.glsl
   engines/eevee/shaders/eevee_outline_lib.glsl
+  engines/eevee/shaders/eevee_outline_shell_lib.bsl.hh
   engines/eevee/shaders/eevee_outline_resolve_frag.glsl
+  engines/eevee/shaders/eevee_outline_upsample_frag.glsl
   engines/eevee/shaders/eevee_pipeline.bsl.hh
   engines/eevee/shaders/eevee_ray_denoise.bsl.hh
   engines/eevee/shaders/eevee_ray_generate.bsl.hh
@@ -537,15 +543,19 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/eevee_ray_types_lib.bsl.hh
   engines/eevee/shaders/eevee_reverse_z_lib.glsl
   engines/eevee/shaders/eevee_render_texture_extract_comp.glsl
+  engines/eevee/shaders/eevee_render_texture_export_comp.glsl
+  engines/eevee/shaders/eevee_renderpass_clear.bsl.hh
+  engines/eevee/shaders/eevee_stencil_snapshot_frag.glsl
   engines/eevee/shaders/eevee_renderpass.bsl.hh
   engines/eevee/shaders/eevee_renderpass_lib.glsl
-  engines/eevee/shaders/eevee_renderpass_clear.bsl.hh
   engines/eevee/shaders/eevee_reverse_z_lib.bsl.hh
   engines/eevee/shaders/eevee_sampling_lib.bsl.hh
   engines/eevee/shaders/eevee_sampling_lib.glsl
   engines/eevee/shaders/eevee_shadow.bsl.hh
   engines/eevee/shaders/eevee_shadow_filter_frag.glsl
   engines/eevee/shaders/eevee_shadow_tag_usage_bounds.bsl.hh
+  engines/eevee/shaders/eevee_shadow_node_cache.bsl.hh
+  engines/eevee/shaders/eevee_shadow_tracing.bsl.hh
   engines/eevee/shaders/eevee_shadow_page_allocate.bsl.hh
   engines/eevee/shaders/eevee_shadow_page_clear.bsl.hh
   engines/eevee/shaders/eevee_shadow_page_defrag.bsl.hh
@@ -560,7 +570,6 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/eevee_shadow_tilemap_finalize.bsl.hh
   engines/eevee/shaders/eevee_shadow_tilemap_init.bsl.hh
   engines/eevee/shaders/eevee_shadow_tilemap_lib.bsl.hh
-  engines/eevee/shaders/eevee_shadow_tracing.bsl.hh
   engines/eevee/shaders/eevee_shadow_visibility.bsl.hh
   engines/eevee/shaders/eevee_stencil_value_visualize_frag.glsl
   engines/eevee/shaders/eevee_subsurface_lib.bsl.hh
@@ -790,7 +799,6 @@ set(SHADER_SRC_SELECT_ID
   engines/select/shaders/select_lib.bsl.hh
   engines/select/shaders/select_debug_frag.glsl
 
-  engines/select/select_defines.hh
   engines/select/select_shader_shared.hh
 )
 
@@ -818,8 +826,6 @@ set(SHADER_SRC_WORKBENCH
   engines/workbench/shaders/workbench_volume.bsl.hh
   engines/workbench/shaders/workbench_world_light.bsl.hh
 
-  engines/workbench/workbench_defines.hh
-  engines/workbench/workbench_shader_shared.hh
 )
 
 # These tests depend on gpu_shader_test, so they're only included when

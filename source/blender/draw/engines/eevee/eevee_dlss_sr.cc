@@ -57,7 +57,11 @@ void DlssSrModule::publish_status(const char *status)
 void DlssSrModule::init(const int2 output_extent)
 {
   const bool was_active = active_;
+  const bool was_enabled = quality_ != 0;
   active_ = false;
+  if (inst_.is_dlss_guide_render) {
+    return;
+  }
   const Scene &scene = *inst_.scene;
   const int quality = inst_.is_viewport() ? scene.eevee.dlss_sr_viewport_quality :
                                             scene.eevee.dlss_sr_render_quality;
@@ -76,6 +80,9 @@ void DlssSrModule::init(const int2 output_extent)
   percentage_ = percentage;
   output_extent_ = output_extent;
   if (!quality) {
+    if (was_enabled) {
+      session_.reset();
+    }
     failed_ = false;
     reset_ = true;
     publish_status("Disabled");

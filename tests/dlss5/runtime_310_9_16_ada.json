@@ -1,0 +1,20 @@
+{
+  "version": "310.9.16.0",
+  "variant": "local Ada adaptation",
+  "filename": "nvngx_dlssnr.dll",
+  "sha256": "ed4b4164bdfde6268a3c896aad5e340cb66646d5e93e0aa4ff02583e7d684274",
+  "source_sha256": "2bc19bc09a7b89dd44f73e2ac0108fcc586e2154bdd0830f242f4f040e28789f",
+  "patcher_repository": "https://github.com/dev-camo/dlssnr-patcher",
+  "patcher_commit": "98dac112990e5cea30ab03d74625fc848bce5c92",
+  "patch": "runtime_patches/acquire_fence.patch",
+  "patch_apply_options": ["--unidiff-zero"],
+  "cuda_toolkit": "13.3.0",
+  "ptxas_version": "13.3.33",
+  "added_target": "sm_89",
+  "original_images_preserved": true,
+  "fatbin_count": 15,
+  "validated_gpu": "NVIDIA GeForce RTX 4080",
+  "validated_driver": "616.92",
+  "signature": "Removed after modification; not an NVIDIA-signed release",
+  "distribution": "External user-supplied binary; not stored in this repository"
+}

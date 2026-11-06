@@ -10,8 +10,13 @@ void node_render_info([[resource_table]] KernelGlobals &kg, ShadingData &sd, out
                       out float current_sample,
                       out float total_samples)
 {
-  width = float(eevee_uniform_data_get().film.extent.x);
-  height = float(eevee_uniform_data_get().film.extent.y);
+#ifdef MAT_FILTER
+  float2 render_extent = float2(filter_graph_output_extent());
+#else
+  float2 render_extent = float2(eevee_uniform_data_get().film.extent);
+#endif
+  width = render_extent.x;
+  height = render_extent.y;
   resolution = float3(width, height, 0.0f);
 #ifdef GPU_FRAGMENT_SHADER
   float2 extent = max(float2(width, height), float2(1.0f));
@@ -21,11 +26,7 @@ void node_render_info([[resource_table]] KernelGlobals &kg, ShadingData &sd, out
 #else
   frag_coord = float3(0.0f);
 #endif
-#ifdef EEVEE_SAMPLING_DATA
-  current_sample = float(sampling_buf.sample_index);
-  total_samples = float(max(sampling_buf.sample_count, 1));
-#else
-  current_sample = 0.0f;
-  total_samples = 1.0f;
-#endif
+  float2 samples = render_info_samples();
+  current_sample = samples.x;
+  total_samples = samples.y;
 }

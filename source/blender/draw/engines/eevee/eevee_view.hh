@@ -28,6 +28,7 @@
 namespace blender::eevee {
 
 class Instance;
+class Film;
 
 /* -------------------------------------------------------------------- */
 /** \name ShadingView
@@ -55,6 +56,7 @@ class ShadingView {
   Framebuffer combined_fb_ = {"combined_fb_"};
   Framebuffer gbuffer_fb_ = {"gbuffer_fb_"};
   Framebuffer transparent_fb_ = {"transparent"};
+  Framebuffer stencil_preview_fb_ = {"stencil_preview"};
   TextureFromPool postfx_tx_;
   TextureFromPool outline_postfx_tx_;
 
@@ -91,6 +93,7 @@ class ShadingView {
   void sync();
 
   void render();
+  void render_dlss_guides(Film &film);
 
  private:
   void render_transparent_pass(RenderBuffers &rbufs);
@@ -158,6 +161,13 @@ class MainView {
   {
     for (auto i : IndexRange(6)) {
       shading_views_[i].render();
+    }
+  }
+
+  void render_dlss_guides(Film &film)
+  {
+    for (auto i : IndexRange(6)) {
+      shading_views_[i].render_dlss_guides(film);
     }
   }
 

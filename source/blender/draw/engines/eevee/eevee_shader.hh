@@ -29,6 +29,8 @@ struct Light;
 
 namespace blender::eevee {
 
+struct MaterialNodeTreeInfo;
+
 using StaticShader = gpu::StaticShader;
 
 enum class eLightShaderPipeline {
@@ -70,11 +72,24 @@ enum eShaderType {
   DEFERRED_LIGHT_DOUBLE,
   DEFERRED_LIGHT_TRIPLE,
   OUTLINE_DETECT,
+  OUTLINE_DETECT_CACHED,
+  OUTLINE_DETECT_SCALED,
+  OUTLINE_DETECT_SCALED_CACHED,
+  OUTLINE_CLASSIFY,
+  OUTLINE_DISPATCH,
   OUTLINE_JFA_INIT,
+  OUTLINE_JFA_INIT_PACKED,
   OUTLINE_FACTOR_BLUR,
+  OUTLINE_FACTOR_BLUR_SCALED,
   OUTLINE_JFA_STEP,
+  OUTLINE_JFA_STEP_PACKED,
+  OUTLINE_JFA_STEP_VISIBLE,
+  OUTLINE_JFA_STEP_VISIBLE_PACKED,
   OUTLINE_RESOLVE,
-  OUTLINE_FREESTYLE,
+  OUTLINE_RESOLVE_PACKED,
+  OUTLINE_RESOLVE_SCALED,
+  OUTLINE_RESOLVE_SCALED_PACKED,
+  OUTLINE_UPSAMPLE,
   DEFERRED_PLANAR_EVAL,
   DEFERRED_THICKNESS_AMEND,
   DEFERRED_TILE_CLASSIFY,
@@ -152,12 +167,16 @@ enum eShaderType {
   RAY_TRACE_SCREEN,
 
   RENDERPASS_CLEAR,
+  STENCIL_SNAPSHOT,
   RENDER_TEXTURE_EXTRACT_RGBA16F,
   RENDER_TEXTURE_EXTRACT_RGBA32F,
   RENDER_TEXTURE_EXTRACT_R16F,
   RENDER_TEXTURE_EXTRACT_R32F,
+  RENDER_TEXTURE_EXPORT_COLOR,
+  RENDER_TEXTURE_EXPORT_VALUE,
 
   STENCIL_VALUE_VISUALIZE,
+  STENCIL_SNAPSHOT_VISUALIZE,
 
   SPHERE_PROBE_CONVOLVE,
   SPHERE_PROBE_IRRADIANCE,
@@ -169,13 +188,19 @@ enum eShaderType {
   SHADOW_DEBUG,
   SHADOW_MASK_FILTER,
   SHADOW_MASK_FILTER_LAYERED,
+  SHADOW_NODE_CACHE_ESTIMATE,
+  SHADOW_NODE_CACHE_RESOLVE,
+  SHADOW_NODE_CACHE_RESOLVE_CLASSIFIED,
+  SHADOW_NODE_CACHE_FILTER,
   SHADOW_PAGE_ALLOCATE,
   SHADOW_PAGE_CLEAR,
   SHADOW_PAGE_DEFRAG,
   SHADOW_PAGE_FREE,
   SHADOW_PAGE_MASK,
+  SHADOW_PAGE_DILATE,
   SHADOW_TILEMAP_AMEND,
   SHADOW_TILEMAP_BOUNDS,
+  SHADOW_TILEMAP_BOUNDS_STABILIZE,
   SHADOW_TILEMAP_FINALIZE,
   SHADOW_TILEMAP_RENDERMAP,
   SHADOW_TILEMAP_INIT,
@@ -207,6 +232,7 @@ enum eShaderType {
   VOLUME_INTEGRATION,
   VOLUME_OCCUPANCY_CONVERT,
   VOLUME_RESOLVE,
+  NPR_LAYER_VOLUME,
   VOLUME_SCATTER,
   VOLUME_SCATTER_WITH_LIGHTS,
 
@@ -243,6 +269,7 @@ enum ShaderGroups : uint32_t {
   MATERIAL_SHADERS = 1 << 20,
   VOLUME_PROBE_SHADERS = 1 << 21,
   FILTER_GRAPH_SHADERS = 1 << 22,
+  NODE_SHADOW_CACHE_SHADERS = 1 << 23,
 };
 ENUM_OPERATORS(ShaderGroups)
 
@@ -338,7 +365,9 @@ class ShaderModule {
                                    bool deferred_compilation,
                                    blender::Material *default_mat,
                                    bool use_outline = true,
-                                   bool outline_shell = false);
+                                   bool outline_shell = false,
+                                   const MaterialNodeTreeInfo *node_tree_info = nullptr,
+                                   bool stencil_writer_surface = false);
   GPUMaterial *world_shader_get(blender::World *blender_world,
                                 bNodeTree *nodetree,
                                 eMaterialPipeline pipeline_type,

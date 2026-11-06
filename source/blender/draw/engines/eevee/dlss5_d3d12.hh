@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include "BLI_math_vector_types.hh"
 
@@ -40,6 +41,20 @@ struct Dlss5NRSettings {
            use_auto_mask == other.use_auto_mask && ui_correction == other.ui_correction &&
            style == other.style;
   }
+};
+
+/** Identity and continuity of a final-render NR stream. Never serialized in a blend file. */
+struct Dlss5OfflineFrame {
+  uint64_t sequence = 0;
+  uint32_t scene = 0;
+  uint32_t camera = 0;
+  std::string layer;
+  std::string view;
+  std::string signature;
+  bool pre_fx = false;
+  int frame = 0;
+  int camera_type = 0;
+  Dlss5NRSettings settings;
 };
 
 struct Dlss5D3D12Frame {
@@ -86,6 +101,9 @@ class Dlss5D3D12Session {
   bool warmup();
   /** Lease a context-owned offline session. Never share viewport temporal history. */
   void reuse_for_offline_render();
+  /** Acquire one animation stream; return whether its last completed frame is adjacent. */
+  bool begin_offline_frame(const Dlss5OfflineFrame &frame);
+  void complete_offline_frame();
   bool sr_optimal_settings(int2 output_extent, int quality, float percentage, int2 &input_extent);
   /** Release process-wide NGX while Blender's GPU and allocator are still alive. */
   static void free_runtime();

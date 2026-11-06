@@ -521,6 +521,9 @@ void Camera::sync()
   data.panoramic_front_face_extent = panoramic_front_face_extent_get(data);
   data_.initialized = true;
   view_changed_ = assign_if_different(last_persmat_, data_.persmat);
+  /* Screen-edge tessellation also changes with render/viewport resolution. */
+  view_changed_ |= assign_if_different(last_render_extent_, inst_.film.render_extent_get());
+  position_changed_ = assign_if_different(last_position_, data_.viewinv.location());
 
   update_bounds();
 }

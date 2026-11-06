@@ -161,6 +161,7 @@ set(SRC
   GPU_index_buffer.hh
   GPU_init_exit.hh
   GPU_material.hh
+  GPU_material_profile.hh
   GPU_matrix.hh
   GPU_pass.hh
   GPU_platform.hh
@@ -688,8 +689,11 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_npr.glsl
   shaders/material/gpu_shader_material_outline_control.glsl
   shaders/material/gpu_shader_material_render_info.glsl
+  shaders/material/gpu_shader_material_draw_info.glsl
+  shaders/material/gpu_shader_material_stencil_value.glsl
   shaders/material/gpu_shader_material_world_environment.glsl
   shaders/material/gpu_shader_material_light_probe_color.glsl
+  shaders/material/gpu_shader_material_planar_probe.glsl
   shaders/material/gpu_shader_material_world_to_tangent.glsl
   shaders/material/gpu_shader_material_basis_transform.glsl
   shaders/material/gpu_shader_material_sdf_util.glsl
@@ -977,7 +981,10 @@ endif()
 
 
 if(WITH_GTESTS)
-  set(TEST_SRC "")
+  set(TEST_SRC tests/shader_diagnostics_test.cc)
+  if(WITH_OPENGL_BACKEND)
+    list(APPEND TEST_SRC tests/shader_log_test.cc)
+  endif()
   set(TEST_INC "")
   set(TEST_LIB
     bf_intern_ghost
