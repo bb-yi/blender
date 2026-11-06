@@ -17,6 +17,9 @@ void node_output_outline(
     float id_edge,
     float id_edge_width,
     float freestyle_edge,
+    float expansion_mask,
+    float id_combine,
+    float edge_priority,
     Closure &dummy)
 {
   dummy = Closure(0);
@@ -32,5 +35,8 @@ void node_output_outline(
                  outline_id,
                  id_edge > 0.5f,
                  id_edge_width,
-                 freestyle_edge > 0.5f);
+                 freestyle_edge > 0.5f,
+                 expansion_mask,
+                 id_combine,
+                 edge_priority);
 }

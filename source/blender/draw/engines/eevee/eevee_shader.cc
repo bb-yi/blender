@@ -439,17 +439,19 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
   {
     /* These are the slowest shaders by far. Submitting them first make sure they overlap with
      * other shaders compilation. */
-    const eShaderType shader_list[] = {DEFERRED_LIGHT_TRIPLE,
-                                       DEFERRED_LIGHT_SINGLE,
-                                       DEFERRED_LIGHT_DOUBLE,
-                                       DEFERRED_COMBINE,
-                                       DEFERRED_AOV_CLEAR,
-                                       DEFERRED_TILE_CLASSIFY,
-                                       OUTLINE_DETECT,
-                                       OUTLINE_JFA_INIT,
-                                       OUTLINE_FACTOR_BLUR,
-                                       OUTLINE_JFA_STEP,
-                                       OUTLINE_RESOLVE};
+    const eShaderType shader_list[] = {DEFERRED_LIGHT_TRIPLE,    DEFERRED_LIGHT_SINGLE,
+                                       DEFERRED_LIGHT_DOUBLE,    DEFERRED_COMBINE,
+                                       DEFERRED_AOV_CLEAR,       DEFERRED_TILE_CLASSIFY,
+                                       OUTLINE_DETECT,           OUTLINE_DETECT_CACHED,
+                                       OUTLINE_DETECT_SCALED,    OUTLINE_DETECT_SCALED_CACHED,
+                                       OUTLINE_CLASSIFY,         OUTLINE_DISPATCH,
+                                       OUTLINE_JFA_INIT,         OUTLINE_JFA_INIT_PACKED,
+                                       OUTLINE_FACTOR_BLUR,      OUTLINE_FACTOR_BLUR_SCALED,
+                                       OUTLINE_JFA_STEP,         OUTLINE_JFA_STEP_PACKED,
+                                       OUTLINE_JFA_STEP_VISIBLE, OUTLINE_JFA_STEP_VISIBLE_PACKED,
+                                       OUTLINE_RESOLVE,          OUTLINE_RESOLVE_PACKED,
+                                       OUTLINE_RESOLVE_SCALED,   OUTLINE_RESOLVE_SCALED_PACKED,
+                                       OUTLINE_UPSAMPLE};
     request(DEFERRED_LIGHTING_SHADERS, AS_SPAN(shader_list));
   }
   {
@@ -752,14 +754,42 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_deferred_light_triple";
     case OUTLINE_DETECT:
       return "eevee_outline_detect";
+    case OUTLINE_DETECT_CACHED:
+      return "eevee_outline_detect_cached";
+    case OUTLINE_DETECT_SCALED:
+      return "eevee_outline_detect_scaled";
+    case OUTLINE_DETECT_SCALED_CACHED:
+      return "eevee_outline_detect_scaled_cached";
+    case OUTLINE_CLASSIFY:
+      return "eevee_outline_classify";
+    case OUTLINE_DISPATCH:
+      return "eevee_outline_dispatch";
     case OUTLINE_JFA_INIT:
       return "eevee_outline_jfa_init";
+    case OUTLINE_JFA_INIT_PACKED:
+      return "eevee_outline_jfa_init_packed";
     case OUTLINE_FACTOR_BLUR:
       return "eevee_outline_factor_blur";
+    case OUTLINE_FACTOR_BLUR_SCALED:
+      return "eevee_outline_factor_blur_scaled";
     case OUTLINE_JFA_STEP:
       return "eevee_outline_jfa_step";
+    case OUTLINE_JFA_STEP_PACKED:
+      return "eevee_outline_jfa_step_packed";
+    case OUTLINE_JFA_STEP_VISIBLE:
+      return "eevee_outline_jfa_step_visible";
+    case OUTLINE_JFA_STEP_VISIBLE_PACKED:
+      return "eevee_outline_jfa_step_visible_packed";
     case OUTLINE_RESOLVE:
       return "eevee_outline_resolve";
+    case OUTLINE_RESOLVE_PACKED:
+      return "eevee_outline_resolve_packed";
+    case OUTLINE_RESOLVE_SCALED:
+      return "eevee_outline_resolve_scaled";
+    case OUTLINE_RESOLVE_SCALED_PACKED:
+      return "eevee_outline_resolve_scaled_packed";
+    case OUTLINE_UPSAMPLE:
+      return "eevee_outline_upsample";
     case DEFERRED_AOV_CLEAR:
       return "eevee_deferred_aov_clear";
     case DEFERRED_CAPTURE_EVAL:
@@ -1971,8 +2001,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       (has_outline_output || clears_outline_output) &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
   {
-    info.additional_info((pipeline_type == MAT_PIPE_FORWARD) ? "eevee_surf_forward_outline_out" :
-                                                              "eevee_outline_out");
+    /* Refraction receiver masks preserve any underlying outline style, just like Forward. */
+    info.additional_info(clears_outline_output ? "eevee_surf_forward_outline_out" :
+                                                 "eevee_outline_out");
     info.define("MAT_OUTLINE_OUTPUT");
     if (clears_outline_output) {
       info.define("MAT_OUTLINE_CLEAR");

@@ -36,8 +36,12 @@ float outline_depth_fetch(int2 texel)
 
 void main()
 {
-  const int2 texel = int2(gl_FragCoord.xy);
+  int2 texel = int2(gl_FragCoord.xy);
   const int2 extent = textureSize(depth_tx, 0);
+  const bool reduced = any(notEqual(outline_extent, extent));
+  if (reduced) {
+    texel = outline_source_texel(texel, extent, outline_extent);
+  }
   if (any(lessThan(texel, int2(0))) || any(greaterThanEqual(texel, extent))) {
     discard;
   }
@@ -59,7 +63,11 @@ void main()
                                    sqrt(uniform_buf.film.sr_render_ratio.x *
                                         uniform_buf.film.sr_render_ratio.y) :
                                    1.0f;
-  const float line_width = outline_width_unpack(outline_info.r) * sr_width_scale;
+  float line_width = outline_width_unpack(outline_info.r) * sr_width_scale;
+  if (reduced) {
+    const float2 ratio = float2(outline_extent) / float2(extent);
+    line_width *= sqrt(ratio.x * ratio.y);
+  }
   if (line_width <= 0.0f || outline_color.a <= 0.0f ||
       !outline_freestyle_edge_unpack(outline_info.b))
   {

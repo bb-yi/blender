@@ -14,9 +14,21 @@
 
 #include "infos/eevee_outline_infos.hh"
 
+#ifdef OUTLINE_DOWNSAMPLED
+FRAGMENT_SHADER_CREATE_INFO(eevee_outline_factor_blur_scaled)
+#else
 FRAGMENT_SHADER_CREATE_INFO(eevee_outline_factor_blur)
+#endif
 
 #include "eevee_outline_lib.glsl"
+
+uint outline_seed_id(int2 texel)
+{
+#ifdef OUTLINE_DOWNSAMPLED
+  texel = outline_source_texel(texel, textureSize(outline_info_tx, 0).xy, outline_extent);
+#endif
+  return outline_id_unpack(texelFetch(outline_info_tx, int3(texel, 0), 0).a);
+}
 
 void main()
 {
@@ -29,7 +41,7 @@ void main()
     return;
   }
 
-  const uint center_id = outline_id_unpack(texelFetch(outline_info_tx, int3(texel, 0), 0).a);
+  const uint center_id = outline_seed_id(texel);
   float factor_sum = clamp(center.r, 0.0f, 1.0f);
   float weight_sum = 1.0f;
 
@@ -49,7 +61,7 @@ void main()
         continue; /* Not a seed pixel -> not part of the contour. */
       }
       /* Same outline id only: never bleed the factor across different objects' contours. */
-      if (outline_id_unpack(texelFetch(outline_info_tx, int3(tap, 0), 0).a) != center_id) {
+      if (outline_seed_id(tap) != center_id) {
         continue;
       }
       factor_sum += clamp(neighbor.r, 0.0f, 1.0f);

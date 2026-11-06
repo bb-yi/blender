@@ -909,6 +909,8 @@ if(WITH_GPU_RENDER_TESTS)
     render_texture_updates
     render_texture_performance
     render_texture_layers
+    outline_controls
+    outline_performance
     outline_visibility
     vulkan_failure_recovery
   )

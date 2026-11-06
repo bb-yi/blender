@@ -869,6 +869,9 @@ class RENDER_PT_eevee_outline(RenderButtonsPanel, Panel):
         layout.use_property_decorate = False
 
         col = layout.column()
+        col.active = context.scene.eevee.use_outline
+        col.prop(context.scene.eevee, "outline_viewport_resolution")
+        col.prop(context.scene.eevee, "outline_surface_identity")
         col.label(text="Uses Outline Control nodes and the Outline render pass.")
 
 

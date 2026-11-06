@@ -10266,6 +10266,48 @@ static void def_sh_image_to_closure(BlenderRNA * /*brna*/, StructRNA *srna)
       prop, NC_NODE | NA_EDITED, "rna_ShaderNodeImageToClosure_settings_update");
 }
 
+static void def_sh_outline_control(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem combine_items[] = {
+      {0, "LEGACY", 0, "Original", "Keep the original ID boundary detection"},
+      {1, "DEPTH", 0, "ID and Depth", "Keep ID boundaries only where depth also detects an edge"},
+      {2,
+       "NORMAL",
+       0,
+       "ID and Normal",
+       "Keep ID boundaries only where normals also detect an edge"},
+      {3,
+       "DEPTH_OR_NORMAL",
+       0,
+       "ID and (Depth or Normal)",
+       "Keep ID boundaries where depth or normals detect an edge"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem priority_items[] = {
+      {0, "LEGACY", 0, "Original", "Keep the original edge width selection"},
+      {1, "ID", 0, "Prefer ID", "Use the ID width when that edge contributes"},
+      {2, "DEPTH", 0, "Prefer Depth", "Use the depth width when that edge contributes"},
+      {3, "NORMAL", 0, "Prefer Normal", "Use the normal width when that edge contributes"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  PropertyRNA *prop = RNA_def_property(srna, "id_combine", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, combine_items);
+  RNA_def_property_ui_text(prop,
+                           "ID Combine",
+                           "Conditions required for an ID boundary; independent depth and normal "
+                           "widths remain available");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  prop = RNA_def_property(srna, "edge_priority", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom2");
+  RNA_def_property_enum_items(prop, priority_items);
+  RNA_def_property_ui_text(
+      prop,
+      "Edge Priority",
+      "Preferred width at a detected pixel; does not change neighboring line expansion");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
 static void def_sh_draw_info(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem query_items[] = {
@@ -14771,7 +14813,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeNPR_Input");
   define("ShaderNode", "ShaderNodeNPR_Output", def_group_output);
   define("ShaderNode", "ShaderNodeNPR_Refraction");
-  define("ShaderNode", "ShaderNodeOutlineControl");
+  define("ShaderNode", "ShaderNodeOutlineControl", def_sh_outline_control);
   define("ShaderNode", "ShaderNodeOutputOutlineShell");
   define("ShaderNode", "ShaderNodeEeveeLightShaderInfo");
   define("ShaderNode", "ShaderNodeEeveeLightShaderOutput", def_sh_eevee_light_shader_output);

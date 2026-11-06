@@ -2839,7 +2839,10 @@ struct SceneEEVEE {
   char use_outline = true;
   /** Zero preserves the traditional Forward-after-Deferred pipeline. */
   char npr_forward_refraction_mode = 0;
-  char _pad2[2] = {};
+  /** Viewport outline resolution: 0 = full, 1 = 3/4, 2 = half, 3 = quarter. */
+  char outline_viewport_resolution = 0;
+  /** Outline occlusion identity: 0 = legacy region ID, 1 = draw instance. */
+  char outline_surface_identity = 0;
   float dlss_sr_viewport_percentage = 80.0f;
   float dlss_sr_render_percentage = 80.0f;
 };

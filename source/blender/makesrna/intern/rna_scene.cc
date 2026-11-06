@@ -9931,6 +9931,39 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
       "Enable Eevee screen-space outlines from Outline Control nodes and the Outline render pass");
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
 
+  static const EnumPropertyItem outline_surface_identity_items[] = {
+      {0, "LEGACY", 0, "Outline ID (Compatible)", "Use the outline region ID for occlusion"},
+      {1,
+       "OBJECT_INSTANCE",
+       0,
+       "Object Instance",
+       "Separate surface occlusion from outline regions"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "outline_surface_identity", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, outline_surface_identity_items);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(
+      prop, "Occlusion Identity", "How outlines identify the receiving surface");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  static const EnumPropertyItem outline_viewport_resolution_items[] = {
+      {0, "FULL", 0, "1\xC3\x97", "Full viewport resolution"},
+      {1, "THREE_QUARTERS", 0, "0.75\xC3\x97", "Three-quarter width and height"},
+      {2, "HALF", 0, "0.5\xC3\x97", "Half width and height"},
+      {3, "QUARTER", 0, "0.25\xC3\x97", "Quarter width and height"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "outline_viewport_resolution", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, outline_viewport_resolution_items);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop,
+                           "Viewport Resolution",
+                           "Resolution of screen-space outlines in the viewport. Lower values "
+                           "improve performance but soften or lose fine outlines. Final renders "
+                           "always use full resolution");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
   prop = RNA_def_property(srna, "ray_tracing_method", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, ray_tracing_method_items);
   RNA_def_property_ui_text(

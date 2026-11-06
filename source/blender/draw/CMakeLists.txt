@@ -494,6 +494,8 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_occupancy_lib.bsl.hh
   engines/eevee/shaders/eevee_octahedron_lib.bsl.hh
   engines/eevee/shaders/eevee_outline_detect_frag.glsl
+  engines/eevee/shaders/eevee_outline_classify_comp.glsl
+  engines/eevee/shaders/eevee_outline_dispatch_comp.glsl
   engines/eevee/shaders/eevee_outline_factor_blur_frag.glsl
   engines/eevee/shaders/eevee_outline_freestyle_frag.glsl
   engines/eevee/shaders/eevee_outline_jfa_init_frag.glsl
@@ -501,6 +503,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_outline_lib.glsl
   engines/eevee/shaders/eevee_outline_shell_lib.bsl.hh
   engines/eevee/shaders/eevee_outline_resolve_frag.glsl
+  engines/eevee/shaders/eevee_outline_upsample_frag.glsl
   engines/eevee/shaders/eevee_pipeline.bsl.hh
   engines/eevee/shaders/eevee_ray_denoise.bsl.hh
   engines/eevee/shaders/eevee_ray_generate.bsl.hh

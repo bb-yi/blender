@@ -311,6 +311,9 @@
 #define OUTLINE_JFA_IN_IMG_SLOT 0
 #define OUTLINE_JFA_OUT_IMG_SLOT 1
 #define OUTLINE_JFA_STEP_GROUP_SIZE 16
+#define OUTLINE_NEEDS_FACTOR_BLUR (1u << 0u)
+#define OUTLINE_NEEDS_JFA (1u << 1u)
+#define OUTLINE_NEEDS_ORIGINAL_DETECT (1u << 2u)
 /* Volume properties pass do not write to `rbufs`. Reuse the same bind points. */
 #define VOLUME_PROP_SCATTERING_IMG_SLOT 0
 #define VOLUME_PROP_EXTINCTION_IMG_SLOT 1
