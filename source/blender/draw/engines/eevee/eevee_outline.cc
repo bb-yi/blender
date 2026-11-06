@@ -26,6 +26,7 @@ void OutlineModule::begin_sync()
   freestyle_edge_ps_.bind_texture(OUTLINE_DEPTH_TEX_SLOT, &inst_.render_buffers.depth_tx);
   freestyle_edge_ps_.bind_texture(OUTLINE_COLOR_TEX_SLOT, &inst_.render_buffers.outline_color_tx);
   freestyle_edge_ps_.bind_texture(OUTLINE_INFO_TEX_SLOT, &inst_.render_buffers.outline_info_tx);
+  freestyle_edge_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
   freestyle_edge_ps_.bind_resources(inst_.uniform_data);
   freestyle_edge_ps_.bind_resources(inst_.sampling);
   freestyle_edge_ps_.bind_resources(inst_.render_textures);
