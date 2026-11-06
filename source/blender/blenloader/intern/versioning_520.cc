@@ -1201,6 +1201,49 @@ void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
     FOREACH_NODETREE_END;
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 57)) {
+    /* Replace the old selected Result in place so all links keep their original meaning. */
+    static const char *output_names[] = {"Is Outline Shell",
+                                         "Is Shadow Pass",
+                                         "Is Render Texture Capture",
+                                         "Is Probe Capture",
+                                         "Is Image Render",
+                                         "Is Color Bake",
+                                         "Is Viewport",
+                                         "Is Depth Prepass",
+                                         "Is Deferred",
+                                         "Is Forward",
+                                         "Is NPR Evaluation",
+                                         "Is Filter Pass",
+                                         "Is World",
+                                         "Is Vertex Evaluation",
+                                         "Is Fragment Evaluation",
+                                         "Is Volume Evaluation",
+                                         "Is Sphere Probe Capture",
+                                         "Is Planar Probe Capture",
+                                         "Is Irradiance Capture",
+                                         "Is Pre-FX Render",
+                                         "Is Playback",
+                                         "Is Navigating"};
+    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+      for (bNode &node : ntree->nodes) {
+        if (!STREQ(node.idname, "ShaderNodeDrawInfo")) {
+          continue;
+        }
+        for (bNodeSocket &socket : node.outputs) {
+          if (STREQ(socket.identifier, "Result")) {
+            const int query = (node.custom1 >= 0 && node.custom1 <= SHD_DRAW_INFO_NAVIGATING) ?
+                                  node.custom1 :
+                                  SHD_DRAW_INFO_OUTLINE_SHELL;
+            version_node_socket_identifier_set(socket, output_names[query]);
+            STRNCPY_UTF8(socket.name, output_names[query]);
+          }
+        }
+      }
+    }
+    FOREACH_NODETREE_END;
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.

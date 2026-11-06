@@ -1752,9 +1752,17 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                  MA_OUTLINE_SHELL_BLENDED;
   if (outline_shell) {
     info.define("MAT_OUTLINE_SHELL");
+    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_AOV)) {
+      info.define("MAT_OUTLINE_SHELL_AOV");
+    }
     if (shell_blended) {
       info.define("MAT_OUTLINE_SHELL_BLENDED");
     }
+  }
+  if (pipeline_type == MAT_PIPE_FORWARD && GPU_material_flag_get(gpumat, GPU_MATFLAG_AOV)) {
+    /* Forward binds the legacy render-pass images. Enable the BSL bridge used by AOV nodes,
+     * which are runtime-generated and therefore absent from the static entry-point resources. */
+    info.define("CREATE_INFO_eevee_RenderPassOutput");
   }
   const bool shell_self_occlusion = outline_shell && pipeline_type != MAT_PIPE_SHADOW &&
                                     (blender_mat->outline_shell_flag &
@@ -2817,8 +2825,18 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     frag_gen << "Closure nodetree_surface(float closure_rand)\n";
     frag_gen << "{\n";
     frag_gen << "  closure_weights_reset(closure_rand);\n";
-    frag_gen << codegen.surface.serialized_or_default("return Closure(0);\n");
+    const GPUGraphOutput &surface_graph = codegen.outline_shell_surface.has_value() ?
+                                              *codegen.outline_shell_surface :
+                                              codegen.surface;
+    frag_gen << surface_graph.serialized_or_default("return Closure(0);\n");
     frag_gen << "}\n\n";
+
+    if (codegen.outline_shell_aov.has_value()) {
+      frag_gen << "void nodetree_outline_shell_aov(float closure_rand)\n{\n";
+      frag_gen << "closure_weights_reset(closure_rand);\n";
+      frag_gen << codegen.outline_shell_aov->serialized_or_default("");
+      frag_gen << "}\n\n";
+    }
 
     frag_gen << "float4 nodetree_npr()\n";
     frag_gen << "{\n";

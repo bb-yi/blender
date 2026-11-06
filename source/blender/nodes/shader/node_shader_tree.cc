@@ -1031,7 +1031,7 @@ static bool ntree_branch_node_tag(bNode *fromnode, bNode *tonode, void * /*userd
  * first executed SSS node gets a SSS profile. */
 static void ntree_shader_pruned_unused(bNodeTree *ntree,
                                        bNode *output_node,
-                                       bool keep_side_outputs = true)
+                                       bool keep_outline_control = true)
 {
   ntree_shader_disconnect_inactive_mix_branches(ntree);
 
@@ -1047,12 +1047,12 @@ static void ntree_shader_pruned_unused(bNodeTree *ntree,
     bke::node_chain_iterator_backwards(ntree, output_node, ntree_branch_node_tag, nullptr, 0);
   }
 
-  if (keep_side_outputs) {
-    for (bNode &node : ntree->nodes) {
-      if (ELEM(node.type_legacy, SH_NODE_OUTPUT_AOV, SH_NODE_OUTLINE_CONTROL)) {
-        node.runtime->tmp_flag = 1;
-        bke::node_chain_iterator_backwards(ntree, &node, ntree_branch_node_tag, nullptr, 0);
-      }
+  for (bNode &node : ntree->nodes) {
+    if (node.type_legacy == SH_NODE_OUTPUT_AOV ||
+        (keep_outline_control && node.type_legacy == SH_NODE_OUTLINE_CONTROL))
+    {
+      node.runtime->tmp_flag = 1;
+      bke::node_chain_iterator_backwards(ntree, &node, ntree_branch_node_tag, nullptr, 0);
     }
   }
 
@@ -1277,14 +1277,10 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat, const bool pr
   if (output != nullptr) {
     iter_shader_to_rgba_depth_count(localtree, output, max_depth);
   }
-  if (!is_outline_shell) {
-    ntree_shader_to_rgba_depth_count_of_type(localtree, SH_NODE_OUTPUT_AOV, max_depth);
-  }
+  ntree_shader_to_rgba_depth_count_of_type(localtree, SH_NODE_OUTPUT_AOV, max_depth);
   for (int depth = max_depth; depth >= 0; depth--) {
     ntreeExecGPUNodes(exec, mat, output, &depth);
-    if (!is_outline_shell) {
-      ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTPUT_AOV, &depth);
-    }
+    ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTPUT_AOV, &depth);
   }
   if (!is_outline_shell) {
     ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTLINE_CONTROL);

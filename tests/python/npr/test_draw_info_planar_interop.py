@@ -21,14 +21,12 @@ def capture_fixture(query='PLANAR_PROBE_CAPTURE', shell_route='DEFERRED'):
     for source in sources:
         tree = source.data.materials[0].node_tree
         context = tree.nodes.new('ShaderNodeDrawInfo')
-        context.query = query
-        tree.links.new(context.outputs[0], tree.nodes['Emission'].inputs['Color'])
+        tree.links.new(context.outputs['Is ' + query.replace('_', ' ').title()], tree.nodes['Emission'].inputs['Color'])
     tree = mat.node_tree
     context = tree.nodes.new('ShaderNodeDrawInfo')
-    context.query = query
     channels = tree.nodes.new('ShaderNodeCombineXYZ')
     tree.links.new(reader.outputs['Color'], channels.inputs['X'])
-    tree.links.new(context.outputs[0], channels.inputs['Y'])
+    tree.links.new(context.outputs['Is ' + query.replace('_', ' ').title()], channels.inputs['Y'])
     tree.links.new(reader.outputs['Is Valid'], channels.inputs['Z'])
     planar.wire_output(mat, channels.outputs[0])
     shell = tree.nodes.new('ShaderNodeOutputOutlineShell')

@@ -28,6 +28,9 @@ Closure nodetree_surface(float /*closure_rand*/)
   return Closure(0);
 }
 
+/* Shell AOV side outputs, evaluated after shell coverage tests. */
+void nodetree_outline_shell_aov(float /*closure_rand*/) {}
+
 /* Material graph connected to the volume output. */
 Closure nodetree_volume()
 {

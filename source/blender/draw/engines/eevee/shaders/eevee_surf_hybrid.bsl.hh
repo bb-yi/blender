@@ -374,6 +374,11 @@ HybridFragOut surf_hybrid_impl([[resource_table]] PipelineConstants &pipe,
   frag_out.radiance = float4(g_emission, 0.0f);
   frag_out.radiance.rgb *= 1.0f - g_holdout;
   frag_out.radiance.a = g_holdout;
+#ifdef MAT_OUTLINE_SHELL_AOV
+  /* Shader to RGB in an AOV selects Hybrid even when the shell color is unlit. */
+  nodetree_outline_shell_aov(closure_rand);
+#endif
+
   return frag_out;
 }
 

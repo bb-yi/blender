@@ -659,6 +659,11 @@ void GPUCodegen::generate_graphs()
       GPU_NODE_TAG_SURFACE | GPU_NODE_TAG_AOV | GPU_NODE_TAG_OUTLINE,
       graph.outlink_surface,
       "CLOSURE_DEFAULT");
+  if (GPU_material_is_outline_shell(&mat) && !graph.outlink_aovs.is_empty()) {
+    output.outline_shell_surface = graph_serialize(
+        GPU_NODE_TAG_SURFACE, graph.outlink_surface, "CLOSURE_DEFAULT");
+    output.outline_shell_aov = graph_serialize(GPU_NODE_TAG_AOV);
+  }
   output.volume = graph_serialize(GPU_NODE_TAG_VOLUME, graph.outlink_volume, "CLOSURE_DEFAULT");
   output.displacement = graph_serialize(
       GPU_NODE_TAG_DISPLACEMENT, graph.outlink_displacement, nullptr);

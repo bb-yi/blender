@@ -46,6 +46,9 @@ QUERIES = (
     'VOLUME_EVALUATION', 'SPHERE_PROBE_CAPTURE', 'PLANAR_PROBE_CAPTURE', 'IRRADIANCE_CAPTURE',
     'PRE_FX_RENDER', 'PLAYBACK', 'NAVIGATING',
 )
+OUTPUTS = {query: 'Is ' + query.replace('_', ' ').title() for query in QUERIES}
+OUTPUTS.update(NPR_EVALUATION='Is NPR Evaluation', PRE_FX_RENDER='Is Pre-FX Render')
+
 REPORT = {'version': bpy.app.version_string, 'build_hash': bpy.app.build_hash.decode(),
           'mode': args.mode, 'cases': {}, 'passed': False}
 (OUT / ('summary_' + args.mode + '.json')).write_text(json.dumps(REPORT, indent=2), encoding='utf-8')
@@ -53,8 +56,19 @@ REPORT = {'version': bpy.app.version_string, 'build_hash': bpy.app.build_hash.de
 
 def probe(tree, query='OUTLINE_SHELL'):
     node = tree.nodes.new('ShaderNodeDrawInfo')
-    node.query = query
+    select_query(node, query)
     return node
+
+
+def query_output(node):
+    return node.outputs[OUTPUTS[node.get('_test_query', 'OUTLINE_SHELL')]]
+
+
+def select_query(node, query):
+    targets = [link.to_socket for socket in node.outputs for link in socket.links]
+    node['_test_query'] = query
+    for target in targets:
+        connect(node.id_data, query_output(node), target)
 
 
 def connect(tree, output, target):
@@ -137,19 +151,52 @@ def export(output, label):
     return images
 
 
+def test_legacy():
+    path = Path(__file__).parent / 'assets' / 'draw_info_legacy_queries.blend'
+
+    def check():
+        tree = bpy.data.materials['LegacyDrawInfo'].node_tree
+        nodes = [node for node in tree.nodes if node.bl_idname == 'ShaderNodeDrawInfo']
+        assert {node.name for node in nodes} == set(QUERIES)
+        for node in nodes:
+            assert len(node.outputs) == len(QUERIES)
+            links = [link for socket in node.outputs for link in socket.links]
+            assert len(links) == 1 and links[0].from_socket.name == OUTPUTS[node.name]
+            assert links[0].to_node.name == node.name + '_sink'
+        group = bpy.data.node_groups['LegacyDrawInfoGroup']
+        link = next(link for link in group.links if link.from_node.bl_idname == 'ShaderNodeDrawInfo')
+        assert link.from_socket.name == 'Is Image Render'
+
+    bpy.ops.wm.open_mainfile(filepath=str(path))
+    check()
+    assets = OUT / 'assets'
+    assets.mkdir(exist_ok=True)
+    converted = assets / 'draw_info_legacy_migrated.blend'
+    bpy.ops.wm.save_as_mainfile(filepath=str(converted), check_existing=False)
+    bpy.ops.wm.open_mainfile(filepath=str(converted))
+    check()
+    return {'queries': len(QUERIES), 'group': True, 'roundtrip': True}
+
+
 def test_registration():
     s, m, emit = scene()
     node = probe(m.node_tree)
-    items = node.bl_rna.properties['query'].enum_items
-    assert tuple(item.identifier for item in items) == QUERIES
-    query_count = len(items)
-    assert len(node.inputs) == 0 and len(node.outputs) == 1
-    assert node.outputs[0].identifier == 'Result' and node.outputs[0].type == 'VALUE'
+    assert 'query' not in node.bl_rna.properties
+    assert len(node.inputs) == 0 and len(node.outputs) == len(QUERIES)
+    assert tuple(socket.name for socket in node.outputs) == tuple(OUTPUTS.values())
+    assert all(socket.type == 'VALUE' for socket in node.outputs)
+    query_count = len(node.outputs)
     ri = m.node_tree.nodes.new('ShaderNodeRenderInfo')
     assert [socket.name for socket in ri.outputs] == [
         'Frag Coord', 'Width', 'Height', 'Resolution', 'Current Sample', 'Total Samples']
-    node.query = 'IMAGE_RENDER'
-    connect(m.node_tree, node.outputs[0], emit.inputs['Color'])
+    combine = m.node_tree.nodes.new('ShaderNodeCombineXYZ')
+    for query, target in [('IMAGE_RENDER', 'X'), ('DEFERRED', 'Y'), ('OUTLINE_SHELL', 'Z')]:
+        connect(m.node_tree, node.outputs[OUTPUTS[query]], combine.inputs[target])
+    connect(m.node_tree, combine.outputs[0], emit.inputs['Color'])
+    near(center(render('registration_simultaneous_outputs')), (1, 1, 0), tolerance=.015)
+    m.node_tree.nodes.remove(combine)
+    select_query(node, 'IMAGE_RENDER')
+    connect(m.node_tree, query_output(node), emit.inputs['Color'])
     check_center('registration_image_render', 1)
     path = OUT / 'assets' / 'draw_info_roundtrip.blend'
     path.parent.mkdir(exist_ok=True)
@@ -157,7 +204,7 @@ def test_registration():
     bpy.ops.wm.open_mainfile(filepath=str(path))
     m = bpy.data.materials['Probe']
     node = next(node for node in m.node_tree.nodes if node.bl_idname == 'ShaderNodeDrawInfo')
-    assert node.query == 'IMAGE_RENDER' and node.outputs[0].is_linked
+    assert node.outputs['Is Image Render'].is_linked
     check_center('roundtrip_image_render', 1)
     return {'queries': query_count, 'roundtrip': True}
 
@@ -168,11 +215,11 @@ def test_surface():
         s, m, emit = scene()
         m.surface_render_method = method
         node = probe(m.node_tree)
-        connect(m.node_tree, node.outputs[0], emit.inputs['Color'])
+        connect(m.node_tree, query_output(node), emit.inputs['Color'])
         positive = {'IMAGE_RENDER', 'FRAGMENT_EVALUATION',
                     'DEFERRED' if method == 'DITHERED' else 'FORWARD'}
         for query in QUERIES:
-            node.query = query
+            select_query(node, query)
             check_center(f'surface_{method}_{query}', int(query in positive))
         results[method] = sorted(positive)
     return results
@@ -195,10 +242,10 @@ def test_shell():
         shell = m.node_tree.nodes.new('ShaderNodeOutputOutlineShell')
         shell.inputs['Strength'].default_value = .2
         m.outline_shell_render_method = route
-        connect(m.node_tree, node.outputs[0], shell.inputs['Color'])
+        connect(m.node_tree, query_output(node), shell.inputs['Color'])
         positive = {'OUTLINE_SHELL', 'IMAGE_RENDER', 'FRAGMENT_EVALUATION', route}
         for query in QUERIES:
-            node.query = query
+            select_query(node, query)
             pixels = render(f'shell_{route}_{query}')
             near(center(pixels), (.2,) * 3, tolerance=.015)
             near(pixels[48, int((1.1 / 3 + .5) * 96), :3],
@@ -214,10 +261,10 @@ def test_world():
     world.use_nodes = True
     s.world = world
     node = probe(world.node_tree)
-    connect(world.node_tree, node.outputs[0], world.node_tree.nodes['Background'].inputs['Color'])
+    connect(world.node_tree, query_output(node), world.node_tree.nodes['Background'].inputs['Color'])
     positive = {'WORLD', 'IMAGE_RENDER', 'FRAGMENT_EVALUATION'}
     for query in QUERIES:
-        node.query = query
+        select_query(node, query)
         check_center('world_' + query, int(query in positive))
     return sorted(positive)
 
@@ -230,11 +277,11 @@ def test_filter():
     node = probe(fm.node_tree)
     output = fm.node_tree.nodes.new('ShaderNodeOutputFilter')
     output.inputs['Alpha'].default_value = 1
-    connect(fm.node_tree, node.outputs[0], output.inputs['Color'])
+    connect(fm.node_tree, query_output(node), output.inputs['Color'])
     attach_filter_material(fm)
     positive = {'FILTER_PASS', 'IMAGE_RENDER', 'FRAGMENT_EVALUATION'}
     for query in QUERIES:
-        node.query = query
+        select_query(node, query)
         check_center('filter_' + query, int(query in positive))
     return sorted(positive)
 
@@ -244,11 +291,11 @@ def test_npr():
     tree = bpy.data.node_groups.new('DrawInfoNPR', 'ShaderNodeTree')
     output = tree.nodes.new('ShaderNodeNPR_Output')
     node = probe(tree)
-    connect(tree, node.outputs[0], output.inputs['Color'])
+    connect(tree, query_output(node), output.inputs['Color'])
     m.node_tree.nodes.get('Material Output').nprtree = tree
     positive = {'NPR_EVALUATION', 'IMAGE_RENDER', 'FRAGMENT_EVALUATION', 'DEFERRED'}
     for query in QUERIES:
-        node.query = query
+        select_query(node, query)
         check_center('npr_' + query, int(query in positive))
     return sorted(positive)
 
@@ -260,12 +307,12 @@ def test_bake():
     image_node.image = image
     m.node_tree.nodes.active = image_node
     node = probe(m.node_tree, 'COLOR_BAKE')
-    connect(m.node_tree, node.outputs[0], emit.inputs['Color'])
+    connect(m.node_tree, query_output(node), emit.inputs['Color'])
     s.render.bake.target = 'IMAGE_TEXTURES'
     results = {}
     for query, expected in [('COLOR_BAKE', 1), ('FRAGMENT_EVALUATION', 1),
                             ('VERTEX_EVALUATION', 0), ('OUTLINE_SHELL', 0)]:
-        node.query = query
+        select_query(node, query)
         assert bpy.ops.object.bake(type='EMIT') == {'FINISHED'}
         pixels = np.array(image.pixels[:]).reshape(16, 16, 4)
         near(pixels[8, 8, :3], (expected,) * 3, tolerance=.015)
@@ -276,7 +323,7 @@ def test_bake():
 def test_render_texture():
     s, m, emit = scene()
     node = probe(m.node_tree, 'RENDER_TEXTURE_CAPTURE')
-    connect(m.node_tree, node.outputs[0], emit.inputs['Color'])
+    connect(m.node_tree, query_output(node), emit.inputs['Color'])
     capture = s.eevee.render_textures.add()
     capture.name = 'DrawInfoCapture'
     capture.enabled = True
@@ -314,14 +361,14 @@ def test_vertex_depth():
     scale = m.node_tree.nodes.new('ShaderNodeVectorMath')
     scale.operation = 'SCALE'
     scale.inputs['Scale'].default_value = .2
-    connect(m.node_tree, node.outputs[0], combine.inputs['Z'])
+    connect(m.node_tree, query_output(node), combine.inputs['Z'])
     connect(m.node_tree, combine.outputs[0], scale.inputs[0])
     connect(m.node_tree, scale.outputs[0], m.node_tree.nodes['Material Output'].inputs['Displacement'])
     _, _, output = compositor(s, [('Depth', 'FLOAT', 'Depth')])
     results = {}
     for query, expected in [('VERTEX_EVALUATION', 2.8), ('FRAGMENT_EVALUATION', 3),
                             ('DEPTH_PREPASS', 2.8), ('SHADOW_PASS', 3)]:
-        node.query = query
+        select_query(node, query)
         pixels = export(output, 'depth_' + query)['Depth']
         actual = float(pixels[24, 32, 0])
         assert abs(actual - expected) < .015, (query, actual, expected)
@@ -337,14 +384,163 @@ def test_aov():
     node = probe(m.node_tree, 'IMAGE_RENDER')
     aov = m.node_tree.nodes.new('ShaderNodeOutputAOV')
     aov.aov_name = item.name
-    connect(m.node_tree, node.outputs[0], aov.inputs['Value'])
+    connect(m.node_tree, query_output(node), aov.inputs['Value'])
     _, _, output = compositor(s, [('Value', 'FLOAT', item.name), ('Main', 'RGBA', 'Image')])
     for query, expected in [('IMAGE_RENDER', 1), ('OUTLINE_SHELL', 0)]:
-        node.query = query
+        select_query(node, query)
         images = export(output, 'aov_' + query)
         assert abs(float(images['Value'][24, 32, 0]) - expected) < .015
         near(center(images['Main']), (.2,) * 3, tolerance=.015)
     return {'surface_aov': True, 'beauty_unchanged': True}
+
+
+def test_shell_aov():
+    results = {}
+    for body_method in ('DITHERED', 'BLENDED'):
+        for route, transparency in [('DEFERRED', 'DITHERED'), ('DEFERRED', 'CLIP'),
+                                    ('FORWARD', 'DITHERED'), ('FORWARD', 'CLIP'),
+                                    ('FORWARD', 'BLENDED')]:
+            s, m, emit = scene()
+            s.render.resolution_x = s.render.resolution_y = 96
+            s.camera.data.ortho_scale = 3
+            bpy.data.objects.remove(bpy.context.object, do_unlink=True)
+            bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32)
+            sphere = bpy.context.object
+            for polygon in sphere.data.polygons:
+                polygon.use_smooth = True
+            sphere.data.materials.append(m)
+            m.surface_render_method = body_method
+            m.outline_shell_render_method = route
+            m.outline_shell_transparency_method = transparency
+            emit.inputs['Color'].default_value = (.2, .2, .2, 1)
+            tree = m.node_tree
+            shell = tree.nodes.new('ShaderNodeOutputOutlineShell')
+            shell.inputs['Strength'].default_value = .2
+            shell.inputs['Color'].default_value = (.05, .05, .05, 1)
+            node = tree.nodes.new('ShaderNodeDrawInfo')
+            flag = node.outputs['Is Outline Shell']
+            color = tree.nodes.new('ShaderNodeMixRGB')
+            color.inputs[1].default_value = (.4, .4, .4, 1)
+            color.inputs[2].default_value = (1, 0, 0, 1)
+            tree.links.new(flag, color.inputs[0])
+            value = tree.nodes.new('ShaderNodeMapRange')
+            value.inputs['To Min'].default_value = .25
+            value.inputs['To Max'].default_value = .75
+            tree.links.new(flag, value.inputs['Value'])
+            for name, kind, socket, source in [
+                    ('ShellColor', 'COLOR', 'Color', color.outputs[0]),
+                    ('ShellValue', 'VALUE', 'Value', value.outputs[0])]:
+                item = s.view_layers[0].aovs.add()
+                item.name, item.type = name, kind
+                aov = tree.nodes.new('ShaderNodeOutputAOV')
+                aov.aov_name = name
+                tree.links.new(source, aov.inputs[socket])
+            _, _, output = compositor(s, [('Color', 'RGBA', 'ShellColor'),
+                                         ('Value', 'FLOAT', 'ShellValue'),
+                                         ('Main', 'RGBA', 'Image')])
+            label = f'aov_{body_method}_{route}_{transparency}'
+            if body_method == 'DITHERED' and route == 'DEFERRED' and transparency == 'DITHERED':
+                node.location, color.location, value.location = (-640, 400), (-320, 400), (-320, 100)
+                emit.location = (-320, 650)
+                tree.nodes.get('Material Output').location = (0, 650)
+                shell.location = (0, -180)
+                for aov in (item for item in tree.nodes if item.bl_idname == 'ShaderNodeOutputAOV'):
+                    aov.location = (0, 400 if aov.aov_name == 'ShellColor' else 100)
+                assets = OUT / 'assets'
+                assets.mkdir(exist_ok=True)
+                bpy.ops.wm.save_as_mainfile(filepath=str(assets / 'draw_info_shell_aov.blend'),
+                                           check_existing=False)
+            images = export(output, label)
+            body, rim = (48, 48), (48, 83)
+            near(images['Color'][body][:3], (.4,) * 3, tolerance=.015)
+            near(images['Color'][rim][:3], (1, 0, 0), tolerance=.015)
+            assert abs(float(images['Value'][body][0]) - .25) < .015
+            assert abs(float(images['Value'][rim][0]) - .75) < .015
+            near(images['Main'][body][:3], (.2,) * 3, tolerance=.015)
+            near(images['Main'][rim][:3], (.05,) * 3, tolerance=.015)
+            # Alter only the shell AOV; body and beauty must remain unchanged.
+            color.inputs[2].default_value = (0, 0, 1, 1)
+            changed = export(output, label + '_blue')
+            near(changed['Color'][rim][:3], (0, 0, 1), tolerance=.015)
+            near(changed['Color'][body][:3], (.4,) * 3, tolerance=.015)
+            assert np.max(np.abs(changed['Main'] - images['Main'])) < .015
+            # Shader to RGB switches deferred materials to the Hybrid entry point.
+            aov_emit = tree.nodes.new('ShaderNodeEmission')
+            convert = tree.nodes.new('ShaderNodeShaderToRGB')
+            tree.links.new(color.outputs[0], aov_emit.inputs['Color'])
+            tree.links.new(aov_emit.outputs[0], convert.inputs[0])
+            color_aov = next(item for item in tree.nodes
+                             if item.bl_idname == 'ShaderNodeOutputAOV' and item.aov_name == 'ShellColor')
+            connect(tree, convert.outputs['Color'], color_aov.inputs['Color'])
+            converted = export(output, label + '_shader_to_rgb')
+            near(converted['Color'][rim][:3], (0, 0, 1), tolerance=.015)
+            near(converted['Color'][body][:3], (.4,) * 3, tolerance=.015)
+            assert np.max(np.abs(converted['Main'] - images['Main'])) < .015
+            sphere.is_holdout = True
+            holdout = export(output, label + '_holdout')
+            for pixel in (body, rim):
+                near(holdout['Color'][pixel][:3], (0, 0, 0), tolerance=.015)
+                assert abs(float(holdout['Value'][pixel][0])) < .015
+                near(holdout['Main'][pixel], (0, 0, 0, 0), tolerance=.015)
+            sphere.is_holdout = False
+            shell.inputs['Alpha'].default_value = 0
+            hidden = export(output, label + '_alpha_zero')
+            near(hidden['Color'][rim][:3], (0, 0, 0), tolerance=.015)
+            assert abs(float(hidden['Value'][rim][0])) < .015
+            near(hidden['Color'][body][:3], (.4,) * 3, tolerance=.015)
+            shell.inputs['Alpha'].default_value = 1
+            # A nearer surface owns both passes; the shell must not leak through it.
+            bpy.ops.mesh.primitive_plane_add(size=.5, location=(1.1, 0, 1.5))
+            foreground = bpy.data.materials.new('ForegroundAOV')
+            foreground.use_nodes = True
+            bpy.context.object.data.materials.append(foreground)
+            for name, kind, socket, source in [('ShellColor', 'COLOR', 'Color', (0, 1, 0, 1)),
+                                               ('ShellValue', 'VALUE', 'Value', .6)]:
+                aov = foreground.node_tree.nodes.new('ShaderNodeOutputAOV')
+                aov.aov_name = name
+                aov.inputs[socket].default_value = source
+            occluded = export(output, label + '_occluded')
+            near(occluded['Color'][rim][:3], (0, 1, 0), tolerance=.015)
+            assert abs(float(occluded['Value'][rim][0]) - .6) < .015
+            results[label] = {'body_gray': True, 'shell_red': True, 'value': True,
+                              'independent_control': True, 'zero_alpha': True, 'occlusion': True,
+                              'shader_to_rgb': True, 'holdout': True}
+    return results
+
+
+def test_shell_aov_hybrid_self_occlusion():
+    import test_outline_shell_self_occlusion as helper
+
+    results = {}
+    for route in ('DEFERRED', 'FORWARD'):
+        s = helper.setup()
+        s.eevee.taa_render_samples = 16
+        mat = helper.body_material(alpha=.5)
+        helper.sphere(mat)
+        mat.outline_shell_render_method = route
+        tree = mat.node_tree
+        shell = next(item for item in tree.nodes if item.bl_idname == 'ShaderNodeOutputOutlineShell')
+        item = s.view_layers[0].aovs.add()
+        item.name, item.type = 'HybridSelfOcclusion', 'COLOR'
+        flag = tree.nodes.new('ShaderNodeDrawInfo')
+        emission = tree.nodes.new('ShaderNodeEmission')
+        convert = tree.nodes.new('ShaderNodeShaderToRGB')
+        aov = tree.nodes.new('ShaderNodeOutputAOV')
+        aov.aov_name = item.name
+        tree.links.new(flag.outputs['Is Outline Shell'], emission.inputs['Color'])
+        tree.links.new(emission.outputs[0], convert.inputs[0])
+        tree.links.new(convert.outputs['Color'], aov.inputs['Color'])
+        shell.inputs['Alpha'].default_value = 0
+        reference = helper.render('aov_hybrid_self_' + route + '_reference')
+        shell.inputs['Alpha'].default_value = 1
+        original = helper.render('aov_hybrid_self_' + route + '_disabled')
+        mat.use_outline_shell_self_occlusion = True
+        fixed = helper.render('aov_hybrid_self_' + route + '_enabled')
+        near(helper.center(fixed), helper.center(reference), tolerance=.05)
+        assert float((helper.center(fixed) - helper.center(original)).mean()) > .06
+        assert float(helper.at(fixed, .86).max()) < .07
+        results[route] = {'self_occlusion': True, 'visible_rim': True}
+    return results
 
 
 def test_shared_group():
@@ -353,7 +549,7 @@ def test_shared_group():
     group = bpy.data.node_groups.new('SharedDrawInfo', 'ShaderNodeTree')
     group.interface.new_socket(name='Value', in_out='OUTPUT', socket_type='NodeSocketFloat')
     node = probe(group, 'WORLD')
-    connect(group, node.outputs[0], group.nodes.new('NodeGroupOutput').inputs['Value'])
+    connect(group, query_output(node), group.nodes.new('NodeGroupOutput').inputs['Value'])
     body = m.node_tree.nodes.new('ShaderNodeGroup')
     body.node_tree = group
     connect(m.node_tree, body.outputs['Value'], emit.inputs['Color'])
@@ -405,7 +601,7 @@ def test_shadow():
     links.new(mix.outputs[0], output.inputs['Surface'])
     reference = render('shadow_constant_opaque')
     node = probe(mat.node_tree, 'SHADOW_PASS')
-    connect(mat.node_tree, node.outputs[0], mix.inputs[0])
+    connect(mat.node_tree, query_output(node), mix.inputs[0])
     actual = render('shadow_context_transparent')
     receiver_pixels = np.max(reference[:, :, :3], axis=2) - np.min(reference[:, :, :3], axis=2) < .01
     gain = (actual[:, :, 0] - reference[:, :, 0])[receiver_pixels]
@@ -425,7 +621,7 @@ def test_pre_fx():
     s.camera.data.dof.aperture_fstop = 1
     s.view_layers[0].use_pass_pre_fx = True
     node = probe(m.node_tree, 'PRE_FX_RENDER')
-    connect(m.node_tree, node.outputs[0], emit.inputs['Color'])
+    connect(m.node_tree, query_output(node), emit.inputs['Color'])
     _, _, output = compositor(s, [('Main', 'RGBA', 'Image'), ('PreFX', 'RGBA', 'Pre-FX')])
     images = export(output, 'pre_fx_context')
     near(center(images['Main']), (0,) * 3, tolerance=.015)
@@ -449,10 +645,10 @@ def test_volume():
     reference = center(render('volume_constant_emission')).copy()
     assert float(reference.max()) > .05
     node = probe(tree)
-    connect(tree, node.outputs[0], volume.inputs['Emission Strength'])
+    connect(tree, query_output(node), volume.inputs['Emission Strength'])
     for query, expected in [('VOLUME_EVALUATION', reference), ('FRAGMENT_EVALUATION', reference),
                             ('WORLD', np.zeros(3)), ('VERTEX_EVALUATION', np.zeros(3))]:
-        node.query = query
+        select_query(node, query)
         near(center(render('volume_' + query)), expected, tolerance=.015)
     return {'volume_reference': reference.tolist()}
 
@@ -483,7 +679,7 @@ def test_probe_capture():
         reference = render('probe_reference_' + kind + '_' + query)
         assert float(center(reference).min()) > .3, ('probe reference', kind, center(reference))
         node = probe(target_tree, query)
-        connect(target_tree, node.outputs[0], target_socket)
+        connect(target_tree, query_output(node), target_socket)
         pixels = render('probe_' + kind + '_' + query)
         reflected = center(pixels)
         assert float(reflected.min()) > .3, (kind, query, reflected)
@@ -523,7 +719,7 @@ def test_irradiance_capture():
     assert bpy.ops.object.lightprobe_cache_bake(subset='ALL') == {'FINISHED'}
     reference = render('irradiance_without_capture_emission')
     node = probe(emitter.node_tree, 'IRRADIANCE_CAPTURE')
-    connect(emitter.node_tree, node.outputs[0], emission.inputs['Color'])
+    connect(emitter.node_tree, query_output(node), emission.inputs['Color'])
     bpy.context.view_layer.update()
     assert bpy.ops.object.lightprobe_cache_bake(subset='ALL') == {'FINISHED'}
     actual = render('irradiance_with_capture_emission')
@@ -539,7 +735,7 @@ def test_offscreen():
     s.eevee.taa_samples = 1
     s.eevee.use_taa_reprojection = False
     node = probe(m.node_tree)
-    connect(m.node_tree, node.outputs[0], emit.inputs['Color'])
+    connect(m.node_tree, query_output(node), emit.inputs['Color'])
     area = next(area for area in bpy.context.screen.areas if area.type == 'VIEW_3D')
     region = next(region for region in area.regions if region.type == 'WINDOW')
     space = area.spaces.active
@@ -563,7 +759,7 @@ def test_offscreen():
 
     try:
         for query in QUERIES:
-            node.query = query
+            select_query(node, query)
             pixels = draw_current()
             near(center(pixels), (int(query in positive),) * 3, tolerance=.02)
             results[query] = center(pixels).tolist()
@@ -591,7 +787,7 @@ def test_offscreen():
         bpy.context.view_layer.objects.active = None
         for query, expected in [('PLANAR_PROBE_CAPTURE', 1), ('PROBE_CAPTURE', 1),
                                 ('SPHERE_PROBE_CAPTURE', 0)]:
-            node.query = query
+            select_query(node, query)
             data.show_data = True
             shown = center(draw_current())
             near(shown, (expected,) * 3, tolerance=.03)
@@ -616,7 +812,7 @@ def start_window_test():
     s.eevee.use_taa_reprojection = False
     s.eevee.use_shadows = False
     node = probe(m.node_tree, 'VIEWPORT')
-    connect(m.node_tree, node.outputs[0], emit.inputs['Color'])
+    connect(m.node_tree, query_output(node), emit.inputs['Color'])
     window = bpy.context.window
     area = next(area for area in window.screen.areas if area.type == 'VIEW_3D')
     region = next(region for region in area.regions if region.type == 'WINDOW')
@@ -646,7 +842,7 @@ def start_window_test():
 
     def finish_demo():
         try:
-            node.query = 'OUTLINE_SHELL'
+            select_query(node, 'OUTLINE_SHELL')
             bpy.data.objects.remove(bpy.context.object, do_unlink=True)
             bpy.ops.mesh.primitive_uv_sphere_add(radius=.7, segments=64, ring_count=32)
             bpy.context.object.data.materials.append(m)
@@ -655,7 +851,7 @@ def start_window_test():
             mix = m.node_tree.nodes.new('ShaderNodeMixRGB')
             mix.inputs[1].default_value = (.12, .4, .85, 1)
             mix.inputs[2].default_value = (1, .12, .02, 1)
-            connect(m.node_tree, node.outputs[0], mix.inputs[0])
+            connect(m.node_tree, query_output(node), mix.inputs[0])
             connect(m.node_tree, mix.outputs[0], emit.inputs['Color'])
             shell = m.node_tree.nodes.new('ShaderNodeOutputOutlineShell')
             shell.inputs['Strength'].default_value = .04
@@ -742,8 +938,8 @@ def start_window_test():
                     finish_demo()
                     return None
                 name, query, expected, action = phases[state['index']]
-                if node.query != query:
-                    node.query = query
+                if node.get('_test_query') != query:
+                    select_query(node, query)
                 with bpy.context.temp_override(window=window, area=area, region=region):
                     if action == 'play':
                         bpy.ops.screen.animation_play()
@@ -766,10 +962,13 @@ def start_window_test():
 
 
 def main():
-    tests = {'registration': test_registration, 'surface': test_surface, 'shell': test_shell,
+    tests = {'legacy': test_legacy, 'registration': test_registration,
+             'surface': test_surface, 'shell': test_shell,
              'world': test_world, 'filter': test_filter, 'npr': test_npr, 'bake': test_bake,
              'render_texture': test_render_texture, 'vertex_depth': test_vertex_depth,
-             'aov': test_aov, 'shared_group': test_shared_group, 'shadow': test_shadow,
+             'aov': test_aov, 'shell_aov': test_shell_aov,
+             'shell_aov_hybrid_self_occlusion': test_shell_aov_hybrid_self_occlusion,
+             'shared_group': test_shared_group, 'shadow': test_shadow,
              'pre_fx': test_pre_fx, 'volume': test_volume, 'probe_capture': test_probe_capture,
              'irradiance_capture': test_irradiance_capture}
     if args.mode == 'offscreen':

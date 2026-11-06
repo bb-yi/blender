@@ -562,6 +562,10 @@ struct GPUCodegenOutput {
   /* Node-tree functions calls. */
   GPUGraphOutput displacement;
   GPUGraphOutput surface;
+  /* Shell variants defer AOV stores until coverage tests pass. Keep `surface` above complete
+   * for resource discovery; these graphs split its execution without changing other materials. */
+  std::optional<GPUGraphOutput> outline_shell_surface;
+  std::optional<GPUGraphOutput> outline_shell_aov;
   GPUGraphOutput volume;
   GPUGraphOutput thickness;
   std::optional<GPUGraphOutput> depth_offset;

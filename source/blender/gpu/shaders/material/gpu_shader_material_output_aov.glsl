@@ -6,7 +6,7 @@
 void node_output_aov(float4 color, float value, float hash, Closure &dummy)
 {
 #ifdef GPU_FRAGMENT_SHADER
-#  ifdef OBINFO_LIB
+#  if defined(OBINFO_LIB) || defined(CREATE_INFO_draw_Infos)
   output_aov(int2(gl_FragCoord.xy),
              color,
              value,

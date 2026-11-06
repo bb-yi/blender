@@ -330,6 +330,11 @@ DeferredFragOut surf_deferred_impl([[resource_table]] PipelineConstants &pipe,
   frag_out.radiance.rgb *= 1.0f - g_holdout;
   frag_out.radiance.a = g_holdout;
 
+#ifdef MAT_OUTLINE_SHELL_AOV
+  /* Execute side outputs only after the visible shell sample survived all coverage tests. */
+  nodetree_outline_shell_aov(closure_rand);
+#endif
+
   return frag_out;
 }
 

@@ -1,9 +1,11 @@
 # Draw Info
 
-`Draw Info` is an Eevee material input node. Select a **Query** and use the single
-**Result** float output: `1` when the selected context is active, `0` otherwise.
-The default query is **Is Outline Shell**. The node is available in the shader
+`Draw Info` is an Eevee material input node. All 22 context tests are exposed as
+separate outputs, like Light Path. Each has Boolean semantics represented by a
+float: `1` when the context is active, `0` otherwise. The node is available in the shader
 editor's **Add > Input** menu and supports nested, shared shader node groups.
+Old single-Result nodes retain their connections on the output corresponding to
+their saved Query when the file is opened.
 
 ## Queries
 
@@ -34,8 +36,8 @@ editor's **Add > Input** menu and supports nested, shared shader node groups.
 
 The conditions are independent. A shell shadow draw can return `1` for both
 **Is Outline Shell** and **Is Shadow Pass**. A viewport image render can return
-`1` for both **Is Viewport** and **Is Image Render**. Use multiple Draw Info nodes
-and Math nodes to combine conditions.
+`1` for both **Is Viewport** and **Is Image Render**. Use the outputs of one Draw Info
+node and Math nodes to combine conditions.
 
 ## Material evaluation and AOVs
 
@@ -45,10 +47,16 @@ and does not make post-processing operations re-evaluate object materials.
 Changing Alpha, depth offset or displacement between a depth prepass and its
 shading pass can make their coverage disagree.
 
-The node does not change AOV scheduling. Existing AOVs keep their current body,
-NPR and Filter behavior. Outline Shell AOV side outputs remain excluded by the
-existing shader-tree compilation path; a Draw Info input alone does not enable
-them. A result of `0` is data, not an instruction to skip an AOV write.
+Material AOV Output nodes execute for both the body and the Outline Shell.
+For example, connect **Is Outline Shell** to a color Mix factor, set A to gray and
+B to red, then connect the mixed color to AOV Output. The AOV contains gray on
+the body and red on visible shell pixels. Color and Value AOVs are supported in
+Deferred and Forward shell rendering. Shell AOV side outputs execute after shell
+coverage tests, so zero-alpha and clipped shell fragments do not write AOVs.
+They follow the existing AOV replacement semantics rather than beauty alpha blending.
+A result of `0` is data, not an instruction to skip an AOV write.
+Shader to RGB inputs are supported, including the Hybrid deferred path. Object
+holdout suppresses both body and shell AOV writes through the object-info flags.
 
 Render Texture and probe contexts are restored after capture. Queries describing
 the host task stay valid inside auxiliary captures. The node is Eevee-specific;
@@ -59,6 +67,8 @@ outputs and identifiers are unchanged.
 
 `tests/python/npr/test_draw_info.py` checks actual linear render pixels, shader
 stages and capture isolation. Set `BLENDER_TEST_OUTPUT_DIR` or pass `--output-dir`.
+The checked-in legacy fixture covers all old Query values and a shared node group;
+the converted copy is saved only in the configured test output directory.
 Run the offline mode with an isolated Blender user directory. The `offscreen`
 mode requires an isolated foreground instance and also checks that viewport image
 rendering is simultaneously a viewport and an image render.

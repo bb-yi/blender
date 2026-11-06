@@ -244,6 +244,11 @@ SurfaceForwardFragOut surf_forward_impl(
     frag_out.combined_b = float4(radiance.b, 0.0f, 0.0f, transmittance.b);
     frag_out.combined_a = float4(g_holdout, 0.0f, 0.0f, average(transmittance));
   }
+#ifdef MAT_OUTLINE_SHELL_AOV
+  /* Execute side outputs only after the visible shell sample survived all coverage tests. */
+  nodetree_outline_shell_aov(closure_rand);
+#endif
+
   return frag_out;
 }
 
