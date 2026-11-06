@@ -1227,11 +1227,15 @@ class SlotAllocator {
 static bool create_info_contains_additional_info(
     const gpu::shader::ShaderCreateInfo &info,
     const StringRefNull create_info_name,
-    Set<StringRefNull> &visited_infos)
+    Set<StringRefNull> &visited_infos,
+    Span<gpu::shader::CompilationConstant> constants)
 {
   using namespace blender::gpu::shader;
 
   for (const ShaderCreateInfo::AdditionalInfo &additional_info : info.additional_infos_) {
+    if (!additional_info.conditions.evaluate(constants)) {
+      continue;
+    }
     if (additional_info.name == create_info_name) {
       return true;
     }
@@ -1241,7 +1245,7 @@ static bool create_info_contains_additional_info(
     const ShaderCreateInfo *nested_info = reinterpret_cast<const ShaderCreateInfo *>(
         GPU_shader_create_info_get(additional_info.name.c_str()));
     if (nested_info != nullptr &&
-        create_info_contains_additional_info(*nested_info, create_info_name, visited_infos))
+        create_info_contains_additional_info(*nested_info, create_info_name, visited_infos, constants))
     {
       return true;
     }
@@ -1253,7 +1257,8 @@ static bool create_info_contains_additional_info(const gpu::shader::ShaderCreate
                                                  const StringRefNull create_info_name)
 {
   Set<StringRefNull> visited_infos;
-  return create_info_contains_additional_info(info, create_info_name, visited_infos);
+  return create_info_contains_additional_info(
+      info, create_info_name, visited_infos, info.compilation_constants_);
 }
 
 static void add_create_info_and_reserve(gpu::shader::ShaderCreateInfo &info,
@@ -1355,8 +1360,7 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
                                                const bool use_lighting_nodes,
                                                const bool use_ao_node,
                                                const bool use_raycast,
-                                               const bool use_additional_data,
-                                               const bool use_planar_probe_data)
+                                               const bool use_additional_data)
 {
   using namespace blender::gpu::shader;
   using gpu::shader::Type;
@@ -2144,7 +2148,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                                  has_depth_offset,
                                                  use_lightprobe_data,
                                                  use_lighting_nodes, use_ao_node,
-                                                 use_raycast, use_additional_data, use_planar_probe_data);
+                                                 use_raycast, use_additional_data);
   if (shell_self_occlusion) {
     add_create_info_and_reserve(info, slots, "eevee_OutlineShellOcclusionData");
   }

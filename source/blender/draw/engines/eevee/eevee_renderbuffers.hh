@@ -44,8 +44,9 @@ class RenderBuffers {
   TextureFromPool cryptomatte_tx;
   TextureFromPool outline_color_tx;
   TextureFromPool outline_info_tx;
-  TextureFromPool rp_color_tx;
-  TextureFromPool rp_value_tx;
+  /* Auxiliary views exchange these with persistent capture-owned buffers. */
+  Texture rp_color_tx;
+  Texture rp_value_tx;
 
  private:
   Instance &inst_;
