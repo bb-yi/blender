@@ -29,6 +29,10 @@ float4 closure_to_rgba_depth(KernelGlobals &kg, ShadingData &sd, Closure /*cl*/)
 
 namespace eevee {
 
+struct StencilWriterSurfaceData {
+  [[push_constant]] int stencil_writer_reference;
+};
+
 /* WORKAROUND(fclem): This is not supposed to be needed.
  * But Metal still writes to the velocity buffer if the frag output is defined. And conditions are
  * not yet supported on in/out. */
@@ -54,6 +58,8 @@ void surf_depth([[resource_table]] KernelGlobals &kg,
                 [[resource_table]] const Sampling &sampling,
                 [[resource_table]] const UtilityTexture &util_tx,
                 [[resource_table]] const draw::View &views,
+                [[resource_table, condition(is_stencil_writer_surface)]]
+                const StencilWriterSurfaceData &stencil_writer,
                 [[resource_table]] [[condition(use_velocity)]] const GeometryVelocity &geo_vel,
                 [[frag_coord]] const float4 frag_co,
                 [[in]] const VertOutCommon &interp,
@@ -67,7 +73,7 @@ void surf_depth([[resource_table]] KernelGlobals &kg,
                 [[front_facing]] const bool front_face)
 {
 #ifdef MAT_OUTLINE_SHELL_SELF_OCCLUSION
-  if (outline_shell_self_occluded()) {
+  if (outline_shell_self_occluded(interp.resource_id_raw, frag_co)) {
     gpu_discard_fragment();
     return;
   }
@@ -163,7 +169,10 @@ void surf_depth([[resource_table]] KernelGlobals &kg,
 
   /* Always written, but may be optimized out by frame-buffer/subpass setup. */
   frag_out.normal.rgb = normalize(interp.N) * 0.5f + 0.5f;
-  frag_out.object_id = interp.resource_id_raw & uint(0xFFFF);
+  frag_out.object_id = interp.resource_id_raw & 0xFFFFu;
+  if (pipe.is_stencil_writer_surface) [[static_branch]] {
+    frag_out.object_id = uint(stencil_writer.stencil_writer_reference) & 15u;
+  }
 }
 template<bool with_velocity>
 [[fragment]]
@@ -173,6 +182,8 @@ void surf_depth_offset([[resource_table]] KernelGlobals &kg,
                 [[resource_table]] const Sampling &sampling,
                 [[resource_table]] const UtilityTexture &util_tx,
                 [[resource_table]] const draw::View &views,
+                [[resource_table, condition(is_stencil_writer_surface)]]
+                const StencilWriterSurfaceData &stencil_writer,
                 [[resource_table]] [[condition(use_velocity)]] const GeometryVelocity &geo_vel,
                 [[frag_coord]] const float4 frag_co,
                 [[in]] const VertOutCommon &interp,
@@ -252,14 +263,22 @@ void surf_depth_offset([[resource_table]] KernelGlobals &kg,
 
   if constexpr (with_velocity) {
     if (pipe.use_velocity) [[static_branch]] {
+      const ViewMatrices view = views.get(0);
+      float3 P_prv = interp.P + motion.prev;
+      float3 P = interp.P;
+      float3 P_nxt = interp.P + motion.next;
 #  ifdef MAT_DEPTH_OFFSET
-      frag_out.velocity = geo_vel.camera.surface_velocity_depth_offset(
-          interp.P + motion.prev, interp.P, interp.P + motion.next, depth_offset);
-#  else
-      frag_out.velocity = geo_vel.camera.surface_velocity(
-          interp.P + motion.prev, interp.P, interp.P + motion.next);
+      P_prv = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_prev.viewmat,
+                                                  geo_vel.camera.camera_prev.viewinv,
+                                                  P_prv, depth_offset);
+      P = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_curr.viewmat,
+                                              geo_vel.camera.camera_curr.viewinv,
+                                              P, depth_offset);
+      P_nxt = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_next.viewmat,
+                                                  geo_vel.camera.camera_next.viewinv,
+                                                  P_nxt, depth_offset);
 #  endif
-      frag_out.velocity = velocity::pack(frag_out.velocity);
+      frag_out.velocity = velocity::pack(geo_vel.camera.surface_velocity_local(view, P_prv, P, P_nxt));
     }
   }
 
@@ -269,11 +288,10 @@ void surf_depth_offset([[resource_table]] KernelGlobals &kg,
 
   /* Always written, but may be optimized out by frame-buffer/subpass setup. */
   frag_out.normal.rgb = normalize(interp.N) * 0.5f + 0.5f;
-#ifdef MAT_STENCIL_WRITER_SURFACE
-  frag_out.object_id = uint(stencil_writer_reference) & 15u;
-#else
-  frag_out.object_id = interp.resource_id_raw & uint(0xFFFF);
-#endif
+  frag_out.object_id = interp.resource_id_raw & 0xFFFFu;
+  if (pipe.is_stencil_writer_surface) [[static_branch]] {
+    frag_out.object_id = uint(stencil_writer.stencil_writer_reference) & 15u;
+  }
 }
 
 

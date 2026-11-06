@@ -243,15 +243,22 @@ void VKDevice::submission_runner(VKDevice *device)
       continue;
     }
     BLI_SCOPED_DEFER([&]() {
-      submit_task->render_graph->reset();
-      BLI_thread_queue_push(device->unused_render_graphs_,
-                            submit_task->render_graph,
-                            BLI_THREAD_QUEUE_WORK_PRIORITY_NORMAL);
+      render_graph::VKRenderGraph &render_graph = *submit_task->render_graph;
+      /* Release references before publishing completion, including failed submissions. Stamp
+       * discarded resources with the last task that could have recorded their use. */
+      render_graph.deref_resources();
+      Vector<render_graph::VKResourceStateTracker::DiscardableResource> discardable =
+          device->resources.pop_discardable_resources();
+      device->orphaned_data.discard_resources(discardable, submit_task->timeline);
+      render_graph.reset();
       if (submit_task->wait_for_submission != nullptr) {
         std::unique_lock<Mutex> lock(submit_task->wait_for_submission->is_submitted_mutex);
         submit_task->wait_for_submission->is_done = true;
         submit_task->wait_for_submission->is_submitted_condition.notify_one();
       }
+      BLI_thread_queue_push(device->unused_render_graphs_,
+                            submit_task->render_graph,
+                            BLI_THREAD_QUEUE_WORK_PRIORITY_NORMAL);
       MEM_delete<VKRenderGraphSubmitTask>(submit_task);
     });
     uint64_t current_timeline = 0;
@@ -383,31 +390,6 @@ void VKDevice::submission_runner(VKDevice *device)
       command_buffer.reset();
     }
 
-    /* Release the graph's references; zero-ref resources become discardable and are flushed
-     * below. */
-    render_graph.deref_resources();
-
-    /* Discard zero-ref resources, stamped with this submission's timeline: their last use is
-     * in this task's commands. */
-    {
-      Vector<render_graph::VKResourceStateTracker::DiscardableResource> discardable =
-          device->resources.pop_discardable_resources();
-      device->orphaned_data.discard_resources(discardable, submit_task->timeline);
-    }
-
-    render_graph.reset();
-    /* Signal only after the graph's resource references are released. Otherwise swapchain images
-     * aren't dereffed in correct order. */
-    if (submit_task->wait_for_submission != nullptr) {
-      std::unique_lock<Mutex> lock(submit_task->wait_for_submission->is_submitted_mutex);
-      submit_task->wait_for_submission->is_submitted = true;
-      submit_task->wait_for_submission->is_submitted_condition.notify_one();
-    }
-
-    BLI_thread_queue_push(device->unused_render_graphs_,
-                          std::move(submit_task->render_graph),
-                          BLI_THREAD_QUEUE_WORK_PRIORITY_NORMAL);
-    MEM_delete<VKRenderGraphSubmitTask>(submit_task);
   }
   CLOG_TRACE(&LOG, "Submission runner is being canceled");
 

@@ -36,6 +36,7 @@ void geom_bake_mesh([[resource_table]] KernelGlobals &kg,
 
   init_interface(interp, id.raw_id);
   interp.P = obj.point_object_to_world(vert_in.pos);
+  interp.P_relative = to_float3x3(obj.model) * vert_in.pos;
   interp.N = normalize(obj.normal_object_to_world(vert_in.nor));
   interp.P_base = interp.P;
   bake_interp.Ng = normalize(obj.normal_object_to_world(vert_in.geom_nor));
@@ -45,7 +46,9 @@ void geom_bake_mesh([[resource_table]] KernelGlobals &kg,
   init_globals_mesh(interp, sd, float3(0.0f));
   float3 lP_orco = vert_in.pos * ob_infos.orco_mul + ob_infos.orco_add;
   attrib_load(MeshVertex{vert_in.pos, to_float3x3(obj.model_inverse), lP_orco});
-  interp.P += nodetree_displacement(kg, sd);
+  const float3 displacement = nodetree_displacement(kg, sd);
+  interp.P += displacement;
+  interp.P_relative += displacement;
   out_position = float4(vert_in.bake_uv * 2.0f - 1.0f, 0.0f, 1.0f);
 }
 

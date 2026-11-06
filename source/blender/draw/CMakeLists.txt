@@ -527,7 +527,7 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/eevee_outline_classify_comp.glsl
   engines/eevee/shaders/eevee_outline_dispatch_comp.glsl
   engines/eevee/shaders/eevee_outline_factor_blur_frag.glsl
-  engines/eevee/shaders/eevee_outline_freestyle_frag.glsl
+  engines/eevee/shaders/eevee_outline_freestyle.bsl.hh
   engines/eevee/shaders/eevee_outline_jfa_init_frag.glsl
   engines/eevee/shaders/eevee_outline_jfa_step_comp.glsl
   engines/eevee/shaders/eevee_outline_lib.glsl
@@ -799,6 +799,7 @@ set(SHADER_SRC_SELECT_ID
   engines/select/shaders/select_lib.bsl.hh
   engines/select/shaders/select_debug_frag.glsl
 
+  engines/select/select_defines.hh
   engines/select/select_shader_shared.hh
 )
 
@@ -826,6 +827,8 @@ set(SHADER_SRC_WORKBENCH
   engines/workbench/shaders/workbench_volume.bsl.hh
   engines/workbench/shaders/workbench_world_light.bsl.hh
 
+  engines/workbench/workbench_defines.hh
+  engines/workbench/workbench_shader_shared.hh
 )
 
 # These tests depend on gpu_shader_test, so they're only included when

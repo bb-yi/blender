@@ -207,6 +207,8 @@ static inline bool is_ubo_supported_type(const GPUType type)
     case GPU_TEX2D:
     case GPU_TEX2D_ARRAY:
     case GPU_TEX3D:
+    case GPU_TEXCUBE:
+    case GPU_TEX_HANDLE:
     case GPU_CLOSURE:
     case GPU_ATTR:
     case GPU_KERNEL_GLOBALS:

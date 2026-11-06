@@ -286,6 +286,13 @@ class OutlineControlsTest(unittest.TestCase):
                         self.assertIn(name, node.inputs)
         self.assertGreater(found, 0)
 
+    def test_legacy_outline_and_pre_fx_passes(self):
+        path = Path(__file__).resolve().parent / 'data' / 'legacy_52_outline_pre_fx.blend'
+        bpy.ops.wm.open_mainfile(filepath=str(path))
+        layer = bpy.context.scene.view_layers[0]
+        self.assertTrue(layer.eevee.use_pass_outline)
+        self.assertTrue(layer.use_pass_pre_fx)
+
     def test_defaults_and_file_roundtrip(self):
         scene = setup()
         _, mat, control = region_surface()

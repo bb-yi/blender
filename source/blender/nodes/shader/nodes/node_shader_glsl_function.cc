@@ -11727,7 +11727,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
             /* Let graph linking create the placeholder only when it is consumed. Helper
              * specialization can fail before the wrapper is linked. */
             stack->link = nullptr;
-            std::fill_n(stack->vec, 4, 0.0f);
+            stack->value = GPU_node_stack_default_value(stack->type);
             continue;
           }
 

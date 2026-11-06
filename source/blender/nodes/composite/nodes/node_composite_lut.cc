@@ -491,12 +491,7 @@ class LUTOperation : public NodeOperation {
  private:
   void report_error(const std::string &message)
   {
-    context().set_info_message(message);
-    if (auto *log = context().nodes_evaluation_log()) {
-      auto &logger = log->get_local_tree_logger(get_compute_context());
-      logger.node_warnings.append(*logger.allocator,
-                                  {node().identifier, {NodeWarningType::Error, message}});
-    }
+    this->add_warning(NodeWarningType::Error, message);
   }
 
   static Color grade(const OCIOLUT &lut, const Color &input, float factor)

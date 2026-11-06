@@ -829,9 +829,10 @@ void RenderTextureModule::write_viewport_compositor_passes()
   {
     return;
   }
-  const Set<std::string> needed = bke::compositor::get_used_passes(*inst_.scene, inst_.view_layer);
+  const Set<std::string> needed = bke::compositor::get_used_passes(
+      *inst_.scene, inst_.view_layer, bke::compositor::ExecutionMode::Preview);
   for (const SceneRenderTexture *render_texture =
-           static_cast<const SceneRenderTexture *>(inst_.scene->eevee.render_textures.first);
+           static_cast<const SceneRenderTexture *>(inst_.scene->eevee.render_textures.first_);
        render_texture;
        render_texture = render_texture->next)
   {

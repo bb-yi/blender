@@ -2204,8 +2204,9 @@ bool BKE_material_animation_state_get(const Material &material,
       for (const FCurve *curve : curves) {
         PointerRNA ptr;
         PropertyRNA *property = nullptr;
-        if (curve->rna_path == nullptr ||
-            !RNA_path_resolve_property(&owner, curve->rna_path, &ptr, &property) ||
+        const StringRefNull rna_path = curve->rna_path();
+        if (rna_path.is_empty() ||
+            !RNA_path_resolve_property(&owner, rna_path.c_str(), &ptr, &property) ||
             !RNA_struct_is_a(ptr.type, RNA_NodeSocket) ||
             !STREQ(RNA_property_identifier(property), "default_value") ||
             RNA_property_type(property) != PROP_FLOAT)
@@ -2221,8 +2222,8 @@ bool BKE_material_animation_state_get(const Material &material,
         if (!std::isfinite(value)) {
           return reject(5);
         }
-        r_state.append(double(strlen(curve->rna_path)));
-        for (const char *c = curve->rna_path; *c; c++) {
+        r_state.append(double(rna_path.size()));
+        for (const char *c = rna_path.c_str(); *c; c++) {
           r_state.append(double(uint8_t(*c)));
         }
         r_state.append(double(curve->array_index));

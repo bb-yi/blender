@@ -157,7 +157,7 @@ int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
 
 void RenderBuffers::release()
 {
-  depth_tx.release();
+  /* Persistent depth owns stencil views and is reused by the next acquire(). */
   combined_tx.release();
   stencil_value_tx.release();
   stencil_surface_value_tx.release();

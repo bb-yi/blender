@@ -451,7 +451,7 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        OUTLINE_JFA_STEP_VISIBLE, OUTLINE_JFA_STEP_VISIBLE_PACKED,
                                        OUTLINE_RESOLVE,          OUTLINE_RESOLVE_PACKED,
                                        OUTLINE_RESOLVE_SCALED,   OUTLINE_RESOLVE_SCALED_PACKED,
-                                       OUTLINE_UPSAMPLE, OUTLINE_FREESTYLE};
+                                       OUTLINE_UPSAMPLE};
     request(DEFERRED_LIGHTING_SHADERS, AS_SPAN(shader_list));
   }
   {
@@ -1427,10 +1427,12 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
     default:
       switch (pipeline_type) {
         case MAT_PIPE_OUTLINE_FREESTYLE:
-          pipeline_info_name = "eevee_outline_freestyle";
+          pipeline_info_name = "eevee_outline_freestyle_infos_";
           info.name_ += "_outline_freestyle";
           info.define("closure_to_rgba", "closure_to_rgba_depth");
-          info.fragment_source("eevee_outline_freestyle_frag.glsl");
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
+          info.fragment_source("eevee_outline_freestyle.bsl.hh");
+          info.fragment_function("eevee_outline_freestyle");
           break;
         case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
         case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
@@ -1838,10 +1840,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
   info.compilation_constant(gpu::shader::Type::bool_t, "use_transparency", use_transparency);
-  if (stencil_writer_surface) {
-    info.define("MAT_STENCIL_WRITER_SURFACE");
-    info.push_constant(gpu::shader::Type::int_t, "stencil_writer_reference");
-  }
+  info.compilation_constant(
+      gpu::shader::Type::bool_t, "is_stencil_writer_surface", stencil_writer_surface);
 
   const bool use_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST) &&
                            ELEM(pipeline_type,
@@ -1994,6 +1994,123 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   info.compilation_constant(
       gpuType::bool_t, "use_sss", GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE));
 
+  const eClosureBits closure_bits = shader_closure_bits_from_flag(gpumat);
+
+  int32_t closure_bin_count = to_gbuffer_bin_count(closure_bits);
+  info.compilation_constant(gpu::shader::Type::int_t, "closure_bin_count", closure_bin_count);
+  info.compilation_constant(
+      gpu::shader::Type::int_t, "closure_bin_len", max(1, closure_bin_count));
+
+  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR)) {
+    if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+      /* NPR reads the already-written material GBuffer, so it cannot be specialized to the
+       * NPR tree's own closures. */
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_reflection", true);
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_refraction", true);
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_subsurface", true);
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_translucent", true);
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_reflection_colorless", false);
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_refraction_colorless", false);
+      info.compilation_constant(gpu::shader::Type::int_t, "gbuffer_layer_max", 3);
+    }
+    else {
+      info.compilation_constant(gpu::shader::Type::bool_t,
+                                "gbuffer_has_reflection",
+                                GPU_material_flag_get(gpumat, GPU_MATFLAG_GLOSSY));
+      info.compilation_constant(gpu::shader::Type::bool_t,
+                                "gbuffer_has_refraction",
+                                GPU_material_flag_get(gpumat, GPU_MATFLAG_REFRACT));
+      info.compilation_constant(gpu::shader::Type::bool_t,
+                                "gbuffer_has_subsurface",
+                                GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE));
+      info.compilation_constant(gpu::shader::Type::bool_t,
+                                "gbuffer_has_translucent",
+                                GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSLUCENT));
+      info.compilation_constant(
+          gpu::shader::Type::bool_t,
+          "gbuffer_reflection_colorless",
+          GPU_material_flag_get(gpumat, GPU_MATFLAG_REFLECTION_MAYBE_COLORED) == false);
+      info.compilation_constant(
+          gpu::shader::Type::bool_t,
+          "gbuffer_refraction_colorless",
+          GPU_material_flag_get(gpumat, GPU_MATFLAG_REFRACTION_MAYBE_COLORED) == false);
+      info.compilation_constant(
+          gpu::shader::Type::int_t, "gbuffer_layer_max", max(1, closure_bin_count));
+    }
+
+    bool use_simple_layout = false;
+    if (closure_bin_count == 2 && pipeline_type != MAT_PIPE_DEFERRED_NPR) {
+      /* In a lot of cases, we can predict that we do not need the extra GBuffer layers. This
+       * simplifies the shader code and improves compilation time (see #145347). */
+      const bool colorless_reflection = !GPU_material_flag_get(
+          gpumat, GPU_MATFLAG_REFLECTION_MAYBE_COLORED);
+      const bool colorless_refraction = !GPU_material_flag_get(
+          gpumat, GPU_MATFLAG_REFRACTION_MAYBE_COLORED);
+      int closure_layer_count = 0;
+      if (closure_bits & CLOSURE_DIFFUSE) {
+        closure_layer_count += 1;
+      }
+      if (closure_bits & CLOSURE_SSS) {
+        closure_layer_count += 2;
+      }
+      if (closure_bits & CLOSURE_REFLECTION) {
+        closure_layer_count += colorless_reflection ? 1 : 2;
+      }
+      if (closure_bits & CLOSURE_REFRACTION) {
+        closure_layer_count += colorless_refraction ? 1 : 2;
+      }
+      if (closure_bits & CLOSURE_TRANSLUCENT) {
+        closure_layer_count += 1;
+      }
+      if (closure_bits & CLOSURE_CLEARCOAT) {
+        closure_layer_count += colorless_reflection ? 1 : 2;
+      }
+
+      if (closure_layer_count <= 2) {
+        use_simple_layout = true;
+      }
+    }
+
+    info.compilation_constant(
+        gpu::shader::Type::bool_t, "gbuffer_simple_layout", use_simple_layout);
+  }
+
+  int transmit_eval_count = 0;
+  const bool use_light_shader_texture_eval =
+      ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) ||
+      use_front_light_shader_in_surface_pass || use_lighting_nodes;
+  if (use_light_shader_texture_eval) {
+    transmit_eval_count = (closure_bits &
+                                     (CLOSURE_REFRACTION | CLOSURE_TRANSLUCENT | CLOSURE_SSS)) ?
+                                        1 :
+                                        0;
+
+    info.compilation_constant(
+        gpu::shader::Type::bool_t, "use_light_shader_texture_eval", use_light_shader_texture_eval);
+    info.compilation_constant(gpu::shader::Type::bool_t,
+                              "use_npr_light_policy",
+                              GPU_material_principled_npr_v2_has(gpumat));
+    info.compilation_constant(
+        gpu::shader::Type::int_t, "light_closure_eval_count_reflect", closure_bin_count);
+    info.compilation_constant(
+        gpu::shader::Type::int_t, "light_closure_eval_count_transmit", transmit_eval_count);
+  }
+
+  if (use_light_shader_texture_eval || use_npr_foreach_shadow) {
+    info.compilation_constant(gpu::shader::Type::bool_t, "shadow_random", true);
+  }
+
+  /* Always need to be defined. */
+  info.compilation_constant(
+      gpu::shader::Type::int_t, "light_closure_count_reflect", max(1, closure_bin_count));
+  info.compilation_constant(
+      gpu::shader::Type::int_t, "light_closure_count_transmit", max(1, transmit_eval_count));
+
+  /* Enabling barycentric coordinate only works for triangle primitives. */
+  bool use_barycentric = GPU_material_flag_get(gpumat, GPU_MATFLAG_BARYCENTRIC) &&
+                         ELEM(geometry_type, MAT_GEOM_MESH, MAT_GEOM_MESH_TESS);
+  info.compilation_constant(gpu::shader::Type::bool_t, "use_barycentric", use_barycentric);
+
   SlotAllocator slots = add_pipeline_create_info(info,
                                                  pipeline_type,
                                                  geometry_type,
@@ -2003,7 +2120,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                                  use_lighting_nodes, use_ao_node,
                                                  use_raycast, use_additional_data, use_planar_probe_data);
   if (shell_self_occlusion) {
-    add_create_info_and_reserve(info, slots, "eevee_outline_shell_self_occlusion");
+    add_create_info_and_reserve(info, slots, "eevee_OutlineShellOcclusionData");
   }
   if (material_codegen_uses_render_info(codegen)) {
     add_create_info_and_reserve(info, slots, "eevee_sampling_data");
@@ -2314,139 +2431,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.define("MAT_CLEARCOAT");
   }
 
-  const eClosureBits closure_bits = shader_closure_bits_from_flag(gpumat);
-
-  int32_t closure_bin_count = to_gbuffer_bin_count(closure_bits);
-  info.compilation_constant(gpu::shader::Type::int_t, "closure_bin_count", closure_bin_count);
-  info.compilation_constant(
-      gpu::shader::Type::int_t, "closure_bin_len", max(1, closure_bin_count));
-
-  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR)) {
-    if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
-      /* NPR reads the already-written material GBuffer, so it cannot be specialized to the
-       * NPR tree's own closures. */
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_reflection", true);
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_refraction", true);
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_subsurface", true);
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_translucent", true);
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_reflection_colorless", false);
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_refraction_colorless", false);
-      info.compilation_constant(gpu::shader::Type::int_t, "gbuffer_layer_max", 3);
-    }
-    else {
-      info.compilation_constant(gpu::shader::Type::bool_t,
-                                "gbuffer_has_reflection",
-                                GPU_material_flag_get(gpumat, GPU_MATFLAG_GLOSSY));
-      info.compilation_constant(gpu::shader::Type::bool_t,
-                                "gbuffer_has_refraction",
-                                GPU_material_flag_get(gpumat, GPU_MATFLAG_REFRACT));
-      info.compilation_constant(gpu::shader::Type::bool_t,
-                                "gbuffer_has_subsurface",
-                                GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE));
-      info.compilation_constant(gpu::shader::Type::bool_t,
-                                "gbuffer_has_translucent",
-                                GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSLUCENT));
-      info.compilation_constant(
-          gpu::shader::Type::bool_t,
-          "gbuffer_reflection_colorless",
-          GPU_material_flag_get(gpumat, GPU_MATFLAG_REFLECTION_MAYBE_COLORED) == false);
-      info.compilation_constant(
-          gpu::shader::Type::bool_t,
-          "gbuffer_refraction_colorless",
-          GPU_material_flag_get(gpumat, GPU_MATFLAG_REFRACTION_MAYBE_COLORED) == false);
-      info.compilation_constant(
-          gpu::shader::Type::int_t, "gbuffer_layer_max", max(1, closure_bin_count));
-    }
-
-    bool use_simple_layout = false;
-    if (closure_bin_count == 2 && pipeline_type != MAT_PIPE_DEFERRED_NPR) {
-      /* In a lot of cases, we can predict that we do not need the extra GBuffer layers. This
-       * simplifies the shader code and improves compilation time (see #145347). */
-      const bool colorless_reflection = !GPU_material_flag_get(
-          gpumat, GPU_MATFLAG_REFLECTION_MAYBE_COLORED);
-      const bool colorless_refraction = !GPU_material_flag_get(
-          gpumat, GPU_MATFLAG_REFRACTION_MAYBE_COLORED);
-      int closure_layer_count = 0;
-      if (closure_bits & CLOSURE_DIFFUSE) {
-        closure_layer_count += 1;
-      }
-      if (closure_bits & CLOSURE_SSS) {
-        closure_layer_count += 2;
-      }
-      if (closure_bits & CLOSURE_REFLECTION) {
-        closure_layer_count += colorless_reflection ? 1 : 2;
-      }
-      if (closure_bits & CLOSURE_REFRACTION) {
-        closure_layer_count += colorless_refraction ? 1 : 2;
-      }
-      if (closure_bits & CLOSURE_TRANSLUCENT) {
-        closure_layer_count += 1;
-      }
-      if (closure_bits & CLOSURE_CLEARCOAT) {
-        closure_layer_count += colorless_reflection ? 1 : 2;
-      }
-
-      if (closure_layer_count <= 2) {
-        use_simple_layout = true;
-      }
-    }
-
-    info.compilation_constant(
-        gpu::shader::Type::bool_t, "gbuffer_simple_layout", use_simple_layout);
-  }
-
-  int transmit_eval_count = 0;
-  const bool use_light_shader_texture_eval =
-      ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) ||
-      use_front_light_shader_in_surface_pass || use_lighting_nodes;
-  if (use_light_shader_texture_eval) {
-    transmit_eval_count = (closure_bits &
-                                     (CLOSURE_REFRACTION | CLOSURE_TRANSLUCENT | CLOSURE_SSS)) ?
-                                        1 :
-                                        0;
-
-    info.compilation_constant(
-        gpu::shader::Type::bool_t, "use_light_shader_texture_eval", use_light_shader_texture_eval);
-    info.compilation_constant(gpu::shader::Type::bool_t,
-                              "use_npr_light_policy",
-                              GPU_material_principled_npr_v2_has(gpumat));
-    info.compilation_constant(
-        gpu::shader::Type::int_t, "light_closure_eval_count_reflect", closure_bin_count);
-    info.compilation_constant(
-        gpu::shader::Type::int_t, "light_closure_eval_count_transmit", transmit_eval_count);
-  }
-
-  if (use_light_shader_texture_eval || use_npr_foreach_shadow) {
-    info.compilation_constant(gpu::shader::Type::bool_t, "shadow_random", true);
-  }
-
-  /* Always need to be defined. */
-  info.compilation_constant(
-      gpu::shader::Type::int_t, "light_closure_count_reflect", max(1, closure_bin_count));
-  info.compilation_constant(
-      gpu::shader::Type::int_t, "light_closure_count_transmit", max(1, transmit_eval_count));
-
-  /* Enabling barycentric coordinate only works for triangle primitives. */
-  bool use_barycentric = GPU_material_flag_get(gpumat, GPU_MATFLAG_BARYCENTRIC) &&
-                         ELEM(geometry_type, MAT_GEOM_MESH, MAT_GEOM_MESH_TESS);
-  info.compilation_constant(gpu::shader::Type::bool_t, "use_barycentric", use_barycentric);
-
   /* Allow to use Reverse-Z on OpenGL. Does nothing in other backend. */
   info.builtins(BuiltinBits::CLIP_CONTROL);
-
-  /* IMPORTANT: All additional_info containing resources should go before
-   * add_pipeline_create_info. This ensure all resource slot are correctly reserved inside the
-   * SlotAllocator.
-   * Similarly all compilation_constant setting needs to happen before this point. */
-
-  SlotAllocator slots = add_pipeline_create_info(info,
-                                                 pipeline_type,
-                                                 geometry_type,
-                                                 use_shader_to_rgba,
-                                                 use_lighting_nodes,
-                                                 use_ao_node,
-                                                 use_raycast,
-                                                 use_additional_data);
 
   std::stringstream global_vars;
   /* Interpolation of the material attributes of tessellated meshes. */

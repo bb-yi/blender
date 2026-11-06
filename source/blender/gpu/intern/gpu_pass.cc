@@ -374,7 +374,8 @@ static bool gpu_pass_validate(GPUCodegenCreateInfo *create_info)
 {
   int samplers_len = 0;
   for (const ShaderCreateInfo::Resource &res : create_info->resources_get_all_()) {
-    if (res.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
+    if (res.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER &&
+        res.conditions.evaluate(create_info->compilation_constants_)) {
       samplers_len++;
     }
   }

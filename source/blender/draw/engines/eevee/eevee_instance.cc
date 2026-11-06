@@ -990,7 +990,7 @@ void Instance::render_read_result(RenderLayer *render_layer, const char *view_na
 
   /* Render Texture snapshots are exported directly, without main-camera post effects. */
   for (const SceneRenderTexture *render_texture =
-           static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first);
+           static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first_);
        render_texture;
        render_texture = render_texture->next)
   {
@@ -1346,7 +1346,7 @@ void Instance::update_passes(RenderEngine *engine, Scene *scene, ViewLayer *view
   RE_engine_register_pass(engine, scene, view_layer, RE_PASSNAME_COMBINED, 4, "RGBA", SOCK_RGBA);
   int enabled_render_textures = 0;
   for (const SceneRenderTexture *render_texture =
-           static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first);
+           static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first_);
        render_texture;
        render_texture = render_texture->next)
   {

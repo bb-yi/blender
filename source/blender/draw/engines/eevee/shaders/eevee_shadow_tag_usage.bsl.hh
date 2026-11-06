@@ -73,7 +73,6 @@ struct TagUsage {
     LightSunData sun = light.sun;
 
     [[resource_table]] const Uniform &uni = uniforms;
-    [[resource_table]] const draw::View &views = views_;
     const ViewMatrices view = views.get(0);
     float pixel_size = shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
                                                 view.is_perspective(), view.z_distance(P));

@@ -391,6 +391,7 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
   bool has_time_dependent_shadows = false;
   bool has_view_dependent_shadows = false;
   bool has_position_dependent_shadows = false;
+  bool has_shadow_offset = false;
   float inflate_bounds = 0.0f;
 
   for (const Material *material : materials) {
@@ -447,7 +448,8 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
                             has_transparent_shadows,
                             has_time_dependent_shadows,
                             has_view_dependent_shadows,
-                            has_position_dependent_shadows);
+                            has_position_dependent_shadows,
+                            has_shadow_offset);
 
   if (has_volume) {
     inst_.volume.object_sync(ob_handle);

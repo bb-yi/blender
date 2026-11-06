@@ -1217,7 +1217,7 @@ bool GPU_material_animation_uniform_update(Material *material, Span<double> stat
     return false;
   }
   GPUMaterial *first = static_cast<GPUMaterial *>(
-      static_cast<LinkData *>(material->gpumaterial.first)->data);
+      material->gpumaterial.first()->data);
   if (!first->uniform_tracking_supported || !first->animation_state_valid ||
       !first->animation_state)
   {

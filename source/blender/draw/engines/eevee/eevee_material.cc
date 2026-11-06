@@ -320,7 +320,7 @@ void MaterialModule::expression_diagnostics_begin_sync()
       DEG_get_input_view_layer(inst_.depsgraph)->runtime->shader_diagnostics_context;
   expression_context_owner_ = layer_context;
   expression_context_key_ = std::to_string(DEG_get_original(inst_.scene)->id.session_uid) + "/" +
-                            std::to_string(BLI_session_uid_hash_uint64(layer_context.get())) +
+                            std::to_string(layer_context->hash()) +
                             "/" + std::to_string(int(DEG_get_mode(inst_.depsgraph))) + "/" +
                             std::to_string(int(GPU_backend_get_type()));
 }

@@ -410,17 +410,11 @@ enum GPUType {
   GPU_INT3,
   GPU_INT4,
   GPU_BOOL,
-  /* Values not in GPU_DATATYPE_STR */
-  GPU_TEX1D_ARRAY = 1001,
-  GPU_TEX2D = 1002,
-  GPU_TEX2D_ARRAY = 1003,
-  GPU_TEX3D = 1004,
-  GPU_TEXCUBE = 1005,
-
   GPU_TEX1D_ARRAY,
   GPU_TEX2D,
   GPU_TEX2D_ARRAY,
   GPU_TEX3D,
+  GPU_TEXCUBE,
   GPU_TEX_HANDLE = 1008,
 
   /* Struct types. */
@@ -473,6 +467,7 @@ constexpr int gpu_type_element_count(const GPUType type)
     case GPU_TEX2D:
     case GPU_TEX2D_ARRAY:
     case GPU_TEX3D:
+    case GPU_TEXCUBE:
     case GPU_CLOSURE:
     case GPU_TEX_HANDLE:
     case GPU_ATTR:
@@ -651,6 +646,7 @@ inline GPUNodeStackValue GPU_node_stack_default_value(const GPUType type)
     case GPU_TEX2D:
     case GPU_TEX2D_ARRAY:
     case GPU_TEX3D:
+    case GPU_TEXCUBE:
     case GPU_CLOSURE:
     case GPU_TEX_HANDLE:
     case GPU_ATTR:

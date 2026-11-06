@@ -96,7 +96,7 @@ void surf_deferred_impl([[resource_table]] KernelGlobals &kg,
                    DeferredFragOut &frag_out, float &out_depth, ShadingData &sd)
 {
 #ifdef MAT_OUTLINE_SHELL_SELF_OCCLUSION
-  if (outline_shell_self_occluded()) {
+  if (outline_shell_self_occluded(interp.resource_id_raw, frag_co)) {
     gpu_discard_fragment();
     return;
   }

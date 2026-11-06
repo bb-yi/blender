@@ -282,6 +282,7 @@ float3 npr_probe_direct_closure([[resource_table]] LightEvalIterator &lights,
                                 [[resource_table]] const UtilityTexture &util_tx,
                                 light::EvalCtx<false> base_ctx,
                                 ClosureUndetermined cl,
+                                float3 V,
                                 float vPz)
 {
   if (cl.type == CLOSURE_NONE_ID) {
@@ -293,7 +294,7 @@ float3 npr_probe_direct_closure([[resource_table]] LightEvalIterator &lights,
   if (!cl.npr.enabled && !closure_has_transmission(cl.type)) {
     for (uint i = 0u; i < 3u; i++) [[unroll]] {
       if (lrt.constants.light_closure_eval_count_reflect > i) [[static_branch]] {
-        ctx.stack.cl[i] = closure_light_new(util_tx, cl, ctx.V);
+        ctx.stack.cl[i] = closure_light_new(util_tx, cl, V);
       }
     }
     lights.eval_reflection(ctx, vPz);
@@ -304,7 +305,7 @@ float3 npr_probe_direct_closure([[resource_table]] LightEvalIterator &lights,
     light::EvalCtx<true> ctx_tr = light::init_from_reflect_ctx(ctx);
     for (uint i = 0u; i < 3u; i++) [[unroll]] {
       if (lrt.constants.light_closure_eval_count_transmit > i) [[static_branch]] {
-        ctx_tr.stack.cl[i] = closure_light_new(util_tx, cl, ctx.V, ctx.thickness);
+        ctx_tr.stack.cl[i] = closure_light_new(util_tx, cl, V, ctx.thickness);
       }
     }
     lights.eval_transmission(ctx_tr, vPz);
@@ -466,7 +467,7 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
   for (int i = 0; i < min(int(closure_count), 3); i++) {
     if (gbuf.header.has_npr_payload()) {
       ClosureUndetermined indirect_cl = probe_closures[i];
-      frag_out.radiance.xyz += npr_probe_direct_closure(lights, util_tx, ctx, indirect_cl, vPz);
+      frag_out.radiance.xyz += npr_probe_direct_closure(lights, util_tx, ctx, indirect_cl, V, vPz);
       float3 color = indirect_cl.color;
       if ((indirect_cl.type == CLOSURE_BSDF_TRANSLUCENT_ID ||
            indirect_cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&
@@ -685,7 +686,7 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
   for (int i = 0; i < min(int(closure_count), 3); i++) {
     if (gbuf.header.has_npr_payload()) {
       ClosureUndetermined npr_cl = probe_closures[i];
-      frag_out.radiance.xyz += npr_probe_direct_closure(lights, util_tx, ctx, npr_cl, vPz);
+      frag_out.radiance.xyz += npr_probe_direct_closure(lights, util_tx, ctx, npr_cl, V, vPz);
       float3 color = npr_cl.color;
       if ((npr_cl.type == CLOSURE_BSDF_TRANSLUCENT_ID ||
            npr_cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&

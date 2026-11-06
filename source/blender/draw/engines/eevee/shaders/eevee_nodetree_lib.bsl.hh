@@ -6,8 +6,6 @@
 
 #include "draw_gsplat_lib.bsl.hh"
 #include "draw_intersect.bsl.hh"
-#include "gpu_shader_common_hash.glsl"
-#include "draw_referenced_object_lib.glsl"
 #include "draw_model.bsl.hh"
 #include "draw_view.bsl.hh"
 #include "draw_viewlayer.bsl.hh"

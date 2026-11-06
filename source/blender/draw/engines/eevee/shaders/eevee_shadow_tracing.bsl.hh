@@ -155,7 +155,8 @@ ShadowRayDirectional shadow_ray_generate_directional(LightData light,
                                                      float2 random_2d,
                                                      float3 lP,
                                                      float texel_radius,
-                                                     float receiver_pixel_size)
+                                                     float receiver_pixel_size,
+                                                     float soft_shadow_scale = 1.0f)
 {
   float clip_near = orderedIntBitsToFloat(light.clip_near);
   /* Assumed to be non-null. */
@@ -1196,7 +1197,7 @@ float4 shadow_node_pcss_bilinear([[resource_table]] ShadowRenderData &srd,
   int face = 0;
   float texel_world;
   if (ctx.directional) {
-    LightSunData sun = ctx.light.sun();
+    LightSunData sun = ctx.light.sun;
     int level = shadow_directional_level(ctx.light, lP - ctx.light.position(), ctx.pixel_size);
     int physical_level = ctx.light.type == LIGHT_SUN_ORTHO ? sun.clipmap_lod_min : level;
     int2 offset = shadow_decompress_grid_offset(ctx.light.type,
@@ -1233,7 +1234,7 @@ float4 shadow_node_pcss_bilinear([[resource_table]] ShadowRenderData &srd,
     float2 extent_near = max(abs(lP.xy - ctx.light.position().xy) - texel_world, float2(0.0f));
     float2 extent_far = abs(lP.xy - ctx.light.position().xy) + texel_world;
     int current_level = center_coord.tilemap_index - ctx.light.tilemap_index +
-                        ctx.light.sun().clipmap_lod_min;
+                        ctx.light.sun.clipmap_lod_min;
     interior = interior && ctx.light.type == LIGHT_SUN &&
                shadow_directional_level(ctx.light, float3(extent_near, 0.0f), ctx.pixel_size) ==
                    current_level &&
@@ -1329,7 +1330,7 @@ float2 shadow_node_pcss_blocker([[resource_table]] ShadowRenderData &srd,
   float texel_world;
   int face = 0;
   if (ctx.directional) {
-    LightSunData sun = ctx.light.sun();
+    LightSunData sun = ctx.light.sun;
     int level = shadow_directional_level(ctx.light, lP - ctx.light.position(), ctx.pixel_size);
     int physical_level = ctx.light.type == LIGHT_SUN_ORTHO ? sun.clipmap_lod_min : level;
     int2 offset = shadow_decompress_grid_offset(ctx.light.type,
@@ -1378,13 +1379,13 @@ float4 shadow_node_pcss_core([[resource_table]] ShadowRenderData &srd,
   const ViewMatrices view = views.get(0);
   float texel_radius = shadow_texel_radius_at_position(uni, views, light, directional, P);
   float3 L = directional ? light.z_axis() :
-                           normalize(light.position() + light.local().local.shadow_position - P);
+                           normalize(light.position() + light.local.local.shadow_position - P);
   P = shadow_ray_offset(P, Ng, texel_radius) + Ng * shadow_normal_offset(Ng, L, texel_radius) +
       N * shadow_terminator_offset(N, L, normal_offset, geometry_offset);
   ShadowNodePCSS ctx;
   ctx.light = light;
   ctx.P = directional ? light_world_to_local_direction(light, P) :
-                        light_world_to_local_point(light, P) - light.local().local.shadow_position;
+                        light_world_to_local_point(light, P) - light.local.local.shadow_position;
   /* Depth extrapolation is a virtual receiver surface, not a geometric ray offset. Face
    * normals make its reference depths and blocker radius jump at every triangle edge on a
    * smooth mesh. Use the continuous shading normal here, retaining Ng for the offsets above. */
@@ -1398,12 +1399,12 @@ float4 shadow_node_pcss_core([[resource_table]] ShadowRenderData &srd,
   if (center.x < 0.0f) {
     return center;
   }
-  float source_radius = directional ? tan(light.sun().shadow_angle) :
-                                      light.local().local.shadow_radius;
+  float source_radius = directional ? tan(light.sun.shadow_angle) :
+                                      light.local.local.shadow_radius;
   bool area_light = !directional && is_area_light(light.type);
   float2 area_size = float2(0.0f);
   if (area_light) {
-    area_size = light.area().size * light.area().shadow_scale;
+    area_size = light.area.size * light.area.shadow_scale;
     source_radius = reduce_max(area_size);
   }
   if (source_radius <= 1e-8f) {
@@ -1420,7 +1421,7 @@ float4 shadow_node_pcss_core([[resource_table]] ShadowRenderData &srd,
     ShadowSamplingTile center_tile = shadow_tile_load(
         srd.shadow_tilemaps_tx, center_coord.tilemap_tile, center_coord.tilemap_index);
     int level = light.type == LIGHT_SUN_ORTHO ?
-                    light.sun().clipmap_lod_min :
+                    light.sun.clipmap_lod_min :
                     shadow_directional_level(light, ctx.P - light.position(), ctx.pixel_size);
     float page_width = exp2(float(level + int(center_tile.lod))) / float(SHADOW_TILEMAP_RES);
     /* Directional maps reserve one page of padding around the visible footprint. */
@@ -1454,7 +1455,7 @@ float4 shadow_node_pcss_core([[resource_table]] ShadowRenderData &srd,
       }
       /* Cover both contact-scale blockers and the outer search footprint. A uniform
        * wide disk can miss a small ring entirely between its center and first radius. */
-      float2 search_sample = hammersley_2d(i, search_count);
+      float2 search_sample = random::hammersley_2d(i, search_count);
       search_sample.x = search_sample.x * search_sample.x * search_sample.x;
       float2 disk = sample_disk(search_sample);
       float3 sample_P = shadow_node_pcss_plane_point(
@@ -1503,7 +1504,7 @@ float4 shadow_node_pcss_core([[resource_table]] ShadowRenderData &srd,
     if (i >= filter_count) {
       break;
     }
-    float2 filter_sample = hammersley_2d(i, filter_count);
+    float2 filter_sample = random::hammersley_2d(i, filter_count);
     if (light.type == LIGHT_RECT && filter_multiplier < 8) {
       /* Translate the square sequence rather than rotating the rectangular emitter itself. */
       filter_sample = fract(filter_sample + filter_rotation * 0.5f + 0.5f);

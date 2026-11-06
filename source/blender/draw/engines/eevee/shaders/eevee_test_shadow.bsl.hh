@@ -95,7 +95,7 @@ void eevee_test_shadows([[resource_table]] [[maybe_unused]] const ShaderTestOutp
     EXPECT_EQ(shadow_directional_level(light, float3(0.0f)), -12);
     EXPECT_EQ(shadow_directional_level(light, float3(0.00001f, 0.0f, 0.0f)), -12);
     EXPECT_EQ(shadow_directional_level(light, float3(1e30f), 1e30f),
-              light.sun().clipmap_lod_max);
+              light.sun.clipmap_lod_max);
     /* Perspective footprint follows distance; orthographic footprint remains constant. */
     EXPECT_NEAR(shadow_screen_pixel_size(0.01f, true, 2.0f),
                 2.0f * shadow_screen_pixel_size(0.01f, true, 1.0f), 1e-7f);

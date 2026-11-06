@@ -103,7 +103,7 @@ static void declare_pass_callback(void *user_data,
   UString name = StringRef(pass_name) == RE_PASSNAME_COMBINED ? "Image"_ustr : UString(pass_name);
   if (StringRef(scene->r.engine) == RE_engine_id_BLENDER_EEVEE) {
     for (const SceneRenderTexture *render_texture =
-             static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first);
+             static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first_);
          render_texture;
          render_texture = render_texture->next)
     {

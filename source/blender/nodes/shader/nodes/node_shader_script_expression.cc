@@ -631,7 +631,8 @@ static void node_update(bNodeTree *ntree, bNode *node)
   const ExpressionValidation validation = validate_expression_for_node(*node);
   if (!validation.ok) {
     std::lock_guard lock(ntree->runtime->shader_node_errors_mutex);
-    ntree->runtime->shader_node_errors.lookup_or_add_default(node->identifier).add(validation.error);
+    ntree->runtime->shader_node_errors.lookup_or_add_default(node->identifier).add(
+        {NodeWarningType::Error, validation.error});
   }
 }
 
@@ -714,11 +715,11 @@ std::string script_expression_error_get(const bNode &node)
   {
     std::lock_guard lock(tree.runtime->shader_node_errors_mutex);
     if (const auto *errors = tree.runtime->shader_node_errors.lookup_ptr(node.identifier)) {
-      for (const std::string &error : *errors) {
+      for (const NodeWarning &error : *errors) {
         if (!result.empty()) {
           result += '\n';
         }
-        result += error;
+        result += error.message;
       }
     }
   }

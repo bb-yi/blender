@@ -1413,10 +1413,10 @@ class ShaderNodesInliner {
       id_us_plus(sample_node.id);
     }
     /* The destination tree's topology cache is not built while nodes are being inserted. */
-    bNodeSocket &sample_input = *static_cast<bNodeSocket *>(sample_node.inputs.first);
+    bNodeSocket &sample_input = *sample_node.inputs.first();
     const SocketValue uv = this->handle_implicit_conversion(
         value_by_socket_.lookup(*uv_socket), *(*uv_socket)->typeinfo, *sample_input.typeinfo);
-    this->set_input_socket_value(*evaluate_node, sample_node, sample_input, uv);
+    this->set_input_socket_value(evaluate_node, sample_node, sample_input, uv);
 
     for (const int i : IndexRange(storage.output_items.items_num)) {
       const SocketInContext output = evaluate_node.output_socket(i);
@@ -2705,7 +2705,7 @@ class ShaderNodesInliner {
       }
       if (bNodeSocket *target = bundle_socket_by_identifier(copy, SOCK_IN, source->identifier)) {
         this->set_input_socket_value(
-            *node, copy, *target, value_by_socket_.lookup({node.context, source}));
+            node, copy, *target, value_by_socket_.lookup({node.context, source}));
       }
     }
     for (const Binding &binding : bindings) {
@@ -2720,7 +2720,7 @@ class ShaderNodesInliner {
                                                                          *binding.source_type,
                                                                          *target->typeinfo) :
                                         binding.value;
-      this->set_input_socket_value(*node, copy, *target, converted);
+      this->set_input_socket_value(node, copy, *target, converted);
     }
 
     std::function<SocketValue(const GLSLBundleField &, StringRef, const std::string &)>
@@ -2992,7 +2992,7 @@ class ShaderNodesInliner {
       SocketValue output_value{
           PrimitiveSocketValue::from_value({output_socket->typeinfo->base_cpp_type, value})};
       if (params_.r_uniform_tracking && node->is_type("ShaderNodeValue"_ustr) &&
-          output_socket == node->outputs.first && output_socket->type == SOCK_FLOAT)
+          output_socket == node->outputs.first() && output_socket->type == SOCK_FLOAT)
       {
         /* Value's multi-function only copies this socket default. All other CPU-folded outputs
          * intentionally lose direct provenance, even when numerically equal to an input. */
@@ -3067,8 +3067,8 @@ class ShaderNodesInliner {
       bNodeSocket &dst_output_socket = *socket_map.lookup(src_output_socket);
       const SocketInContext output_socket_ctx = {out_context, src_output_socket};
       SocketValue output_value{LinkedSocketValue{&copied_node, &dst_output_socket}};
-      if (params_.r_uniform_tracking && node->is_type("ShaderNodeRGB"_ustr) &&
-          src_output_socket == node->outputs.first && src_output_socket->type == SOCK_RGBA)
+      if (params_.r_uniform_tracking && node.is_type("ShaderNodeRGB"_ustr) &&
+          src_output_socket == node.outputs.first() && src_output_socket->type == SOCK_RGBA)
       {
         output_value.uniform_source = output_socket_ctx;
         this->track_uniform_target(copied_node, dst_output_socket, output_value);

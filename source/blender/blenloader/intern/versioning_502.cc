@@ -725,6 +725,10 @@ void blo_do_versions_502(FileData *fd, Library * /*lib*/, Main *bmain)
             view_layer.eevee.render_passes = eViewLayerEEVEEPassType(
                 (int(view_layer.eevee.render_passes) & ~(1 << 22)) | EEVEE_RENDER_PASS_OUTLINE);
           }
+          if (int(view_layer.eevee.render_passes) & (1 << 23)) {
+            view_layer.eevee.render_passes = eViewLayerEEVEEPassType(
+                (int(view_layer.eevee.render_passes) & ~(1 << 23)) | EEVEE_RENDER_PASS_PRE_FX);
+          }
         }
       }
       for (bScreen &screen : bmain->screens) {

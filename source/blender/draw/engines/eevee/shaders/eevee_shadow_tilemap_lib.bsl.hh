@@ -227,7 +227,7 @@ int shadow_directional_level(LightData light, float3 lP, float pixel_size = 0.0f
   if (light.type == LIGHT_SUN) {
     float scale = shadow_directional_clipmap_scale(light, lP, pixel_size);
     return clamp(shadow_directional_scale_level_ceil(scale),
-                 light.sun().clipmap_lod_min, light.sun().clipmap_lod_max);
+                 light.sun.clipmap_lod_min, light.sun.clipmap_lod_max);
   }
   /* The level can be negative and is increasing with the distance.
    * So we have to ceil instead of flooring. */

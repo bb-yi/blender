@@ -1046,11 +1046,11 @@ void ShadowModule::render_node_cache(View &view, int2 extent)
       continue;
     }
     const bool soft = is_sun_light(light.type) ?
-                          light.sun().shadow_angle > 0.0f :
+                          light.sun.shadow_angle > 0.0f :
                       is_area_light(light.type) ?
-                          light.area().shadow_scale > 0.0f :
+                          light.area.shadow_scale > 0.0f :
                           ELEM(light.type, LIGHT_OMNI_SPHERE, LIGHT_OMNI_DISK) &&
-                              light.local().local.shadow_radius > 0.0f;
+                              light.local.local.shadow_radius > 0.0f;
     lights += int(soft);
   }
   const int64_t cache_pixels = int64_t(extent.x + 1) * extent.y;
@@ -1212,7 +1212,8 @@ void ShadowModule::sync_object(const ObjectHandle &ob_handle,
                                bool has_transparent_shadows,
                                bool has_time_dependent_shadows,
                                bool has_view_dependent_shadows,
-                               bool has_position_dependent_shadows)
+                               bool has_position_dependent_shadows,
+                               bool has_offset_shadows)
 {
   if ((is_alpha_blend && !inst_.is_baking()) || has_offset_shadows) {
     tilemap_usage_transparent_ps_->draw(box_batch_, ob_handle.res_handle);

@@ -411,7 +411,8 @@ class ShadowModule {
                    bool has_transparent_shadows,
                    bool has_time_dependent_shadows,
                    bool has_view_dependent_shadows,
-                   bool has_position_dependent_shadows);
+                   bool has_position_dependent_shadows,
+                   bool has_offset_shadows);
   /** Conservatively tag shadow pages needed by a color-bake receiver bounds. */
   void sync_bake_receiver_bounds(const ResourceHandleRange &resource_handle);
   void end_sync();

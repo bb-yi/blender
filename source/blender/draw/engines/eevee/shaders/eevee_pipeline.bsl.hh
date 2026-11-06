@@ -39,6 +39,7 @@ struct PipelineConstants {
   [[compilation_constant]] bool use_screenspace_info;
   [[compilation_constant]] bool use_multi_viewport;
   [[compilation_constant]] bool use_barycentric;
+  [[compilation_constant]] bool is_stencil_writer_surface;
   [[compilation_constant]] int closure_bin_count;
   /* Same closure_bin_count but clamped to a minimum of 1. */
   [[compilation_constant]] int closure_bin_len;

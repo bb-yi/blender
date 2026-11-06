@@ -942,9 +942,9 @@ static bool npr_tree_reads_background(const bNodeTree *tree,
       if (node->flag & NODE_MUTED) {
         /* Muted nodes use their bypass links; a refraction node inside a muted group is
          * not a consumer and must not change Forward scheduling or allocate snapshots. */
-        for (const bNodeLink &internal_link : node->internal_links()) {
-          if (internal_link.tosock == link->fromsock) {
-            pending.append(internal_link.fromsock);
+        for (const bNodeInternalLink &internal_link : node->internal_links()) {
+          if (internal_link.out == link->fromsock) {
+            pending.append(internal_link.in);
           }
         }
         continue;
