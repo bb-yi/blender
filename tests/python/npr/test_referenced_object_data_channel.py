@@ -137,6 +137,10 @@ def assert_fixed_socket_abi():
         "Spot Size",
         "Sun Angle",
         "Visible",
+        "Origin",
+        "X Axis",
+        "Y Axis",
+        "Z Axis",
     }
     assert {socket.name for socket in node.outputs} == expected
 

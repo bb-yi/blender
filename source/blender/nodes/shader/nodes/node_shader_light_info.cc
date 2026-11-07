@@ -237,6 +237,17 @@ static void node_declare(NodeDeclarationBuilder &b)
   basic.add_output<decl::Float>("Sun Angle"_ustr);
   basic.add_output<decl::Float>("Visible"_ustr);
 
+  auto &transform = b.add_panel("Transform"_ustr, 3).default_closed(true);
+  transform.add_output<decl::Vector>("Origin"_ustr)
+      .description("Evaluated world-space origin for every light type, including Sun");
+  transform.add_output<decl::Vector>("X Axis"_ustr)
+      .description("World-space local +X matrix axis, including scale and shear");
+  transform.add_output<decl::Vector>("Y Axis"_ustr)
+      .description("World-space local +Y matrix axis, including scale and shear");
+  transform.add_output<decl::Vector>("Z Axis"_ustr)
+      .description("World-space local +Z matrix axis, including scale and shear; "
+                   "emission points along local -Z");
+
   auto &parameters = b.add_panel("Shader Parameters"_ustr, 1);
   const bNode *node = b.node_or_null();
   if (!node || !node->storage) {
@@ -297,7 +308,8 @@ static void node_update(bNodeTree *tree, bNode *node)
     }
     if (StringRef(socket.identifier).startswith("Shader Parameter ") ||
         ELEM(StringRef(socket.identifier), "Color", "Power", "Type", "Position", "Direction",
-             "Radius", "Spot Size", "Sun Angle", "Visible"))
+             "Radius", "Spot Size", "Sun Angle", "Visible", "Origin", "X Axis", "Y Axis",
+             "Z Axis"))
     {
       bke::node_set_socket_availability(*tree, socket, true);
     }
@@ -351,6 +363,19 @@ static int node_gpu(GPUMaterial *mat, bNode *node, bNodeExecData *, GPUNodeStack
   bool ok = GPU_link(mat, "node_light_info", GPU_constant(&uid),
                     links[0], links[1], links[2], links[3], links[4],
                     links[5], links[6], links[7], links[8]);
+  auto &origin = GPU_node_get_output(*node, out, "Origin");
+  auto &x_axis = GPU_node_get_output(*node, out, "X Axis");
+  auto &y_axis = GPU_node_get_output(*node, out, "Y Axis");
+  auto &z_axis = GPU_node_get_output(*node, out, "Z Axis");
+  if (origin.hasoutput || x_axis.hasoutput || y_axis.hasoutput || z_axis.hasoutput) {
+    ok &= GPU_link(mat,
+                   "node_light_info_transform",
+                   GPU_constant(&uid),
+                   &origin.link,
+                   &x_axis.link,
+                   &y_axis.link,
+                   &z_axis.link);
+  }
   const auto read_parameter = [&](const char *name, int type, bool available,
                                   GPUNodeLink *fallback, GPUNodeLink **value, GPUNodeLink **valid) {
     const uint64_t key = object && available ?

@@ -165730,3 +165730,19 @@ msgstr "Forward 折射"
 
 msgid "Participate in Refraction Background"
 msgstr "参与折射背景"
+
+
+msgid "Evaluated world-space origin for every light type, including Sun"
+msgstr "所有灯光类型（包括太阳灯）求值后的世界空间原点"
+
+
+msgid "World-space local +X matrix axis, including scale and shear"
+msgstr "世界空间中的局部 +X 矩阵轴，保留缩放与剪切"
+
+
+msgid "World-space local +Y matrix axis, including scale and shear"
+msgstr "世界空间中的局部 +Y 矩阵轴，保留缩放与剪切"
+
+
+msgid "World-space local +Z matrix axis, including scale and shear; emission points along local -Z"
+msgstr "世界空间中的局部 +Z 矩阵轴，保留缩放与剪切；发光方向沿局部 -Z"
