@@ -236,7 +236,25 @@ class NODE_HT_header(Header):
 
             layout.separator_spacer()
 
-            if snode.tree_type == 'EeveeFilterGraphNodeTree':
+            if snode.tree_type == 'NPRLineNodeTree':
+                layout.label(text=scene.name, icon='SCENE_DATA')
+                layout.template_ID(scene.eevee, "geometry_line_tree",
+                                   new="scene.npr_line_tree_copy" if scene.eevee.geometry_line_tree else
+                                       "scene.npr_line_tree_new")
+                layout.prop(scene.eevee, "use_geometry_lines", text="Enabled")
+                layout.operator("node.npr_line_add_group", text="Add Line Group", icon='ADD')
+                tree = scene.eevee.geometry_line_tree
+                if tree:
+                    layout.prop(tree, "show_performance", text="Line Timings", icon='TIME')
+                if tree and tree.preview_solo_node:
+                    layout.operator("node.npr_line_solo", text="Exit Solo Preview", icon='SOLO_ON').clear = True
+                elif tree:
+                    row = layout.row()
+                    active = snode.edit_tree.nodes.active if snode.edit_tree else None
+                    row.enabled = bool(snode.edit_tree == tree and active and active.bl_idname in {
+                        'NPRLineNodeSettings', 'NPRLineNodeCombine'})
+                    row.operator("node.npr_line_solo", text="Solo Preview", icon='SOLO_OFF')
+            elif snode.tree_type == 'EeveeFilterGraphNodeTree':
                 layout.template_ID(scene.eevee, "filter_graph", new="scene.eevee_filter_graph_new")
             else:
                 layout.template_ID(snode, "node_tree", new="node.new_node_tree")
@@ -345,6 +363,24 @@ class NODE_MT_add(node_add_menu.AddNodeMenu):
             layout.menu_contents("NODE_MT_shader_node_add_all")
         elif snode.tree_type == 'TextureNodeTree':
             layout.menu_contents("NODE_MT_texture_node_add_all")
+        elif snode.tree_type == 'NPRLineNodeTree':
+            for node_type, label in (
+                    ('NPRLineNodeObjects', 'Line Objects'),
+                    ('NPRLineNodeBrush', 'Line Brush'),
+                    ('NPRLineNodeSettings', 'Line Settings'),
+                    ('NPRLineNodeCombine', 'Combine Lines'),
+                    ('NPRLineNodeOcclusion', 'Line Occlusion'),
+                    ('NPRLineNodeReduction', 'Distance Reduction'),
+                    ('NPRLineNodeMap', 'Line Map'),
+                    ('NPRLineNodeOutput', 'Geometry Line Output')):
+                props = layout.operator("node.add_node", text=label)
+                props.type = node_type
+                props.use_transform = True
+            layout.separator()
+            layout.menu("NODE_MT_node_add_root_catalogs")
+            layout.menu("NODE_MT_node_add_group")
+            layout.operator("node.add_node", text="Reroute").type = 'NodeReroute'
+            layout.operator("node.add_node", text="Frame").type = 'NodeFrame'
         elif snode.tree_type == 'EeveeFilterGraphNodeTree':
             layout.menu_contents("NODE_MT_filter_graph_node_add_all")
         elif nodeitems_utils.has_node_categories(context):
@@ -1209,6 +1245,27 @@ class NODE_PT_node_tree_animation(Panel):
 
 
 # Grease Pencil properties
+class NODE_PT_npr_line_brush_preview(Panel):
+    bl_space_type = 'NODE_EDITOR'
+    bl_region_type = 'UI'
+    bl_category = 'Node'
+    bl_label = 'Brush Preview'
+
+    @classmethod
+    def poll(cls, context):
+        space = context.space_data
+        return (space.tree_type == 'NPRLineNodeTree' and space.edit_tree and
+                space.edit_tree.nodes.active and
+                space.edit_tree.nodes.active.bl_idname == 'NPRLineNodeBrush')
+
+    def draw(self, context):
+        from bl_operators.npr_lines import brush_preview
+        layout = self.layout
+        node = context.space_data.edit_tree.nodes.active
+        layout.template_icon(icon_value=brush_preview(node).icon_id, scale=12.0)
+        layout.label(text='Local sample; no visibility calculation', icon='INFO')
+
+
 class NODE_PT_annotation(AnnotationDataPanel, Panel):
     bl_space_type = 'NODE_EDITOR'
     bl_region_type = 'UI'
@@ -1320,6 +1377,7 @@ classes = (
     NODE_PT_backdrop,
     NODE_PT_quality,
     NODE_PT_annotation,
+    NODE_PT_npr_line_brush_preview,
     NODE_PT_overlay,
     NODE_PT_active_node_properties,
     NODE_PT_active_node_custom_properties,

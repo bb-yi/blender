@@ -537,6 +537,68 @@ void NativePostFXOutputModule::release_default_outline_history()
   default_outline_dof_buffer_.stabilize_history_tx_.release();
 }
 
+gpu::Texture *NativePostFXOutputModule::render_geometry_lines_for_combined(
+    View &view,
+    gpu::Texture *color_tx,
+    gpu::Texture *depth_tx,
+    gpu::Texture *velocity_tx,
+    bool use_dof,
+    bool use_motion_blur,
+    uint64_t history_signature)
+{
+  use_dof &= inst_.depth_of_field.postfx_enabled();
+  use_motion_blur &= inst_.motion_blur.postfx_enabled();
+  if (color_tx == nullptr || depth_tx == nullptr || (!use_dof && !use_motion_blur)) {
+    release_geometry_lines_history();
+    return color_tx;
+  }
+
+  if (geometry_line_history_signature_ != history_signature) {
+    release_geometry_lines_history();
+    geometry_line_history_signature_ = history_signature;
+  }
+  if (!use_dof) {
+    geometry_line_dof_buffer_.stabilize_history_tx_.release();
+  }
+
+  const int2 extent(GPU_texture_width(color_tx), GPU_texture_height(color_tx));
+  constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ |
+                                     GPU_TEXTURE_USAGE_SHADER_WRITE;
+  geometry_line_tx_.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
+  geometry_line_effect_tx_.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
+  GPU_texture_copy(geometry_line_tx_.gpu_texture(), color_tx);
+
+  /* Motion blur writes its velocity input while flattening camera/object motion. Keep both the
+   * raw line pass and its exact geometric guides available to subsequent consumers. Line motion
+   * always stores both directions, even when the main viewport vector buffer uses two channels. */
+  gpu::Texture *velocity_work_tx = velocity_tx;
+  if (use_motion_blur && velocity_tx != nullptr) {
+    geometry_line_velocity_tx_.acquire_2d(
+        extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
+    GPU_texture_copy(geometry_line_velocity_tx_.gpu_texture(), velocity_tx);
+    velocity_work_tx = geometry_line_velocity_tx_.gpu_texture();
+  }
+  GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
+                     GPU_BARRIER_SHADER_IMAGE_ACCESS);
+
+  ViewLayerNativePostFXOutput output = {};
+  output.effects = (use_dof ? VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_DOF : 0) |
+                   (use_motion_blur ? VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_MOTION_BLUR : 0);
+  return apply_camera_fx(view,
+                         geometry_line_tx_.gpu_texture(),
+                         geometry_line_effect_tx_.gpu_texture(),
+                         depth_tx,
+                         velocity_work_tx,
+                         geometry_line_dof_buffer_,
+                         output);
+}
+
+void NativePostFXOutputModule::release_geometry_lines_history()
+{
+  geometry_line_dof_buffer_.stabilize_history_tx_.release();
+  geometry_line_history_signature_ = 0;
+}
+
 void NativePostFXOutputModule::release()
 {
   source_tx_.release();
@@ -545,6 +607,9 @@ void NativePostFXOutputModule::release()
   default_outline_tx_.release();
   default_outline_effect_tx_.release();
   velocity_work_texture_release(default_outline_velocity_tx_, inst_.render_buffers.vector_tx_format());
+  geometry_line_tx_.release();
+  geometry_line_effect_tx_.release();
+  geometry_line_velocity_tx_.release();
 }
 
 }  // namespace blender::eevee

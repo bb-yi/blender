@@ -55,6 +55,10 @@ static bool is_supported_socket_type(const StringRef socket_type)
   if (!node_is_static_socket_type(*typeinfo)) {
     return true;
   }
+  /* Native opaque descriptors can define interface RNA without an arithmetic base type. */
+  if (typeinfo->type == SOCK_CUSTOM && typeinfo->ext_interface.srna) {
+    return true;
+  }
   /* Static socket types must have a valid base type.
    * Built-in sockets can have multiple registered RNA types for the base type, e.g.
    * `NodeSocketFloatUnsigned`, `NodeSocketFloatFactor`. */

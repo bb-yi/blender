@@ -579,6 +579,15 @@
 #define EEVEE_FILTER_GRAPH_NODE_STAGE_OUTPUT 903
 #define EEVEE_FILTER_GRAPH_NODE_AOV_OUTPUT 904
 
+#define NPR_LINE_NODE_OBJECTS 920
+#define NPR_LINE_NODE_BRUSH 921
+#define NPR_LINE_NODE_SETTINGS 922
+#define NPR_LINE_NODE_OUTPUT 923
+#define NPR_LINE_NODE_COMBINE 924
+#define NPR_LINE_NODE_OCCLUSION 925
+#define NPR_LINE_NODE_REDUCTION 926
+#define NPR_LINE_NODE_MAP 927
+
 /** \} */
 
 /* -------------------------------------------------------------------- */

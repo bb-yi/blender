@@ -1330,6 +1330,32 @@ static void rna_Scene_eevee_filter_graph_set(PointerRNA *ptr,
   }
 }
 
+static bool rna_Scene_geometry_line_tree_poll(PointerRNA * /*ptr*/, PointerRNA value)
+{
+  bNodeTree *ntree = static_cast<bNodeTree *>(value.data);
+  return ntree != nullptr && ntree->type == NTREE_NPR_LINE;
+}
+
+static void rna_Scene_geometry_line_tree_set(PointerRNA *ptr,
+                                             const PointerRNA value,
+                                             ReportList *reports)
+{
+  SceneEEVEE *eevee = static_cast<SceneEEVEE *>(ptr->data);
+  bNodeTree *ntree = static_cast<bNodeTree *>(value.data);
+  if (ntree && ntree->type != NTREE_NPR_LINE) {
+    BKE_reportf(
+        reports, RPT_ERROR, "Node tree '%s' is not a geometry line graph.", ntree->id.name + 2);
+    return;
+  }
+  if (eevee->geometry_line_tree) {
+    id_us_min(&eevee->geometry_line_tree->id);
+  }
+  eevee->geometry_line_tree = ntree;
+  if (eevee->geometry_line_tree) {
+    id_us_plus(&eevee->geometry_line_tree->id);
+  }
+}
+
 static std::optional<std::string> rna_SceneEEVEE_path(const PointerRNA * /*ptr*/)
 {
   return "eevee";
@@ -5611,6 +5637,14 @@ static void rna_def_view_layer_eevee(BlenderRNA *brna)
   srna = RNA_def_struct(brna, "ViewLayerEEVEE", nullptr);
   RNA_def_struct_path_func(srna, "rna_ViewLayerEEVEE_path");
   RNA_def_struct_ui_text(srna, "EEVEE Settings", "View Layer settings for EEVEE");
+  prop = RNA_def_property(srna, "use_geometry_lines", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, nullptr, "geometry_lines_disabled", 1);
+  RNA_def_property_ui_text(prop, "Geometry Lines", "Enable the scene geometry line graph for this view layer");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
+  prop = RNA_def_property(srna, "use_pass_geometry_line", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "use_pass_geometry_line", 1);
+  RNA_def_property_ui_text(prop, "Geometry Line", "Deliver geometry lines in an independent RGBA pass");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
 
   prop = RNA_def_property(srna, "use_pass_volume_direct", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "render_passes", EEVEE_RENDER_PASS_VOLUME_LIGHT);
@@ -9526,6 +9560,23 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
                                  "rna_Scene_eevee_filter_graph_set",
                                  nullptr,
                                  "rna_Scene_eevee_filter_graph_poll");
+
+  prop = RNA_def_property(srna, "geometry_line_tree", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "geometry_line_tree");
+  RNA_def_property_struct_type(prop, "NodeTree");
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+  RNA_def_property_ui_text(prop, "Geometry Lines", "Scene-level geometry line node tree");
+  RNA_def_property_update(prop, NC_SCENE | ND_NODES, "rna_Scene_set_update");
+  RNA_def_property_pointer_funcs(prop,
+                                 nullptr,
+                                 "rna_Scene_geometry_line_tree_set",
+                                 nullptr,
+                                 "rna_Scene_geometry_line_tree_poll");
+
+  prop = RNA_def_property(srna, "use_geometry_lines", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "use_geometry_lines", 1);
+  RNA_def_property_ui_text(prop, "Geometry Lines", "Render the scene geometry line graph");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_Scene_set_update");
 
   prop = RNA_def_property(srna, "filter_materials", PROP_COLLECTION, PROP_NONE);
   RNA_def_property_collection_sdna(prop, nullptr, "filter_materials", nullptr);

@@ -151,17 +151,21 @@ void MotionBlurModule::sync()
     return;
   }
 
-  GPUSamplerState no_filter = GPUSamplerState::default_sampler();
-  RenderBuffers &render_buffers = inst_.render_buffers;
+  sync_passes(inst_.render_buffers.vector_tx_format());
+}
 
+void MotionBlurModule::sync_passes(gpu::TextureFormat velocity_format)
+{
+  flatten_format_ = velocity_format;
+
+  GPUSamplerState no_filter = GPUSamplerState::default_sampler();
   motion_blur_ps_.init();
   motion_blur_ps_.bind_resources(inst_.velocity);
   motion_blur_ps_.bind_resources(inst_.sampling);
   {
     /* Create max velocity tiles. */
     PassSimple::Sub &sub = motion_blur_ps_.sub("TilesFlatten");
-    gpu::TextureFormat vector_tx_format = inst_.render_buffers.vector_tx_format();
-    eShaderType shader = vector_tx_format == gpu::TextureFormat::SFLOAT_16_16 ?
+    eShaderType shader = velocity_format == gpu::TextureFormat::SFLOAT_16_16 ?
                              MOTION_BLUR_TILE_FLATTEN_RG :
                              MOTION_BLUR_TILE_FLATTEN_RGBA;
     sub.shader_set(inst_.shaders.static_shader_get(shader));
@@ -210,6 +214,11 @@ void MotionBlurModule::render(View &view,
 
   depth_tx_ = (depth_tx != nullptr) ? depth_tx : inst_.render_buffers.depth_tx;
   velocity_tx_ = (velocity_tx != nullptr) ? velocity_tx : inst_.render_buffers.vector_tx;
+
+  /* An independent native output may provide RGBA velocity while the viewport scene uses RG. */
+  if (flatten_format_ != GPU_texture_format(velocity_tx_)) {
+    sync_passes(GPU_texture_format(velocity_tx_));
+  }
 
   int2 extent = {GPU_texture_width(depth_tx_), GPU_texture_height(depth_tx_)};
   int2 tiles_extent = math::divide_ceil(extent, int2(MOTION_BLUR_TILE_SIZE));

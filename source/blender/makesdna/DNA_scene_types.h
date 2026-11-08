@@ -2811,6 +2811,10 @@ struct SceneEEVEE {
   ListBase filter_materials = {};
   ListBase render_textures = {};
   struct bNodeTree *filter_graph = nullptr;
+  struct bNodeTree *geometry_line_tree = nullptr;
+  void *_pad_geometry_line_tree = nullptr;
+  int use_geometry_lines = 0;
+  int _pad_geometry_lines = 0;
   void *_pad3 = nullptr;
   int active_filter_material_index = -1;
   int active_render_texture_index = -1;

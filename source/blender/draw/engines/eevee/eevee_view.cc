@@ -303,6 +303,10 @@ namespace blender::eevee
       inst_.gbuffer.release();
     }
 
+    /* Independent geometry lines are also a Filter Graph source. The raw image never enters
+     * scene sampling/history; only its explicit Filter consumers or final Film overlay do. */
+    inst_.geometry_lines.render(main_view_);
+
     if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG))
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry,

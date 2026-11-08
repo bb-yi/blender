@@ -13,6 +13,7 @@
 #include <type_traits>
 
 #include "BLI_linear_allocator.hh"
+#include "BLI_listbase_iterator.hh"
 #include "BLI_index_range.hh"
 #include "BLI_math_base.h"
 #include "BLI_math_rotation.h"
@@ -31,6 +32,7 @@
 #include "BKE_attribute.hh"
 #include "BKE_context.hh"
 #include "BKE_geometry_set.hh"
+#include "BKE_global.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main_invariants.hh"
@@ -47,6 +49,7 @@
 
 #include "../../nodes/shader/include/NOD_filter_graph.hh"
 #include "NOD_common.hh"
+#include "NOD_npr_line.hh"
 #include "NOD_principled_npr.hh"
 #include "NOD_socket.hh"
 #include "NOD_shader_glsl_bundle.hh"
@@ -1065,6 +1068,97 @@ static void rna_EeveeFilterGraphStageOutput_is_active_output_set(PointerRNA *ptr
     node.flag &= ~NODE_DO_OUTPUT;
   }
   BKE_ntree_update_tag_active_output_changed(&ntree);
+}
+
+static bool rna_NPRLineOutput_is_active_output_get(PointerRNA *ptr)
+{
+  return (ptr->data_as<bNode>()->flag & NODE_DO_OUTPUT) != 0;
+}
+
+static int rna_NPRLineTree_preview_solo_node_get(PointerRNA *ptr)
+{
+  return nodes::npr_line_solo_node(*ptr->data_as<bNodeTree>());
+}
+
+static int rna_NPRLineNode_identifier_get(PointerRNA *ptr)
+{
+  return ptr->data_as<bNode>()->identifier;
+}
+
+static int rna_NPRLineBrush_stroke_mode_get(PointerRNA *ptr)
+{
+  return (static_cast<const NodeNPRLine *>(ptr->data_as<bNode>()->storage)->curve_flags >> 3) & 3;
+}
+
+static void rna_NPRLineBrush_stroke_mode_set(PointerRNA *ptr, int value)
+{
+  auto &data = *static_cast<NodeNPRLine *>(ptr->data_as<bNode>()->storage);
+  data.curve_flags = (data.curve_flags & ~(3 << 3)) | (value << 3);
+}
+
+static int rna_NPRLineBrush_wave_units_get(PointerRNA *ptr)
+{
+  return (static_cast<const NodeNPRLine *>(ptr->data_as<bNode>()->storage)->curve_flags >> 6) & 1;
+}
+
+static void rna_NPRLineBrush_wave_units_set(PointerRNA *ptr, int value)
+{
+  auto &data = *static_cast<NodeNPRLine *>(ptr->data_as<bNode>()->storage);
+  data.curve_flags = (data.curve_flags & ~(1 << 6)) | ((value & 1) << 6);
+}
+
+static bool rna_NPRLineTree_timing_get(PointerRNA *ptr)
+{
+  return nodes::npr_line_timing_enabled(*ptr->data_as<bNodeTree>());
+}
+static void rna_NPRLineTree_timing_set(PointerRNA *ptr, bool value)
+{
+  nodes::npr_line_set_timing_enabled(*G_MAIN, *ptr->data_as<bNodeTree>(), value);
+}
+static thread_local std::string npr_line_timing_snapshot;
+static int rna_NPRLineTree_timing_info_length(PointerRNA *ptr)
+{
+  npr_line_timing_snapshot = nodes::npr_line_timing(*ptr->data_as<bNodeTree>());
+  return int(npr_line_timing_snapshot.size());
+}
+static void rna_NPRLineTree_timing_info_get(PointerRNA * /*ptr*/, char *value)
+{
+  /* Keep the same snapshot used to size the RNA buffer while a render thread publishes. */
+  memcpy(value, npr_line_timing_snapshot.c_str(), npr_line_timing_snapshot.size() + 1);
+}
+
+static void rna_NPRLineTree_preview_solo_node_set(PointerRNA *ptr, int value)
+{
+  bNodeTree &tree = *ptr->data_as<bNodeTree>();
+  if (value) {
+    bool valid = false;
+    for (const bNode &node : tree.nodes) {
+      valid |= node.identifier == value &&
+               ELEM(node.type_legacy, NPR_LINE_NODE_SETTINGS, NPR_LINE_NODE_COMBINE);
+    }
+    if (!valid) {
+      return;
+    }
+  }
+  nodes::npr_line_set_solo_node(*G_MAIN, tree, value);
+}
+
+static void rna_NPRLineOutput_is_active_output_set(PointerRNA *ptr, bool value)
+{
+  bNodeTree &tree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
+  bNode &node = *ptr->data_as<bNode>();
+  if (value) {
+    for (bNode &other : tree.nodes) {
+      if (other.type_legacy == NPR_LINE_NODE_OUTPUT) {
+        other.flag &= ~NODE_DO_OUTPUT;
+      }
+    }
+    node.flag |= NODE_DO_OUTPUT;
+  }
+  else {
+    node.flag &= ~NODE_DO_OUTPUT;
+  }
+  BKE_ntree_update_tag_active_output_changed(&tree);
 }
 
 static void rna_EeveeFilterGraphStageOutput_update(Main *bmain,
@@ -9151,6 +9245,231 @@ static void def_eevee_filter_graph_filter_material(BlenderRNA *brna, StructRNA *
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
 }
 
+
+static void def_npr_line_common(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  PropertyRNA *prop;
+  prop = RNA_def_property(srna, "node_identifier", PROP_INT, PROP_NONE);
+  RNA_def_property_int_funcs(prop, "rna_NPRLineNode_identifier_get", nullptr, nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE | PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Node Identifier", "Stable identity used by temporary viewport previews");
+  RNA_def_struct_sdna_from(srna, "NodeNPRLine", "storage");
+  prop = RNA_def_property(srna, "enabled", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "enabled", 1);
+  RNA_def_property_ui_text(prop, "Enabled", "Enable this geometry line rule");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  for (const char *name : {"item_count", "exclude_count", "material_count"}) {
+    prop = RNA_def_property(srna, name, PROP_INT, PROP_NONE);
+    RNA_def_property_int_sdna(prop, nullptr, name);
+    RNA_def_property_range(prop, 1, 4096);
+    RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+    RNA_def_property_ui_text(prop, "Slots", "Number of persistent reference slots");
+    RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  }
+  static const EnumPropertyItem edges[] = {
+      {1, "OUTLINE", 0, "Outline", ""},
+      {2, "OBJECT", 0, "Object Contour", ""},
+      {4, "INTERSECTION", 0, "Intersection", ""},
+      {8, "SMOOTHING", 0, "Smoothing Boundary", ""},
+      {16, "MATERIAL", 0, "Material Boundary", ""},
+      {32, "NORMAL", 0, "Normal Angle", ""},
+      {64, "WIRE", 0, "Wire", ""},
+      {128, "MARKED", 0, "Marked Edge", ""},
+      {0, nullptr, 0, nullptr, nullptr}};
+  for (const char *name : {"visible_overrides", "hidden_overrides"}) {
+    prop = RNA_def_property(srna, name, PROP_ENUM, PROP_NONE);
+    RNA_def_property_enum_sdna(prop, nullptr, name);
+    RNA_def_property_flag(prop, PROP_ENUM_FLAG);
+    RNA_def_property_enum_items(prop, edges);
+    RNA_def_property_ui_text(prop, "Specific Brushes", "Expose independent brushes for these edge types");
+    RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  }
+}
+
+static void npr_line_mode(StructRNA *srna, const EnumPropertyItem *items)
+{
+  PropertyRNA *prop = RNA_def_property(srna, "mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "mode");
+  RNA_def_property_enum_items(prop, items);
+  RNA_def_property_ui_text(prop, "Mode", "Geometry line node mode");
+  RNA_def_property_translation_context(prop, "Geometry Lines");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
+static void def_npr_line_objects(BlenderRNA *brna, StructRNA *srna)
+{
+  def_npr_line_common(brna, srna);
+  static const EnumPropertyItem items[] = {
+      {0, "VIEW_LAYER", 0, "Current View Layer", ""},
+      {1, "COLLECTION", 0, "Collection", ""},
+      {2, "OBJECTS", 0, "Object List", ""},
+      {0, nullptr, 0, nullptr, nullptr}};
+  npr_line_mode(srna, items);
+}
+
+static void def_npr_line_brush(BlenderRNA *brna, StructRNA *srna)
+{
+  def_npr_line_common(brna, srna);
+  static const EnumPropertyItem items[] = {
+      {0, "SIMPLE", 0, "Simple", ""},
+      {1, "NORMAL", 0, "Normal", ""},
+      {2, "MULTIPLE", 0, "Multiple", ""},
+      {0, nullptr, 0, nullptr, nullptr}};
+  npr_line_mode(srna, items);
+  PropertyRNA *response = RNA_def_property(srna, "raster_size_response", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(response, nullptr, "curve_flags", 4);
+  RNA_def_property_boolean_default(response, true);
+  RNA_def_property_ui_text(response, "Raster Size Response",
+                          "Use Pencil-style raster coverage and subpixel opacity for Simple, Normal, and Multiple brushes");
+  RNA_def_property_update(response, NC_NODE | NA_EDITED, "rna_Node_update");
+  static const EnumPropertyItem wave_units[] = {
+      {0, "STROKE", 0, "Cycles per Stroke", "Keep the saved normalized cycle count along each stroke"},
+      {1, "PIXELS", 0, "Pixel Wavelength", "Keep the wave length fixed in output pixels"},
+      {0, nullptr, 0, nullptr, nullptr}};
+  PropertyRNA *wave = RNA_def_property(srna, "wave_units", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(wave, wave_units);
+  RNA_def_property_enum_funcs(wave, "rna_NPRLineBrush_wave_units_get", "rna_NPRLineBrush_wave_units_set", nullptr);
+  RNA_def_property_ui_text(wave, "Wave Units", "Choose a pixel wavelength or the legacy number of cycles per stroke");
+  RNA_def_property_update(wave, NC_NODE | NA_EDITED, "rna_Node_update");
+  PropertyRNA *connection = RNA_def_property(srna, "override_stroke_connection", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(connection, nullptr, "curve_flags", 1 << 5);
+  RNA_def_property_ui_text(connection, "Override Stroke Connection",
+                          "Use this brush's connection and direction settings for visible, hidden and per-type lines; otherwise use Line Settings");
+  RNA_def_property_update(connection, NC_NODE | NA_EDITED, "rna_Node_update");
+  static const EnumPropertyItem stroke_modes[] = {
+      {0, "RAKE", 0, "Follow Path", "Orient brush tips along the stroke tangent"},
+      {1, "NORMAL", 0, "Fixed Angle", "Keep the brush orientation constant"},
+      {2, "RANDOM", 0, "Random Angle", "Vary brush orientation using Rotation Random and the fixed seed"},
+      {0, nullptr, 0, nullptr, nullptr}};
+  PropertyRNA *stroke = RNA_def_property(srna, "stroke_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(stroke, stroke_modes);
+  RNA_def_property_enum_funcs(stroke, "rna_NPRLineBrush_stroke_mode_get", "rna_NPRLineBrush_stroke_mode_set", nullptr);
+  RNA_def_property_ui_text(stroke, "Stroke Orientation", "Control how textured brush tips follow the stroke");
+  RNA_def_property_update(stroke, NC_NODE | NA_EDITED, "rna_Node_update");
+  for (int i = 0; i < 2; i++) {
+    PropertyRNA *prop = RNA_def_property(srna, i == 0 ? "use_width_curve" : "use_opacity_curve", PROP_BOOLEAN, PROP_NONE);
+    RNA_def_property_boolean_sdna(prop, nullptr, "curve_flags", 1 << i);
+    RNA_def_property_ui_text(prop, i == 0 ? "Width Curve" : "Opacity Curve",
+                            "Use a normalized curve along the stroke instead of linear start and end reduction");
+    RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+    prop = RNA_def_property(srna, i == 0 ? "width_curve" : "opacity_curve", PROP_POINTER, PROP_NONE);
+    RNA_def_property_pointer_sdna(prop, nullptr, i == 0 ? "width_curve" : "opacity_curve");
+    RNA_def_property_struct_type(prop, "CurveMapping");
+    RNA_def_property_ui_text(prop, i == 0 ? "Width Curve" : "Opacity Curve", "Normalized stroke envelope");
+    RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  }
+}
+
+static void def_npr_line_settings(BlenderRNA *brna, StructRNA *srna)
+{
+  def_npr_line_common(brna, srna);
+}
+
+static void def_npr_line_combine(BlenderRNA *brna, StructRNA *srna)
+{
+  def_npr_line_common(brna, srna);
+  static const EnumPropertyItem items[] = {
+      {0, "PRIORITY", 0, "Priority Override", ""},
+      {1, "OVERLAY", 0, "Overlay", ""},
+      {0, nullptr, 0, nullptr, nullptr}};
+  npr_line_mode(srna, items);
+}
+
+static void def_npr_line_output(BlenderRNA *brna, StructRNA *srna)
+{
+  def_npr_line_common(brna, srna);
+  static const EnumPropertyItem items[] = {
+      {0, "AUTO", 0, "Automatic Preview", ""},
+      {1, "FULL", 0, "Full", ""},
+      {2, "FAST", 0, "Fast Preview", ""},
+      {0, nullptr, 0, nullptr, nullptr}};
+  npr_line_mode(srna, items);
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+  PropertyRNA *prop = RNA_def_property(srna, "is_active_output", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "flag", NODE_DO_OUTPUT);
+  RNA_def_property_boolean_funcs(prop,
+                                 "rna_NPRLineOutput_is_active_output_get",
+                                 "rna_NPRLineOutput_is_active_output_set");
+  RNA_def_property_ui_text(prop, "Active Output", "Use this geometry line output");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
+static void def_npr_line_occlusion(BlenderRNA *brna, StructRNA *srna)
+{
+  def_npr_line_common(brna, srna);
+  static const EnumPropertyItem items[] = {
+      {0, "SOLID", 0, "Solid", ""},
+      {1, "IGNORE", 0, "Ignore", ""},
+      {2, "MASK", 0, "Alpha Mask", ""},
+      {0, nullptr, 0, nullptr, nullptr}};
+  npr_line_mode(srna, items);
+}
+
+static void def_npr_line_reduction(BlenderRNA *brna, StructRNA *srna)
+{
+  def_npr_line_common(brna, srna);
+  static const EnumPropertyItem items[] = {
+      {0, "CAMERA", 0, "Camera Distance", "Measure distance from the camera position"},
+      {1, "OBJECT", 0, "Object Distance", "Measure distance from the evaluated reference object's origin"},
+      {0, nullptr, 0, nullptr, nullptr}};
+  npr_line_mode(srna, items);
+  PropertyRNA *prop = RNA_def_property(srna, "curve", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "width_curve");
+  RNA_def_property_struct_type(prop, "CurveMapping");
+  RNA_def_property_ui_text(prop, "Reduction Curve", "Distance along the horizontal axis, width or opacity factor along the vertical axis");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
+static void def_npr_line_map(BlenderRNA *brna, StructRNA *srna)
+{
+  def_npr_line_common(brna, srna);
+  static const EnumPropertyItem coordinates[] = {
+      {0, "UV", 0, "Surface UV", "Use evaluated mesh UV coordinates; stable when the view changes"},
+      {1, "SCREEN", 0, "Screen", "Top-left is zero, bottom-right is one"},
+      {2, "ATTRIBUTE", 0, "Color Attribute", "Use an evaluated mesh point or face-corner color attribute"},
+      {0, nullptr, 0, nullptr, nullptr}};
+  npr_line_mode(srna, coordinates);
+  static const EnumPropertyItem selection[] = {
+      {0, "INDEX", 0, "Index", "UV map order in the object data, starting at zero"},
+      {1, "NAME", 0, "Name", "Select a UV map by name"},
+      {0, nullptr, 0, nullptr, nullptr}};
+  static const EnumPropertyItem wraps[] = {
+      {0, "REPEAT", 0, "Repeat", ""}, {1, "CLAMP", 0, "Clamp", ""},
+      {2, "MIRROR", 0, "Mirror", ""}, {3, "MIRROR_ONCE", 0, "Mirror Once", ""},
+      {4, "CLIP", 0, "Clip", ""}, {0, nullptr, 0, nullptr, nullptr}};
+  static const EnumPropertyItem filters[] = {
+      {0, "POINT", 0, "Point", "Sample the nearest image pixel"},
+      {1, "BILINEAR", 0, "Bilinear", "Interpolate four image pixels"},
+      {0, nullptr, 0, nullptr, nullptr}};
+  PropertyRNA *prop = RNA_def_property(srna, "uv_selection", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "uv_selection");
+  RNA_def_property_enum_items(prop, selection);
+  RNA_def_property_ui_text(prop, "UV Selection", "Choose the UV layer by index or name");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  static const EnumPropertyItem attribute_selection[] = {
+      {0, "INDEX", 0, "Index", "Color Attributes order in the object data, starting at zero"},
+      {1, "NAME", 0, "Name", "Select a color attribute by name"},
+      {0, nullptr, 0, nullptr, nullptr}};
+  prop = RNA_def_property(srna, "attribute_selection", PROP_ENUM, PROP_NONE);
+  /* Map nodes do not use brush curve flags; retain their independent attribute selector here. */
+  RNA_def_property_enum_sdna(prop, nullptr, "curve_flags");
+  RNA_def_property_enum_items(prop, attribute_selection);
+  RNA_def_property_ui_text(prop, "Attribute Selection", "Choose a mesh color attribute by index or name");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  for (const char *axis : {"wrap_u", "wrap_v"}) {
+    prop = RNA_def_property(srna, axis, PROP_ENUM, PROP_NONE);
+    RNA_def_property_enum_sdna(prop, nullptr, axis);
+    RNA_def_property_enum_items(prop, wraps);
+    RNA_def_property_ui_text(prop, STREQ(axis, "wrap_u") ? "Wrap U" : "Wrap V", "Texture boundary behavior");
+    RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  }
+  prop = RNA_def_property(srna, "filter_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "texture_filter");
+  RNA_def_property_enum_items(prop, filters);
+  RNA_def_property_ui_text(prop, "Filter", "Image sampling filter");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
 static void def_eevee_filter_graph_stage_output(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem filter_execution_stage_items[] = {
@@ -14167,6 +14486,7 @@ static void rna_def_nodetree(BlenderRNA *brna)
        ICON_NODE_COMPOSITING,
        "Filter Graph",
        "Eevee filter graph nodes"},
+      {NTREE_NPR_LINE, "NPR_LINE", ICON_GREASEPENCIL, "Geometry Lines", "Scene geometry line nodes"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -14627,6 +14947,15 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("NodeInternal", "EeveeFilterGraphNodeAOVOutput", def_eevee_filter_graph_aov_output);
   define("NodeInternal", "EeveeFilterGraphNodeFilterMaterial", def_eevee_filter_graph_filter_material);
   define("NodeInternal", "EeveeFilterGraphNodeSceneColor");
+  define("NodeInternal", "NPRLineNodeObjects", def_npr_line_objects);
+  define("NodeInternal", "NPRLineNodeBrush", def_npr_line_brush);
+  define("NodeInternal", "NPRLineNodeSettings", def_npr_line_settings);
+  define("NodeInternal", "NPRLineNodeCombine", def_npr_line_combine);
+  define("NodeInternal", "NPRLineNodeOutput", def_npr_line_output);
+  define("NodeInternal", "NPRLineNodeOcclusion", def_npr_line_occlusion);
+  define("NodeInternal", "NPRLineNodeReduction", def_npr_line_reduction);
+  define("NodeInternal", "NPRLineNodeMap", def_npr_line_map);
+  define("NodeInternal", "NPRLineNodeGroup", def_group);
   define("NodeInternal", "EeveeFilterGraphNodeStageOutput", def_eevee_filter_graph_stage_output);
 
   define("ShaderNode", "ShaderNodeAddShader");
@@ -15251,6 +15580,32 @@ void RNA_def_nodetree(BlenderRNA *brna)
 
   rna_def_composite_nodetree(brna);
   rna_def_eevee_filter_graph_nodetree(brna);
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NPRLineNodeTree", "NodeTree");
+    RNA_def_struct_ui_text(srna, "Geometry Lines", "Scene-wide geometry line node tree");
+    RNA_def_struct_sdna(srna, "bNodeTree");
+    RNA_def_struct_ui_icon(srna, ICON_GREASEPENCIL);
+    PropertyRNA *prop = RNA_def_property(srna, "preview_solo_node", PROP_INT, PROP_NONE);
+    RNA_def_property_int_funcs(prop,
+                               "rna_NPRLineTree_preview_solo_node_get",
+                               "rna_NPRLineTree_preview_solo_node_set",
+                               nullptr);
+    RNA_def_property_range(prop, 0, INT_MAX);
+    RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+    RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+    RNA_def_property_ui_text(prop, "Solo Preview", "Temporarily isolate a line rule in the viewport only");
+    RNA_def_property_update(prop, NC_NODE | NA_EDITED, nullptr);
+    prop = RNA_def_property(srna, "show_performance", PROP_BOOLEAN, PROP_NONE);
+    RNA_def_property_boolean_funcs(prop, "rna_NPRLineTree_timing_get", "rna_NPRLineTree_timing_set");
+    RNA_def_property_flag(prop, PROP_SKIP_SAVE | PROP_NO_DEG_UPDATE);
+    RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+    RNA_def_property_ui_text(prop, "Line Timings", "Show CPU stage timings and drawing submission costs without blocking for GPU readback");
+    prop = RNA_def_property(srna, "performance_info", PROP_STRING, PROP_NONE);
+    RNA_def_property_string_funcs(prop, "rna_NPRLineTree_timing_info_get", "rna_NPRLineTree_timing_info_length", nullptr);
+    RNA_def_property_clear_flag(prop, PROP_EDITABLE | PROP_ANIMATABLE);
+    RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+  }
+
   rna_def_shader_nodetree(brna);
   rna_def_texture_nodetree(brna);
   rna_def_geometry_nodetree(brna);

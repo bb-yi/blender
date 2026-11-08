@@ -868,6 +868,7 @@ static void scene_foreach_id(ID *id, LibraryForeachIDData *data)
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->r.bake.cage_object, IDWALK_CB_NOP);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->compositing_node_group, IDWALK_CB_USER);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->eevee.filter_graph, IDWALK_CB_USER);
+  BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->eevee.geometry_line_tree, IDWALK_CB_USER);
   for (SceneRenderTexture *render_texture = static_cast<SceneRenderTexture *>(
            scene->eevee.render_textures.first);
        render_texture != nullptr;
@@ -1936,6 +1937,7 @@ Scene *BKE_scene_duplicate(Main *bmain,
     BKE_scene_copy_data_eevee(sce_copy, sce);
     /* EMPTY bypasses generic ID copying, which normally accounts for these users. */
     id_us_plus(reinterpret_cast<ID *>(sce_copy->eevee.filter_graph));
+    id_us_plus(reinterpret_cast<ID *>(sce_copy->eevee.geometry_line_tree));
     for (SceneFilterMaterial *filter_material = static_cast<SceneFilterMaterial *>(
              sce_copy->eevee.filter_materials.first);
          filter_material != nullptr;
@@ -2032,6 +2034,10 @@ Scene *BKE_scene_duplicate(Main *bmain,
       bmain, reinterpret_cast<ID *>(sce->compositing_node_group), duplicate_flags, copy_flags);
   BKE_id_copy_for_duplicate(
       bmain, reinterpret_cast<ID *>(sce->eevee.filter_graph), duplicate_flags, copy_flags);
+  BKE_id_copy_for_duplicate(bmain,
+                            reinterpret_cast<ID *>(sce->eevee.geometry_line_tree),
+                            duplicate_flags,
+                            copy_flags);
 
   if (type == SCE_COPY_FULL) {
     /* Copy Freestyle LineStyle datablocks. */

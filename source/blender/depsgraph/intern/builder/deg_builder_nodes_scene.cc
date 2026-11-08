@@ -61,6 +61,7 @@ void DepsgraphNodeBuilder::build_scene_parameters(Scene *scene)
 
   /* Scene filters are rendered even when their materials are not assigned to objects. */
   build_nodetree(scene->eevee.filter_graph);
+  build_nodetree(scene->eevee.geometry_line_tree);
 
   for (TimeMarker &marker : scene->markers) {
     build_idproperties(marker.prop);

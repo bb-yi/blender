@@ -1765,6 +1765,47 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     for (const bNode *node : order) {
       if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_SCENE_COLOR) {
         for (const bNodeSocket *socket : node->output_sockets()) {
+          if (STREQ(socket->identifier, "Geometry Line Image")) {
+            gpu::Texture *line_tx = inst_.geometry_lines.enabled() ?
+                                       inst_.geometry_lines.pass_texture() : nullptr;
+            if (!socket->is_directly_linked()) {
+              result_by_socket.add_overwrite(socket, FilterGraphImageHandle::null());
+              continue;
+            }
+            /* Graph image inputs use array textures. Blit the single 2D line layer without a
+             * shader or CPU readback, and let the existing graph resampling/alpha path handle it.
+             * GPU_texture_copy requires identical texture types on OpenGL. */
+            const int2 line_extent = line_tx ?
+                                         int2(GPU_texture_width(line_tx), GPU_texture_height(line_tx)) :
+                                         int2(1);
+            Texture *line_input_tx = acquire_graph_texture("FilterMaterial.GeometryLines",
+                                                          line_tx ? GPU_texture_format(line_tx) :
+                                                                    gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                                          line_extent,
+                                                          1);
+            if (line_tx) {
+              line_input_tx->ensure_layer_views();
+              geometry_line_input_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(line_tx));
+              framebuffer_.ensure(GPU_ATTACHMENT_NONE,
+                                  GPU_ATTACHMENT_TEXTURE_LAYER(line_input_tx->layer_view(0), 0));
+              GPU_framebuffer_blit(geometry_line_input_fb_, 0, framebuffer_, 0, GPU_COLOR_BIT);
+            }
+            else {
+              /* A missing line image means transparent ink. A null graph handle instead resolves
+               * to the graph's opaque-black missing-input fallback. */
+              const float transparent[4] = {0, 0, 0, 0};
+              GPU_texture_clear(line_input_tx->gpu_texture(), GPU_DATA_FLOAT, transparent);
+            }
+            GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_UPDATE |
+                               GPU_BARRIER_TEXTURE_FETCH);
+            result_by_socket.add_overwrite(
+                socket,
+                FilterGraphImageHandle::graph_texture(line_input_tx->gpu_texture(),
+                                                      0,
+                                                      FILTER_GRAPH_SOURCE_COLOR,
+                                                      FILTER_GRAPH_ALPHA_MODE_OPACITY));
+            continue;
+          }
           result_by_socket.add_overwrite(
               socket, filter_graph_scene_output_handle(*socket, extent, stage_format));
         }

@@ -266,6 +266,21 @@ class ObjectRef {
     return duplis_ != nullptr;
   }
 
+  /** Read-only evaluated instance identity for geometry-dependent render modules. */
+  const DupliObject *dupli_object(int instance_index = 0) const
+  {
+    if (duplis_) {
+      return (*duplis_)[instance_index];
+    }
+    BLI_assert(instance_index == 0);
+    return dupli_object_;
+  }
+
+  const Object *dupli_parent() const
+  {
+    return dupli_parent_;
+  }
+
   int instances_count() const
   {
     if (duplis_) {

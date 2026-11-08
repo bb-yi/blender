@@ -850,6 +850,20 @@ class RENDER_PT_eevee_sampling_advanced(RenderButtonsPanel, Panel):
         col.prop(props, "light_threshold")
 
 
+class RENDER_PT_eevee_geometry_lines(RenderButtonsPanel, Panel):
+    bl_label = "Geometry Lines"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.eevee, "use_geometry_lines", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.template_ID(context.scene.eevee, "geometry_line_tree", new="scene.npr_line_tree_new")
+        layout.label(text="Edit the scene in a Geometry Lines node editor.")
+
+
 class RENDER_PT_eevee_outline(RenderButtonsPanel, Panel):
     bl_label = "Outline"
     bl_options = {'DEFAULT_CLOSED'}
@@ -1342,6 +1356,7 @@ classes = (
     RENDER_PT_eevee_motion_blur,
     RENDER_PT_eevee_motion_blur_curve,
     RENDER_PT_eevee_bake,
+    RENDER_PT_eevee_geometry_lines,
     RENDER_PT_eevee_outline,
     RENDER_PT_eevee_film,
     RENDER_PT_eevee_performance,

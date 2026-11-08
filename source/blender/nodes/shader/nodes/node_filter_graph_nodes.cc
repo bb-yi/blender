@@ -481,6 +481,8 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Image>("Depth Image"_ustr);
   b.add_output<decl::Image>("Normal Image"_ustr);
   b.add_output<decl::Image>("Position Image"_ustr);
+  b.add_output<decl::Image>("Geometry Line Image"_ustr)
+      .description("Independent premultiplied scene Geometry Lines, before automatic compositing");
 }
 
 }  // namespace scene_color

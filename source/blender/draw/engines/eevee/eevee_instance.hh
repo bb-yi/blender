@@ -48,6 +48,7 @@
 #include "eevee_motion_blur.hh"
 #include "eevee_native_postfx_output.hh"
 #include "eevee_outline.hh"
+#include "eevee_geometry_lines.hh"
 #include "eevee_outline_shell.hh"
 #include "eevee_pipeline.hh"
 #include "eevee_raytrace.hh"
@@ -131,6 +132,7 @@ namespace blender::eevee
 
     /** Info string displayed at the top of the render / viewport, or the console when baking. */
     std::string info_ = "";
+    std::string display_info_;
 
   public:
     ShaderModule& shaders;
@@ -153,6 +155,7 @@ namespace blender::eevee
     RenderTextureModule render_textures;
     FilterMaterialModule filter_materials;
     OutlineModule outline;
+    GeometryLineModule geometry_lines{*this};
     OutlineShellModule outline_shell;
     Dlss5Module dlss5;
     DlssSrModule dlss_sr;
@@ -407,7 +410,13 @@ namespace blender::eevee
 
     const char* info_get()
     {
-      return info_.c_str();
+      display_info_ = info_;
+      if (geometry_lines.is_quick_preview()) {
+        display_info_ += RPT_("Geometry Lines: Quick Preview (approximate depth, no intersections or joining)");
+      }
+      const std::string timing = geometry_lines.timing_info();
+      if (!timing.empty()) { display_info_ += "\n" + timing; }
+      return display_info_.c_str();
     }
 
     bool is_viewport() const

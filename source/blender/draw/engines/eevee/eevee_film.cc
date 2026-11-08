@@ -369,6 +369,7 @@ static eViewLayerEEVEEPassType with_light_pass_color_dependencies(eViewLayerEEVE
 
 void Film::init(const int2 &extent, const rcti *output_rect)
 {
+  inst_.geometry_lines.reset_accumulation();
   using namespace math;
 
   Sampling &sampling = inst_.sampling;
@@ -1183,6 +1184,7 @@ void Film::accumulate(View &view,
   has_outline_input_ = outline_input_tx != nullptr;
   use_outline_in_combined_ = outline_combined_tx != nullptr;
   display_only_ = false;
+  inst_.geometry_lines.accumulate(view);
   gpu::Texture *dlss_display_tx = nullptr;
   inst_.manager->submit(accumulate_ps_, view);
   const bool dlss_live_viewport = inst_.is_viewport() && !inst_.is_image_render;
@@ -1214,6 +1216,9 @@ void Film::accumulate(View &view,
     }
   }
 
+  if (inst_.is_viewport() && data_.display_id == -1) {
+    inst_.geometry_lines.present(view);
+  }
   combined_tx_.swap();
   weight_tx_.swap();
 
@@ -1285,6 +1290,9 @@ void Film::display()
 
   display_only_ = true;
   DRW_manager_get()->submit(accumulate_ps_, drw_view);
+  if (data_.display_id == -1) {
+    inst_.geometry_lines.present(drw_view);
+  }
 
   inst_.render_buffers.release();
 
@@ -1302,6 +1310,9 @@ float *Film::read_pass(eViewLayerEEVEEPassType pass_type, int layer_offset)
    * normal pass lookup here so render readback and viewport display share one
    * authoritative Combined texture. */
   gpu::Texture *pass_tx = this->get_pass_texture(pass_type, layer_offset);
+  if (pass_type == EEVEE_RENDER_PASS_COMBINED && layer_offset == 0 && pass_tx) {
+    pass_tx = inst_.geometry_lines.composite(draw::View::default_get(), pass_tx);
+  }
   if (pass_tx == nullptr) {
     return nullptr;
   }
@@ -1435,6 +1446,9 @@ void Film::write_viewport_compositor_passes()
     Vector<std::string> pass_names = Film::pass_to_render_pass_names(pass_type, inst_.view_layer);
     for (const int64_t pass_offset : IndexRange(pass_names.size())) {
       gpu::Texture *pass_texture = this->get_pass_texture(pass_type, pass_offset);
+      if (pass_type == EEVEE_RENDER_PASS_COMBINED && pass_texture) {
+        pass_texture = inst_.geometry_lines.composite(draw::View::default_get(), pass_texture);
+      }
       if (!pass_texture) {
         continue;
       }
@@ -1458,6 +1472,21 @@ void Film::write_viewport_compositor_passes()
       write_pass_ps.barrier(GPU_BARRIER_TEXTURE_FETCH);
       write_pass_ps.dispatch(math::divide_ceil(this->display_extent, int2(FILM_GROUP_SIZE)));
       inst_.manager->submit(write_pass_ps);
+    }
+  }
+
+  if (inst_.view_layer->eevee.use_pass_geometry_line) {
+    if (gpu::Texture *line = inst_.geometry_lines.texture()) {
+      draw::TextureFromPool &output = DRW_viewport_pass_texture_get("Geometry Line");
+      output.acquire_2d(this->display_extent, GPU_texture_format(line));
+      PassSimple pass("Film.WriteGeometryLine");
+      pass.shader_set(inst_.shaders.static_shader_get(FILM_PASS_CONVERT_COMBINED));
+      pass.push_constant("offset", data_.offset);
+      pass.bind_texture("input_tx", line);
+      pass.bind_image("output_img", output);
+      pass.barrier(GPU_BARRIER_TEXTURE_FETCH);
+      pass.dispatch(math::divide_ceil(this->display_extent, int2(FILM_GROUP_SIZE)));
+      inst_.manager->submit(pass);
     }
   }
 

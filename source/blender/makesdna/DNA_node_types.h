@@ -52,6 +52,7 @@ struct RuntimeNodeEnumItems;
 
 struct AnimData;
 struct Collection;
+struct CurveMapping;
 struct GeometryNodeAssetTraits;
 struct ID;
 struct Image;
@@ -282,6 +283,7 @@ enum eNodeTree_Type : int {
   NTREE_TEXTURE = 2,
   NTREE_GEOMETRY = 3,
   NTREE_EEVEE_FILTER_GRAPH = 4,
+  NTREE_NPR_LINE = 5,
 };
 
 /** #NodeTree.flag */
@@ -4616,6 +4618,24 @@ struct NodeGetBundleItem {
   eNodeSocketDatatype socket_type = {};
   NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
   char _pad = {};
+};
+
+/** Settings not represented by sockets in a scene-level geometry line graph. */
+struct NodeNPRLine {
+  int mode = 0;
+  int enabled = 1;
+  int item_count = 1;
+  int exclude_count = 1;
+  int material_count = 1;
+  int visible_overrides = 0;
+  int hidden_overrides = 0;
+  int curve_flags = 0;
+  int uv_selection = 0;
+  int wrap_u = 0;
+  int wrap_v = 0;
+  int texture_filter = 1;
+  CurveMapping *width_curve = nullptr;
+  CurveMapping *opacity_curve = nullptr;
 };
 
 struct NodeStoreBundleItem {
