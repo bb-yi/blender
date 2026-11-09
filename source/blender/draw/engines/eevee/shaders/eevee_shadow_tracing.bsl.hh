@@ -662,13 +662,7 @@ uint shadow_caster_id_read([[resource_table]] ShadowRenderData &srd, ShadowCoord
   uint2 texel_page = (texel >> tile.lod) & page_mask;
   texel = (uint2(tile.page.xy) << page_shift) | texel_page;
 
-  uint packed_value = texelFetch(
-                          srd.shadow_caster_atlas_tx, int3(int2(texel), int(tile.page.z)), 0)
-                          .r;
-  if (packed_value == 0xFFFFFFFFu) {
-    return SHADOW_CASTER_UNKNOWN_ID;
-  }
-  return packed_value & 0xFFFFu;
+  return texelFetch(srd.shadow_caster_atlas_tx, int3(int2(texel), int(tile.page.z)), 0).r;
 }
 
 ShadowCoordinates shadow_caster_sample_coord(ShadowRayDirectional ray, float ray_time)
@@ -693,15 +687,37 @@ ShadowCasterTraceResult shadow_trace_caster_id([[resource_table]] ShadowRenderDa
 {
   ShadowMapTracingState state = shadow_map_trace_init(sample_count, step_offset);
   uint caster_id = SHADOW_CASTER_UNKNOWN_ID;
+  uint history_caster_id = SHADOW_CASTER_UNKNOWN_ID;
   for (int i = 0; (i <= sample_count) && (i <= SHADOW_MAX_STEP) && (state.hit == false); i++)
   { /* Saturate to always cover the shading point position when i == sample_count. */
     state.ray_time = square(saturate(float(i) * state.ray_step_mul + state.ray_step_bias));
 
     ShadowTracingSample samp = shadow_map_trace_sample(srd, state, ray);
-    if (!samp.skip_sample) {
-      caster_id = shadow_caster_id_read(srd, shadow_caster_sample_coord(ray, state.ray_time));
+    if (samp.skip_sample) {
+      continue;
     }
+    uint sample_caster_id = shadow_caster_id_read(srd,
+                                                  shadow_caster_sample_coord(ray, state.ray_time));
+    bool has_history = state.occluder_history.x != SHADOW_TRACING_INVALID_HISTORY;
+    bool extrapolate_history = has_history && samp.occluder.y > 1e-6f &&
+                               state.occluder_slope != SHADOW_TRACING_INVALID_HISTORY;
+    bool same_caster = has_history && sample_caster_id == history_caster_id;
     shadow_map_trace_hit_check(state, samp, i == sample_count);
+    /* An extrapolated hit belongs to the historical surface, not to the surface sampled
+     * after its silhouette. The latter can be an unrelated object behind the receiver. */
+    caster_id = extrapolate_history ? history_caster_id : sample_caster_id;
+    if (!extrapolate_history) {
+      history_caster_id = sample_caster_id;
+      if (has_history && !same_caster) {
+        /* Never build a surface slope by joining different objects. */
+        state.occluder_slope = SHADOW_TRACING_INVALID_HISTORY;
+      }
+    }
+    else if (!state.hit && !same_caster) {
+      state.occluder_history = samp.occluder;
+      state.occluder_slope = SHADOW_TRACING_INVALID_HISTORY;
+      history_caster_id = sample_caster_id;
+    }
   }
 
   ShadowCasterTraceResult result;
@@ -740,7 +756,6 @@ float3 shadow_caster_classification_seeded_ex([[resource_table]] ShadowRenderDat
 
   int safe_ray_count = clamp(ray_count, 1, SHADOW_MAX_RAY);
   int safe_step_count = clamp(ray_step_count, 1, SHADOW_MAX_STEP);
-  uint self_id = receiver_id & 0xFFFFu;
 
   float distance_to_shadow;
   float3 L;
@@ -798,7 +813,7 @@ float3 shadow_caster_classification_seeded_ex([[resource_table]] ShadowRenderDat
     if (trace_result.caster_id == SHADOW_CASTER_UNKNOWN_ID) {
       unknown_hit += 1.0f;
     }
-    else if (trace_result.caster_id == self_id) {
+    else if (trace_result.caster_id == receiver_id) {
       self_hit += 1.0f;
     }
     else {
@@ -1173,7 +1188,7 @@ float4 shadow_node_pcss_bilinear([[resource_table]] ShadowRenderData &srd,
     float4 occluded = float4(lessThan(depths, references));
     float4 known = ctx.classify ? float4(notEqual(casters, uint4(SHADOW_CASTER_UNKNOWN_ID))) :
                                   float4(0.0f);
-    float4 self = float4(equal(casters & 0xFFFFu, uint4(ctx.receiver_id))) * known * occluded;
+    float4 self = float4(equal(casters, uint4(ctx.receiver_id))) * known * occluded;
     float4 cast_occlusion = known * occluded - self;
     float4 weights = float4(1.0f - fraction.x, fraction.x, 1.0f - fraction.x, fraction.x) *
                      float4(1.0f - fraction.y, 1.0f - fraction.y, fraction.y, fraction.y);
@@ -1287,7 +1302,7 @@ float4 shadow_node_pcss_core([[resource_table]] ShadowRenderData &srd,
       uni.uniform_buf.shadow.film_pixel_radius, view.is_perspective(), view.z_distance(P));
   ctx.directional = directional;
   ctx.classify = classify && bool(uni.uniform_buf.shadow.use_caster_atlas);
-  ctx.receiver_id = receiver_id & 0xFFFFu;
+  ctx.receiver_id = receiver_id;
   float4 center = shadow_node_pcss_bilinear(srd, ctx, ctx.P);
   if (center.x < 0.0f) {
     return center;

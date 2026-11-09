@@ -523,7 +523,7 @@ float glsl_light_cast_shadow_raw(uint light_index, bool is_local, float3 shading
   float3 classification = eevee_shadow_caster_classification_seeded(
       light,
       is_directional,
-      resource_id_get() & 0xFFFFu,
+      resource_id_get(),
       g_data.P,
       geometry_normal,
       resolved_shading_normal,

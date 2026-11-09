@@ -94,7 +94,9 @@ bool shader_info_cache_surface(float3 P, float3 Ng, float3 N)
   if (any(lessThan(extent, int2(2))) || any(greaterThanEqual(pixel, extent))) {
     return false;
   }
-  if (texelFetch(object_id_tx, pixel, 0).r != (resource_id_get() & 0xFFFFu)) {
+  /* The shared prepass stores 16-bit IDs. Larger instances must use their full ID in
+   * direct shadow evaluation instead of aliasing a different cached receiver. */
+  if (texelFetch(object_id_tx, pixel, 0).r != resource_id_get()) {
     return false;
   }
   float3 N_ref = safe_normalize(texelFetch(prepass_normal_tx, pixel, 0).xyz * 2.0f - 1.0f);

@@ -151,6 +151,8 @@ class ShadowPipeline {
 
   /* Shadow update pass. */
   PassMain render_ps_ = {"Shadow.Surface"};
+  /* Reuse the exact same draws and transparency samples to resolve full-depth caster IDs. */
+  int caster_id_pass_ = 0;
   /* Shadow surface render sub-passes. */
   PassMain::Sub *surface_double_sided_ps_ = nullptr;
   PassMain::Sub *surface_single_sided_ps_ = nullptr;

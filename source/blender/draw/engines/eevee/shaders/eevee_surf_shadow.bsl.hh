@@ -44,7 +44,7 @@ struct SurfShadow {
   [[image(SHADOW_CASTER_ATLAS_IMG_SLOT, read_write, UINT_32)]] uimage2DArrayAtomic
       shadow_caster_atlas_img;
 
-  [[push_constant]] const int use_shadow_caster_atlas;
+  [[push_constant]] const int shadow_caster_id_pass;
 };
 
 [[fragment]] [[texture_atomic]]
@@ -121,15 +121,18 @@ void surf_shadow([[resource_table]] PipelineConstants &pipe,
    * This is equivalent of calling `next_after`, but without the safety. */
   u_depth += 2;
 
-  if (uni.uniform_buf.shadow.use_debug_cost) {
+  if (srt.shadow_caster_id_pass != 0) {
+    /* The first draw has completed its full-precision depth reduction. Only a fragment
+     * at that exact depth may own the texel. Exact ties use a deterministic instance ID. */
+    if (u_depth == imageLoad(srt.shadow_atlas_img, out_texel).r) {
+      imageAtomicMin(srt.shadow_caster_atlas_img, out_texel, resource_id_get());
+    }
+  }
+  else if (uni.uniform_buf.shadow.use_debug_cost) {
     imageAtomicAdd(srt.shadow_atlas_img, out_texel, 1u);
   }
   else {
     imageAtomicMin(srt.shadow_atlas_img, out_texel, u_depth);
-    if (srt.use_shadow_caster_atlas != 0) {
-      uint packed_caster = (u_depth & 0xFFFF0000u) | (resource_id_get() & 0xFFFFu);
-      imageAtomicMin(srt.shadow_caster_atlas_img, out_texel, packed_caster);
-    }
   }
 }
 

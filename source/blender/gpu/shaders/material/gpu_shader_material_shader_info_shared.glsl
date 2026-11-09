@@ -408,7 +408,7 @@ ShaderInfoShadowClassification shader_info_shadow_classification_seeded(
   float3 classification = eevee_shadow_caster_classification_seeded(
       light,
       is_directional,
-      resource_id_get() & 0xFFFFu,
+      resource_id_get(),
       P,
       Ng,
       N,

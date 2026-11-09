@@ -617,14 +617,22 @@ PassMain::Sub *ShadowPipeline::surface_material_add(blender::Material *material,
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
   material_pass->shader_set(GPU_pass_shader_get(gpupass));
-  material_pass->push_constant("use_shadow_caster_atlas",
-                               inst_.shadows.use_caster_atlas_push_ref());
+  material_pass->push_constant("shadow_caster_id_pass", &caster_id_pass_);
   return material_pass;
 }
 
 void ShadowPipeline::render(View &view)
 {
+  caster_id_pass_ = 0;
   inst_.manager->submit(render_ps_, view);
+  if (inst_.shadows.use_caster_atlas()) {
+    /* Both atlases must select the same nearest fragment. A separate ID resolve avoids
+     * quantizing depth, or racing independent depth and ID writes in a single draw. */
+    GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
+    caster_id_pass_ = 1;
+    inst_.manager->submit(render_ps_, view);
+    caster_id_pass_ = 0;
+  }
 }
 
 /** \} */

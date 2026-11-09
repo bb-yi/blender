@@ -1232,11 +1232,17 @@ void ShadowModule::sync_object(const ObjectHandle &ob_handle,
     shadow_ob.used = true;
     const bool is_initialized = shadow_ob.resource_handle.is_valid();
     const bool has_jittered_transparency = has_transparent_shadows && data_.use_jitter;
-    const bool caster_changed = ob_handle.recalc || !is_initialized || shape_changed;
     ResourceHandle instance_handle = ob_handle.res_handle.sub_handle(i);
+    /* Draw resource indices are reassigned at sync. Cached classification pages cannot
+     * keep the old index when an unchanged caster receives a different handle. */
+    const bool identity_changed = (use_caster_atlas_ || use_caster_atlas_next_) &&
+                                  is_initialized &&
+                                  shadow_ob.resource_handle.raw() != instance_handle.raw();
+    const bool caster_changed = ob_handle.recalc || !is_initialized || shape_changed ||
+                                identity_changed;
     if (is_shadow_caster && (caster_changed || has_jittered_transparency)) {
       viewport_history_invalidated_ |= inst_.is_viewport() && data_.use_jitter && caster_changed;
-      if (ob_handle.recalc && is_initialized) {
+      if ((ob_handle.recalc || identity_changed) && is_initialized) {
         past_casters_updated_.append(shadow_ob.resource_handle.raw());
       }
 
