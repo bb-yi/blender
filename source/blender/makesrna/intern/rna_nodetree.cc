@@ -1483,7 +1483,7 @@ static void rna_NPRLineTree_preview_pixels(bNodeTree *tree,
     BKE_report(reports, RPT_ERROR, "Brush preview requires its own scene, camera and non-drawing context");
     return;
   }
-  ViewLayer *view_layer = static_cast<ViewLayer *>(scene->view_layers.first);
+  ViewLayer *view_layer = scene->view_layers.first();
   Depsgraph *depsgraph = BKE_scene_ensure_depsgraph(bmain, scene, view_layer);
   BKE_scene_graph_update_tagged(depsgraph, bmain);
   char error[256] = {};
