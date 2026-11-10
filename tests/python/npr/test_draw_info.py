@@ -175,6 +175,14 @@ def test_legacy():
     bpy.ops.wm.save_as_mainfile(filepath=str(converted), check_existing=False)
     bpy.ops.wm.open_mainfile(filepath=str(converted))
     check()
+    if bpy.app.version >= (5, 3, 0):
+        path_53 = Path(__file__).parent / 'assets' / 'draw_info_legacy_503_31.blend'
+        bpy.ops.wm.open_mainfile(filepath=str(path_53))
+        check()
+        converted_53 = assets / 'draw_info_legacy_503_migrated.blend'
+        bpy.ops.wm.save_as_mainfile(filepath=str(converted_53), check_existing=False)
+        bpy.ops.wm.open_mainfile(filepath=str(converted_53))
+        check()
     return {'queries': len(QUERIES), 'group': True, 'roundtrip': True}
 
 

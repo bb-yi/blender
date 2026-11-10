@@ -2782,6 +2782,18 @@ def test_viewport_map_image_changes(directory):
         image.pixels[:] = (value, value, value, 1)
         image.update()
         images.append(image)
+    first_revision, other_revision = [image.update_revision for image in images]
+    images[0].pixels[0] = .5
+    images[0].update()
+    require(images[0].update_revision != first_revision,
+            'Image pixel edits must advance the brush preview content revision')
+    require(images[1].update_revision == other_revision,
+            'An unrelated image edit must not invalidate another image revision')
+    stable_revision = images[0].update_revision
+    require(images[0].update_revision == stable_revision,
+            'Reading a revision must not consume or create content changes')
+    images[0].pixels[:] = (.25, .25, .25, 1)
+    images[0].update()
     mapping = tree.nodes.new('NPRLineNodeMap')
     mapping.mode = 'SCREEN'
     area = next(a for a in bpy.context.screen.areas if a.type == 'VIEW_3D')

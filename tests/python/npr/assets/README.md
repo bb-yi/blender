@@ -9,3 +9,7 @@ a shader node group. It contains no user project data or external assets.
 every link, including the node group, and repeats those checks after saving and
 reopening the converted copy in the configured test output directory. Do not
 resave the fixture with the new node implementation.
+
+`draw_info_legacy_503_31.blend` contains the same 22 queries and shared-group link,
+saved with Blender 5.3 RC NPR `0252dcf129e1` before the 503.32 migration. The same
+test checks this fixture and its saved/reopened copy on Blender 5.3 and newer.
