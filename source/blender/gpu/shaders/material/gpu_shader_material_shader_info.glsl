@@ -80,8 +80,9 @@ float shader_info_light_ltc(LightData light,
 #if defined(MAT_NODE_SHADOW_CACHE) && defined(GPU_FRAGMENT_SHADER)
 float3 shader_info_cache_position(KernelGlobals &kg, ShadingData &sd, int2 pixel, int2 extent)
 {
-  float depth = texelFetch(kg.hiz.hiz_tx, pixel, 0).r;
-  return kg.view_matrices_get(sd).point_screen_to_world(float3((float2(pixel) + 0.5f) / float2(extent), depth));
+  float2 uv = (float2(pixel) + 0.5f) / float2(extent);
+  float depth = shader_info_shadow_screen_depth_fetch(kg, sd, uv);
+  return kg.view_matrices_get(sd).point_screen_to_world(float3(uv, depth));
 }
 #endif
 
@@ -104,10 +105,10 @@ bool shader_info_cache_surface(KernelGlobals &kg, ShadingData &sd, float3 P, flo
   }
   float3 center = shader_info_cache_position(kg, sd, pixel, extent);
   int2 lo = max(pixel - 1, int2(0)), hi = min(pixel + 1, extent - 1);
-  float3 dx0 = center - shader_info_cache_position(KernelGlobals &kg, ShadingData &sd, int2(lo.x, pixel.y), extent);
-  float3 dx1 = shader_info_cache_position(KernelGlobals &kg, ShadingData &sd, int2(hi.x, pixel.y), extent) - center;
-  float3 dy0 = center - shader_info_cache_position(KernelGlobals &kg, ShadingData &sd, int2(pixel.x, lo.y), extent);
-  float3 dy1 = shader_info_cache_position(KernelGlobals &kg, ShadingData &sd, int2(pixel.x, hi.y), extent) - center;
+  float3 dx0 = center - shader_info_cache_position(kg, sd, int2(lo.x, pixel.y), extent);
+  float3 dx1 = shader_info_cache_position(kg, sd, int2(hi.x, pixel.y), extent) - center;
+  float3 dy0 = center - shader_info_cache_position(kg, sd, int2(pixel.x, lo.y), extent);
+  float3 dy1 = shader_info_cache_position(kg, sd, int2(pixel.x, hi.y), extent) - center;
   float lx0 = length_squared(dx0), lx1 = length_squared(dx1);
   float ly0 = length_squared(dy0), ly1 = length_squared(dy1);
   float3 dx = lx0 == 0.0f ? dx1 : lx1 == 0.0f ? dx0 : lx0 < lx1 ? dx0 : dx1;
@@ -415,7 +416,6 @@ void node_shader_info(float3 position,
 #endif
 }
 
-[[node]]
 void node_shader_info(float3 position,
                       float3 normal_in,
                       float exponent,
@@ -437,6 +437,8 @@ void node_shader_info(float3 position,
                    stable_shadow_samples,
                    lightgroup_id_value,
                    0.0f,
+                   kg,
+                   sd,
                    diffuse_shading,
                    shadow,
                    ambient_lighting,
@@ -446,13 +448,14 @@ void node_shader_info(float3 position,
                    cast_shadow);
 }
 
-[[node]]
 void node_shader_info(float3 position,
                       float3 normal_in,
                       float exponent,
                       float shadow_mode,
                       float stable_shadow_samples,
                       float lightgroup_id_value,
+                      [[resource_table]] KernelGlobals &kg,
+                      ShadingData &sd,
                       out float4 diffuse_shading,
                       out float shadow,
                       out float4 ambient_lighting,
