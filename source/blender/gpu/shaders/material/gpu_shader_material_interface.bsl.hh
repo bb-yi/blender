@@ -409,7 +409,8 @@ float node_attribute_light_cutoff_distance_impl([[resource_table]] KernelGlobals
 
 void scene_time_uniforms([[resource_table]] KernelGlobals & /*kg*/,
                          float & /*seconds*/,
-                         float & /*frame*/)
+                         float & /*frame*/,
+                         float & /*timeline*/)
 {
 }
 

@@ -152,6 +152,7 @@ void init_globals_pointcloud(const VertOutPointcloud &ptcloud_interp, ShadingDat
   sd.frag_co = fragment_co;
   sd.front_facing = front_face;
   sd.P = interp.P;
+  sd.depth_offset_base_view_z = view.point_world_to_view(interp.P).z;
   sd.forward_lighting_P = sd.P;
   sd.Ni = interp.N;
   sd.N = safe_normalize(interp.N);
@@ -240,8 +241,8 @@ bool material_depth_offset_is_zero(KernelGlobals &kg, ShadingData &sd, float dep
 
 float material_depth_offset_view_z(KernelGlobals &kg, ShadingData &sd, float depth_offset)
 {
-  const ViewMatrices view = kg.view_matrices_get(sd);
-  float vP_z = view.depth_screen_to_view(reverse_z::read(sd.frag_co.z));
+  /* Avoid a hardware-depth round trip: late-depth Vulkan passes can differ from the prepass. */
+  float vP_z = sd.depth_offset_base_view_z;
   return vP_z + depth_offset;
 }
 

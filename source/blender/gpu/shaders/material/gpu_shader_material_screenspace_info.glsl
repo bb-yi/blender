@@ -38,7 +38,8 @@ void node_screenspace_info(float3 view_position,
                            out float4 scene_color,
                            out float scene_depth)
 {
-#if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD))
+#if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD)) && \
+    !defined(MAT_DEPTH) && !defined(MAT_SHADOW)
   float3 sample_view_position = screenspace_info_sample_view_position(kg, sd, view_position,
                                                                       use_explicit_view_position);
   float2 uv = screenspace_info_project_uv(kg, sd, sample_view_position);
@@ -48,10 +49,10 @@ void node_screenspace_info(float3 view_position,
     return;
   }
 
-  int2 extent = textureSize(kg.previous_layer_radiance.previous_layer_radiance_tx, 0);
+  int2 extent = eevee_previous_layer_extent_get();
   int2 texel = clamp(int2(uv * float2(extent)), int2(0), extent - int2(1));
-  float depth = texelFetch(kg.previous_layer_hiz.hiz_prev_tx, texel, 0).r;
-  scene_color = texelFetch(kg.previous_layer_radiance.previous_layer_radiance_tx, texel, 0);
+  float depth = eevee_previous_layer_depth_fetch(texel);
+  scene_color = eevee_previous_layer_radiance_fetch(texel);
   scene_color.a = saturate(1.0f - scene_color.a);
 
   if (depth == 1.0f) {

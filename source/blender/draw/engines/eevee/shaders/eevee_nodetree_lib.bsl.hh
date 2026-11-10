@@ -132,6 +132,7 @@ struct ShadingData {
   int bake_principled_depth;
   packed_float3 displacement_base;
   packed_float3 forward_lighting_P;
+  float depth_offset_base_view_z;
   packed_float3 world_view_position;
 
   packed_float3 emission;
@@ -1434,7 +1435,8 @@ Coordinates coordinate_impl(KernelGlobals &kg, const ShadingData &sd, float3 P, 
         coords.screen.xy = eevee::camera::uv_from_world(cam, P) * cam.uv_scale + cam.uv_bias;
       }
       else {
-        coords.screen.xy = view.point_world_to_screen(P + view.position()).xy;
+        /* Orthographic world rays share a direction; retain their varying view position. */
+        coords.screen.xy = view.point_view_to_screen(sd.world_view_position).xy;
         coords.screen.xy = coords.screen.xy * cam.uv_scale + cam.uv_bias;
       }
     }
@@ -1527,12 +1529,13 @@ float4 node_attribute_layer_impl(KernelGlobals &kg, const uint attr_hash)
   return vl_attributes.get(attr_hash);
 }
 
-void scene_time_uniforms(KernelGlobals &kg, float &seconds, float &frame)
+void scene_time_uniforms(KernelGlobals &kg, float &seconds, float &frame, float &timeline)
 {
   const eevee::Uniform &uni = kg.uniforms;
 
   seconds = uni.uniform_buf.scene.time;
   frame = uni.uniform_buf.scene.frame;
+  timeline = uni.uniform_buf.scene.timeline;
 }
 
 void light_iter_init(KernelGlobals &kg,
@@ -1907,7 +1910,7 @@ void output_aov(KernelGlobals &kg,
 
 #ifndef REPEAT_BEGIN
 #  define REPEAT_BEGIN(count, var) \
-    for (var = 0.0f; round(var) < round(count); var += 1.0f) {
+    for (var = 0; round(float(var)) < round(float(count)); var += 1) {
 #endif
 
 #ifndef REPEAT_END

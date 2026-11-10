@@ -1509,12 +1509,14 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
               (has_depth_offset ? "eevee_surf_depth_offsetTtrue" : "eevee_surf_depthTtrue"));
           break;
         case MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH:
-          pipeline_info_name = "eevee_surf_depthTfalse_infos_";
+          pipeline_info_name = (has_depth_offset ? "eevee_surf_depth_offsetTfalse_infos_" :
+                                                   "eevee_surf_depthTfalse_infos_");
           info.name_ += "_outline_shell_self_depth";
           info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
           info.define("closure_to_rgba", "closure_to_rgba_depth");
           info.fragment_source("eevee_surf_depth.bsl.hh");
-          info.fragment_function("eevee_surf_depthTfalse");
+          info.fragment_function(
+              (has_depth_offset ? "eevee_surf_depth_offsetTfalse" : "eevee_surf_depthTfalse"));
           break;
         case MAT_PIPE_PREPASS_OVERLAP:
           pipeline_info_name = (has_depth_offset ? "eevee_surf_depth_offsetTfalse_infos_" :
@@ -2021,7 +2023,6 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                              use_front_light_shader_in_surface_pass);
   const bool use_npr_foreach_shadow = pipeline_type == MAT_PIPE_DEFERRED_NPR &&
                                       GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT);
-
   const bool has_bsl_previous_layer_resources =
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
       GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) &&
@@ -2048,9 +2049,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   info.compilation_constant(
       gpu::shader::Type::bool_t, "use_hiz_data", use_hiz_data || has_depth_offset);
-  info.compilation_constant(gpu::shader::Type::bool_t,
-                            "use_screenspace_info",
-                            GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO));
+  info.compilation_constant(
+      gpu::shader::Type::bool_t,
+      "use_screenspace_info",
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD) &&
+          GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO));
   using gpuType = gpu::shader::Type;
   info.compilation_constant(
       gpuType::bool_t, "use_diffuse", GPU_material_flag_get(gpumat, GPU_MATFLAG_DIFFUSE));
@@ -2183,6 +2186,18 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   bool use_barycentric = GPU_material_flag_get(gpumat, GPU_MATFLAG_BARYCENTRIC) &&
                          ELEM(geometry_type, MAT_GEOM_MESH, MAT_GEOM_MESH_TESS);
   info.compilation_constant(gpu::shader::Type::bool_t, "use_barycentric", use_barycentric);
+
+  if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+    info.additional_info("eevee_LightprobeRenderData");
+  }
+  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_BAKE_COLOR) &&
+      (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
+       GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
+       GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS)))
+  {
+    /* Let BSL own these declarations before legacy pass infos can claim them. */
+    info.additional_info("eevee_ShadowRenderData");
+  }
 
   SlotAllocator slots = add_pipeline_create_info(info,
                                                  pipeline_type,
@@ -2333,15 +2348,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       info.define("CREATE_INFO_eevee_LightRenderData");
     }
     if (!has_bsl_light_eval_resources) {
-      add_create_info_and_reserve(info, slots, "eevee_shadow_data");
-      if (use_npr_foreach_shadow) {
-        /* The legacy material create-info above binds the same resources used by the generated BSL
-         * table. Enable its bridge for the NPR shadow output without changing Shader Info paths.
-         */
-        add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
-        info.define("CREATE_INFO_eevee_ShadowRenderData");
-        info.define("CREATE_INFO_UtilityTexture");
-      }
+      /* BSL shadow helpers need their declarations before their function bodies. */
+      add_create_info_and_reserve(info, slots, "eevee_ShadowRenderData");
     }
   }
   /* Classification is requested by Shader Info Self/Cast outputs and by native nodes such as
@@ -2353,7 +2361,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   if (use_shader_info_shadow_classification) {
     info.define("SHADOW_CASTER_CLASSIFY");
-    if (!has_bsl_light_eval_resources && !use_npr_foreach_shadow) {
+    if (!has_bsl_light_eval_resources && !has_shader_info_light_resources) {
       add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
     }
   }
@@ -2372,7 +2380,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if (material_pass_uses_glsl_light_access) {
       info.define("MAT_GLSL_LIGHT_SHADOW_ACCESS");
       if (!has_shader_info_light_resources && !has_bsl_light_eval_resources) {
-        add_create_info_and_reserve(info, slots, "eevee_shadow_data");
+        add_create_info_and_reserve(info, slots, "eevee_ShadowRenderData");
       }
     }
     if (surface_pass_uses_glsl_light_access) {

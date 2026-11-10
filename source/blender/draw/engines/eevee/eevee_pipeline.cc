@@ -2580,6 +2580,17 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     direct_radiance_npr_views_[bin] = direct_radiance_txs_.layer_view(bin);
   }
 
+  /* Ray tracing can rewrite shared feedback before the combine and NPR passes. Preserve the
+   * previous layer while it still contains that layer's visible radiance. */
+  TextureFromPool npr_refraction_background = {"NPR Refraction Background"};
+  if (has_npr_refraction_ && !inst_.pipelines.forward.background_resolved() &&
+      use_feedback_output_ && radiance_behind_tx &&
+      radiance_behind_tx == rt_buffer.radiance_feedback_tx.gpu_texture())
+  {
+    npr_refraction_background.acquire_2d(extent, GPU_texture_format(radiance_behind_tx), usage_rw);
+    GPU_texture_copy(npr_refraction_background, radiance_behind_tx);
+  }
+
   if (use_raytracing_) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredRaytrace);
     indirect_result_ = inst_.raytracing.render(
@@ -2608,18 +2619,6 @@ gpu::Texture *DeferredLayer::render(View &main_view,
                                 closure_bits_, render_view, bin);
       }
     }
-  }
-
-  /* Refraction layers share their ray-tracing buffer. Clamping writes the current layer into
-   * its feedback before NPR runs, so preserve an aliased background for NPR Refraction reads.
-   * Other layers keep reading the existing texture without an additional allocation or copy. */
-  TextureFromPool npr_refraction_background = {"NPR Refraction Background"};
-  if (has_npr_refraction_ && !inst_.pipelines.forward.background_resolved() &&
-      use_feedback_output_ && use_clamp_direct_ && radiance_behind_tx &&
-      radiance_behind_tx == rt_buffer.radiance_feedback_tx.gpu_texture())
-  {
-    npr_refraction_background.acquire_2d(extent, GPU_texture_format(radiance_behind_tx), usage_rw);
-    GPU_texture_copy(npr_refraction_background, radiance_behind_tx);
   }
 
   radiance_feedback_tx_ = rt_buffer.feedback_ensure(!use_feedback_output_, extent);

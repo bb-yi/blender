@@ -182,11 +182,16 @@ bool npr_light_chunk_iterator_next(NPRLightChunkIterator &iterator,
   return false;
 }
 
-#    define FOREACH_LIGHT_BEGIN( \
-        N, out_color, out_vector, out_distance, out_attenuation, out_shadow_mask) \
+NPRLightChunkIterator npr_light_chunk_iterator_init_for_shading(KernelGlobals &kg,
+                                                               ShadingData &sd)
+{
+  return npr_light_chunk_iterator_init(
+      sd.frag_co.xy, kg.view_matrices_get(sd).point_world_to_view(sd.P).z);
+}
+
+#    define FOREACH_LIGHT_BEGIN(N, out_color, out_vector, out_distance, out_attenuation, out_shadow_mask) \
       { \
-        NPRLightChunkIterator npr_light_iterator = npr_light_chunk_iterator_init( \
-            sd.frag_co.xy, kg.view_matrices_get(sd).point_world_to_view(sd.P).z); \
+        NPRLightChunkIterator npr_light_iterator = npr_light_chunk_iterator_init_for_shading(kg, sd); \
         uint npr_light_chunk_base; \
         uint npr_light_chunk_word; \
         bool is_local; \

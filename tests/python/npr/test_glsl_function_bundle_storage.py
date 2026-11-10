@@ -93,8 +93,12 @@ path = ASSETS / 'bundle_legacy_subversion55.blend'
 bpy.ops.wm.save_as_mainfile(filepath=str(path), compress=False)
 with blendfile.open_blend(str(path), access='r+b') as saved:
     global_block = next(block for block in saved.blocks if block.dna_type_name == 'FileGlobal')
-    assert global_block.get(b'subversion') >= 56
+    assert saved.header.version > 502 or (
+        saved.header.version == 502 and global_block.get(b'subversion') >= 56)
     write_number(saved, global_block, b'subversion', 55, 'h')
+    # Subversions belong to their major/minor line. Model 5.2.55, not 5.3.55.
+    saved.handle.seek(13 if saved.header.file_format_version == 1 else 9)
+    saved.handle.write(b'0502' if saved.header.file_format_version == 1 else b'502')
 bpy.ops.wm.open_mainfile(filepath=str(path), load_ui=False, use_scripts=False)
 packet = bpy.data.materials['Probe'].node_tree.nodes['LegacyVectorRoot']
 assert packet.bundle_items[0].vector_socket_dimensions == 3
