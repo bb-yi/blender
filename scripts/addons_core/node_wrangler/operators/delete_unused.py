@@ -38,7 +38,9 @@ class NODE_OT_delete_unused(Operator, NWBase):
                      'SPLITVIEWER', 'OUTPUT_FILE', 'LEVELS', 'OUTPUT_LIGHT',
                      'OUTPUT_WORLD', 'GROUP_INPUT', 'GROUP_OUTPUT', 'FRAME',
                      'WARNING']
-        if node.type in end_types:
+        if node.type in end_types or node.bl_idname in {
+                'EeveeFilterGraphNodeStageOutput', 'EeveeFilterGraphNodeAOVOutput',
+                'ShaderNodeEeveeLightShaderOutput', 'ShaderNodeOutputFilter', 'ShaderNodeNPR_Output'}:
             return False
 
         for output_socket in node.outputs:
@@ -52,7 +54,7 @@ class NODE_OT_delete_unused(Operator, NWBase):
         return (nw_check(cls, context)
                 and nw_check_not_empty(cls, context)
                 and nw_check_space_type(cls, context, {'ShaderNodeTree', 'CompositorNodeTree',
-                                        'TextureNodeTree', 'GeometryNodeTree'}))
+                                        'TextureNodeTree', 'GeometryNodeTree', 'EeveeFilterGraphNodeTree'}))
 
     def execute(self, context):
         nodes, links = get_nodes_links(context)

@@ -9,6 +9,7 @@ from bpy.app.translations import pgettext_tip as tip_
 
 
 def force_update(context):
+    context.space_data.edit_tree.update_tag()
     context.space_data.node_tree.update_tag()
 
 
@@ -199,7 +200,7 @@ def nw_check(cls, context):
     if space.node_tree is None:
         cls.poll_message_set("No node tree was found in the current node editor.")
         return False
-    if space.node_tree.library is not None:
+    if space.node_tree.library is not None or space.edit_tree.library is not None:
         cls.poll_message_set("Current node tree is linked from another .blend file.")
         return False
     return True

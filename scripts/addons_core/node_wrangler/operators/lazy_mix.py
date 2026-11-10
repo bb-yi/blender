@@ -27,7 +27,8 @@ class NODE_OT_lazy_mix(Operator, NWBase):
 
     @classmethod
     def poll(cls, context):
-        return nw_check(cls, context) and nw_check_not_empty(cls, context)
+        return (nw_check(cls, context) and nw_check_not_empty(cls, context)
+                and context.space_data.tree_type != 'EeveeFilterGraphNodeTree')
 
     def modal(self, context, event):
         context.area.tag_redraw()

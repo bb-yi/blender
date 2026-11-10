@@ -28,7 +28,8 @@ def drawlayout(context, layout, mode='non-panel'):
     tree_type = context.space_data.tree_type
 
     col = layout.column(align=True)
-    col.menu(NWMergeNodesMenu.bl_idname)
+    if tree_type != 'EeveeFilterGraphNodeTree':
+        col.menu(NWMergeNodesMenu.bl_idname)
     col.separator()
 
     if tree_type == 'ShaderNodeTree':
@@ -47,6 +48,8 @@ def drawlayout(context, layout, mode='non-panel'):
     col.menu(NWLinkActiveToSelectedMenu.bl_idname, icon='LINKED')
     if tree_type != 'GeometryNodeTree':
         col.operator("node.nw_link_out", icon='DRIVER')
+    if tree_type == 'EeveeFilterGraphNodeTree':
+        col.operator("node.nw_preview", icon='HIDE_OFF')
     col.separator()
 
     col = layout.column(align=True)

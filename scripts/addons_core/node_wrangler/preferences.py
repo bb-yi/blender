@@ -328,6 +328,9 @@ kmi_defs = (
      (('option', 'FROM_ACTIVE'),), n_("Copy label from active to selected")),
     # DETACH OUTPUTS (Alt Shift D)
     ("node.nw_detach_outputs", 'D', 'PRESS', False, True, True, None, n_("Detach Outputs")),
+    # NPR previews; the poll leaves other editors to Blender's preview.
+    ("node.nw_preview", 'LEFTMOUSE', 'PRESS', True, True, False, None,
+     n_("Preview Filter Graph / Light Node")),
     # LINK TO OUTPUT NODE (O)
     ("node.nw_link_out", 'O', 'PRESS', False, False, False, None, n_("Link to Output Node")),
     # SELECT PARENT/CHILDREN
