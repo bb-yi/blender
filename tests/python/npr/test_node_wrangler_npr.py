@@ -51,9 +51,14 @@ def run():
         checked('filter_connect_to_stage')
 
         _preview_sockets.clear()
-        for index in (0, 1, 2, 3, 0):
+        from node_wrangler.utils.nodes import is_visible_socket
+        preview_outputs = [socket for socket in scene.outputs if is_visible_socket(socket)]
+        assert len(preview_outputs) >= 4
+        if hasattr(bpy.types, 'NPRLineNodeOutput'):
+            assert any(socket.identifier == 'Geometry Line Image' for socket in preview_outputs)
+        for expected in [*preview_outputs, preview_outputs[0]]:
             finished(bpy.ops.node.nw_preview)
-            assert stage.inputs[0].links[0].from_socket == scene.outputs[index]
+            assert stage.inputs[0].links[0].from_socket == expected
         checked('filter_preview_cycles_all_images')
 
         second_stage = tree.nodes.new('EeveeFilterGraphNodeStageOutput')

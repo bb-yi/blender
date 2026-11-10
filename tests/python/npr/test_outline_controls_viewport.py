@@ -23,7 +23,8 @@ REPORT = {'passed': False, 'cases': {}, 'pid': os.getpid()}
 
 def image(label, expected=None):
     scene = bpy.context.scene
-    deadline = time.monotonic() + 20
+    # A cold material variant may still be compiling after the first visible frame.
+    deadline = time.monotonic() + 90
     previous = None
     while True:
         # Submit the actual window to let asynchronously compiled material replacements
