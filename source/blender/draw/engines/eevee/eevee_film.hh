@@ -107,6 +107,9 @@ class Film {
   /** Weight buffers. Double buffered to allow updating it during accumulation. */
   SwapChain<Texture, 2> weight_tx_;
   Texture dummy_outline_tx_ = {"dummy_outline_tx"};
+  /** Main-view input only; never allocated for Render Texture/probe captures. */
+  Texture pre_fx_input_tx_ = {"pre_fx_input"};
+  gpu::Texture *pre_fx_sample_tx_ = nullptr;
 
   PassSimple accumulate_ps_ = {"Film.Accumulate"};
   PassSimple copy_ps_ = {"Film.Copy"};
@@ -121,6 +124,7 @@ class Film {
    * be enabled but not used by the viewport compositor, so they needn't be written. */
   eViewLayerEEVEEPassType viewport_compositor_enabled_passes_ = eViewLayerEEVEEPassType(0);
   bool pre_fx_compositor_requested_ = false;
+  bool pre_fx_alias_combined_ = false;
   PassCategory enabled_categories_ = PassCategory(0);
   bool use_reprojection_ = false;
   bool is_valid_render_extent_ = true;
@@ -133,11 +137,11 @@ class Film {
   void init(const int2 &full_extent, const rcti *output_rect);
 
   void sync();
-  bool pre_fx_compositor_requested() const
+  bool pre_fx_needs_capture() const
   {
-    return pre_fx_compositor_requested_;
+    return data_.pre_fx_id != -1;
   }
-  void write_viewport_pre_fx();
+  void capture_pre_fx(View &view, gpu::Texture *input_tx, gpu::Texture *outline_tx);
   void end_sync();
 
   const FilmData &get_data()
@@ -261,7 +265,8 @@ class Film {
                  EEVEE_RENDER_PASS_COMBINED,
                  EEVEE_RENDER_PASS_VECTOR,
                  EEVEE_RENDER_PASS_TRANSPARENT,
-                 EEVEE_RENDER_PASS_OUTLINE);
+                 EEVEE_RENDER_PASS_OUTLINE,
+                 EEVEE_RENDER_PASS_PRE_FX);
   }
 
   /* Returns layer offset in the accumulation texture. -1 if the pass is not enabled. */
@@ -270,6 +275,8 @@ class Film {
     switch (pass_type) {
       case EEVEE_RENDER_PASS_COMBINED:
         return data_.combined_id;
+      case EEVEE_RENDER_PASS_PRE_FX:
+        return data_.pre_fx_id;
       case EEVEE_RENDER_PASS_DEPTH:
         return data_.depth_id;
       case EEVEE_RENDER_PASS_MIST:
@@ -331,6 +338,9 @@ class Film {
     };
 
     switch (pass_type) {
+      case EEVEE_RENDER_PASS_PRE_FX:
+        result.append("Pre-FX");
+        break;
       case EEVEE_RENDER_PASS_COMBINED:
         result.append(RE_PASSNAME_COMBINED);
         break;

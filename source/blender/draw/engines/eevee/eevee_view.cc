@@ -379,6 +379,9 @@ namespace blender::eevee
 
     gpu::Texture* combined_final_tx = rbufs.combined_tx;
     if (is_stencil_value_preview()) {
+      inst_.film.capture_pre_fx(render_view_,
+                                rbufs.combined_tx,
+                                inst_.outline.use_in_combined() ? outline_raw_tx : nullptr);
       render_stencil_value_preview();
     }
     else if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX))
@@ -387,9 +390,15 @@ namespace blender::eevee
         TelemetryStageId::MainFilterBeforePostFX);
       gpu::Texture* postfx_input_tx = inst_.filter_materials.render_stage(
         render_view_, rbufs.combined_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX);
+      inst_.film.capture_pre_fx(render_view_,
+                                postfx_input_tx,
+                                inst_.outline.use_in_combined() ? outline_raw_tx : nullptr);
       combined_final_tx = render_postfx(postfx_input_tx, postfx_tx_, dof_buffer_, true);
     }
     else {
+      inst_.film.capture_pre_fx(render_view_,
+                                rbufs.combined_tx,
+                                inst_.outline.use_in_combined() ? outline_raw_tx : nullptr);
       combined_final_tx = render_postfx(rbufs.combined_tx, postfx_tx_, dof_buffer_, true);
     }
     {

@@ -112,8 +112,6 @@ namespace blender::eevee
     bool shadow_lod_overlay_ = false;
     float shadow_lod_overlay_opacity_ = 0.7f;
     bool skip_render_ = false;
-    /** Persistent viewport companion, with independent lens/shutter-free sampling histories. */
-    std::unique_ptr<Instance> pre_fx_viewport_;
     bool last_viewport_scene_time_valid_ = false;
     float last_viewport_scene_time_ = 0.0f;
     bool discard_viewport_history_ = false;
@@ -199,8 +197,6 @@ namespace blender::eevee
     bool is_color_bake = false;
     /** True if the instance is created for either viewport image render or final image render. */
     bool is_image_render = false;
-    /** Final-render companion instance: no lens or shutter effects; writes only Pre-FX. */
-    bool is_pre_fx_render = false;
     /** Unjittered depth/velocity only, for one resolved offline NR image. */
     bool is_dlss_guide_render = false;
     /** True if the instance is created only for viewport image render. */
@@ -342,7 +338,6 @@ namespace blender::eevee
     void render_sync();
     void wait_for_material_passes();
     bool render_frame(RenderEngine* engine, RenderLayer* render_layer, const char* view_name);
-    bool render_read_pre_fx(RenderLayer *render_layer, const char *view_name);
     static constexpr const char *pre_fx_pass_name = "Pre-FX";
     void store_metadata(RenderResult* render_result);
 

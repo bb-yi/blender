@@ -201,8 +201,7 @@ void RenderTextureModule::begin_sync()
     slot.update_mode = update_mode;
     slot.manual_update = render_texture->manual_update;
     slot.active = (slot.camera != nullptr);
-    slot.compositor_output = render_texture->use_compositor_output && !inst_.is_pre_fx_render &&
-                             !inst_.is_dlss_guide_render;
+    slot.compositor_output = render_texture->use_compositor_output && !inst_.is_dlss_guide_render;
     slot.requires_full_capture = false;
     slot.sync_camera_valid = slot.active &&
                              camera_data_from_object(
@@ -821,7 +820,7 @@ float *RenderTextureModule::read_pass(const SceneRenderTexture &render_texture,
 
 void RenderTextureModule::write_viewport_compositor_passes()
 {
-  if (inst_.is_pre_fx_render || inst_.is_dlss_guide_render ||
+  if (inst_.is_dlss_guide_render ||
       std::none_of(slots_.begin(), slots_.end(), [](const RuntimeSlot &slot) {
         return slot.used && slot.compositor_output;
       }))

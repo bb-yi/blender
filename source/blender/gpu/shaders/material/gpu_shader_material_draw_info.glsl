@@ -107,7 +107,8 @@ void node_draw_info(float query, out float result)
 #endif
       break;
     case 19: /* Pre-FX Render. */
-      result = float((draw_info_context_flags() & DRAW_CONTEXT_PRE_FX_RENDER) != 0u);
+      /* Compatibility socket: Pre-FX now shares the ordinary scene draw. */
+      result = 0.0;
       break;
     case 20: /* Playback. */
       result = float((draw_info_context_flags() & DRAW_CONTEXT_PLAYBACK) != 0u);

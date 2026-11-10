@@ -36,6 +36,7 @@ enum [[host_shared]] PassCategory : uint32_t {
   PASS_CATEGORY_AOV = 1u << 4,
   PASS_CATEGORY_CRYPTOMATTE = 1u << 5,
   PASS_CATEGORY_NATIVE_POSTFX = 1u << 6,
+  PASS_CATEGORY_PRE_FX = 1u << 7,
 };
 ENUM_OPERATORS(PassCategory)
 
@@ -129,7 +130,8 @@ struct [[host_shared]] FilmData {
   int samples_len;
   /** Sum of the weights of all samples in the sample table. */
   float samples_weight_total;
-  int _pad0, _pad1;
+  /** Pre-camera-FX color in color_accum_img, or -1 when disabled/aliased. */
+  int pre_fx_id, _pad1;
   /** Fractional SR input/output mapping, excluding overscan. Zero when SR is inactive. */
   float2 sr_render_ratio;
   bool32_t sr_active;

@@ -625,8 +625,8 @@ def test_pre_fx():
     _, _, output = compositor(s, [('Main', 'RGBA', 'Image'), ('PreFX', 'RGBA', 'Pre-FX')])
     images = export(output, 'pre_fx_context')
     near(center(images['Main']), (0,) * 3, tolerance=.015)
-    near(center(images['PreFX']), (1,) * 3, tolerance=.015)
-    return {'main': 0, 'pre_fx': 1}
+    near(center(images['PreFX']), (0,) * 3, tolerance=.015)
+    return {'main': 0, 'pre_fx': 0, 'shared_scene_draw': True}
 
 
 def test_volume():

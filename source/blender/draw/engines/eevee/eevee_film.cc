@@ -17,6 +17,7 @@
 #include "BLI_rect.h"
 #include "BLI_set.hh"
 
+#include "DNA_camera_types.h"
 #include "DNA_layer_types.h"
 
 #include "BKE_compositor.hh"
@@ -286,8 +287,6 @@ inline bool operator!=(const FilmData &a, const FilmData &b)
 static eViewLayerEEVEEPassType enabled_passes(const ViewLayer *view_layer)
 {
   eViewLayerEEVEEPassType result = eViewLayerEEVEEPassType(view_layer->eevee.render_passes);
-  /* Pre-FX is written by a separate render instance, never accumulated with these passes. */
-  result &= ~EEVEE_RENDER_PASS_PRE_FX;
 
   /* We enforce the use of combined pass to be compliant with Cycles and EEVEE-Legacy (#122188). */
   result |= EEVEE_RENDER_PASS_COMBINED;
@@ -689,6 +688,37 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     data_.color_len += data_.native_postfx_color_len;
     data_.value_len += data_.native_postfx_value_len;
 
+    /* Decide from immutable frame settings, not last frame's effect-module state. */
+    const blender::Camera *camera_data = inst_.camera_eval_object &&
+                                                 inst_.camera_eval_object->type == OB_CAMERA ?
+                                            reinterpret_cast<const blender::Camera *>(
+                                                 inst_.camera_eval_object->data) :
+                                             nullptr;
+    const bool camera_dof = camera_data && (camera_data->dof.flag & CAM_DOF_ENABLED);
+    const bool motion_fx = (scene.r.mode & R_MBLUR) &&
+                           (inst_.view_layer->layflag & SCE_LAY_MOTION_BLUR) &&
+                           (inst_.is_image_render || inst_.is_playback);
+    const bool later_filters =
+        inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD) ||
+        inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE);
+    const bool nr_requested = scene.eevee.dlss5_mode == SCE_EEVEE_DLSSNR &&
+                              scene.eevee.dlss5_intensity != 0.0f;
+    const bool alias = (enabled_passes_ & EEVEE_RENDER_PASS_PRE_FX) && !camera_dof && !motion_fx &&
+                       !later_filters && !data_.sr_active && !nr_requested &&
+                       !inst_.is_dlss_guide_render &&
+                       (!inst_.is_viewport() ||
+                        ui_render_pass_ != EEVEE_RENDER_PASS_STENCIL_VALUE);
+    if (assign_if_different(pre_fx_alias_combined_, alias)) {
+      sampling.reset();
+    }
+    data_.pre_fx_id = -1;
+    if ((enabled_passes_ & EEVEE_RENDER_PASS_PRE_FX) && !pre_fx_alias_combined_ &&
+        !inst_.is_dlss_guide_render)
+    {
+      data_.pre_fx_id = data_.color_len++;
+      enabled_categories_ |= PASS_CATEGORY_PRE_FX;
+    }
+
     int cryptomatte_id = 0;
     auto cryptomatte_index_get = [&](eViewLayerEEVEEPassType pass_type) {
       int index = -1;
@@ -736,6 +766,9 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     reset += combined_tx_.next().ensure_2d(color_format, data_.extent);
     reset += combined_output_tx_.ensure_2d(color_format, data_.extent);
     reset += dummy_outline_tx_.ensure_2d(color_format, int2(1));
+    if (!pre_fx_needs_capture()) {
+      pre_fx_input_tx_.free();
+    }
     /* Two layers, one for nearest sample weight and one for weight accumulation. */
     reset += weight_tx_.current().ensure_2d_array(weight_format, weight_extent, 2);
     reset += weight_tx_.next().ensure_2d_array(weight_format, weight_extent, 2);
@@ -767,6 +800,7 @@ void Film::init(const int2 &extent, const rcti *output_rect)
       depth_tx_.clear(float4(0.0f));
       cryptomatte_tx_.clear(float4(0.0f));
     }
+
   }
 }
 
@@ -775,6 +809,7 @@ void Film::sync()
   if (inst_.is_dlss_guide_render) {
     return;
   }
+  pre_fx_sample_tx_ = dummy_outline_tx_.gpu_texture();
   nr_mask_id_ = -1;
   if (nr_mask_aov_) {
     const uint hash = BLI_hash_string(nr_mask_aov_->name);
@@ -870,6 +905,7 @@ void Film::init_pass(PassSimple &pass, gpu::Shader *sh)
   pass.bind_texture("combined_tx", &combined_final_tx_);
   pass.bind_texture("vector_tx", &rbuffers.vector_tx);
   pass.bind_texture("rp_color_tx", &rbuffers.rp_color_tx);
+  pass.bind_texture("pre_fx_tx", &pre_fx_sample_tx_);
   pass.bind_texture("rp_value_tx", &rbuffers.rp_value_tx);
   pass.bind_texture("cryptomatte_tx", &rbuffers.cryptomatte_tx);
   pass.bind_texture("in_combined_tx", &history_display_tx_, filter);
@@ -1272,6 +1308,8 @@ void Film::display()
   GPU_framebuffer_viewport_set(dfbl->default_fb, UNPACK2(data_.offset), UNPACK2(data_.extent));
 
   combined_final_tx_ = inst_.render_buffers.combined_tx;
+  /* Cached display does not sample the stage, but still needs a valid descriptor. */
+  pre_fx_sample_tx_ = dummy_outline_tx_.gpu_texture();
   gpu::Texture *dlss_display_tx = inst_.dlss5.display_texture();
   history_display_tx_ = dlss_display_tx ? dlss_display_tx : combined_output_tx_.gpu_texture();
   /* The outline result is transient and may have been released when viewport sampling
@@ -1328,6 +1366,9 @@ float *Film::read_pass(eViewLayerEEVEEPassType pass_type, int layer_offset)
 
 gpu::Texture *Film::get_pass_texture(eViewLayerEEVEEPassType pass_type, int layer_offset)
 {
+  if (pass_type == EEVEE_RENDER_PASS_PRE_FX && pre_fx_alias_combined_) {
+    return combined_output_tx_.gpu_texture();
+  }
   if (inst_.is_viewport() && pass_type == EEVEE_RENDER_PASS_COMBINED && layer_offset == 0) {
     if (gpu::Texture *output = inst_.dlss5.display_texture()) {
       return output;
@@ -1393,35 +1434,58 @@ static eShaderType get_aov_write_pass_shader_type(const ViewLayerAOV *aov)
   return FILM_PASS_CONVERT_VALUE;
 }
 
-void Film::write_viewport_pre_fx()
+void Film::capture_pre_fx(View &view, gpu::Texture *input_tx, gpu::Texture *outline_tx)
 {
-  gpu::Texture *input = get_pass_texture(EEVEE_RENDER_PASS_COMBINED, 0);
-  if (!input) {
-    return;
+  /* Only two camera effects can ping-pong back into their input. A later Filter may reuse
+   * its stage input, and raw outlines must be composited before Film reconstruction. */
+  const bool snapshot = pre_fx_needs_capture() &&
+                        ((inst_.depth_of_field.postfx_enabled() &&
+                          inst_.motion_blur.postfx_enabled()) ||
+                         inst_.filter_materials.has_stage_entries(
+                             SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD) ||
+                         inst_.filter_materials.has_stage_entries(
+                             SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE) ||
+                         outline_tx != nullptr ||
+                         (inst_.is_viewport() && ui_render_pass_ == EEVEE_RENDER_PASS_STENCIL_VALUE));
+  if (pre_fx_needs_capture()) {
+    if (snapshot) {
+      pre_fx_input_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_16_16_16_16, render_extent_get());
+      PassSimple pass("Film.CapturePreFX");
+      pass.init();
+      pass.shader_set(inst_.shaders.static_shader_get(FILM_PRE_FX_CAPTURE));
+      pass.bind_texture("input_tx", input_tx);
+      pass.bind_texture("outline_tx", outline_tx ? outline_tx : input_tx);
+      pass.bind_image("output_img", &pre_fx_input_tx_);
+      pass.push_constant("has_outline", outline_tx != nullptr);
+      pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
+      pass.dispatch(math::divide_ceil(render_extent_get(), int2(FILM_GROUP_SIZE)));
+      pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
+      inst_.manager->submit(pass, view);
+      pre_fx_sample_tx_ = pre_fx_input_tx_.gpu_texture();
+    }
+    else {
+      /* The input stays alive through Film submission; no copy or private input texture. */
+      pre_fx_sample_tx_ = input_tx;
+      pre_fx_input_tx_.free();
+    }
   }
-  draw::TextureFromPool &output = DRW_viewport_pass_texture_get(Instance::pre_fx_pass_name);
-  output.acquire_2d(display_extent, GPU_texture_format(input));
-  PassSimple pass = {"Film.WriteViewportPreFX"};
-  pass.shader_set(inst_.shaders.static_shader_get(FILM_PASS_CONVERT_COMBINED));
-  pass.push_constant("offset", data_.offset);
-  pass.bind_texture("input_tx", input);
-  pass.bind_image("output_img", output);
-  pass.barrier(GPU_BARRIER_TEXTURE_FETCH);
-  pass.dispatch(math::divide_ceil(display_extent, int2(FILM_GROUP_SIZE)));
-  inst_.manager->submit(pass);
+  if (inst_.sampling.sample_index() == 1) {
+    CLOG_INFO(&Instance::log,
+              "Pre-FX resources: requested=%d split=%d snapshot=%d input=%dx%d film=%dx%d "
+              "extra_image_bytes=%llu",
+              (enabled_passes_ & EEVEE_RENDER_PASS_PRE_FX) != 0,
+              pre_fx_needs_capture(), snapshot,
+              snapshot ? data_.render_extent.x : 0, snapshot ? data_.render_extent.y : 0,
+              pre_fx_needs_capture() ? data_.extent.x : 0,
+              pre_fx_needs_capture() ? data_.extent.y : 0,
+              pre_fx_needs_capture() ?
+                  8ULL * ((snapshot ? uint64_t(data_.render_extent.x) * data_.render_extent.y : 0) +
+                          uint64_t(data_.extent.x) * data_.extent.y) : 0ULL);
+  }
 }
 
 void Film::write_viewport_compositor_passes()
 {
-  if (inst_.is_pre_fx_render) {
-    write_viewport_pre_fx();
-    return;
-  }
-  if (pre_fx_compositor_requested_ && !inst_.depth_of_field.enabled() &&
-      !inst_.motion_blur.postfx_enabled())
-  {
-    write_viewport_pre_fx();
-  }
   this->cryptomatte_sort();
 
   /* Write standard passes. */
@@ -1450,7 +1514,10 @@ void Film::write_viewport_compositor_passes()
       output_pass_texture.acquire_2d(this->display_extent, GPU_texture_format(pass_texture));
 
       PassSimple write_pass_ps = {"Film.WriteViewportCompositorPass"};
-      const eShaderType write_shader_type = get_write_pass_shader_type(pass_type);
+      const eShaderType write_shader_type = pass_type == EEVEE_RENDER_PASS_PRE_FX &&
+                                                    pre_fx_alias_combined_ ?
+                                                FILM_PASS_CONVERT_COMBINED :
+                                                get_write_pass_shader_type(pass_type);
       write_pass_ps.shader_set(inst_.shaders.static_shader_get(write_shader_type));
       write_pass_ps.push_constant("offset", data_.offset);
       write_pass_ps.bind_texture("input_tx", pass_texture);

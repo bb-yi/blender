@@ -165591,8 +165591,8 @@ msgstr "输入分辨率"
 msgid "Pre-FX"
 msgstr "效果前图像"
 
-msgid "Output the image before depth of field and motion blur are applied"
-msgstr "输出应用景深和运动模糊之前的图像"
+msgid "Output the accumulated image before camera post-processing, later filters, Grease Pencil, and compositing; lens and shutter sampling remain, without separate DLSS processing"
+msgstr "输出相机后处理前累积的阶段图像，不包含后续过滤、蜡笔与合成；保留镜头和快门采样的模糊，不单独运行 DLSS"
 
 msgid "DLSS Super Resolution: custom input resolution using the Quality preset"
 msgstr "DLSS 超分辨率：使用质量预设，自定义输入分辨率"

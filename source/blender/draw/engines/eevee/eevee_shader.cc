@@ -471,6 +471,7 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        NATIVE_POSTFX_OUTPUT_PACK_VALUE,
                                        FILM_COPY,
                                        FILM_COMP,
+                                       FILM_PRE_FX_CAPTURE,
                                        FILM_CRYPTOMATTE_POST,
                                        FILM_FRAG,
                                        FILM_PASS_CONVERT_COMBINED,
@@ -716,6 +717,8 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_film_copy_frag";
     case FILM_COMP:
       return "eevee_film_comp";
+    case FILM_PRE_FX_CAPTURE:
+      return "eevee_film_pre_fx_capture";
     case FILM_CRYPTOMATTE_POST:
       return "eevee_film_cryptomatte_post";
     case FILM_FRAG:

@@ -62,7 +62,7 @@ enum eViewLayerEEVEEPassType : int {
   /** Viewport-only debug display. Not stored in #ViewLayerEEVEE.render_passes. */
   EEVEE_RENDER_PASS_STENCIL_VALUE = (1 << 29),
 };
-#define EEVEE_RENDER_PASS_MAX_BIT 22
+#define EEVEE_RENDER_PASS_MAX_BIT 23
 ENUM_OPERATORS(eViewLayerEEVEEPassType)
 
 /* #ViewLayer::grease_pencil_flags */

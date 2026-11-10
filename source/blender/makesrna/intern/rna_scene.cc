@@ -6077,7 +6077,11 @@ void rna_def_view_layer_common(BlenderRNA *brna, StructRNA *srna, const bool sce
     prop = RNA_def_property(srna, "use_pass_pre_fx", PROP_BOOLEAN, PROP_NONE);
     RNA_def_property_boolean_sdna(prop, nullptr, "eevee.render_passes", EEVEE_RENDER_PASS_PRE_FX);
     RNA_def_property_ui_text(
-        prop, "Pre-FX", "Output the image before depth of field and motion blur are applied");
+        prop,
+        "Pre-FX",
+        "Output the accumulated image before camera post-processing, later filters, Grease "
+        "Pencil, "
+        "and compositing; lens and shutter sampling remain, without separate DLSS processing");
     RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
   }
 

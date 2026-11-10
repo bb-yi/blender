@@ -387,29 +387,6 @@ namespace blender::eevee
       info_append_i18n("Error: Failed to compile EEVEE engine shaders");
     }
     skip_render_ = !is_loaded(needed_shaders) || !film.is_valid_render_extent();
-    if (is_viewport() && !is_pre_fx_render) {
-      if (film.pre_fx_compositor_requested() &&
-          (depth_of_field.enabled() || motion_blur.postfx_enabled()))
-      {
-        if (!pre_fx_viewport_) {
-          pre_fx_viewport_ = std::make_unique<Instance>();
-          pre_fx_viewport_->is_pre_fx_render = true;
-        }
-        pre_fx_viewport_->init(output_res,
-                               output_rect,
-                               visible_rect,
-                               render_,
-                               depsgraph_,
-                               camera_object_,
-                               render_layer_,
-                               drw_view_,
-                               v3d_,
-                               rv3d_);
-      }
-      else {
-        pre_fx_viewport_.reset();
-      }
-    }
   }
 
   bool Instance::init_light_bake(Depsgraph* depsgraph, draw::Manager* manager)
@@ -535,9 +512,6 @@ namespace blender::eevee
   void Instance::begin_sync()
   {
     sync.begin_sync();
-    if (pre_fx_viewport_) {
-      pre_fx_viewport_->begin_sync();
-    }
     update_eval_members();
     materials.expression_diagnostics_begin_sync();
     telemetry.maybe_begin_viewport_frame();
@@ -630,9 +604,6 @@ namespace blender::eevee
 
   void Instance::object_sync(ObjectRef& ob_ref, Manager& /*manager*/)
   {
-    if (pre_fx_viewport_) {
-      pre_fx_viewport_->object_sync(ob_ref, *manager);
-    }
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncObjects);
     GPUMaterialProfileContext material_profile(telemetry.material_profile_get());
     if (telemetry.enabled()) {
@@ -696,9 +667,6 @@ namespace blender::eevee
 
   void Instance::end_sync()
   {
-    if (pre_fx_viewport_) {
-      pre_fx_viewport_->end_sync();
-    }
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncEnd);
     GPUMaterialProfileContext material_profile(telemetry.material_profile_get());
     if (skip_render_)
@@ -786,7 +754,6 @@ namespace blender::eevee
       uint32_t draw_context = 0;
       SET_FLAG_FROM_TEST(draw_context, is_viewport(), DRAW_CONTEXT_VIEWPORT);
       SET_FLAG_FROM_TEST(draw_context, is_image_render, DRAW_CONTEXT_IMAGE_RENDER);
-      SET_FLAG_FROM_TEST(draw_context, is_pre_fx_render, DRAW_CONTEXT_PRE_FX_RENDER);
       SET_FLAG_FROM_TEST(draw_context, is_playback, DRAW_CONTEXT_PLAYBACK);
       SET_FLAG_FROM_TEST(draw_context, is_navigating, DRAW_CONTEXT_NAVIGATING);
       if (assign_if_different(pipelines.data.draw_context, draw_context) && is_viewport()) {
@@ -1088,24 +1055,6 @@ namespace blender::eevee
   /** \name Interface
    * \{ */
 
-  bool Instance::render_read_pre_fx(RenderLayer *render_layer, const char *view_name)
-  {
-    RenderPass *rp = RE_pass_find_by_name(render_layer, pre_fx_pass_name, view_name);
-    if (!rp) {
-      RE_engine_set_error_message(render, "Pre-FX render pass is missing");
-      return false;
-    }
-    float *result = film.read_pass(EEVEE_RENDER_PASS_COMBINED, 0);
-    if (!result) {
-      RE_engine_set_error_message(render, "Failed to read Pre-FX image");
-      return false;
-    }
-    BLI_mutex_lock(&render->update_render_passes_mutex);
-    RE_pass_set_buffer_data(rp, result);
-    BLI_mutex_unlock(&render->update_render_passes_mutex);
-    return true;
-  }
-
   bool Instance::render_frame(RenderEngine* engine, RenderLayer* render_layer, const char* view_name)
   {
     /* init() may already have moved into the shutter interval. Also restore on cancel/error. */
@@ -1174,15 +1123,11 @@ namespace blender::eevee
         sampling.finished())
       {
         /* TODO: Use `fmt`. */
-        std::string re_info = std::string(is_pre_fx_render ? "Rendering Pre-FX " : "Rendering ") +
-          std::to_string(sampling.sample_index()) + " / " +
-          std::to_string(sampling.sample_count()) + " samples";
+        std::string re_info = std::string("Rendering ") + std::to_string(sampling.sample_index()) +
+                              " / " + std::to_string(sampling.sample_count()) + " samples";
         RE_engine_update_stats(engine, nullptr, re_info.c_str());
-        const bool has_pre_fx = (view_layer->eevee.render_passes & EEVEE_RENDER_PASS_PRE_FX) != 0;
         const float progress = float(sampling.sample_index()) / float(sampling.sample_count());
-        RE_engine_update_progress(engine,
-                                  has_pre_fx ? (is_pre_fx_render ? 0.5f : 0.0f) + progress * 0.5f :
-                                               progress);
+        RE_engine_update_progress(engine, progress);
       }
 
       /* Metal: Perform render step between samples to allow flushing of freed GPUBackend resources.
@@ -1223,15 +1168,7 @@ namespace blender::eevee
       telemetry.reset();
       return false;
     }
-    if (is_pre_fx_render) {
-      if (!render_read_pre_fx(render_layer, view_name)) {
-        telemetry.reset();
-        return false;
-      }
-    }
-    else {
-      this->render_read_result(render_layer, view_name);
-    }
+    this->render_read_result(render_layer, view_name);
     telemetry.maybe_end_final_frame();
     if (telemetry.enabled())
     {
@@ -1360,11 +1297,6 @@ namespace blender::eevee
 
   void Instance::draw(Manager& /*manager*/)
   {
-    /* Write the companion's pass first. Draw the primary instance last so Combined, depth and
-     * overlays still describe the user's normal viewport, including its camera effects. */
-    if (pre_fx_viewport_) {
-      pre_fx_viewport_->draw(*manager);
-    }
     if (is_viewport_image_render)
     {
       draw_viewport_image_render();

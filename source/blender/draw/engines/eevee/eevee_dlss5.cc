@@ -182,7 +182,6 @@ bool Dlss5Module::prepare_session(const Dlss5FrameInputs &inputs)
     frame.camera = inst_.camera_orig_object ? inst_.camera_orig_object->id.session_uid : 0;
     frame.layer = inst_.view_layer->name;
     frame.view = inst_.render ? RE_GetActiveRenderView(inst_.render->re) : "";
-    frame.pre_fx = inst_.is_pre_fx_render;
     frame.frame = inst_.render ? inst_.render->re->r.cfra : inst_.scene->r.cfra;
     frame.camera_type = int(inst_.camera.data_get().type);
     frame.settings = settings;
@@ -480,7 +479,6 @@ void Dlss5Module::render_final()
    * time, independent of the last shutter/lens sample. Do not change camera/scene settings. */
   auto guide = std::make_unique<Instance>();
   guide->is_dlss_guide_render = true;
-  guide->is_pre_fx_render = inst_.is_pre_fx_render;
   const int2 offset = inst_.film.film_offset_get();
   const int2 extent = inst_.film.film_extent_get();
   rcti rect{offset.x, offset.x + extent.x, offset.y, offset.y + extent.y};

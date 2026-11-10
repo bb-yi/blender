@@ -265,9 +265,9 @@ else:
         elif scenario in ('camera','settings'):
             assert resets == ['1','0','1','0','0'],(scenario,resets)
         elif scenario == 'prefx':
-            assert resets == ['1','1']+['0','0']*4,resets
+            assert resets == ['1']+['0']*4,resets
         elif scenario == 'layers':
-            streams = 3 if HAS_PRE_FX else 2
+            streams = 2  # Pre-FX does not create another NR history stream.
             assert resets == ['1']*streams+['0']*(streams*4),resets
         elif scenario == 'compositor':
             assert resets == ['1','1']+['0','0']*4,resets

@@ -100,7 +100,7 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Float>("Is Pre-FX Render"_ustr)
       .min(0.0f)
       .max(1.0f)
-      .description("The current draw belongs to a Pre-FX companion render. Returns 0 or 1");
+      .description("Legacy output; always false because Pre-FX shares the normal scene draw");
   b.add_output<decl::Float>("Is Playback"_ustr)
       .min(0.0f)
       .max(1.0f)

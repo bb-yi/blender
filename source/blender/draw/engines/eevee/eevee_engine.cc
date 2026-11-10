@@ -2,8 +2,6 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include <memory>
-
 #include "BLI_rect.h"
 #include "GPU_framebuffer.hh"
 
@@ -74,30 +72,8 @@ static void eevee_render(RenderEngine *engine, Depsgraph *depsgraph)
     rcti visible_rect = rect;
 
     instance->init(size, &rect, &visible_rect, engine, depsgraph, camera_original_ob, layer);
-    const bool use_pre_fx = (instance->view_layer->eevee.render_passes & EEVEE_RENDER_PASS_PRE_FX) != 0;
-    const bool needs_pre_fx_render = instance->depth_of_field.enabled() ||
-                                     instance->motion_blur.postfx_enabled();
     if (!instance->render_frame(engine, layer, viewname)) {
       return;
-    }
-    if (use_pre_fx) {
-      if (needs_pre_fx_render) {
-        /* render_frame restored the requested time. A new instance isolates all sampling,
-         * Film and DLSS histories without changing scene or camera datablocks. Keep the primary
-         * instance alive for the normal render metadata callback. */
-        auto pre_fx = std::make_unique<Instance>();
-        pre_fx->is_pre_fx_render = true;
-        pre_fx->init(size, &rect, &visible_rect, engine, depsgraph, camera_original_ob, layer);
-        if (!pre_fx->render_frame(engine, layer, viewname)) {
-          if (!RE_engine_test_break(engine)) {
-            RE_engine_set_error_message(engine, "Failed to render Pre-FX image");
-          }
-          return;
-        }
-      }
-      else if (!instance->render_read_pre_fx(layer, viewname)) {
-        return;
-      }
     }
     RE_engine_update_progress(engine, 1.0f);
   };

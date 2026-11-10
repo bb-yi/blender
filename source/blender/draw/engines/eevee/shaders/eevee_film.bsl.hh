@@ -130,6 +130,7 @@ struct Film {
   [[sampler(4)]] sampler2DArray rp_value_tx;
   [[sampler(6)]] sampler2D cryptomatte_tx;
   [[sampler(7)]] sampler2D outline_resolved_tx;
+  [[sampler(8)]] sampler2D pre_fx_tx;
 
   /* Color History for TAA needs to be sampler to leverage bilinear sampling. */
   [[sampler(5)]] sampler2D in_combined_tx;
@@ -982,6 +983,39 @@ struct Film {
       }
     }
 
+    if (flag_test(enabled_categories, PASS_CATEGORY_PRE_FX)) {
+      /* The stage color shares Film's spatial samples, but never Combined's lens/NR history. */
+      float4 current = float4(0.0f);
+      float current_weight = 0.0f;
+      for (int i = samples_len - 1; i >= 0; i--) {
+        FilmSample src = sample_get(i, texel_film);
+        float4 c = texelfetch_as_YCoCg_opacity(pre_fx_tx, src.texel);
+        float w = src.weight * luma_weight(uni, c.x);
+        current += c * w;
+        current_weight += w;
+      }
+      current /= max(current_weight, 1e-8f);
+      int3 co = int3(texel_film, uni.uniform_buf.film.pre_fx_id);
+      float4 previous = current;
+      float previous_weight = 0.0f;
+      if (uni.uniform_buf.film.use_history && !use_reprojection) {
+        previous = imageLoadFast(color_accum_img, co);
+        previous.rgb = colorspace::YCoCg_from_scene_linear(previous.rgb);
+        previous_weight = dst.weight * luma_weight(uni, previous.x);
+      }
+      float4 color = (previous * previous_weight + current * current_weight) /
+                     max(previous_weight + current_weight, 1e-8f);
+      color.rgb = colorspace::scene_linear_from_YCoCg(color.rgb);
+      if (color.a > 0.995f) {
+        color.a = 1.0f;
+      }
+      if (any(isnan(color))) {
+        color = float4(0.0f, 0.0f, 0.0f, 1.0f);
+      }
+      imageStoreFast(
+          color_accum_img, co, patch_float_for_16f_storage(clamp_negative_values(color)));
+    }
+
     if (flag_test(enabled_categories, PASS_CATEGORY_DATA)) {
       float film_distance = distance_load(texel_film);
 
@@ -1375,6 +1409,30 @@ void accumulate_comp([[resource_table]] Film &film,
   film.process_render_sample(texel_film, out_color, out_depth);
 }
 
+struct CapturePreFX {
+  [[sampler(0)]] sampler2D input_tx;
+  [[sampler(1)]] sampler2D outline_tx;
+  [[image(0, write, SFLOAT_16_16_16_16)]] image2D output_img;
+  [[push_constant]] const bool has_outline;
+};
+
+[[compute, local_size(FILM_GROUP_SIZE, FILM_GROUP_SIZE)]]
+void capture_pre_fx([[resource_table]] CapturePreFX &srt,
+                    [[global_invocation_id]] const uint3 global_id)
+{
+  int2 texel = int2(global_id.xy);
+  if (any(greaterThanEqual(texel, imageSize(srt.output_img)))) {
+    return;
+  }
+  float4 color = texelFetch(srt.input_tx, texel, 0);
+  if (srt.has_outline) {
+    float4 outline = texelFetch(srt.outline_tx, texel, 0);
+    color.rgb = outline.rgb + color.rgb * (1.0f - outline.a);
+    color.a *= 1.0f - outline.a;
+  }
+  imageStoreFast(srt.output_img, texel, color);
+}
+
 /* The combined pass is stored into its own 2D texture with a format of
  * SFLOAT_16_16_16_16. */
 struct ConvertCombined {
@@ -1452,6 +1510,7 @@ template void pass_convert<ConvertCryptomatte, true>(ConvertCryptomatte &, const
 }  // namespace eevee::film
 
 PipelineCompute eevee_film_comp(eevee::film::accumulate_comp);
+PipelineCompute eevee_film_pre_fx_capture(eevee::film::capture_pre_fx);
 PipelineGraphic eevee_film_frag(eevee::film::fullscreen_vert,
                                 eevee::film::accumulate_or_display_frag);
 PipelineGraphic eevee_film_copy_frag(eevee::film::fullscreen_vert, eevee::film::display_frag);
