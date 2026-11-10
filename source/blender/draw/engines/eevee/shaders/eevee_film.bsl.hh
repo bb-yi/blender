@@ -160,7 +160,7 @@ struct Film {
   [[sampler(4)]] sampler2DArray rp_value_tx;
   [[sampler(6)]] sampler2D cryptomatte_tx;
   [[sampler(7)]] sampler2D outline_resolved_tx;
-  [[sampler(8)]] sampler2D pre_fx_tx;
+  [[sampler(9)]] sampler2D pre_fx_tx;
 
   /* Color History for TAA needs to be sampler to leverage bilinear sampling. */
   [[sampler(5)]] sampler2D in_combined_tx;
