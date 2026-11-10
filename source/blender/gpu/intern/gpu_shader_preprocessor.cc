@@ -978,6 +978,7 @@ struct Preprocessor {
     Vector<TokenAtom> entry_points;
     entry_points.append(lex_.hash("main"));
     entry_points.append(lex_.hash("nodetree_surface"));
+    entry_points.append(lex_.hash("nodetree_outline_shell_aov"));
     entry_points.append(lex_.hash("nodetree_volume"));
     entry_points.append(lex_.hash("nodetree_displacement"));
     entry_points.append(lex_.hash("nodetree_thickness"));

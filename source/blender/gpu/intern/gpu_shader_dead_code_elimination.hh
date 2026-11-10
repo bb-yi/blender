@@ -318,7 +318,9 @@ struct PruningStream {
       return;
     }
 
-    if (type_tok.type() == TokenType::Word && type_tok.atom() != return_atom) {
+    /* A directive can precede a call in the original token stream. Its final word
+     * is not a return type, and function declarations cannot nest in a body. */
+    if (current_fn == 0 && type_tok.type() == TokenType::Word && type_tok.atom() != return_atom) {
       register_function_declaration(type_tok, name_tok);
     }
     else if (current_fn != 0) {
