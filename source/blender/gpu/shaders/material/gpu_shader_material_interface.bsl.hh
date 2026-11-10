@@ -125,6 +125,11 @@ struct KernelGlobals {
     return {};
   }
 
+  uint resource_id_get(const ShadingData & /*sd*/)
+  {
+    return 0u;
+  }
+
   ObjectMatrices light_matrices_get(int /*light_index*/)
   {
     return {};
