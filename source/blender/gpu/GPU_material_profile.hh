@@ -4,7 +4,7 @@
 
 #include <array>
 #include <cstdint>
-#include "BLI_time.h"
+#include "BLI_time.hh"
 
 namespace blender {
 

@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0 */
 
 #include "BLI_string_ref.hh"
-#include "BLI_string_utf8_symbols.h"
+#include "BLI_string_utf8_symbols.hh"
 #include "BLI_vector.hh"
 
 #include "testing/testing.h"
 
-#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
+#include "BLI_strict_flags.hh" /* IWYU pragma: keep. Keep last. */
 
 namespace blender::tests {
 
@@ -399,6 +399,64 @@ TEST(string_ref, TrimCharacter)
   EXPECT_EQ(ref1.trim('p'), "test");
   EXPECT_EQ(ref2.trim(' '), "test");
   EXPECT_EQ(ref3.trim('\000'), "does this work?");
+}
+
+TEST(string_ref, TrimLeftArbitrary)
+{
+  StringRef ref1("test");
+  StringRef ref2("   test ");
+  StringRef ref3(" \t  Urož with spaces ");
+  StringRef ref4("žžžžleepyžžž");
+  EXPECT_EQ(ref1.trim_left("t"), "est");
+  EXPECT_EQ(ref1.trim_left("te"), "st");
+  EXPECT_EQ(ref1.trim_left("et"), "st");
+  EXPECT_EQ(ref1.trim_left("tes"), "");
+  EXPECT_EQ(ref1.trim_left("est"), "");
+  EXPECT_EQ(ref2.trim_left("t"), "   test ");
+  EXPECT_EQ(ref2.trim_left(""), "   test ");
+  EXPECT_EQ(ref3.trim_left(" "), "\t  Urož with spaces ");
+  EXPECT_EQ(ref4.trim_left("ž"), "leepyžžž");
+}
+
+TEST(string_ref, TrimLeftWhitespace)
+{
+  StringRef ref1("test");
+  StringRef ref2("   test ");
+  StringRef ref3(" \t  Urož with spaces ");
+  StringRef ref4(" \t \n\r  \t ");
+  EXPECT_EQ(ref1.trim_left(), "test");
+  EXPECT_EQ(ref2.trim_left(), "test ");
+  EXPECT_EQ(ref3.trim_left(), "Urož with spaces ");
+  EXPECT_EQ(ref4.trim_left(), "");
+}
+
+TEST(string_ref, TrimRightArbitrary)
+{
+  StringRef ref1("test");
+  StringRef ref2("   test ");
+  StringRef ref3(" \t  Urož with spaces ");
+  StringRef ref4("žžžžleepyžžž");
+  EXPECT_EQ(ref1.trim_right("t"), "tes");
+  EXPECT_EQ(ref1.trim_right("te"), "tes");
+  EXPECT_EQ(ref1.trim_right("et"), "tes");
+  EXPECT_EQ(ref1.trim_right("test"), "");
+  EXPECT_EQ(ref1.trim_right("est"), "");
+  EXPECT_EQ(ref2.trim_right("t"), "   test ");
+  EXPECT_EQ(ref2.trim_right(""), "   test ");
+  EXPECT_EQ(ref3.trim_right(" "), " \t  Urož with spaces");
+  EXPECT_EQ(ref4.trim_right("ž"), "žžžžleepy");
+}
+
+TEST(string_ref, TrimRightWhitespace)
+{
+  StringRef ref1("test");
+  StringRef ref2("   test ");
+  StringRef ref3(" \t  Urož with spaces ");
+  StringRef ref4(" \t \n\r  \t ");
+  EXPECT_EQ(ref1.trim_right(), "test");
+  EXPECT_EQ(ref2.trim_right(), "   test");
+  EXPECT_EQ(ref3.trim_right(), " \t  Urož with spaces");
+  EXPECT_EQ(ref4.trim_right(), "");
 }
 
 TEST(string_ref, Substr)

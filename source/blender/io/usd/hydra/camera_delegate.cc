@@ -6,16 +6,16 @@
 
 #include "DNA_ID.h"
 #include "DNA_camera_types.h"
-#include "DNA_scene_types.h"
+#include "DNA_object_types.h"
 
 #include "BKE_idprop.hh"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase_iterator.hh"
 
 #include <pxr/imaging/hd/dataSource.h>
+#include <pxr/imaging/hd/dataSourceLocator.h>
 #include <pxr/imaging/hd/overlayContainerDataSource.h>
 #include <pxr/imaging/hd/retainedDataSource.h>
-#include <pxr/imaging/hd/sceneIndexObserver.h>
 #include <pxr/imaging/hd/tokens.h>
 
 namespace blender::io::hydra {
@@ -34,7 +34,7 @@ class BlenderCameraIDPropertiesDataSource : public pxr::HdContainerDataSource {
     pxr::TfTokenVector result;
     if (camera_ && camera_->id.properties) {
       for (const IDProperty &prop : camera_->id.properties->data.group) {
-        result.push_back(pxr::TfToken(prop.name));
+        result.emplace_back(prop.name);
       }
     }
     return result;
@@ -82,10 +82,11 @@ CameraDelegate::CameraDelegate(pxr::HdRenderIndex *render_index, pxr::SdfPath co
       camera_scene_index_, pxr::SdfPath::AbsoluteRootPath(), /*needsPrefixing=*/false);
 }
 
-void CameraDelegate::sync(const Scene *scene)
+void CameraDelegate::sync(const Object *camera_object)
 {
-  const Camera *camera = (scene && scene->camera) ? id_cast<const Camera *>(scene->camera->data) :
-                                                    nullptr;
+  const Camera *camera = (camera_object && camera_object->type == OB_CAMERA) ?
+                             id_cast<const Camera *>(camera_object->data) :
+                             nullptr;
   id_properties_ds_->set_camera(camera);
   camera_scene_index_->DirtyPrims({{camera_id_, pxr::HdDataSourceLocator::EmptyLocator()}});
 }

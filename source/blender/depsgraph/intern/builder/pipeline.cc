@@ -2,10 +2,14 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup depsgraph
+ */
+
 #include "pipeline.h"
 
-#include "BLI_listbase.h"
-#include "BLI_time.h"
+#include "BLI_listbase.hh"
+#include "BLI_time.hh"
 
 #include "CLG_log.h"
 

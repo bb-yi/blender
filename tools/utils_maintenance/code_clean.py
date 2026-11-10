@@ -817,16 +817,25 @@ class edit_generators:
 
             for use_brackets in (True, False):
 
+                # An operand may contain blank-space (`c == ' '`) but must not begin or end with it,
+                # otherwise it competes with the surrounding `\s+` separators and long multi-line
+                # expressions can end up hanging (only to be rejected).
+                re_operand = r'[^\s\|\(\)](?:[^\|\(\)]*[^\s\|\(\)])?'
+
                 test_equal = (
-                    r'([^\|\(\)]+)'  # group 1 (no (|))
-                    r'\s+==\s+'
-                    r'([^\|\(\)]+)'  # group 2 (no (|))
+                    # group 1 (no (|), no outer blank-space).
+                    '(' + re_operand + ')' +
+                    r'\s+==\s+' +
+                    # group 2 (no (|), no outer blank-space).
+                    '(' + re_operand + ')'
                 )
 
                 test_not_equal = (
-                    r'([^\|\(\)]+)'  # group 1 (no (|))
-                    r'\s+!=\s+'
-                    r'([^\|\(\)]+)'  # group 2 (no (|))
+                    # group 1 (no (|), no outer blank-space).
+                    '(' + re_operand + ')' +
+                    r'\s+!=\s+' +
+                    # group 2 (no (|), no outer blank-space).
+                    '(' + re_operand + ')'
                 )
 
                 if use_brackets:
@@ -1007,7 +1016,7 @@ class edit_generators:
             edits = []
 
             # Keep:
-            # - `strucrt Foo;` (forward declaration).
+            # - `struct Foo;` (forward declaration).
             # - `struct Foo {` (declaration).
             # - `struct {` (declaration).
             # In these cases removing will cause a build error (which is technically "safe")
@@ -1530,7 +1539,7 @@ class edit_generators:
         def _header_exclude(f_basename: str) -> bool:
             # This header only exists to add additional warnings, removing it doesn't impact generated output.
             # Skip this file.
-            if f_basename == "BLI_strict_flags.h":
+            if f_basename == "BLI_strict_flags.hh":
                 return True
             return False
 

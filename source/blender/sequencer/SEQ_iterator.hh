@@ -8,16 +8,17 @@
  * \ingroup sequencer
  */
 
+#include "BLI_enum_flags.hh"
 #include "BLI_function_ref.hh"
 #include "BLI_vector_set.hh"
 #include "DNA_listBase.h"
-#include "DNA_sequence_types.h"
 
 namespace blender {
 
 struct Scene;
 struct SeqTimelineChannel;
 struct Strip;
+struct Editing;
 
 namespace seq {
 
@@ -27,132 +28,82 @@ namespace seq {
 using ForEachFunc = bool (*)(Strip *strip, void *user_data);
 
 /**
- * Utility function to recursively iterate through all sequence strips in a `seqbase` list.
- * Uses callback to do operations on each element.
- * The callback can stop the iteration if needed.
+ * Recursively iterate through all strips in \a seqbase, calling \a callback on each.
  *
- * \param seqbase: List of sequences to be iterated over.
- * \param callback: query function callback, returns false if iteration should stop.
- * \param user_data: pointer to user data that can be used in the callback function.
+ * \param callback: Return false to stop iterating.
  */
 void foreach_strip(ListBaseT<Strip> *seqbase, ForEachFunc callback, void *user_data);
 
 /** Same as above, but using a more modern FunctionRef as callback. */
 void foreach_strip(ListBaseT<Strip> *seqbase, FunctionRef<bool(Strip *)> callback);
 
-/**
- * Expand set by running `strip_query_func()` for each strip, which will be used as reference.
- * Results of these queries will be merged into provided collection.
- *
- * \param seqbase: List in which strips are queried
- * \param strips: set of strips to be expanded
- * \param strip_query_func: query function callback
- */
-void iterator_set_expand(ListBaseT<Strip> *seqbase,
-                         VectorSet<Strip *> &strips,
-                         void strip_query_func(Strip *strip_reference,
-                                               ListBaseT<Strip> *seqbase,
-                                               VectorSet<Strip *> &strips));
+/* -------------------------------------------------------------------- */
+/** \name Expand Strips
+ * \{ */
 
 /**
- * Same as above, but for query functions that need the whole #Editing context, rather than a
- * single `seqbase`.
+ * Ways in which one strip can relate to another.
+ * Used by #expand_strips to decide which relations to follow.
  */
-void iterator_set_expand(Editing *ed,
-                         VectorSet<Strip *> &strips,
-                         void strip_query_func(Strip *strip_reference,
-                                               Editing *ed,
-                                               VectorSet<Strip *> &strips));
+enum class StripRelation {
+  None = 0,
+
+  /** Effects of this strip. */
+  Effects = (1 << 0),
+  /** If the strip is an effect, the inputs of this strip. */
+  Inputs = (1 << 1),
+  /** If the strip is a meta, the strips nested inside this strip. */
+  MetaContents = (1 << 2),
+  /** Strips connected to this strip. */
+  Connected = (1 << 3),
+  /** Selected strips connected to this strip.
+   *
+   * NOTE: Set either #Connected or #SelectedConnected, but not both,
+   * #expand_strips asserts that only one of these is chosen. */
+  SelectedConnected = (1 << 4),
+
+  /** The entire effect chain a strip participates in, followed in both directions. */
+  EffectChain = Effects | Inputs,
+  /** As above, plus the connections of every strip in that chain. */
+  ConnectedEffectChain = EffectChain | Connected,
+};
+ENUM_OPERATORS(StripRelation);
+
 /**
- * Query strips from seqbase. strip_reference is used by query function as filter condition.
- *
- * \param strip_reference: reference strip for query function
- * \param seqbase: List in which strips are queried
- * \param strip_query_func: query function callback
- * \return set of strips
+ * Grow a #VectorSet of \a strips to also contain every strip reachable from it by repeatedly
+ * following the relations in \a include.
  */
-VectorSet<Strip *> query_by_reference(Strip *strip_reference,
-                                      ListBaseT<Strip> *seqbase,
-                                      void strip_query_func(Strip *strip_reference,
-                                                            ListBaseT<Strip> *seqbase,
-                                                            VectorSet<Strip *> &strips));
+void expand_strips(Editing *ed, VectorSet<Strip *> &strips, StripRelation include);
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Query Strips
+ * \{ */
+
 /**
  * Query all selected strips in seqbase.
- *
- * \param seqbase: List in which strips are queried
- * \return set of strips
  */
 VectorSet<Strip *> query_selected_strips(ListBaseT<Strip> *seqbase);
 /**
  * Query all unselected strips in seqbase.
- *
- * \param seqbase: List in which strips are queried
- * \return set of strips
  */
 VectorSet<Strip *> query_unselected_strips(ListBaseT<Strip> *seqbase);
 /**
  * Query all strips in seqbase. This does not include strips nested in meta strips.
- *
- * \param seqbase: List in which strips are queried
- * \return set of strips
  */
 VectorSet<Strip *> query_all_strips(ListBaseT<Strip> *seqbase);
 /**
  * Query all strips in seqbase and nested meta strips.
- *
- * \param seqbase: List in which strips are queried
- * \return set of strips
  */
 VectorSet<Strip *> query_all_strips_recursive(const ListBaseT<Strip> *seqbase);
 
 /**
  * Query strips at \a timeline_frame in seqbase and nested meta strips.
- *
- * \param seqbase: List in which strips are queried
- * \param timeline_frame: viewed frame
- * \return set of strips
  */
 VectorSet<Strip *> query_strips_recursive_at_frame(const Scene *scene,
                                                    const ListBaseT<Strip> *seqbase,
                                                    int timeline_frame);
-
-/**
- * Recursively queries all meta strip contents.
- */
-void query_strip_recursive(Strip *strip, Editing *ed, VectorSet<Strip *> &r_strips);
-/**
- * Query the effect strips attached to a given reference \a strip, and recursively the effects
- * attached to those effects. The result is placed in the return parameter \a r_strips.
- * Unlike #query_strip_effect_chain this only recursively includes the effects attached to the
- * reference \a strip, but doesn't include the inputs of the recursively included effects.
- */
-void query_strip_direct_effect_chain(Strip *strip, Editing *ed, VectorSet<Strip *> &r_strips);
-
-/**
- * Recursively query the entire chain of effect strips directly or indirectly
- * attached to a given reference \a strip, placing result in return parameter \a r_strips.
- * This includes all effects of \a strip, strips used by another inputs and their effects,
- * so that whole chain is fully independent of other strips.
- *
- * \param strip: reference strip
- * \param seqbase: List in which strips are queried
- * \param r_strips: set of strips to be filled
- */
-void query_strip_effect_chain(Strip *strip,
-                              ListBaseT<Strip> *seqbase,
-                              VectorSet<Strip *> &r_strips);
-
-/**
- * Recursively query the entire chain of connected and effect strips directly or indirectly
- * attached to a given reference \a strip, placing result in return parameter \a r_strips.
- *
- * \param strip: reference strip
- * \param seqbase: List in which strips are queried
- * \param r_strips: set of strips to be filled
- */
-void query_strip_connected_and_effect_chain(Strip *strip,
-                                            ListBaseT<Strip> *seqbase,
-                                            VectorSet<Strip *> &r_strips);
 
 /**
  * Query strips that will be rendered at \a timeline_frame on all channels less than
@@ -186,8 +137,11 @@ Vector<Strip *> query_rendered_strips_sorted(const Scene *scene,
  * part of other strips' renders (such as effect strip inputs). These should be skipped to avoid
  * unnecessary re-rendering.
  *
- * \note: Take care when changing the logic of this function since order matters.
- * */
+ * \note Take care when changing the logic of this function since order matters.
+ */
 bool must_render_strip(const VectorSet<Strip *> &strip_stack, Strip *target_strip);
+
+/** \} */
+
 }  // namespace seq
 }  // namespace blender

@@ -14,7 +14,7 @@
 #include "CurveIterators.h"
 
 #include "BKE_global.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 namespace Freestyle {
 
@@ -614,7 +614,7 @@ Curve::const_point_iterator Curve::points_end(float step) const
   // _Length);
 }
 
-// Adavnced Iterators access
+// Advanced Iterators access
 Curve::point_iterator Curve::vertices_begin()
 {
   return points_begin(0);

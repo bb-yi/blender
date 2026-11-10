@@ -7,14 +7,13 @@
 #include "usd.hh"
 #include "usd_api_hook.hh"
 #include "usd_asset_utils.hh"
-#include "usd_hash_types.hh"
 #include "usd_hierarchy_iterator.hh"
 #include "usd_reader_prim.hh"
 #include "usd_reader_stage.hh"
 #include "usd_writer_material.hh"
 
 #include "BLI_map.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 #include "BLI_vector.hh"
 
 #include "BKE_lib_id.hh"
@@ -318,7 +317,7 @@ void register_hook_converters()
   python::import("pxr.Usd");
   python::import("pxr.UsdShade");
 
-  /* Register converter from PoinerRNA to a PyObject*. */
+  /* Register converter from PointerRNA to a PyObject*. */
   python::to_python_converter<PointerRNA, PointerRNAToPython>();
 
   /* Register context class converters. */
@@ -463,7 +462,7 @@ class OnMaterialExportInvoker final : public USDHookInvoker {
 
  public:
   OnMaterialExportInvoker(pxr::UsdStageRefPtr stage,
-                          Material *material,
+                          const Material *material,
                           const pxr::UsdShadeMaterial &usd_material,
                           const USDExportParams &export_params,
                           ReportList *reports)
@@ -471,7 +470,8 @@ class OnMaterialExportInvoker final : public USDHookInvoker {
         hook_context_(stage, export_params, reports),
         usd_material_(usd_material)
   {
-    material_ptr_ = RNA_pointer_create_discrete(nullptr, RNA_Material, material);
+    material_ptr_ = RNA_pointer_create_discrete(
+        nullptr, RNA_Material, const_cast<Material *>(material));
   }
 
  private:
@@ -602,7 +602,7 @@ void call_export_hooks(Depsgraph *depsgraph, const USDHierarchyIterator *iter, R
 }
 
 void call_material_export_hooks(pxr::UsdStageRefPtr stage,
-                                Material *material,
+                                const Material *material,
                                 const pxr::UsdShadeMaterial &usd_material,
                                 const USDExportParams &export_params,
                                 ReportList *reports)

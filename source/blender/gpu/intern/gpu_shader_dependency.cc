@@ -43,8 +43,14 @@ extern "C" {
 #include "glsl_compositor_source_list.h"
 /* Keep the registered source tables recompiling when draw-side generated source lists change. */
 #include "glsl_draw_source_list.h"
+#include "glsl_eevee_source_list.h"
+#include "glsl_gpencil_source_list.h"
 #include "glsl_gpu_source_list.h"
+#include "glsl_image_source_list.h"
 #include "glsl_ocio_source_list.h"
+#include "glsl_overlay_source_list.h"
+#include "glsl_select_id_source_list.h"
+#include "glsl_workbench_source_list.h"
 #ifdef WITH_OPENSUBDIV
 #  include "glsl_osd_source_list.h"
 #endif
@@ -172,6 +178,16 @@ struct GPUSource {
         return GPU_MAT3;
       case metadata::Type::float4x4:
         return GPU_MAT4;
+      case metadata::Type::int1:
+        return GPU_INT;
+      case metadata::Type::int2:
+        return GPU_INT2;
+      case metadata::Type::int3:
+        return GPU_INT3;
+      case metadata::Type::int4:
+        return GPU_INT4;
+      case metadata::Type::bool1:
+        return GPU_BOOL;
       case metadata::Type::sampler1DArray:
         return GPU_TEX1D_ARRAY;
       case metadata::Type::sampler2DArray:
@@ -186,6 +202,10 @@ struct GPUSource {
         return GPU_CLOSURE;
       case metadata::Type::TextureHandle:
         return GPU_TEX_HANDLE;
+      case metadata::Type::KernelGlobals:
+        return GPU_KERNEL_GLOBALS;
+      case metadata::Type::ShadingData:
+        return GPU_SHADING_DATA;
     }
     BLI_assert_unreachable();
     return GPU_NONE;
@@ -361,7 +381,7 @@ struct GPUSource {
       dependencies.append_non_duplicates(printf_source);
     }
     if (flag_is_set(builtins, BuiltinBits::USE_DEBUG_DRAW)) {
-      GPUSource *debug_draw_source = dict.lookup_default("draw_debug_draw_lib.glsl", nullptr);
+      GPUSource *debug_draw_source = dict.lookup_default("draw_debug_draw.bsl.hh", nullptr);
       if (debug_draw_source == nullptr) {
         print_error(source, 0, "Auto dependency not found : draw_debug_draw_lib.glsl");
         return 1;
@@ -391,13 +411,15 @@ struct GPUSource {
   }
 
   void source_get(Vector<StringRefNull> &result,
+                  Vector<StringRefNull> &included,
                   const shader::GeneratedSourceList &generated_sources,
                   const GPUSourceDictionary &dict,
                   const GPUSource &from) const
   {
 #define CLOG_FILE_INCLUDE(_from, _include) \
   if (CLOG_CHECK(&LOG, CLG_LEVEL_TRACE) && \
-      (from).filename.c_str() != (_include).filename.c_str()) { \
+      (from).filename.c_str() != (_include).filename.c_str()) \
+  { \
     const char *from_filename = (_from).filename.c_str(); \
     const char *include_filename = (_include).filename.c_str(); \
     const int from_size = int((_from).source.size()); \
@@ -413,11 +435,23 @@ struct GPUSource {
     CLG_log_raw(LOG.type, style.c_str()); \
   }
 
+    const shader::GeneratedSource *gen_src = nullptr;
+    if (flag_is_set(this->builtins, shader::BuiltinBits::RUNTIME_GENERATED)) {
+      /* Linear lookup since we won't have more than a few per shaders.
+       * Also avoid the complexity of a Map in info creation. */
+      for (const shader::GeneratedSource &generated_src : generated_sources) {
+        if (generated_src.filename == this->filename) {
+          gen_src = &generated_src;
+          break;
+        }
+      }
+    }
+
     /* Check if this file was already included. */
-    for (const StringRefNull &source_content : result) {
+    for (const StringRefNull &source_content : included) {
       /* Yes, compare pointer instead of string for speed.
        * Each source is guaranteed to be unique and non-moving during the building process. */
-      if (source_content.c_str() == this->source.c_str()) {
+      if (source_content.c_str() == (gen_src ? gen_src->content.c_str() : this->source.c_str())) {
         /* Already included. */
         CLOG_FILE_INCLUDE(from, *this);
         return;
@@ -425,49 +459,48 @@ struct GPUSource {
     }
 
     if (!flag_is_set(this->builtins, shader::BuiltinBits::RUNTIME_GENERATED)) {
+      included.append(this->source);
       for (const auto &dependency : this->dependencies) {
         if (dependency == nullptr) {
           std::cerr << "Null dependency in shader source : " << this->filename << std::endl;
           return;
         }
         /* WATCH: Recursive. */
-        dependency->source_get(result, generated_sources, dict, *this);
+        dependency->source_get(result, included, generated_sources, dict, *this);
       }
       CLOG_FILE_INCLUDE(from, *this);
       result.append(this->source);
       return;
     }
 
-    /* Linear lookup since we won't have more than a few per shaders.
-     * Also avoid the complexity of a Map in info creation. */
-    for (const shader::GeneratedSource &generated_src : generated_sources) {
-      if (generated_src.filename == this->filename) {
-        /* Include dependencies before the generated file. */
-        for (const auto &dependency_name : generated_src.dependencies) {
-          BLI_assert_msg(dependency_name != this->filename, "Recursive include");
+    if (gen_src) {
+      included.append(gen_src->content);
+      /* Include dependencies before the generated file. */
+      for (const auto &dependency_name : gen_src->dependencies) {
+        BLI_assert_msg(dependency_name != this->filename, "Recursive include");
 
-          GPUSource *dependency_source = dict.lookup_default(dependency_name, nullptr);
-          if (dependency_source == nullptr) {
-            /* Will certainly fail compilation. But avoid crashing the application. */
-            std::cerr << "Generated dependency not found : " + dependency_name << std::endl;
-            return;
-          }
-          /* WATCH: Recursive. */
-          dependency_source->source_get(result, generated_sources, dict, *this);
+        GPUSource *dependency_source = dict.lookup_default(dependency_name, nullptr);
+        if (dependency_source == nullptr) {
+          /* Will certainly fail compilation. But avoid crashing the application. */
+          std::cerr << "Generated dependency not found : " + dependency_name << std::endl;
+          return;
         }
-        CLOG_FILE_INCLUDE(from, *this);
-        result.append(generated_src.content);
-        return;
+        /* WATCH: Recursive. */
+        dependency_source->source_get(result, included, generated_sources, dict, *this);
       }
+      CLOG_FILE_INCLUDE(from, *this);
+      result.append(gen_src->content);
+      return;
     }
 
     std::cerr << "warn: Generated source not provided. Using fallback for : " << this->filename
               << std::endl;
+    included.append(this->source);
     /* Dependencies for generated sources are not folded on startup.
      * This allows for different set of dependencies at runtime. */
     for (const auto &dependency : this->dependencies) {
       /* WATCH: Recursive. */
-      dependency->source_get(result, generated_sources, dict, *this);
+      dependency->source_get(result, included, generated_sources, dict, *this);
     }
     CLOG_FILE_INCLUDE(from, *this);
     result.append(this->source);
@@ -478,7 +511,9 @@ struct GPUSource {
              const shader::GeneratedSourceList &generated_sources,
              const GPUSourceDictionary &dict) const
   {
-    source_get(result, generated_sources, dict, *this);
+    /* List of visited files. Avoid infinite or double includes. */
+    Vector<StringRefNull> included;
+    source_get(result, included, generated_sources, dict, *this);
   }
 
   shader::BuiltinBits builtins_get() const
@@ -504,8 +539,14 @@ namespace shader {
 #include "glsl_compositor_metadata_list.hh"
 #include "glsl_draw_metadata_list.hh"
 /* Generated metadata for all GPU shader sources, including material node functions. */
+#include "glsl_eevee_metadata_list.hh"
+#include "glsl_gpencil_metadata_list.hh"
 #include "glsl_gpu_metadata_list.hh"
+#include "glsl_image_metadata_list.hh"
 #include "glsl_ocio_metadata_list.hh"
+#include "glsl_overlay_metadata_list.hh"
+#include "glsl_select_id_metadata_list.hh"
+#include "glsl_workbench_metadata_list.hh"
 #ifdef WITH_OPENSUBDIV
 #  include "glsl_osd_metadata_list.hh"
 #endif
@@ -541,10 +582,17 @@ void gpu_shader_dependency_init()
                                    g_formats, \
                                    gpu::shader::metadata_##filename_underscore));
 
+#include "glsl_gpu_source_list.h"
+
 #include "glsl_compositor_source_list.h"
 #include "glsl_draw_source_list.h"
-#include "glsl_gpu_source_list.h"
+#include "glsl_eevee_source_list.h"
+#include "glsl_gpencil_source_list.h"
+#include "glsl_image_source_list.h"
 #include "glsl_ocio_source_list.h"
+#include "glsl_overlay_source_list.h"
+#include "glsl_select_id_source_list.h"
+#include "glsl_workbench_source_list.h"
 #ifdef WITH_OPENSUBDIV
 #  include "glsl_osd_source_list.h"
 #endif
@@ -552,7 +600,7 @@ void gpu_shader_dependency_init()
 #ifdef WITH_OPENSUBDIV
   osd_patch_basis = openSubdiv_getGLSLPatchBasisSource();
   osd_patch_basis = shader::SourceProcessor(
-                        osd_patch_basis, "osd_patch_basis.glsl", gpu::shader::Language::GLSL)
+                        osd_patch_basis, "osd_patch_basis.glsl", gpu::shader::Language::GLSL, {})
                         .remove_comments();
   auto source_ptr_opt = g_sources->pop_try("osd_patch_basis.glsl");
   if (source_ptr_opt) {

@@ -16,12 +16,13 @@
 
 #include "DNA_object_types.h"
 
-#include "BLI_compiler_compat.h"
-#include "BLI_listbase.h"
+#include "BLI_compiler_compat.hh"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_c.hh"
 #include "BLI_offset_indices.hh"
 #include "BLI_ordered_edge.hh"
+#include "BLI_vector.hh"
 
 #include "BLT_translation.hh"
 
@@ -31,11 +32,14 @@
 #include "BKE_main.hh"
 #include "BKE_material.hh"
 #include "BKE_mesh.hh"
+#include "BKE_modifier.hh"
 #include "BKE_object.hh"
 #include "BKE_subdiv.hh"
 
 #include "CLG_log.h"
 #include "IO_validate.hh"
+
+#include <algorithm>
 
 namespace blender {
 
@@ -50,6 +54,7 @@ using Alembic::AbcGeom::IC3fGeomParam;
 using Alembic::AbcGeom::IC4fGeomParam;
 using Alembic::AbcGeom::IFaceSet;
 using Alembic::AbcGeom::IFaceSetSchema;
+using Alembic::AbcGeom::IInt32Property;
 using Alembic::AbcGeom::IN3fGeomParam;
 using Alembic::AbcGeom::IObject;
 using Alembic::AbcGeom::IPolyMesh;
@@ -68,7 +73,7 @@ namespace io::alembic {
 
 static CLG_LogRef LOG = {"io.alembic"};
 
-/* NOTE: Alembic's face winding order is clockwise, to match with Renderman. */
+/* NOTE: Alembic's face winding order is clockwise, to match with RenderMan. */
 
 /* Some helpers for mesh generation */
 namespace utils {
@@ -118,9 +123,11 @@ static void assign_materials(Main *bmain,
 
 } /* namespace utils */
 
-/** This utility structure holds mesh data arrays which are common between the IPolyMeshSchema and
+/**
+ * This utility structure holds mesh data arrays which are common between the IPolyMeshSchema and
  * the ISubDSchema. As those schemas do not derive from one another, this structure is used to read
- * mesh data generically. */
+ * mesh data generically.
+ */
 struct AbcMeshData {
   StringRef iobject_full_name;
   StringRef schema_name;
@@ -454,11 +461,14 @@ static bool samples_have_same_topology(const SampleType &sample, const SampleTyp
   /* Otherwise, we need to check the connectivity as files from e.g. videogrammetry may have the
    * same face count, but different connections between faces. */
 
-  if (memcmp(face_counts->get(), ceil_face_counts->get(), face_counts->size() * sizeof(int))) {
+  if (memcmp(face_counts->get(), ceil_face_counts->get(), face_counts->size() * sizeof(int)) != 0)
+  {
     return false;
   }
 
-  if (memcmp(face_indices->get(), ceil_face_indices->get(), face_indices->size() * sizeof(int))) {
+  if (memcmp(face_indices->get(), ceil_face_indices->get(), face_indices->size() * sizeof(int)) !=
+      0)
+  {
     return false;
   }
 
@@ -718,11 +728,38 @@ static bool has_animated_geom_params(const ICompoundProperty arbGeomParams)
   return false;
 }
 
+/* Copy of #IPolyMeshSchema::getFaceSetNames(), to avoid ASAN false positive
+ * when the std::vector is passed from ASAN enabled Blender code to the
+ * Alembic library built without ASAN. */
+static Vector<std::string> get_face_set_names(const IPolyMeshSchema &schema)
+{
+  const IObject object = schema.getObject();
+
+  Vector<std::string> names;
+  for (size_t i = 0; i < object.getNumChildren(); i++) {
+    const Alembic::AbcCoreAbstract::ObjectHeader &header = object.getChildHeader(i);
+    if (IFaceSet::matches(header)) {
+      names.append(header.getName());
+    }
+  }
+
+  std::sort(names.begin(), names.end());
+  return names;
+}
+
 /* Specialization of #has_animations() as defined in abc_reader_object.h. */
 template<> bool has_animations(Alembic::AbcGeom::IPolyMeshSchema &schema, ImportSettings *settings)
 {
   if (settings->is_sequence || !schema.isConstant()) {
     return true;
+  }
+
+  for (const std::string &face_set_name : get_face_set_names(schema)) {
+    const IFaceSet face_set = schema.getFaceSet(face_set_name);
+    const IFaceSetSchema &face_set_schema = face_set.getSchema();
+    if (!face_set_schema.isConstant()) {
+      return true;
+    }
   }
 
   IV2fGeomParam uvsParam = schema.getUVsParam();
@@ -804,6 +841,9 @@ void AbcMeshReader::readObjectData(Main *bmain, const Alembic::Abc::ISampleSelec
   if (m_settings->always_add_cache_reader || has_animations(m_schema, m_settings)) {
     addCacheModifier();
   }
+
+  ICompoundProperty user_props = m_schema.getUserProperties();
+  read_active_and_default_color_attributes(*mesh, user_props, sample_sel);
 }
 
 bool AbcMeshReader::accepts_object_type(
@@ -892,20 +932,20 @@ Mesh *AbcMeshReader::read_mesh(Mesh *existing_mesh,
                                     r_err_str,
                                     m_is_reading_a_file_sequence);
 
-  if (new_mesh != existing_mesh) {
-    /* Here we assume that the number of materials doesn't change, i.e. that
-     * the material slots that were created when the object was loaded from
-     * Alembic are still valid now. */
-    size_t num_faces = new_mesh->faces_num;
-    if (num_faces > 0) {
-      std::map<std::string, int> mat_map;
-      bke::MutableAttributeAccessor attributes = new_mesh->attributes_for_write();
-      bke::SpanAttributeWriter<int> material_indices =
-          attributes.lookup_or_add_for_write_span<int>("material_index", bke::AttrDomain::Face);
-      assign_facesets_to_material_indices(sample_sel, material_indices.span, mat_map);
-      material_indices.finish();
-    }
+  /* Here we assume that the number of materials doesn't change, i.e. that
+   * the material slots that were created when the object was loaded from
+   * Alembic are still valid now. */
+  size_t num_faces = new_mesh->faces_num;
+  if (num_faces > 0) {
+    std::map<std::string, int> mat_map;
+    bke::MutableAttributeAccessor attributes = new_mesh->attributes_for_write();
+    bke::SpanAttributeWriter<int> material_indices = attributes.lookup_or_add_for_write_span<int>(
+        "material_index", bke::AttrDomain::Face);
+    assign_facesets_to_material_indices(sample_sel, material_indices.span, mat_map);
+    material_indices.finish();
+  }
 
+  if (new_mesh != existing_mesh) {
     return new_mesh;
   }
 
@@ -916,14 +956,16 @@ void AbcMeshReader::assign_facesets_to_material_indices(const ISampleSelector &s
                                                         MutableSpan<int> material_indices,
                                                         std::map<std::string, int> &r_mat_map)
 {
-  std::vector<std::string> face_sets;
-  m_schema.getFaceSetNames(face_sets);
+  const Vector<std::string> face_sets = get_face_set_names(m_schema);
 
-  if (face_sets.empty()) {
+  if (face_sets.is_empty()) {
     return;
   }
 
   int current_mat = 0;
+
+  /* Avoid preserving old assignments. */
+  material_indices.fill(0);
 
   for (const std::string &grp_name : face_sets) {
     if (!r_mat_map.contains(grp_name)) {
@@ -1144,6 +1186,11 @@ void AbcSubDReader::readObjectData(Main *bmain, const Alembic::Abc::ISampleSelec
   if (m_settings->always_add_cache_reader || has_animations(m_schema, m_settings)) {
     addCacheModifier();
   }
+
+  add_subdiv_modifier();
+
+  ICompoundProperty user_props = m_schema.getUserProperties();
+  read_active_and_default_color_attributes(*mesh, user_props, sample_sel);
 }
 
 bool AbcSubDReader::topology_changed(const Mesh *existing_mesh, const ISampleSelector &sample_sel)
@@ -1222,6 +1269,86 @@ void AbcSubDReader::read_geometry(bke::GeometrySet &geometry_set,
   Mesh *new_mesh = read_mesh(mesh, sample_sel, read_params, r_err_str);
 
   geometry_set.replace_mesh(new_mesh);
+}
+
+void AbcSubDReader::add_subdiv_modifier()
+{
+  ModifierData *md = BKE_modifier_new(eModifierType_Subsurf);
+  BLI_addtail(&m_object->modifiers, md);
+  BKE_modifiers_persistent_uid_init(*m_object, *md);
+
+  SubsurfModifierData *subdiv_data = reinterpret_cast<SubsurfModifierData *>(md);
+
+  try {
+    /* We only read the first sample as it is unlikely that those value are animated. */
+    ISampleSelector sample_selector = ISampleSelector(Alembic::Abc::index_t(0));
+    ISubDSchema::Sample sample = m_schema.getValue(sample_selector);
+
+    const AbcFaceVaryingInterpolateBoundary fvar_interpolate_boundary =
+        AbcFaceVaryingInterpolateBoundary(sample.getFaceVaryingInterpolateBoundary());
+
+    const AbcInterpolateBoundary interpolate_boundary = AbcInterpolateBoundary(
+        sample.getInterpolateBoundary());
+
+    /* FaceVaryingPropagateCorners should have a value of either 0 (false) or 1 (true). Consider
+     * only values that are greater than 0 as true to allow for bad values, but discard negative
+     * values for the potential set of true values are the value used by Alembic to tell that the
+     * property has not been initialized is negative. */
+    const bool propagate_corners = sample.getFaceVaryingPropagateCorners() > 0;
+
+    /* Confusingly, ALL is NONE and NONE is ALL. */
+    switch (fvar_interpolate_boundary) {
+      case AbcFaceVaryingInterpolateBoundary::ALL:
+        subdiv_data->uv_smooth = SUBSURF_UV_SMOOTH_NONE;
+        break;
+      case AbcFaceVaryingInterpolateBoundary::EDGE_AND_CORNERS: {
+        if (propagate_corners) {
+          subdiv_data->uv_smooth = SUBSURF_UV_SMOOTH_PRESERVE_CORNERS_JUNCTIONS_AND_CONCAVE;
+        }
+        else {
+          subdiv_data->uv_smooth = SUBSURF_UV_SMOOTH_PRESERVE_CORNERS;
+        }
+        break;
+      }
+      case AbcFaceVaryingInterpolateBoundary::NONE:
+        subdiv_data->uv_smooth = SUBSURF_UV_SMOOTH_ALL;
+        break;
+      case AbcFaceVaryingInterpolateBoundary::BOUNDARIES:
+        subdiv_data->uv_smooth = SUBSURF_UV_SMOOTH_PRESERVE_BOUNDARIES;
+        break;
+    }
+
+    switch (interpolate_boundary) {
+      case AbcInterpolateBoundary::NONE:
+        /* Blender has no concept for this. */
+        break;
+      case AbcInterpolateBoundary::EDGE_AND_CORNERS:
+        subdiv_data->boundary_smooth = SUBSURF_BOUNDARY_SMOOTH_PRESERVE_CORNERS;
+        break;
+      case AbcInterpolateBoundary::EDGE_ONLY:
+        subdiv_data->boundary_smooth = SUBSURF_BOUNDARY_SMOOTH_ALL;
+        break;
+    }
+
+    ICompoundProperty user_properties = m_schema.getUserProperties();
+
+    if (user_properties.valid() && user_properties.getPropertyHeader("subdivRenderLevels") &&
+        user_properties.getPropertyHeader("subdivViewportLevels"))
+    {
+      IInt32Property render_levels(user_properties, "subdivRenderLevels");
+      IInt32Property viewport_levels(user_properties, "subdivViewportLevels");
+
+      subdiv_data->renderLevels = short(render_levels.getValue(sample_selector));
+      subdiv_data->levels = short(viewport_levels.getValue(sample_selector));
+    }
+  }
+  catch (Alembic::Util::Exception &ex) {
+    CLOG_WARN(&LOG,
+              "Error reading subdivision parameter for '%s/%s' : %s",
+              m_iobject.getFullName().c_str(),
+              m_schema.getName().c_str(),
+              ex.what());
+  }
 }
 
 }  // namespace io::alembic

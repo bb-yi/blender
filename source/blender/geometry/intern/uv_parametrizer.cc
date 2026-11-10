@@ -14,15 +14,15 @@
 #include "BLI_array.hh"
 #include "BLI_bounds.hh"
 #include "BLI_convexhull_2d.hh"
-#include "BLI_ghash.h"
-#include "BLI_math_base_safe.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_polyfill_2d.h"
-#include "BLI_polyfill_2d_beautify.h"
-#include "BLI_rand.h"
+#include "BLI_ghash.hh"
+#include "BLI_math_base_safe.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_polyfill_2d.hh"
+#include "BLI_polyfill_2d_beautify.hh"
+#include "BLI_rand_c.hh"
 #include "BLI_vector.hh"
 
 #ifdef WITH_UV_SLIM
@@ -89,7 +89,6 @@ struct PEdge {
   union PEdgeUnion {
     PHashKey key;        /* Construct. */
     int id;              /* ABF matrix index. */
-    HeapNode *heaplink;  /* Fill holes. */
     PEdge *nextcollapse; /* Simplification. */
   } u;
 
@@ -114,6 +113,8 @@ struct PFace {
   PEdge *edge;
   uint flag;
 };
+
+constexpr static int P_NGON_STACK_NUM = 32;
 
 enum PVertFlag {
   PVERT_PIN = 1,
@@ -752,7 +753,7 @@ static PVert *p_vert_add(
    * Note that values within the calculation may _become_ non-finite,
    * so the rest of the code still needs to take this possibility into account. */
   for (int i = 0; i < 3; i++) {
-    if (UNLIKELY(!isfinite(v->co[i]))) {
+    if (!isfinite(v->co[i])) [[unlikely]] {
       v->co[i] = 0.0f;
     }
   }
@@ -1259,110 +1260,127 @@ static void p_chart_boundaries(PChart *chart, PEdge **r_outer)
   }
 }
 
-static float p_edge_boundary_angle(PEdge *e)
+static void p_polygon_calc_tris(ParamHandle *handle,
+                                const float **co,
+                                uint (**r_tris)[3],
+                                uint nverts)
 {
-  PEdge *we;
-  PVert *v, *v1, *v2;
-  float angle;
+  /**
+   * Allocate memory for polyfill.
+   * NOTE: Call `BLI_memarena_clear(handle->polyfill_arena)` after use.
+   */
+  MemArena *arena = handle->polyfill_arena;
+  Heap *heap = handle->polyfill_heap;
+  uint nfilltri = nverts - 2;
+  *r_tris = static_cast<uint(*)[3]>(
+      BLI_memarena_alloc(arena, sizeof(**r_tris) * size_t(nfilltri)));
+  float (*projverts)[2] = static_cast<float (*)[2]>(
+      BLI_memarena_alloc(arena, sizeof(*projverts) * size_t(nverts)));
 
-  v = e->vert;
+  /* Calc normal, flipped: to get a positive 2d cross product. */
+  float normal[3];
+  zero_v3(normal);
+  const float *co_curr, *co_prev = co[nverts - 1];
+  for (int j = 0; j < nverts; j++) {
+    co_curr = co[j];
+    add_newell_cross_v3_v3v3(normal, co_prev, co_curr);
+    co_prev = co_curr;
+  }
+  if (normalize_v3(normal) == 0.0f) [[unlikely]] {
+    normal[2] = 1.0f;
+  }
 
-  /* concave angle check -- could be better */
-  angle = M_PI;
+  /* Project verts to 2d. */
+  float axis_mat[3][3];
+  axis_dominant_v3_to_m3_negate(axis_mat, normal);
+  for (int j = 0; j < nverts; j++) {
+    mul_v2_m3v3(projverts[j], axis_mat, co[j]);
+  }
 
-  we = v->edge;
-  do {
-    v1 = we->next->vert;
-    v2 = we->next->next->vert;
-    angle -= angle_v3v3v3(v1->co, v->co, v2->co);
+  BLI_polyfill_calc_arena(projverts, nverts, 1, *r_tris, arena);
 
-    we = we->next->next->pair;
-  } while (we && (we != v->edge));
-
-  return angle;
+  /* Beautify helps avoid thin triangles that give numerical problems. */
+  BLI_polyfill_beautify(projverts, nverts, *r_tris, arena, heap);
 }
 
-static void p_chart_fill_boundary(ParamHandle *handle, PChart *chart, PEdge *be, int nedges)
+static void p_chart_fill_boundary(ParamHandle *handle,
+                                  PChart *chart,
+                                  MutableSpan<PEdge *> border_edges,
+                                  const float **co)
 {
-  PEdge *e, *e1, *e2;
+  uint(*tris)[3];
+  int nedges = border_edges.size();
+  uint nfilltri = nedges - 2;
+  Array<bool> filled_indices(nfilltri, false);
 
-  PFace *f;
-  Heap *heap = BLI_heap_new();
-  float angle;
+  p_polygon_calc_tris(handle, co, &tris, nedges);
 
-  e = be;
-  do {
-    angle = p_edge_boundary_angle(e);
-    e->u.heaplink = BLI_heap_insert(heap, angle, e);
+  while (nedges >= 3) {
 
-    e = p_boundary_edge_next(e);
-  } while (e != be);
-
-  if (nedges == 2) {
-    /* no real boundary, but an isolated seam */
-    e = be->next->vert->edge;
-    e->pair = be;
-    be->pair = e;
-
-    BLI_heap_remove(heap, e->u.heaplink);
-    BLI_heap_remove(heap, be->u.heaplink);
-  }
-  else {
-    while (nedges > 2) {
-      PEdge *ne, *ne1, *ne2;
-
-      e = static_cast<PEdge *>(BLI_heap_pop_min(heap));
-
-      e1 = p_boundary_edge_prev(e);
-      e2 = p_boundary_edge_next(e);
-
-      BLI_heap_remove(heap, e1->u.heaplink);
-      BLI_heap_remove(heap, e2->u.heaplink);
-      e->u.heaplink = e1->u.heaplink = e2->u.heaplink = nullptr;
-
-      e->flag |= PEDGE_FILLED;
-      e1->flag |= PEDGE_FILLED;
-
-      f = p_face_add_fill(handle, chart, e->vert, e1->vert, e2->vert);
-      f->flag |= PFACE_FILLED;
-
-      ne = f->edge->next->next;
-      ne1 = f->edge;
-      ne2 = f->edge->next;
-
-      ne->flag = ne1->flag = ne2->flag = PEDGE_FILLED;
-
-      e->pair = ne;
-      ne->pair = e;
-      e1->pair = ne1;
-      ne1->pair = e1;
-
-      ne->vert = e2->vert;
-      ne1->vert = e->vert;
-      ne2->vert = e1->vert;
-
-      if (nedges == 3) {
-        e2->pair = ne2;
-        ne2->pair = e2;
-      }
-      else {
-        ne2->vert->edge = ne2;
-
-        ne2->u.heaplink = BLI_heap_insert(heap, p_edge_boundary_angle(ne2), ne2);
-        e2->u.heaplink = BLI_heap_insert(heap, p_edge_boundary_angle(e2), e2);
+    for (uint tris_idx = 0; tris_idx < nfilltri; tris_idx++) {
+      if (filled_indices[tris_idx] == true) {
+        continue;
       }
 
-      nedges--;
+      uint i1 = tris[tris_idx][0];
+      uint i2 = tris[tris_idx][1];
+      uint i3 = tris[tris_idx][2];
+
+      for (int i = 0; i < 3; i++) {
+        PEdge *inner_edge = border_edges[i2];
+
+        PEdge *prev_bound_edge = p_boundary_edge_prev(inner_edge);
+        PEdge *next_bound_edge = p_boundary_edge_next(inner_edge);
+
+        if ((prev_bound_edge->vert->u.id != i1) || (next_bound_edge->vert->u.id != i3)) {
+          SHIFT3(uint, i3, i1, i2);
+          continue;
+        }
+
+        inner_edge->flag |= PEDGE_FILLED;
+        prev_bound_edge->flag |= PEDGE_FILLED;
+
+        PFace *f = p_face_add_fill(
+            handle, chart, inner_edge->vert, prev_bound_edge->vert, next_bound_edge->vert);
+        f->flag |= PFACE_FILLED;
+
+        PEdge *new_inner_edge = f->edge->next->next;
+        PEdge *new_next_edge = f->edge;
+        PEdge *new_prev_edge = f->edge->next;
+
+        new_inner_edge->flag = new_next_edge->flag = new_prev_edge->flag = PEDGE_FILLED;
+
+        inner_edge->pair = new_inner_edge;
+        new_inner_edge->pair = inner_edge;
+        prev_bound_edge->pair = new_next_edge;
+        new_next_edge->pair = prev_bound_edge;
+
+        new_inner_edge->vert = next_bound_edge->vert;
+        new_next_edge->vert = inner_edge->vert;
+        new_prev_edge->vert = prev_bound_edge->vert;
+
+        if (nedges == 3) {
+          next_bound_edge->pair = new_prev_edge;
+          new_prev_edge->pair = next_bound_edge;
+        }
+        else {
+          filled_indices[tris_idx] = true;
+          new_prev_edge->vert->edge = new_prev_edge;
+
+          border_edges[new_prev_edge->vert->u.id] = new_prev_edge;
+          border_edges[next_bound_edge->vert->u.id] = next_bound_edge;
+        }
+
+        nedges--;
+        break;
+      }
     }
   }
-
-  BLI_heap_free(heap, nullptr);
+  BLI_memarena_clear(handle->polyfill_arena);
 }
-
 static void p_chart_fill_boundaries(ParamHandle *handle, PChart *chart, const PEdge *outer)
 {
-  PEdge *e, *be; /* *enext - as yet unused */
-  int nedges;
+  PEdge *e; /* *enext - as yet unused */
 
   for (e = chart->edges; e; e = e->nextlink) {
     /* enext = e->nextlink; - as yet unused */
@@ -1371,16 +1389,40 @@ static void p_chart_fill_boundaries(ParamHandle *handle, PChart *chart, const PE
       continue;
     }
 
-    nedges = 0;
-    be = e;
+    Vector<PEdge *, P_NGON_STACK_NUM> border_edges;
+    int nedges = 0;
+    PEdge *be = e;
     do {
+      border_edges.append(be);
+
       be->flag |= PEDGE_FILLED;
       be = be->next->vert->edge;
       nedges++;
     } while (be != e);
 
     if (e != outer) {
-      p_chart_fill_boundary(handle, chart, e, nedges);
+      if (nedges == 2) {
+        /* no real boundary, but an isolated seam */
+        be = e->next->vert->edge;
+        e->pair = be;
+        be->pair = e;
+        continue;
+      }
+
+      Array<const float *, P_NGON_STACK_NUM> co(nedges);
+      Array<PHashKey, P_NGON_STACK_NUM> stored_indexes(nedges);
+      for (int i = 0; i < nedges; i++) {
+        PVert *bv = border_edges[i]->vert;
+        co[i] = bv->co;
+        stored_indexes[i] = bv->u.key;
+        bv->u.id = i;
+      }
+
+      p_chart_fill_boundary(handle, chart, border_edges, co.data());
+
+      for (int i = 0; i < nedges; i++) {
+        border_edges[i]->vert->u.key = stored_indexes[i];
+      }
     }
   }
 }
@@ -2379,67 +2421,52 @@ static void p_chart_simplify(PChart *chart)
 
 struct PAbfSystem {
   int ninterior, nfaces, nangles;
-  float *alpha, *beta, *sine, *cosine, *weight;
-  float *bAlpha, *bTriangle, *bInterior;
-  float *lambdaTriangle, *lambdaPlanar, *lambdaLength;
-  float (*J2dt)[3], *bstar, *dstar;
+  Array<float> alpha;
+  Array<float> beta;
+  Array<float> sine;
+  Array<float> cosine;
+  Array<float> weight;
+  Array<float> bAlpha;
+  Array<float> bTriangle;
+  Array<float> bInterior;
+  Array<float> lambdaTriangle;
+  Array<float> lambdaPlanar;
+  Array<float> lambdaLength;
+  Array<float[3]> J2dt;
+  Array<float> bstar;
+  Array<float> dstar;
 };
 
 static void p_abf_setup_system(PAbfSystem *sys)
 {
-  int i;
+  sys->alpha.reinitialize(sys->nangles);
+  sys->beta.reinitialize(sys->nangles);
+  sys->sine.reinitialize(sys->nangles);
+  sys->cosine.reinitialize(sys->nangles);
+  sys->weight.reinitialize(sys->nangles);
 
-  sys->alpha = MEM_new_array_uninitialized<float>(size_t(sys->nangles), "ABFalpha");
-  sys->beta = MEM_new_array_uninitialized<float>(size_t(sys->nangles), "ABFbeta");
-  sys->sine = MEM_new_array_uninitialized<float>(size_t(sys->nangles), "ABFsine");
-  sys->cosine = MEM_new_array_uninitialized<float>(size_t(sys->nangles), "ABFcosine");
-  sys->weight = MEM_new_array_uninitialized<float>(size_t(sys->nangles), "ABFweight");
+  sys->bAlpha.reinitialize(sys->nangles);
+  sys->bTriangle.reinitialize(sys->nfaces);
+  sys->bInterior.reinitialize(2 * size_t(sys->ninterior));
 
-  sys->bAlpha = MEM_new_array_uninitialized<float>(size_t(sys->nangles), "ABFbalpha");
-  sys->bTriangle = MEM_new_array_uninitialized<float>(size_t(sys->nfaces), "ABFbtriangle");
-  sys->bInterior = MEM_new_array_uninitialized<float>(2 * size_t(sys->ninterior), "ABFbinterior");
+  sys->lambdaTriangle.reinitialize(sys->nfaces);
+  sys->lambdaTriangle.as_mutable_span().fill(0.0f);
+  sys->lambdaPlanar.reinitialize(sys->ninterior);
+  sys->lambdaPlanar.as_mutable_span().fill(0.0f);
+  sys->lambdaLength.reinitialize(sys->ninterior);
+  sys->lambdaLength.as_mutable_span().fill(1.0f);
 
-  sys->lambdaTriangle = MEM_new_array_zeroed<float>(sys->nfaces, "ABFlambdatri");
-  sys->lambdaPlanar = MEM_new_array_zeroed<float>(sys->ninterior, "ABFlamdaplane");
-  sys->lambdaLength = MEM_new_array_uninitialized<float>(sys->ninterior, "ABFlambdalen");
-
-  sys->J2dt = MEM_new_array_uninitialized<float[3]>(size_t(sys->nangles), "ABFj2dt");
-  sys->bstar = MEM_new_array_uninitialized<float>(size_t(sys->nfaces), "ABFbstar");
-  sys->dstar = MEM_new_array_uninitialized<float>(size_t(sys->nfaces), "ABFdstar");
-
-  for (i = 0; i < sys->ninterior; i++) {
-    sys->lambdaLength[i] = 1.0;
-  }
-}
-
-static void p_abf_free_system(PAbfSystem *sys)
-{
-  MEM_delete(sys->alpha);
-  MEM_delete(sys->beta);
-  MEM_delete(sys->sine);
-  MEM_delete(sys->cosine);
-  MEM_delete(sys->weight);
-  MEM_delete(sys->bAlpha);
-  MEM_delete(sys->bTriangle);
-  MEM_delete(sys->bInterior);
-  MEM_delete(sys->lambdaTriangle);
-  MEM_delete(sys->lambdaPlanar);
-  MEM_delete(sys->lambdaLength);
-  MEM_delete(sys->J2dt);
-  MEM_delete(sys->bstar);
-  MEM_delete(sys->dstar);
+  sys->J2dt.reinitialize(sys->nangles);
+  sys->bstar.reinitialize(sys->nfaces);
+  sys->dstar.reinitialize(sys->nfaces);
 }
 
 static void p_abf_compute_sines(PAbfSystem *sys)
 {
-  float *sine = sys->sine;
-  float *cosine = sys->cosine;
-  const float *alpha = sys->alpha;
-
   for (int i = 0; i < sys->nangles; i++) {
-    const double angle = alpha[i];
-    sine[i] = sin(angle);
-    cosine[i] = cos(angle);
+    const double angle = sys->alpha[i];
+    sys->sine[i] = sin(angle);
+    sys->cosine[i] = cos(angle);
   }
 }
 
@@ -2863,7 +2890,6 @@ static bool p_chart_abf_solve(PChart *chart)
 
       if (!p_abf_matrix_invert(&sys, chart)) {
         param_warning("ABF failed to invert matrix");
-        p_abf_free_system(&sys);
         return false;
       }
 
@@ -2872,13 +2898,12 @@ static bool p_chart_abf_solve(PChart *chart)
 
     if (i == ABF_MAX_ITER) {
       param_warning("ABF maximum iterations reached");
-      p_abf_free_system(&sys);
       return false;
     }
   }
 
-  chart->abf_alpha = MEM_dupalloc(sys.alpha);
-  p_abf_free_system(&sys);
+  chart->abf_alpha = MEM_new_array_uninitialized<float>(sys.alpha.size(), __func__);
+  MutableSpan<float>(chart->abf_alpha, sys.alpha.size()).copy_from(sys.alpha);
 
   return true;
 }
@@ -3759,11 +3784,11 @@ static void p_chart_rotate_fit_aabb(PChart *chart)
 
   p_chart_uv_to_array(chart, points);
 
-  float angle = BLI_convexhull_aabb_fit_points_2d(points);
+  const float2 sincos = BLI_convexhull_aabb_fit_points_2d_as_sincos(points);
 
-  if (angle != 0.0f) {
-    float mat[2][2];
-    angle_to_mat2(mat, angle);
+  if (sincos != float2(0.0f, 1.0f)) {
+    /* Equivalent to #angle_to_mat2. */
+    const float mat[2][2] = {{sincos[1], sincos[0]}, {-sincos[0], sincos[1]}};
     p_chart_uv_transform(chart, mat);
   }
 }
@@ -3898,40 +3923,10 @@ static void p_add_ngon(ParamHandle *handle,
                        const bool *pin,
                        const bool *select)
 {
-  /* Allocate memory for polyfill. */
-  MemArena *arena = handle->polyfill_arena;
-  Heap *heap = handle->polyfill_heap;
+  uint(*tris)[3];
   uint nfilltri = nverts - 2;
-  uint(*tris)[3] = static_cast<uint(*)[3]>(
-      BLI_memarena_alloc(arena, sizeof(*tris) * size_t(nfilltri)));
-  float (*projverts)[2] = static_cast<float (*)[2]>(
-      BLI_memarena_alloc(arena, sizeof(*projverts) * size_t(nverts)));
 
-  /* Calc normal, flipped: to get a positive 2d cross product. */
-  float normal[3];
-  zero_v3(normal);
-
-  const float *co_curr, *co_prev = co[nverts - 1];
-  for (int j = 0; j < nverts; j++) {
-    co_curr = co[j];
-    add_newell_cross_v3_v3v3(normal, co_prev, co_curr);
-    co_prev = co_curr;
-  }
-  if (UNLIKELY(normalize_v3(normal) == 0.0f)) {
-    normal[2] = 1.0f;
-  }
-
-  /* Project verts to 2d. */
-  float axis_mat[3][3];
-  axis_dominant_v3_to_m3_negate(axis_mat, normal);
-  for (int j = 0; j < nverts; j++) {
-    mul_v2_m3v3(projverts[j], axis_mat, co[j]);
-  }
-
-  BLI_polyfill_calc_arena(projverts, nverts, 1, tris, arena);
-
-  /* Beautify helps avoid thin triangles that give numerical problems. */
-  BLI_polyfill_beautify(projverts, nverts, tris, arena, heap);
+  p_polygon_calc_tris(handle, co, &tris, nverts);
 
   /* Add triangles. */
   for (uint j = 0; j < nfilltri; j++) {
@@ -3961,7 +3956,7 @@ static void p_add_ngon(ParamHandle *handle,
         handle, key, 3, tri_vkeys, tri_co, tri_uv, tri_weight, tri_pin, tri_select);
   }
 
-  BLI_memarena_clear(arena);
+  BLI_memarena_clear(handle->polyfill_arena);
 }
 
 void uv_parametrizer_face_add(ParamHandle *phandle,
@@ -3981,7 +3976,7 @@ void uv_parametrizer_face_add(ParamHandle *phandle,
     /* Protect against (manifold) geometry which has a non-manifold triangulation.
      * See #102543. */
 
-    Vector<int, 32> permute;
+    Vector<int, P_NGON_STACK_NUM> permute;
     permute.reserve(nverts);
     for (int i = 0; i < nverts; i++) {
       permute.append_unchecked(i);
@@ -5365,8 +5360,6 @@ void uv_parametrizer_slim_solve(ParamHandle *phandle,
   slim_flush_uvs(phandle, mt, count_changed, count_failed);
   slim_free_matrix_transfer(phandle);
 #else
-  *count_changed = 0;
-  *count_failed = 0;
   UNUSED_VARS(phandle, slim_options, use_original_bounds, count_changed, count_failed);
 #endif /* !WITH_UV_SLIM */
 }

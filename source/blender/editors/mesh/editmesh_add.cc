@@ -8,8 +8,8 @@
 
 #include <cstdarg>
 
-#include "BLI_math_matrix.h"
-#include "BLI_sys_types.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_sys_types.hh"
 
 #include "BLT_translation.hh"
 
@@ -158,15 +158,14 @@ static void make_prim_finish(bContext *C,
                              const MakePrimitiveData *creation_data,
                              int enter_editmode)
 {
-  BMEditMesh *em = BKE_editmesh_from_object(obedit);
-
   if (creation_data->original_mode == CTX_MODE_SCULPT) {
     ed::sculpt_paint::undo::geometry_end(*obedit);
   }
   else {
-    EDBM_selectmode_flush_ex(em, SCE_SELECT_VERTEX);
+    BMesh *bm = BKE_editmesh_bmesh_get_for_write(obedit);
+    EDBM_selectmode_flush_ex(bm, SCE_SELECT_VERTEX);
     /* TODO(@ideasman42): maintain UV sync for newly created data. */
-    EDBM_uvselect_clear(em);
+    EDBM_uvselect_clear(bm);
 
     /* Only recalculate edit-mode tessellation if we are staying in edit-mode. */
     EDBMUpdate_Params params{};
@@ -215,11 +214,11 @@ static bool make_prim_from_bmo_args(bContext *C,
     }
   }
   else {
-    BMEditMesh *em = BKE_editmesh_from_object(obedit);
+    BMesh *bm = BKE_editmesh_bmesh_get_for_write(obedit);
     if (calc_uvs) {
       ED_mesh_uv_ensure(id_cast<Mesh *>(obedit->data), nullptr);
     }
-    ok = EDBM_op_vcall_and_selectf(em, op, "verts.out", false, fmt, list);
+    ok = EDBM_op_vcall_and_selectf(bm, op, "verts.out", false, fmt, list);
   }
 
   va_end(list);
@@ -699,6 +698,89 @@ void MESH_OT_primitive_monkey_add(wmOperatorType *ot)
 
   /* props */
   ed::object::add_unit_props_size(ot);
+  ed::object::add_mesh_props(ot);
+  ed::object::add_generic_props(ot, true);
+}
+
+static const EnumPropertyItem quadsphere_method_items[] = {
+    {QUADSPHERE_METHOD_EQUI_ANGULAR_EVEN_AREA,
+     "EVEN_AREA",
+     0,
+     "Even Area",
+     "Distribute the area evenly between faces"},
+    {QUADSPHERE_METHOD_EQUI_ANGULAR,
+     "EVEN_ANGLE",
+     0,
+     "Even Angle",
+     "Distribute vertices at an even angle, spacing each axis as an exact circle"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+static wmOperatorStatus add_primitive_quadsphere_exec(bContext *C, wmOperator *op)
+{
+  MakePrimitiveData creation_data;
+  Object *obedit;
+  float loc[3], rot[3], scale[3];
+  bool enter_editmode;
+  ushort local_view_bits;
+  const bool calc_uvs = RNA_boolean_get(op->ptr, "calc_uvs");
+
+  WM_operator_view3d_unit_defaults(C, op);
+  ed::object::add_generic_get_opts(
+      C, op, 'Z', loc, rot, scale, &enter_editmode, &local_view_bits, nullptr);
+  obedit = make_prim_init(C,
+                          op,
+                          CTX_DATA_(BLT_I18NCONTEXT_ID_MESH, "Quadsphere"),
+                          loc,
+                          rot,
+                          scale,
+                          local_view_bits,
+                          &creation_data);
+
+  if (!make_prim_from_bmo_args(C,
+                               op,
+                               obedit,
+                               &creation_data,
+                               calc_uvs,
+                               "create_quadsphere segments=%i method=%i "
+                               "radius=%f matrix=%m4 calc_uvs=%b",
+                               RNA_int_get(op->ptr, "segments"),
+                               RNA_enum_get(op->ptr, "method"),
+                               RNA_float_get(op->ptr, "radius"),
+                               creation_data.mat,
+                               calc_uvs))
+  {
+    return OPERATOR_CANCELLED;
+  }
+
+  make_prim_finish(C, obedit, &creation_data, enter_editmode);
+
+  return OPERATOR_FINISHED;
+}
+
+void MESH_OT_primitive_quad_sphere_add(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Add Quad Sphere";
+  ot->description =
+      "Construct a spherical mesh from a subdivided cube, consisting entirely of four-sided faces";
+  ot->idname = "MESH_OT_primitive_quad_sphere_add";
+  /* API callbacks. */
+  ot->exec = add_primitive_quadsphere_exec;
+  ot->poll = ED_operator_scene_editable;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+  /* props */
+  RNA_def_int(ot->srna, "segments", 4, 1, 500, "Segments", "", 1, 200);
+  RNA_def_enum(ot->srna,
+               "method",
+               quadsphere_method_items,
+               QUADSPHERE_METHOD_EQUI_ANGULAR_EVEN_AREA,
+               "Method",
+               "Mapping from the cube onto the sphere");
+  ed::object::add_unit_props_radius(ot);
   ed::object::add_mesh_props(ot);
   ed::object::add_generic_props(ot, true);
 }

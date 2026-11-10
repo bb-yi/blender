@@ -13,8 +13,8 @@
 #include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
 
 #include "BKE_movieclip.hh"
 #include "BKE_sound.hh"
@@ -25,6 +25,7 @@
 
 #include "SEQ_animation.hh"
 #include "SEQ_channels.hh"
+#include "SEQ_effects.hh"
 #include "SEQ_iterator.hh"
 #include "SEQ_render.hh"
 #include "SEQ_retiming.hh"
@@ -32,9 +33,9 @@
 #include "SEQ_time.hh"
 #include "SEQ_transform.hh"
 
+#include "cache/movie_reader_cache.hh"
 #include "sequencer.hh"
 #include "strip_time.hh"
-#include "utils.hh"
 
 namespace blender {
 namespace seq {
@@ -69,10 +70,10 @@ float give_frame_index(const Scene *scene, const Strip *strip, float timeline_fr
     const float retiming_factor = strip_retiming_evaluate(strip, frame_index);
     /* Retiming maps frame index from 0 up to `strip->len`, because key is positioned at the end of
      * last frame. Otherwise the last frame could not be retimed. */
-    frame_index = retiming_factor * strip->len;
+    frame_index = retiming_factor * strip->content_length();
   }
   /* Clamp frame index to strip content frame range. */
-  float frame_index_max = strip->is_effect() ? end - sta : strip->len - 1;
+  float frame_index_max = strip->is_effect() ? end - sta : strip->content_length() - 1;
   frame_index = clamp_f(frame_index, 0, frame_index_max);
 
   if (strip->strobe > 1.0f) {
@@ -89,7 +90,7 @@ static int metastrip_start_get(Strip *strip_meta)
 
 static int metastrip_end_get(Strip *strip_meta)
 {
-  return strip_meta->start + strip_meta->len - strip_meta->endofs;
+  return strip_meta->start + strip_meta->content_length() - strip_meta->end_offset();
 }
 
 static void strip_update_sound_bounds_recursive_impl(const Scene *scene,
@@ -109,13 +110,13 @@ static void strip_update_sound_bounds_recursive_impl(const Scene *scene,
     else if (ELEM(strip.type, STRIP_TYPE_SOUND, STRIP_TYPE_SCENE)) {
       if (strip.runtime->scene_sound) {
         int startofs = strip.startofs;
-        int endofs = strip.endofs;
+        int endofs = strip.end_offset();
         if (strip.startofs + strip.start < start) {
           startofs = start - strip.start;
         }
 
-        if (strip.start + strip.len - strip.endofs > end) {
-          endofs = strip.start + strip.len - end;
+        if (strip.start + strip.content_length() - strip.end_offset() > end) {
+          endofs = strip.start + strip.content_length() - end;
         }
 
         double offset_time = 0.0f;
@@ -126,7 +127,7 @@ static void strip_update_sound_bounds_recursive_impl(const Scene *scene,
         BKE_sound_move_scene_sound(scene,
                                    strip.runtime->scene_sound,
                                    strip.start + startofs,
-                                   strip.start + strip.len - endofs,
+                                   strip.start + strip.content_length() - endofs,
                                    startofs + strip.anim_startofs,
                                    offset_time);
       }
@@ -161,19 +162,30 @@ void time_update_meta_strip_range(const Scene *scene, Strip *strip_meta)
   }
 
   strip_meta->start = min + strip_meta->anim_startofs;
-  strip_meta->len = max - strip_meta->anim_endofs - strip_meta->start;
+  strip_meta->content_length_set(max - strip_meta->anim_endofs - strip_meta->start);
 
   /* Functions `SEQ_time_*_handle_frame_set()` can not be used here, because they are clamped, so
    * change must be done at once. */
   strip_meta->startofs = strip_start - strip_meta->start;
   strip_meta->startdisp = strip_start; /* Only to make files usable in older versions. */
-  strip_meta->endofs = strip_meta->start + strip_meta->length(scene) - strip_end;
+  strip_meta->end_offset_set(strip_meta->start + strip_meta->length(scene) - strip_end);
   strip_meta->enddisp = strip_end; /* Only to make files usable in older versions. */
 
   strip_update_sound_bounds_recursive(scene, strip_meta);
-  Span<Strip *> effects = SEQ_lookup_effects_by_strip(scene->ed, strip_meta);
+  Span<Strip *> effects = lookup_effects_by_strip(scene->ed, strip_meta);
   strip_time_update_effects_strip_range(scene, effects);
   time_update_meta_strip_range(scene, lookup_meta_by_strip(scene->ed, strip_meta));
+}
+
+static bool transition_inputs_have_wrong_order(const Scene *scene,
+                                               const Strip *input1,
+                                               const Strip *input2)
+{
+  const int first_start = input1->left_handle();
+  const int second_start = input2->left_handle();
+  return (first_start > second_start) ||
+         (first_start == second_start &&
+          input1->right_handle(scene) > input2->right_handle(scene));
 }
 
 void strip_time_effect_range_set(const Scene *scene, Strip *strip)
@@ -186,6 +198,13 @@ void strip_time_effect_range_set(const Scene *scene, Strip *strip)
     strip->startdisp = max_ii(strip->input1->left_handle(), strip->input2->left_handle());
     strip->enddisp = min_ii(strip->input1->right_handle(scene),
                             strip->input2->right_handle(scene));
+
+    /* Sort by timeline frame so 2-input transitions go "from" earlier "to" later. */
+    if (effect_is_transition(strip->type) &&
+        transition_inputs_have_wrong_order(scene, strip->input1, strip->input2))
+    {
+      std::swap(strip->input1, strip->input2);
+    }
   }
   else if (strip->input1) { /* Single input effect. */
     strip->startdisp = strip->input1->right_handle(scene);
@@ -201,9 +220,10 @@ void strip_time_effect_range_set(const Scene *scene, Strip *strip)
   }
 
   /* Values unusable for effects, these should be always 0. */
-  strip->startofs = strip->endofs = strip->anim_startofs = strip->anim_endofs = 0;
+  strip->startofs = strip->anim_startofs = strip->anim_endofs = 0;
+  strip->end_offset_set(0);
   strip->start = strip->startdisp;
-  strip->len = strip->enddisp - strip->startdisp;
+  strip->content_length_set(strip->enddisp - strip->startdisp);
 }
 
 void strip_time_update_effects_strip_range(const Scene *scene, const Span<Strip *> effects)
@@ -216,14 +236,14 @@ void strip_time_update_effects_strip_range(const Scene *scene, const Span<Strip 
   /* Second pass: Recursive call to update effects in chain and in order, so they inherit length
    * correctly. */
   for (Strip *strip : effects) {
-    Span<Strip *> effects_recurse = SEQ_lookup_effects_by_strip(scene->ed, strip);
+    Span<Strip *> effects_recurse = lookup_effects_by_strip(scene->ed, strip);
     strip_time_update_effects_strip_range(scene, effects_recurse);
   }
 }
 
 int time_find_next_prev_edit(Scene *scene,
                              int timeline_frame,
-                             const short side,
+                             const Side side,
                              const bool do_skip_mute,
                              const bool do_center,
                              const bool do_unselected)
@@ -271,18 +291,20 @@ int time_find_next_prev_edit(Scene *scene,
       dist = MAXFRAME * 2;
 
       switch (side) {
-        case SIDE_LEFT:
+        case Side::Left:
           if (strip_frame < timeline_frame) {
             dist = timeline_frame - strip_frame;
           }
           break;
-        case SIDE_RIGHT:
+        case Side::Right:
           if (strip_frame > timeline_frame) {
             dist = strip_frame - timeline_frame;
           }
           break;
-        case SIDE_BOTH:
+        case Side::Both:
           dist = abs(strip_frame - timeline_frame);
+          break;
+        default:
           break;
       }
 
@@ -433,14 +455,14 @@ static void strip_time_slip_strip_ex(const Scene *scene,
 
   if (!recursed) {
     strip->startofs = strip->startofs - delta;
-    strip->endofs = strip->endofs + delta;
+    strip->end_offset_set(strip->end_offset() + delta);
   }
 
   /* Only to make files usable in older versions. */
   strip->startdisp = strip->left_handle();
   strip->enddisp = strip->right_handle(scene);
 
-  Span<Strip *> effects = SEQ_lookup_effects_by_strip(scene->ed, strip);
+  Span<Strip *> effects = lookup_effects_by_strip(scene->ed, strip);
   strip_time_update_effects_strip_range(scene, effects);
 }
 
@@ -467,12 +489,11 @@ float Strip::media_fps(Scene *scene)
 {
   switch (this->type) {
     case STRIP_TYPE_MOVIE: {
-      seq::strip_open_anim_file(scene, this, true);
-      const MovieReader *anim = this->runtime->movie_reader_get();
-      if (anim == nullptr) {
+      seq::MovieReaderAccessor reader = seq::movie_reader_cache_acquire_any(*scene, *this);
+      if (!reader) {
         return 0.0f;
       }
-      return MOV_get_fps(anim);
+      return MOV_get_fps(reader.reader());
     }
     case STRIP_TYPE_MOVIECLIP:
       if (this->clip != nullptr) {
@@ -498,7 +519,7 @@ float Strip::content_start() const
 void Strip::content_start_set(const Scene *scene, int timeline_frame)
 {
   this->start = timeline_frame;
-  Span<Strip *> effects = seq::SEQ_lookup_effects_by_strip(scene->ed, this);
+  Span<Strip *> effects = seq::lookup_effects_by_strip(scene->ed, this);
   seq::strip_time_update_effects_strip_range(scene, effects);
   seq::time_update_meta_strip_range(scene, seq::lookup_meta_by_strip(scene->ed, this));
 }
@@ -519,7 +540,7 @@ int Strip::length(const Scene *scene) const
     return last_key_frame - this->content_start() - sound_offset;
   }
 
-  return this->len / this->media_playback_rate_factor(scene_fps);
+  return this->content_length() / this->media_playback_rate_factor(scene_fps);
 }
 
 int Strip::rounded_sound_offset(float scene_fps) const
@@ -545,7 +566,7 @@ int Strip::right_handle(const Scene *scene) const
     return this->enddisp;
   }
 
-  return this->content_end(scene) - this->endofs;
+  return this->content_end(scene) - this->end_offset();
 }
 
 void Strip::left_handle_set(const Scene *scene, int timeline_frame)
@@ -562,7 +583,7 @@ void Strip::left_handle_set(const Scene *scene, int timeline_frame)
     /* This strip has only 1 frame of content that is always stretched to the whole strip length.
      * Move strip start left and adjust end offset to be negative (rightwards past the 1 frame). */
     this->content_start_set(scene, timeline_frame);
-    this->endofs += offset;
+    this->end_offset_set(this->end_offset() + offset);
   }
   else {
     this->startofs = offset;
@@ -570,7 +591,7 @@ void Strip::left_handle_set(const Scene *scene, int timeline_frame)
 
   this->startdisp = timeline_frame; /* Only to make files usable in older versions. */
 
-  Span<Strip *> effects = seq::SEQ_lookup_effects_by_strip(scene->ed, this);
+  Span<Strip *> effects = seq::lookup_effects_by_strip(scene->ed, this);
   seq::strip_time_update_effects_strip_range(scene, effects);
   seq::time_update_meta_strip_range(scene, seq::lookup_meta_by_strip(scene->ed, this));
 }
@@ -583,10 +604,10 @@ void Strip::right_handle_set(const Scene *scene, int timeline_frame)
     timeline_frame = left_handle_orig_frame + 1;
   }
 
-  this->endofs = this->content_end(scene) - timeline_frame;
+  this->end_offset_set(this->content_end(scene) - timeline_frame);
   this->enddisp = timeline_frame; /* Only to make files usable in older versions. */
 
-  Span<Strip *> effects = seq::SEQ_lookup_effects_by_strip(scene->ed, this);
+  Span<Strip *> effects = seq::lookup_effects_by_strip(scene->ed, this);
   seq::strip_time_update_effects_strip_range(scene, effects);
   seq::time_update_meta_strip_range(scene, seq::lookup_meta_by_strip(scene->ed, this));
 }
@@ -606,9 +627,45 @@ void Strip::handles_set(const Scene *scene, int left_frame, int right_frame)
   }
 }
 
+void Strip::channel_set(int channel)
+{
+  this->channel = math::clamp(channel, 1, seq::MAX_CHANNELS);
+}
+
 bool Strip::intersects_frame(const Scene *scene, const int timeline_frame) const
 {
   return (this->left_handle() <= timeline_frame) && (this->right_handle(scene) > timeline_frame);
+}
+
+int Strip::content_length() const
+{
+  if (this->scene && this->type == STRIP_TYPE_SCENE) {
+    float new_length = this->scene->r.efra - this->scene->r.sfra + 1 - this->anim_startofs -
+                       this->anim_endofs;
+    return max_ff(new_length, 0);
+  }
+  return this->len;
+}
+
+float Strip::end_offset() const
+{
+  if (this->type == STRIP_TYPE_SCENE) {
+    return this->content_length() - (this->len - this->endofs);
+  }
+  return this->endofs;
+}
+
+void Strip::content_length_set(int new_length)
+{
+  this->len = new_length;
+}
+
+void Strip::end_offset_set(float new_end_offset)
+{
+  if (this->type == STRIP_TYPE_SCENE) {
+    this->len = this->content_length();
+  }
+  this->endofs = new_end_offset;
 }
 
 }  // namespace blender

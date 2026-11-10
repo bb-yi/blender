@@ -12,7 +12,7 @@
 #include <memory>
 #include <type_traits>
 
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 namespace blender {
 
@@ -324,10 +324,18 @@ Container &move_assign_container(Container &dst, Container &&src) noexcept(
 /**
  * Returns true if the value is different and was assigned.
  */
-template<typename T> inline bool assign_if_different(T &old_value, T new_value)
+template<typename T> inline bool assign_if_different(T &old_value, T &&new_value)
 {
   if (old_value != new_value) {
     old_value = std::move(new_value);
+    return true;
+  }
+  return false;
+}
+template<typename T> inline bool assign_if_different(T &old_value, const T &new_value)
+{
+  if (old_value != new_value) {
+    old_value = new_value;
     return true;
   }
   return false;

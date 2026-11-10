@@ -42,7 +42,7 @@ static int node_shader_gpu_output_outline_shell(GPUMaterial *mat,
 
   GPU_material_flag_set(mat, GPU_MATFLAG_EMISSION);
   const Material *material = GPU_material_get_material(mat);
-  const bool has_alpha = in[1].link || in[1].vec[0] < 1.0f;
+  const bool has_alpha = in[1].link || std::get<float>(in[1].value) < 1.0f;
   GPU_material_outline_shell_alpha_set(mat, has_alpha);
   if (has_alpha) {
     GPU_material_flag_set(mat, GPU_MATFLAG_TRANSPARENT);
@@ -51,8 +51,8 @@ static int node_shader_gpu_output_outline_shell(GPUMaterial *mat,
                     material->outline_shell_transparency_method == MA_OUTLINE_SHELL_CLIP;
   const float threshold = material ? material->outline_shell_alpha_threshold : 0.5f;
 
-  GPUNodeLink *color_link = in[0].link ? in[0].link : GPU_uniform(in[0].vec);
-  GPUNodeLink *alpha_link = in[1].link ? in[1].link : GPU_uniform(in[1].vec);
+  GPUNodeLink *color_link = in[0].link ? in[0].link : GPU_uniform(in[0]);
+  GPUNodeLink *alpha_link = in[1].link ? in[1].link : GPU_uniform(in[1]);
   GPUNodeLink *surface_link = nullptr;
   GPU_link(mat,
            "node_emission_outline_shell",
@@ -60,14 +60,16 @@ static int node_shader_gpu_output_outline_shell(GPUMaterial *mat,
            alpha_link,
            GPU_constant(&clip),
            GPU_uniform(&threshold),
+           GPU_kernel_globals(),
+           GPU_shading_data(),
            &surface_link);
   GPU_material_output_surface(mat, surface_link);
 
   GPUNodeLink *displacement_link = in[2].link;
   if (displacement_link == nullptr) {
-    GPU_link(mat, "world_normals_get", &displacement_link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &displacement_link);
   }
-  GPUNodeLink *strength_link = in[3].link ? in[3].link : GPU_uniform(in[3].vec);
+  GPUNodeLink *strength_link = in[3].link ? in[3].link : GPU_uniform(in[3]);
   GPUNodeLink *offset_link = nullptr;
   GPU_link(mat,
            "vector_math_scale",

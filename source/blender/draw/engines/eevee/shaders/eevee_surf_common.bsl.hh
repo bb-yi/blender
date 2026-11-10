@@ -4,29 +4,29 @@
 
 #pragma once
 
-#include "infos/eevee_geom_infos.hh"
-
-#include "draw_model.bsl.hh"
-#include "draw_view.bsl.hh"
-#include "eevee_lightprobe_shared.hh" /* IWYU pragma: export: Needed for resource declaration. */
-#include "eevee_pipeline.bsl.hh"
-#include "eevee_sampling_shared.hh"   /* IWYU pragma: export: Needed for resource declaration. */
+#include "draw_gsplat_lib.bsl.hh"
+#include "eevee_nodetree_lib.bsl.hh"
 #include "eevee_shadow_shared.hh"
 #include "eevee_uniform.bsl.hh"
-#include "gpu_shader_codegen_lib.glsl"
-#include "gpu_shader_math_base_lib.glsl"
-#include "gpu_shader_math_vector_safe_lib.glsl"
+#include "gpu_shader_math_base.bsl.hh"
+#include "gpu_shader_math_vector_safe.bsl.hh"
+
 #include "eevee_reverse_z_lib.bsl.hh"
 
 #define MAT_SURFACE_CULL_NONE 0
 #define MAT_SURFACE_CULL_BACK 1
 #define MAT_SURFACE_CULL_FRONT 2
 
-void material_surface_cull_discard()
+struct MaterialSurfaceCull {
+  [[push_constant]] int surface_cull_mode;
+};
+
+void material_surface_cull_discard(bool front_face)
 {
-#if defined(GPU_FRAGMENT_SHADER) && defined(MAT_SURFACE_CULL)
-  if ((surface_cull_mode == MAT_SURFACE_CULL_BACK && !gl_FrontFacing) ||
-      (surface_cull_mode == MAT_SURFACE_CULL_FRONT && gl_FrontFacing))
+#if defined(GPU_FRAGMENT_SHADER)
+  [[resource_table]] const MaterialSurfaceCull &srt = resource_table_get(MaterialSurfaceCull);
+  if ((srt.surface_cull_mode == MAT_SURFACE_CULL_BACK && !front_face) ||
+      (srt.surface_cull_mode == MAT_SURFACE_CULL_FRONT && front_face))
   {
     gpu_discard_fragment();
   }
@@ -35,244 +35,181 @@ void material_surface_cull_discard()
 
 namespace eevee {
 
+/* Common interface */
+struct VertOutCommon {
+  /* World Position. */
+  [[smooth]] float3 P;
+  [[smooth]] float3 P_base;
+  [[smooth]] float3 P_relative;
+  /* World Normal. */
+  [[smooth]] float3 N;
+  /* Resource ID. */
+  [[flat]] uint resource_id_raw;
+};
+
+struct VertOutShadow {
+  [[flat]] int shadow_view_id;
+};
+
+struct VertOutBake {
+  [[flat]] float3 Ng;
+  [[flat]] int primitive_id;
+};
+
+struct VertOutShadowClipping {
+  [[smooth]] float3 position;
+  [[smooth]] float3 vector;
+};
+
+struct VertOutCurves {
+  [[smooth]] float3 tangent;
+  [[smooth]] float3 binormal;
+  [[smooth]] float time;
+  [[smooth]] float time_width;
+  [[smooth]] float radius;
+  [[smooth]] float point_id; /* Smooth to be used for barycentric. */
+  [[flat]] int strand_id;
+};
+
+struct VertOutPointcloud {
+  [[smooth]] float radius;
+  [[smooth]] float3 position;
+  [[flat]] int id;
+};
+
+struct VertOutGSplat {
+  [[smooth]] float2 billboard_co;
+  [[flat]] float opacity;
+};
+
+struct VertOutClipPlane {
+  [[smooth]] float clip_distance;
+};
+
+struct ClipPlane {
+  [[uniform(CLIP_PLANE_BUF)]] ClipPlaneData &clip_plane;
+};
+
 struct GeomShadow {
   [[storage(SHADOW_RENDER_VIEW_BUF_SLOT,
             read)]] const ShadowRenderView (&render_view_buf)[SHADOW_VIEW_MAX];
 };
 
-}  // namespace eevee
-
-ViewMatrices surface_view_matrices_get()
+void init_globals_mesh(const VertOutCommon &interp, ShadingData &sd, float3 barycentric_co)
 {
-  [[resource_table]] const eevee::PipelineConstants &pipe = resource_table_get(
-      eevee::PipelineConstants);
-  [[resource_table]] const draw::View &views = resource_table_get(draw::View);
-  auto &interp_flat = interface_get(eevee_geom_iface_info, interp_flat);
-  draw::ID id{interp_flat.resource_id_raw};
-  if (pipe.is_shadow_pipe) {
-    return views.get(id.view_id<64>());
-  }
-  return views.get(id.view_id<1>());
-}
-
-#if defined(USE_BARYCENTRICS) && defined(GPU_FRAGMENT_SHADER) && defined(MAT_GEOM_MESH)
-float3 barycentric_distances_get()
-{
-  float wp_delta = length(gpu_dfdx(interp.P_relative)) + length(gpu_dfdy(interp.P_relative));
-  float bc_delta = length(gpu_dfdx(gpu_BaryCoord)) + length(gpu_dfdy(gpu_BaryCoord));
-  float rate_of_change = wp_delta / bc_delta;
-  return rate_of_change * (1.0f - gpu_BaryCoord);
-}
+  float wp_delta = 0.0f;
+  float bc_delta = 0.0f;
+#if defined(GPU_FRAGMENT_SHADER) || defined(GLSL_CPP_STUBS)
+  wp_delta = length(gpu_dfdx(interp.P_relative)) + length(gpu_dfdy(interp.P_relative));
+  bc_delta = length(gpu_dfdx(barycentric_co)) + length(gpu_dfdy(barycentric_co));
 #endif
-
-void init_globals_mesh()
-{
-#if defined(USE_BARYCENTRICS) && defined(GPU_FRAGMENT_SHADER) && defined(MAT_GEOM_MESH)
-  g_data.barycentric_coords = gpu_BaryCoord.xy;
-  g_data.barycentric_dists = barycentric_distances_get();
-#endif
+  float rate_of_change = wp_delta * safe_rcp(bc_delta);
+  sd.barycentric_dists = rate_of_change * (1.0f - barycentric_co);
+  sd.barycentric_coords = barycentric_co.xy;
 }
 
-void init_globals_curves(const ViewMatrices view)
+void init_globals_curves(const VertOutCommon &interp,
+                         const VertOutCurves &curve_interp,
+                         ShadingData &sd,
+                         const ViewMatrices view)
 {
-  auto &interp = interface_get(eevee_geom_iface_info, interp);
-  auto &curve_interp = interface_get(eevee_geom_curves_iface_info, curve_interp);
-  auto &curve_interp_flat = interface_get(eevee_geom_curves_iface_info, curve_interp_flat);
   /* Shade as a cylinder. */
   float cos_theta = curve_interp.time_width / curve_interp.radius;
   float sin_theta = sin_from_cos(cos_theta);
-  g_data.N = g_data.Ni = normalize(interp.N * sin_theta + curve_interp.binormal * cos_theta);
+  sd.N = sd.Ni = normalize(interp.N * sin_theta + curve_interp.binormal * cos_theta);
 
   /* Costly, but follows cycles per pixel tangent space (not following curve shape). */
-  float3 V = view.world_incident_vector(g_data.P);
-  g_data.curve_T = -curve_interp.tangent;
-  g_data.curve_B = cross(V, g_data.curve_T);
-  g_data.curve_N = safe_normalize(cross(g_data.curve_T, g_data.curve_B));
+  float3 V = view.world_incident_vector(sd.P);
+  sd.curve_T = -curve_interp.tangent;
+  sd.curve_B = cross(V, sd.curve_T);
+  sd.curve_N = safe_normalize(cross(sd.curve_T, sd.curve_B));
 
-  g_data.is_strand = true;
-  g_data.hair_diameter = curve_interp.radius * 2.0;
-  g_data.hair_strand_id = curve_interp_flat.strand_id;
-#if defined(USE_BARYCENTRICS) && defined(GPU_FRAGMENT_SHADER)
-  g_data.barycentric_coords.y = fract(curve_interp.point_id);
-  g_data.barycentric_coords.x = 1.0 - g_data.barycentric_coords.y;
-#endif
+  sd.is_strand = true;
+  sd.hair_diameter = curve_interp.radius * 2.0;
+  sd.hair_strand_id = curve_interp.strand_id;
+  sd.barycentric_coords.y = fract(curve_interp.point_id);
+  sd.barycentric_coords.x = 1.0 - sd.barycentric_coords.y;
 }
 
-void init_globals([[resource_table]] const eevee::Uniform &uni,
-                  const ViewMatrices view,
-                  bool front_face)
+void init_globals_pointcloud(const VertOutPointcloud &ptcloud_interp, ShadingData &sd)
 {
-  auto &interp = interface_get(eevee_geom_iface_info, interp);
-  /* Default values. */
-  g_data.P = interp.P;
-  g_data.Ni = interp.N;
-  g_data.N = safe_normalize(interp.N);
-  g_data.Ng = g_data.N;
-  g_data.is_strand = false;
-  g_data.hair_diameter = 0.0f;
-  g_data.hair_strand_id = 0;
-#if defined(MAT_SHADOW)
-  g_data.ray_type = RAY_TYPE_SHADOW;
-#elif defined(MAT_CAPTURE)
-  g_data.ray_type = RAY_TYPE_DIFFUSE;
-#else
-  g_data.ray_type = uni.pipeline_buf.ray_type;
-#endif
-  g_data.ray_depth = 0.0f;
-  g_data.ray_length = distance(g_data.P, view.position());
-  g_data.barycentric_coords = float2(0.0f);
-  g_data.barycentric_dists = float3(0.0f);
+  sd.point_position = ptcloud_interp.position;
+  sd.point_radius = ptcloud_interp.radius;
+  sd.point_id = ptcloud_interp.id;
+}
 
-  g_data.N = (front_face) ? g_data.N : -g_data.N;
-  g_data.Ni = (front_face) ? g_data.Ni : -g_data.Ni;
-#ifdef GPU_FRAGMENT_SHADER
-#  if defined(MAT_GEOM_MESH)
-  /* Interpolating world coordinates loses subpixel differences for small meshes away from the
-   * origin. Apply the model's linear transform before interpolation, without its translation. */
-  float3 dPdx = gpu_dfdx(interp.P_relative);
-  float3 dPdy = gpu_dfdy(interp.P_relative);
-#  else
-  float3 dPdx = gpu_dfdx(g_data.P);
-  float3 dPdy = gpu_dfdy(g_data.P);
-#  endif
-  g_data.Ng = safe_normalize(cross(dPdx, dPdy));
+[[nodiscard]] ShadingData init_globals(const eevee::PipelineConstants &pipe,
+                                       const eevee::Uniform &uni,
+                                       const VertOutCommon &interp,
+                                       const ViewMatrices view,
+                                       bool front_face,
+                                       float4 fragment_co)
+{
+  ShadingData sd = {};
+  sd.npr_diffusion_weight = 1.0f;
+  sd.displacement_base = interp.P_base;
+  /* Default values. */
+  sd.frag_co = fragment_co;
+  sd.front_facing = front_face;
+  sd.P = interp.P;
+  sd.forward_lighting_P = sd.P;
+  sd.Ni = interp.N;
+  sd.N = safe_normalize(interp.N);
+  sd.Ng = sd.N;
+  sd.is_strand = false;
+  sd.hair_diameter = 0.0f;
+  sd.hair_strand_id = 0;
+  sd.point_position = float3(0.0f);
+  sd.point_radius = 0.0f;
+  sd.point_id = 0;
+  if (pipe.is_shadow_pipe) [[static_branch]] {
+    sd.ray_type = RAY_TYPE_SHADOW;
+  }
+  else if (pipe.is_capture_pipe) [[static_branch]] {
+    sd.ray_type = RAY_TYPE_DIFFUSE;
+  }
+  else {
+    sd.ray_type = uni.pipeline_buf.ray_type;
+  }
+  sd.ray_depth = 0.0f;
+  sd.ray_length = distance(sd.P, view.position());
+  sd.barycentric_coords = float2(0.0f);
+  sd.barycentric_dists = float3(0.0f);
+  sd.thickness = Thickness::zero();
+  sd.resource_id_raw = interp.resource_id_raw;
+
+  sd.N = (front_face) ? sd.N : -sd.N;
+  sd.Ni = (front_face) ? sd.Ni : -sd.Ni;
+#if defined(GPU_FRAGMENT_SHADER) || defined(GLSL_CPP_STUBS)
+  float3 dPdx = pipe.is_mesh ? gpu_dfdx(interp.P_relative) : gpu_dfdx(sd.P);
+  float3 dPdy = pipe.is_mesh ? gpu_dfdy(interp.P_relative) : gpu_dfdy(sd.P);
+  sd.Ng = safe_normalize(cross(dPdx, dPdy));
   if (uni.pipeline_buf.is_main_view_inverted) {
-    g_data.Ng = -g_data.Ng;
+    sd.Ng = -sd.Ng;
   }
 #endif
-
-#if defined(MAT_GEOM_MESH)
-  init_globals_mesh();
-#elif defined(MAT_GEOM_CURVES)
-  init_globals_curves(view);
-#endif
+  return sd;
 }
 
 /* Avoid some compiler issue with non set interface parameters. */
-void init_interface([[maybe_unused]] uint resource_id_raw)
+void init_interface(VertOutCommon &interp, uint resource_id_raw)
 {
-#ifdef GPU_VERTEX_SHADER
-  auto &interp = interface_get(eevee_geom_iface_info, interp);
-  auto &interp_flat = interface_get(eevee_geom_iface_info, interp_flat);
   interp.P = float3(0.0f);
+  interp.P_base = float3(0.0f);
   interp.P_relative = float3(0.0f);
   interp.N = float3(0.0f);
-  interp_flat.resource_id_raw = resource_id_raw;
-#endif
+  interp.resource_id_raw = resource_id_raw;
 }
 
-#if defined(GPU_VERTEX_SHADER) && defined(DRAW_MODELMAT_CREATE_INFO) && \
-    defined(DRW_MODEL_LIB_FUNCTIONS_DEFINED)
-void init_interface()
+float3 gsplat_amend_transmittance([[maybe_unused]] const VertOutGSplat &gsplat_interp,
+                                  float3 transmittance)
 {
-  init_interface(drw_resource_id_raw());
-}
-#endif
-
-#if defined(GPU_FRAGMENT_SHADER) || defined(GPU_VERTEX_SHADER)
-void init_globals()
-{
-  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
-  const ViewMatrices view = surface_view_matrices_get();
-#  if defined(GPU_FRAGMENT_SHADER)
-  init_globals(uni, view, gl_FrontFacing);
-#  else
-  init_globals(uni, view, true);
-#  endif
-}
-#endif
-
-#if defined(GPU_FRAGMENT_SHADER) && defined(MAT_DEPTH_OFFSET)
-bool material_depth_offset_is_zero(float depth_offset)
-{
-  return abs(depth_offset) <= 1.0e-8f;
+  float alpha = draw::gsplat::evaluate_gaussian(gsplat_interp.billboard_co, gsplat_interp.opacity);
+  alpha = saturate(alpha * (256.0f / 255.0f));
+  return float3(1.0f) - alpha * saturate(float3(1.0f) - transmittance);
 }
 
-float material_depth_offset_view_z(float depth_offset)
-{
-  const ViewMatrices view = surface_view_matrices_get();
-  float vP_z = view.depth_screen_to_view(reverse_z::read(gl_FragCoord.z));
-  return vP_z + depth_offset;
-}
-
-bool material_depth_offset_is_clipped(float depth_offset)
-{
-  if (material_depth_offset_is_zero(depth_offset)) {
-    return false;
-  }
-  const ViewMatrices view = surface_view_matrices_get();
-  float vP_z = material_depth_offset_view_z(depth_offset);
-  return vP_z > view.near() || vP_z < view.far();
-}
-
-float material_depth_offset_frag_depth(float depth_offset)
-{
-  if (material_depth_offset_is_zero(depth_offset)) {
-    return gl_FragCoord.z;
-  }
-  const ViewMatrices view = surface_view_matrices_get();
-  float vP_z = material_depth_offset_view_z(depth_offset);
-  return saturate(reverse_z::read(view.depth_view_to_screen(vP_z)));
-}
-
-float material_depth_offset_screen_depth(float depth_offset)
-{
-  return reverse_z::read(material_depth_offset_frag_depth(depth_offset));
-}
-
-#  if defined(MAT_DEFERRED)
-bool material_depth_offset_fragment_matches_prepass(float depth_offset)
-{
-  float fragment_depth = reverse_z::read(material_depth_offset_frag_depth(depth_offset));
-  float prepass_depth = texelFetch(hiz_tx, int2(gl_FragCoord.xy), 0).r;
-  return abs(fragment_depth - prepass_depth) <= 1.0e-6f;
-}
-#  endif
-
-float3 material_depth_offset_world_position_from_depth(float screen_depth)
-{
-  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
-  const ViewMatrices view = surface_view_matrices_get();
-  float2 screen_uv = gl_FragCoord.xy * uni.uniform_buf.volumes.main_view_extent_inv;
-  return view.point_screen_to_world(float3(screen_uv, screen_depth));
-}
-
-float3 material_depth_offset_world_position(float depth_offset)
-{
-  return material_depth_offset_world_position_from_depth(
-      material_depth_offset_screen_depth(depth_offset));
-}
-
-float3 material_depth_offset_apply_nodetree_position(float depth_offset)
-{
-  if (!material_depth_offset_is_zero(depth_offset)) {
-    g_data.P = material_depth_offset_world_position(depth_offset);
-    g_data.ray_length = distance(g_data.P, surface_view_matrices_get().position());
-  }
-  return g_data.P;
-}
-
-float material_depth_offset_frag_depth()
-{
-  return material_depth_offset_frag_depth(nodetree_depth_offset());
-}
-
-#  if !defined(MAT_SHADOW) || defined(SHADOW_UPDATE_TBDR)
-void material_depth_offset_write(float depth_offset)
-{
-  if (material_depth_offset_is_clipped(depth_offset)) {
-    gpu_discard_fragment();
-    return;
-  }
-  gl_FragDepth = material_depth_offset_frag_depth(depth_offset);
-}
-
-void material_depth_offset_write()
-{
-  material_depth_offset_write(nodetree_depth_offset());
-}
-#  endif
-#endif
+}  // namespace eevee
 
 float3 shadow_position_vector_get(float3 view_position, ShadowRenderView view)
 {
@@ -294,3 +231,99 @@ float3 shadow_clip_vector_get(float3 view_position, float clip_distance_inv)
   /* Punctual shadow case. */
   return view_position * clip_distance_inv;
 }
+
+#if defined(GPU_FRAGMENT_SHADER) && defined(MAT_DEPTH_OFFSET)
+bool material_depth_offset_is_zero(KernelGlobals &kg, ShadingData &sd, float depth_offset)
+{
+  return abs(depth_offset) <= 1.0e-8f;
+}
+
+float material_depth_offset_view_z(KernelGlobals &kg, ShadingData &sd, float depth_offset)
+{
+  const ViewMatrices view = kg.view_matrices_get(sd);
+  float vP_z = view.depth_screen_to_view(reverse_z::read(sd.frag_co.z));
+  return vP_z + depth_offset;
+}
+
+bool material_depth_offset_is_clipped(KernelGlobals &kg, ShadingData &sd, float depth_offset)
+{
+  if (material_depth_offset_is_zero(kg, sd, depth_offset)) {
+    return false;
+  }
+  const ViewMatrices view = kg.view_matrices_get(sd);
+  float vP_z = material_depth_offset_view_z(kg, sd, depth_offset);
+  return vP_z > view.near() || vP_z < view.far();
+}
+
+float material_depth_offset_frag_depth(KernelGlobals &kg, ShadingData &sd, float depth_offset)
+{
+  if (material_depth_offset_is_zero(kg, sd, depth_offset)) {
+    return sd.frag_co.z;
+  }
+  const ViewMatrices view = kg.view_matrices_get(sd);
+  float vP_z = material_depth_offset_view_z(kg, sd, depth_offset);
+  return saturate(reverse_z::read(view.depth_view_to_screen(vP_z)));
+}
+
+float material_depth_offset_screen_depth(KernelGlobals &kg, ShadingData &sd, float depth_offset)
+{
+  return reverse_z::read(material_depth_offset_frag_depth(kg, sd, depth_offset));
+}
+
+#  if defined(MAT_DEFERRED)
+bool material_depth_offset_fragment_matches_prepass(KernelGlobals &kg, ShadingData &sd, float depth_offset)
+{
+  float fragment_depth = reverse_z::read(material_depth_offset_frag_depth(kg, sd, depth_offset));
+  if (kg.pipe.use_ambient_occlusion || kg.pipe.use_hiz_data) [[static_branch]] {
+    float prepass_depth = texelFetch(kg.hiz.hiz_tx, int2(sd.frag_co.xy), 0).r;
+    return abs(fragment_depth - prepass_depth) <= 1.0e-6f;
+  }
+  return true;
+}
+#  endif
+
+float3 material_depth_offset_world_position_from_depth(KernelGlobals &kg, ShadingData &sd, float screen_depth)
+{
+  const eevee::Uniform &uni = kg.uniforms;
+  const ViewMatrices view = kg.view_matrices_get(sd);
+  float2 screen_uv = sd.frag_co.xy * uni.uniform_buf.volumes.main_view_extent_inv;
+  return view.point_screen_to_world(float3(screen_uv, screen_depth));
+}
+
+float3 material_depth_offset_world_position(KernelGlobals &kg, ShadingData &sd, float depth_offset)
+{
+  return material_depth_offset_world_position_from_depth(kg, sd,
+      material_depth_offset_screen_depth(kg, sd, depth_offset));
+}
+
+float3 material_depth_offset_apply_nodetree_position(KernelGlobals &kg, ShadingData &sd, float depth_offset)
+{
+  if (!material_depth_offset_is_zero(kg, sd, depth_offset)) {
+    sd.P = material_depth_offset_world_position(kg, sd, depth_offset);
+    sd.ray_length = distance(sd.P, kg.view_matrices_get(sd).position());
+  }
+  return sd.P;
+}
+
+float material_depth_offset_frag_depth(KernelGlobals &kg, ShadingData &sd)
+{
+  return material_depth_offset_frag_depth(kg, sd, nodetree_depth_offset(kg, sd));
+}
+
+#  if !defined(MAT_SHADOW) || defined(SHADOW_UPDATE_TBDR)
+void material_depth_offset_write(KernelGlobals &kg, ShadingData &sd, float depth_offset, float &out_depth)
+{
+  if (material_depth_offset_is_clipped(kg, sd, depth_offset)) {
+    gpu_discard_fragment();
+    return;
+  }
+  out_depth = material_depth_offset_frag_depth(kg, sd, depth_offset);
+}
+
+void material_depth_offset_write(KernelGlobals &kg, ShadingData &sd, float &out_depth)
+{
+  material_depth_offset_write(kg, sd, nodetree_depth_offset(kg, sd), out_depth);
+}
+#  endif
+#endif
+

@@ -10,9 +10,14 @@
 
 #pragma once
 
+#include <variant>
+
 #include "DNA_listBase.h"
 
 #include "BLI_enum_flags.hh"
+#include "BLI_math_matrix_types.hh"
+#include "BLI_math_vector_types.hh"
+#include "BLI_span.hh"
 
 #include "GPU_material.hh"
 
@@ -34,6 +39,9 @@ enum GPUDataSource {
   GPU_SOURCE_TEX_TILED_MAPPING,
   GPU_SOURCE_FUNCTION_CALL,
   GPU_SOURCE_CRYPTOMATTE,
+  GPU_SOURCE_THICKNESS_MODE,
+  GPU_SOURCE_SHADING_DATA,
+  GPU_SOURCE_KERNEL_GLOBALS,
 };
 
 enum GPUNodeLinkType {
@@ -51,6 +59,8 @@ enum GPUNodeLinkType {
   GPU_NODE_LINK_UNIFORM,
   GPU_NODE_LINK_FUNCTION_CALL,
   GPU_NODE_LINK_DIFFERENTIATE_FLOAT_FN,
+  GPU_NODE_LINK_SHADING_DATA,
+  GPU_NODE_LINK_KERNEL_GLOBALS,
 };
 
 enum GPUNodeTag {
@@ -93,17 +103,18 @@ struct GPUNode {
   bool skip_call;
 };
 
-struct GPUNodeLink {
-  /* One-based index in the owning material's stable uniform-source registry. */
-  uint32_t uniform_source_index;
-  GPUNodeStack *socket;
+using GPUNodeLinkData = std::variant<const float *, const int *, const bool *>;
 
-  GPUNodeLinkType link_type;
-  int users; /* Refcount */
+struct GPUNodeLink {
+  uint32_t uniform_source_index = 0;
+  GPUNodeStack *socket = nullptr;
+
+  GPUNodeLinkType link_type = GPU_NODE_LINK_NONE;
+  int users = 0; /* Refcount */
 
   union {
     /* GPU_NODE_LINK_CONSTANT | GPU_NODE_LINK_UNIFORM */
-    const float *data;
+    GPUNodeLinkData data = static_cast<const float *>(nullptr);
     /* GPU_NODE_LINK_COLORBAND */
     gpu::Texture **colorband;
     /* GPU_NODE_LINK_OUTPUT */
@@ -140,22 +151,30 @@ struct GPUOutput {
   bool is_duplicate;
 };
 
+using GPUInputConstantData =
+    std::variant<float, float2, float3, float4, float3x3, float4x4, int, int2, int3, int4, bool>;
+
+Span<float> gpu_constant_to_float_span(const GPUInputConstantData &data, const GPUType type);
+Span<int> gpu_constant_to_int_span(const GPUInputConstantData &data, const GPUType type);
+bool gpu_constant_to_bool(const GPUInputConstantData &data);
+
 struct GPUInput {
-  GPUInput *next, *prev;
-  uint32_t uniform_source_index;
+  GPUInput *next = nullptr;
+  GPUInput *prev = nullptr;
+  uint32_t uniform_source_index = 0;
 
-  GPUNode *node;
-  GPUType type; /* data-type. */
-  GPUNodeLink *link;
-  int id; /* unique id as created by code generator */
+  GPUNode *node = nullptr;
+  GPUType type = GPU_NONE; /* data-type. */
+  GPUNodeLink *link = nullptr;
+  int id = 0; /* unique id as created by code generator */
 
-  GPUDataSource source; /* data source */
+  GPUDataSource source = GPU_SOURCE_OUTPUT; /* data source */
 
   /* Content based on GPUDataSource */
   union {
     /* GPU_SOURCE_CONSTANT | GPU_SOURCE_UNIFORM */
-    float vec[16]; /* vector data */
-                   /* GPU_SOURCE_TEX | GPU_SOURCE_TEX_TILED_MAPPING */
+    GPUInputConstantData constant_data{};
+    /* GPU_SOURCE_TEX | GPU_SOURCE_TEX_TILED_MAPPING */
     GPUMaterialTexture *texture;
     /* GPU_SOURCE_ATTR */
     GPUMaterialAttribute *attr;
@@ -168,9 +187,9 @@ struct GPUInput {
   };
 
   /* True for Zone Items. */
-  bool is_zone_io;
+  bool is_zone_io = false;
   /* This variable is shared with other socket/s and doesn't need to be declared. */
-  bool is_duplicate;
+  bool is_duplicate = false;
 };
 
 struct GPUNodeGraphOutputLink {
@@ -195,6 +214,8 @@ struct GPUNodeGraphFunctionLink {
   char dependency_name[128];
   GPUType return_type;
   GPUNodeLink *outlink;
+  /* Closure scopes must propagate their reservoirs; scalar bump callbacks must not. */
+  bool preserve_shading_state;
 
   GPUNodeGraphFunctionLinkMode mode;
   GPUType *input_types;
@@ -256,7 +277,8 @@ void gpu_node_graph_finalize_uniform_attrs(GPUNodeGraph *graph);
  *
  * NOTE: Graph optimizations will produce a shader which needs to be re-compiled
  * more frequently, however, the default material pass will always exist to fall
- * back on. */
+ * back on.
+ */
 void gpu_node_graph_optimize(GPUNodeGraph *graph);
 
 /**

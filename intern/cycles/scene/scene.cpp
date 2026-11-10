@@ -233,7 +233,7 @@ void Scene::device_update(Device *device_, Progress &progress)
      *
      * This does mean the scene might have gotten updated in the meantime, in which case
      * we have to redo the first part of the scene update. */
-    const uint kernel_features = dscene.data.kernel_features;
+    const uint64_t kernel_features = dscene.data.kernel_features;
     scene_updated_while_loading_kernels = false;
     if (!kernels_loaded || loaded_kernel_features != kernel_features) {
       mutex.unlock();
@@ -431,11 +431,13 @@ Scene::MotionType Scene::need_motion() const
   if (integrator->get_motion_blur()) {
     return MOTION_BLUR;
   }
-  const bool denoiser_motion = integrator->get_use_denoise() &&
-                               (integrator->get_denoiser_passes() &
-                                (DENOISER_PASS_MOTION | DENOISER_PASS_BACKWARD_MOTION)) != 0;
+  const DenoiserPassMask denoiser_motion_passes = DENOISER_PASS_BACKWARD_MOTION |
+                                                  DENOISER_PASS_SPECULAR_MOTION;
+  const bool denoiser_motion = (integrator->get_use_denoise()) &&
+                               (integrator->get_denoiser_passes() & denoiser_motion_passes) != 0;
   if (denoiser_motion || (Pass::contains(passes, PASS_MOTION) ||
-                          Pass::contains(passes, PASS_DENOISING_BACKWARD_MOTION)))
+                          Pass::contains(passes, PASS_DENOISING_BACKWARD_MOTION) ||
+                          Pass::contains(passes, PASS_DENOISING_SPECULAR_MOTION)))
   {
     return params.background ? MOTION_PASS : MOTION_PASS_INTERACTIVE;
   }
@@ -544,7 +546,7 @@ void Scene::update_kernel_features()
 
   /* These features are not being tweaked as often as shaders,
    * so could be done selective magic for the viewport as well. */
-  uint kernel_features = shader_manager->get_kernel_features(this);
+  uint64_t kernel_features = shader_manager->get_kernel_features(this);
 
   const bool use_motion = need_motion() == Scene::MotionType::MOTION_BLUR;
   kernel_features |= KERNEL_FEATURE_PATH_TRACING;
@@ -583,9 +585,12 @@ void Scene::update_kernel_features()
       kernel_max_prim_count = max(kernel_max_prim_count, hair->num_segments());
     }
     else if (geom->is_pointcloud()) {
+      const PointCloud *pointcloud = static_cast<const PointCloud *>(geom);
       kernel_features |= KERNEL_FEATURE_POINTCLOUD;
-      kernel_max_prim_count = max(kernel_max_prim_count,
-                                  static_cast<PointCloud *>(geom)->num_points());
+      if (pointcloud->primitive_type() & PRIMITIVE_GSPLAT) {
+        kernel_features |= KERNEL_FEATURE_GSPLATS;
+      }
+      kernel_max_prim_count = max(kernel_max_prim_count, pointcloud->num_points());
     }
     else if (geom->is_mesh()) {
       kernel_max_prim_count = max(kernel_max_prim_count,
@@ -680,7 +685,7 @@ bool Scene::update_camera_resolution(Progress &progress, int width, int height)
   return update_data;
 }
 
-static void log_kernel_features(const uint features)
+static void log_kernel_features(const uint64_t features)
 {
   LOG_INFO << "Requested features:";
   LOG_INFO << "Use BSDF " << string_from_bool(features & KERNEL_FEATURE_NODE_BSDF);
@@ -701,6 +706,9 @@ static void log_kernel_features(const uint features)
   LOG_INFO << "Use Volume " << string_from_bool(features & KERNEL_FEATURE_VOLUME);
   LOG_INFO << "Use Shadow Catcher " << string_from_bool(features & KERNEL_FEATURE_SHADOW_CATCHER);
   LOG_INFO << "Use Portal Node " << string_from_bool(features & KERNEL_FEATURE_NODE_PORTAL);
+  LOG_INFO << "Use Light Linking " << string_from_bool(features & KERNEL_FEATURE_LIGHT_LINKING);
+  LOG_INFO << "Use Shadow Linking " << string_from_bool(features & KERNEL_FEATURE_SHADOW_LINKING);
+  LOG_INFO << "Use Gaussian Splats " << string_from_bool(features & KERNEL_FEATURE_GSPLATS);
 }
 
 bool Scene::load_kernels(Progress &progress)
@@ -709,7 +717,7 @@ bool Scene::load_kernels(Progress &progress)
 
   const scoped_timer timer;
 
-  const uint kernel_features = dscene.data.kernel_features;
+  const uint64_t kernel_features = dscene.data.kernel_features;
   log_kernel_features(kernel_features);
   if (!device->load_kernels(kernel_features)) {
     string message = device->error_message();
@@ -1176,5 +1184,12 @@ template<> void Scene::delete_nodes(const set<Pass *> &nodes, const NodeOwner *o
   passes.erase_in_set(nodes);
   film->tag_modified();
 }
+
+/* Template instantiations so we don't have to inline functions. */
+template PointLight *Scene::create_light_node<PointLight>();
+template SpotLight *Scene::create_light_node<SpotLight>();
+template AreaLight *Scene::create_light_node<AreaLight>();
+template SunLight *Scene::create_light_node<SunLight>();
+template BackgroundLight *Scene::create_light_node<BackgroundLight>();
 
 CCL_NAMESPACE_END

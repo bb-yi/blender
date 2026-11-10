@@ -8,7 +8,7 @@
  * GPU shader interface (C --> GLSL)
  */
 
-#include "BLI_bitmap.h"
+#include "BLI_bitmap.hh"
 
 #include "GPU_capabilities.hh"
 
@@ -19,9 +19,9 @@
 #include "mtl_shader_interface.hh"
 #include "mtl_shader_interface_type.hh"
 
-#include "BLI_math_base.h"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_base_c.hh"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 #include "MEM_guardedalloc.h"
 
 namespace blender::gpu {
@@ -36,7 +36,7 @@ MTLShaderInterface::MTLShaderInterface(const char *name,
     STRNCPY(this->name, name);
   }
 
-  shader_builtins_ = info.builtins_;
+  shader_builtins_ = info.builtins_combined();
 
   attr_len_ = info.vertex_inputs_.size();
   uniform_len_ = info.push_constants_.size();
@@ -60,10 +60,14 @@ MTLShaderInterface::MTLShaderInterface(const char *name,
       case ShaderCreateInfo::Resource::BindType::STORAGE_BUFFER:
         ssbo_len_++;
         break;
+      case ShaderCreateInfo::Resource::BindType::ACCELERATION_STRUCTURE:
+        tlas_len_++;
+        break;
     }
   }
 
-  int32_t input_tot_len = attr_len_ + ubo_len_ + uniform_len_ + ssbo_len_ + constant_len_;
+  int32_t input_tot_len = attr_len_ + ubo_len_ + uniform_len_ + ssbo_len_ + tlas_len_ +
+                          constant_len_;
   inputs_ = MEM_new_array_zeroed<ShaderInput>(input_tot_len, __func__);
   ShaderInput *input = inputs_;
 
@@ -130,6 +134,17 @@ MTLShaderInterface::MTLShaderInterface(const char *name,
       input->location = input->binding = res.slot;
       enabled_ssbo_mask_ |= (1u << input->binding);
       vertex_buffer_mask_ &= ~(1 << (input->binding + MTL_SSBO_SLOT_OFFSET));
+      input++;
+    }
+  }
+
+  /* Acceleration structures (top level). */
+  for (const ShaderCreateInfo::Resource &res : all_resources) {
+    if (res.bind_type == ShaderCreateInfo::Resource::BindType::ACCELERATION_STRUCTURE) {
+      copy_input_name(input, res.acceleration_structure.name, name_buffer_, name_buffer_offset);
+      input->location = input->binding = res.slot;
+      enabled_accel_mask_ |= (1 << input->binding);
+      vertex_buffer_mask_ &= ~(1 << (MTL_ACCELERATION_STRUCTURE_SLOT + res.slot));
       input++;
     }
   }

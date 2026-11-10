@@ -5,9 +5,9 @@
 #include "node_geometry_util.hh"
 
 #include "BLI_generic_key_string.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_memory_cache_file_load.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BKE_report.hh"
 
@@ -23,13 +23,15 @@ static void node_declare(NodeDeclarationBuilder &b)
       .optional_label()
       .description("Path to a PLY file");
 
-  b.add_output<decl::Geometry>("Mesh"_ustr);
+  /* The socket used to be called mesh, so keep "Mesh" as identifier to support forward and
+   * backward compatibility. */
+  b.add_output<decl::Geometry>("Geometry"_ustr, "Mesh"_ustr);
 }
 
 class LoadPlyCache : public memory_cache::CachedValue {
  public:
   GeometrySet geometry;
-  Vector<eval_log::NodeWarning> warnings;
+  Vector<NodeWarning> warnings;
 
   void count_memory(MemoryCounter &counter) const override
   {
@@ -58,10 +60,8 @@ static void node_geo_exec(GeoNodeExecParams params)
         BLI_SCOPED_DEFER([&]() { BKE_reports_free(&reports); });
         import_params.reports = &reports;
 
-        Mesh *mesh = PLY_import_mesh(import_params);
-
         auto cached_value = std::make_unique<LoadPlyCache>();
-        cached_value->geometry = GeometrySet::from_mesh(mesh);
+        cached_value->geometry = PLY_import_geometry_set(import_params);
 
         for (Report &report : (import_params.reports)->list) {
           cached_value->warnings.append_as(report);
@@ -69,7 +69,7 @@ static void node_geo_exec(GeoNodeExecParams params)
         return cached_value;
       });
 
-  for (const eval_log::NodeWarning &warning : cached_value->warnings) {
+  for (const NodeWarning &warning : cached_value->warnings) {
     params.error_message_add(warning.type, warning.message);
   }
 

@@ -9,9 +9,11 @@
 #pragma once
 
 #include "BKE_camera.h"
+#include "BKE_image_gpu.hh"
 #include "BKE_tracking.hh"
-#include "BLI_math_color.h"
-#include "BLI_math_rotation.h"
+#include "BLI_math_color_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
 #include "DEG_depsgraph_query.hh"
 #include "DNA_camera_types.h"
 #include "DRW_render.hh"
@@ -595,6 +597,16 @@ class Cameras : Overlay {
       if (tex) {
         image_camera_background_matrix_get(&cam, bgpic, state, aspect, mat);
 
+        /* Apply roll and flip to image. */
+        if (state.rv3d->camroll != 0.0f || (state.rv3d->rflag & RV3D_FLIP_X) != 0) {
+          transpose_m4(mat.ptr());
+          rotate_m4(mat.ptr(), 'Z', -state.rv3d->camroll);
+          if ((state.rv3d->rflag & RV3D_FLIP_X) != 0) {
+            negate_v4(mat[0]);
+          }
+          transpose_m4(mat.ptr());
+        }
+
         const bool is_foreground = (bgpic->flag & CAM_BGIMG_FLAG_FOREGROUND) != 0;
         /* Alpha is clamped just below 1.0 to fix background images to interfere with foreground
          * images. Without this a background image with 1.0 will be rendered on top of a
@@ -715,12 +727,13 @@ class Cameras : Overlay {
         Images::stereo_setup(state.scene, state.v3d, image, iuser);
 
         iuser->scene = const_cast<Scene *>(state.scene);
-        tex = BKE_image_get_gpu_viewer_texture(image, iuser);
+        tex = BKE_image_acquire_gpu_viewer_texture(image, iuser);
         iuser->scene = nullptr;
 
         if (tex == nullptr) {
           return nullptr;
         }
+        DRW_manager_get()->hold_texture(tex);
 
         width = GPU_texture_original_width(tex);
         height = GPU_texture_original_height(tex);

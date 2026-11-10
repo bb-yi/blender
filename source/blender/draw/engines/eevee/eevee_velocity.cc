@@ -18,7 +18,7 @@
 #include "BKE_object.hh"
 #include "BKE_mesh.hh"
 #include "BLI_map.hh"
-#include "BLI_time.h"
+#include "BLI_time.hh"
 #include "DEG_depsgraph_query.hh"
 #include "DNA_modifier_types.h"
 #include "DNA_particle_types.h"

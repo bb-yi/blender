@@ -18,7 +18,7 @@
 
 #include "../system/FreestyleConfig.h"
 
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 
 #include "MEM_guardedalloc.h"
 
@@ -43,7 +43,7 @@ class WFace;
 
 class WVertex {
  protected:
-  int _Id;  // an identificator
+  int _Id;  // an identifier
   Vec3f _Vertex;
   vector<WEdge *> _EdgeList;
   WShape *_Shape;  // the shape to which the vertex belongs

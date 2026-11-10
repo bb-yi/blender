@@ -9,98 +9,68 @@
  */
 #pragma once
 
-#include "infos/eevee_geom_infos.hh"
-#include "infos/eevee_nodetree_infos.hh"
-
-FRAGMENT_SHADER_CREATE_INFO(eevee_nodetree)
-FRAGMENT_SHADER_CREATE_INFO(eevee_geom_iface_info)
-
-#include "draw_curves_lib.glsl" /* IWYU pragma: export. For nodetree functions. */
 #include "draw_view.bsl.hh"
 #include "eevee_forward_lib.bsl.hh"
-#include "eevee_nodetree_frag_lib.glsl"
+#include "eevee_nodetree_frag_lib.bsl.hh"
+#include "eevee_outline_lib.glsl"
+#include "eevee_outline_shell_lib.bsl.hh"
 #include "eevee_reverse_z_lib.bsl.hh"
 #include "eevee_sampling_lib.bsl.hh"
-#include "eevee_outline_lib.glsl"
 #include "eevee_surf_common.bsl.hh"
-#include "eevee_outline_shell_lib.bsl.hh"
 #include "eevee_transparency.bsl.hh"
 #include "eevee_volume_lib.bsl.hh"
 
-/* Global thickness because it is needed for closure_to_rgba. */
-Thickness g_thickness_forward;
-float3 g_forward_surface_lighting_P;
-
-float4 closure_to_rgba_forward(Closure /*cl_unused*/)
+float4 closure_to_rgba_forward(KernelGlobals &kg, ShadingData &sd, Closure /*cl_unused*/)
 {
-  [[resource_table]] const draw::View &views = resource_table_get(draw::View);
-  [[resource_table]] const eevee::Sampling &sampling = resource_table_get(eevee::Sampling);
-  [[resource_table]] const UtilityTexture &util_tx = resource_table_get(UtilityTexture);
-  auto &interp_flat = interface_get(eevee_geom_iface_info, interp_flat);
-  draw::ID id{interp_flat.resource_id_raw};
-  const uint resource_id = id.resource_id<1>();
+  [[resource_table]] const eevee::PipelineConstants &pipe = kg.pipe;
+  if (!pipe.is_occupancy_pipe) [[static_branch]] {
+    [[resource_table]] const draw::View &views = kg.view;
+    [[resource_table]] const eevee::Sampling &sampling = kg.sampling;
+    [[resource_table]] const UtilityTexture &util_tx = kg.util_tx;
+    draw::ID id{sd.resource_id_raw};
+    const uint resource_id = id.resource_id<1>();
 
-  const float2 frag_co = gl_FragCoord.xy;
+    const float2 frag_co = sd.frag_co.xy;
 
-  float3 radiance, transmittance;
-  float3 nodetree_P = g_data.P;
-  g_data.P = g_forward_surface_lighting_P;
-  eevee::forward_lighting_eval(
-      views.get(0), resource_id, g_thickness_forward, frag_co, radiance, transmittance);
-  g_data.P = nodetree_P;
+    float3 radiance, transmittance;
+    float3 nodetree_P = sd.P;
+    sd.P = sd.forward_lighting_P;
+    eevee::forward_lighting_eval(
+        kg, sd, views.get(0), resource_id, sd.thickness, frag_co, radiance, transmittance);
 
-  /* Reset for the next closure tree. */
-  float noise = util_tx.fetch(frag_co, UTIL_BLUE_NOISE_LAYER).r;
-  float closure_rand = fract(noise + sampling.rng_1D_get(SAMPLING_CLOSURE));
-  closure_weights_reset(closure_rand);
+    /* Reset for the next closure tree. */
+    float noise = util_tx.fetch(frag_co, UTIL_BLUE_NOISE_LAYER).r;
+    float closure_rand = fract(noise + sampling.rng_1D_get(SAMPLING_CLOSURE));
+    closure_weights_reset(kg, sd, closure_rand);
 
-#if defined(MAT_TRANSPARENT) && defined(MAT_SHADER_TO_RGBA)
-  { /* Limit resource guard to this scope. */
-    /* Multi-line macro breaks error line counting. */
-    /* clang-format off */
-    [[resource_table]] eevee::LightprobeRenderData &lightprobes = resource_table_get(eevee::LightprobeRenderData);
-    /* clang-format on */
-    [[resource_table]] eevee::LightprobeSphereRenderData &lp_spheres = lightprobes.spheres;
+    if (pipe.use_forward_lighting && pipe.use_transparency) [[static_branch]] {
+      [[resource_table]] eevee::LightprobeRenderData &lightprobes = kg.lightprobes;
+      [[resource_table]] eevee::LightprobeSphereRenderData &lp_spheres = lightprobes.spheres;
+      [[resource_table]] eevee::PreviousLayerHiZ &prev_hiz = kg.previous_layer_hiz;
+      [[resource_table]] eevee::PreviousLayerRadiance &prev_radiance = kg.previous_layer_radiance;
 
-    float3 V = -views.get(0).world_incident_vector(g_forward_surface_lighting_P);
-    eevee::LightProbeSample samp = lightprobes.load(
-        frag_co, g_forward_surface_lighting_P, g_data.N, V);
-    float3 radiance_behind = lp_spheres.spherical_sample_normalized_with_parallax(
-        samp, g_forward_surface_lighting_P, V, 0.0);
-
-#  ifndef MAT_FIRST_LAYER
-    { /* Limit resource guard to this scope. */
-      /* Multi-line macro breaks error line counting. */
-      /* clang-format off */
-      [[resource_table]] const eevee::PreviousLayerHiZ &prev_hiz = resource_table_get(eevee::PreviousLayerHiZ);
-      [[resource_table]] const eevee::PreviousLayerRadiance &prev_radiance = resource_table_get(eevee::PreviousLayerRadiance);
-      /* clang-format on */
+      float3 V = -views.get(0).world_incident_vector(sd.P);
+      eevee::LightProbeSample samp = lightprobes.load(frag_co, sd.P, sd.N, V);
+      float3 radiance_behind = lp_spheres.spherical_sample_normalized_with_parallax(
+          samp, sd.P, V, 0.0);
 
       int2 texel = int2(frag_co);
       if (texelFetchExtend(prev_hiz.hiz_prev_tx, texel, 0).x != 1.0f) {
         radiance_behind = texelFetch(prev_radiance.previous_layer_radiance_tx, texel, 0).xyz;
       }
+
+      radiance += radiance_behind * saturate(transmittance);
     }
-#  endif
 
-    radiance += radiance_behind * saturate(transmittance);
+    sd.P = nodetree_P;
+    return float4(radiance, saturate(1.0f - average(transmittance)));
   }
-#endif
-
-  return float4(radiance, saturate(1.0f - average(transmittance)));
+  else {
+    return float4(0);
+  }
 }
 
 namespace eevee {
-
-struct SurfaceForward {
-  [[legacy_info]] ShaderCreateInfo eevee_geom_iface_info;
-
-  [[legacy_info]] ShaderCreateInfo draw_view_culling;
-
-  /* Optionally added depending on the material. */
-  // [[legacy_info]] ShaderCreateInfo eevee_hiz_prev_data;
-  // [[legacy_info]] ShaderCreateInfo eevee_previous_layer_radiance;
-};
 
 struct SurfaceForwardFragOut {
   /* Splitting RGB components into different target to overcome the lack of dual source blending
@@ -111,126 +81,118 @@ struct SurfaceForwardFragOut {
   [[frag_color(3)]] float4 combined_a;
 };
 
-SurfaceForwardFragOut surf_forward_impl(
-    [[resource_table]] PipelineConstants & /*pipe*/,
-    [[resource_table]] SurfaceForward & /*srt*/,
-    [[resource_table]] LightEvalIterator & /*lights*/,
-    [[resource_table]] eevee::LightprobeRenderData & /*lightprobes*/,
-    [[resource_table]] eevee::LightprobePlaneRenderData & /*lightprobe_planes*/,
-    [[resource_table]] const draw::View &views,
-    [[resource_table]] const draw::Model & /*models*/,
-    [[resource_table]] const draw::Infos & /*infos*/,
-    [[resource_table]] const UnifiedVolumeData &volumes,
-    [[resource_table]] const Uniform &uni,
-    [[resource_table]] const Sampling &sampling,
-    [[resource_table]] const UtilityTexture &util_tx,
-    const float4 frag_co,
-    const bool front_face)
+void surf_forward_impl([[resource_table]] KernelGlobals &kg,
+                       [[resource_table]] PipelineConstants &pipe,
+                       [[resource_table]] LightEvalIterator &lights,
+                       [[resource_table]] LightprobeRenderData &lightprobes,
+                       [[resource_table]] LightprobePlaneRenderData &lightprobe_planes,
+                       [[resource_table]] const draw::View &views,
+                       [[resource_table]] const draw::Model &models,
+                       [[resource_table]] const draw::Infos &infos,
+                       [[resource_table]] const UnifiedVolumeData &volumes,
+                       [[resource_table]] const Uniform &uni,
+                       [[resource_table]] const Sampling &sampling,
+                       [[resource_table]] const UtilityTexture &util_tx,
+                       const VertOutCommon &interp,
+                       const float4 frag_co,
+                       SurfaceForwardFragOut &frag_out,
+                       float &out_depth,
+                       ShadingData &sd)
 {
-  SurfaceForwardFragOut frag_out = {};
 #ifdef MAT_OUTLINE_SHELL_SELF_OCCLUSION
-  if (outline_shell_self_occluded()) {
+  if (outline_shell_self_occluded(interp.resource_id_raw, frag_co)) {
     gpu_discard_fragment();
-    return frag_out;
+    return;
   }
 #endif
-  auto &interp_flat = interface_get(eevee_geom_iface_info, interp_flat);
-  draw::ID id{interp_flat.resource_id_raw};
+  draw::ID id{interp.resource_id_raw};
   const uint resource_id = id.resource_id<1>();
-
   const ViewMatrices view = views.get(0);
 
-  init_globals(uni, view, front_face);
-  g_forward_surface_lighting_P = g_data.P;
-
-  float noise = util_tx.fetch(gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
+  float noise = util_tx.fetch(frag_co.xy, UTIL_BLUE_NOISE_LAYER).r;
   float closure_rand = fract(noise + sampling.rng_1D_get(SAMPLING_CLOSURE));
 
-#ifdef MAT_DEPTH_OFFSET
-  float depth_offset = nodetree_depth_offset();
   float volume_depth = reverse_z::read(frag_co.z);
-  if (!material_depth_offset_is_zero(depth_offset)) {
-    volume_depth = material_depth_offset_screen_depth(depth_offset);
-    float3 depth_offset_P = material_depth_offset_apply_nodetree_position(depth_offset);
+#ifdef MAT_DEPTH_OFFSET
+  float depth_offset = nodetree_depth_offset(kg, sd);
+  if (!material_depth_offset_is_zero(kg, sd, depth_offset)) {
+    volume_depth = material_depth_offset_screen_depth(kg, sd, depth_offset);
+    float3 depth_offset_P = material_depth_offset_apply_nodetree_position(kg, sd, depth_offset);
 #  ifndef MAT_DEPTH_OFFSET_NO_LIGHTING
-    g_forward_surface_lighting_P = depth_offset_P;
+    sd.forward_lighting_P = depth_offset_P;
 #  endif
   }
-  material_depth_offset_write(depth_offset);
-#else
-  float volume_depth = reverse_z::read(frag_co.z);
+  material_depth_offset_write(kg, sd, depth_offset, out_depth);
 #endif
 
-  fragment_displacement();
+  fragment_displacement(kg, sd);
 
-  g_thickness_forward = Thickness::from(nodetree_thickness(), thickness_mode);
+  sd.thickness = Thickness::from(nodetree_thickness(kg, sd),
+                                 ThicknessMode(kg.nt.node_tree.thickness_mode));
 
   outline_output_reset();
-  nodetree_surface(closure_rand);
+  nodetree_surface(kg, sd, closure_rand);
 
 #ifdef MAT_OUTLINE_SHELL
-  const float shell_transparency = average(g_transmittance);
+  const float shell_transparency = average(sd.transmittance);
 #  ifdef MAT_OUTLINE_SHELL_BLENDED
   if (shell_transparency >= 1.0f) {
     gpu_discard_fragment();
-    return frag_out;
+    return;
   }
 #  else
   if (hashed_transparency::should_discard(shell_transparency,
-                                         uni.pipeline_buf.alpha_hash_scale,
-                                         sampling.rng_1D_get(SAMPLING_TRANSPARENCY),
-                                         g_data.P))
+                                          uni.pipeline_buf.alpha_hash_scale,
+                                          sampling.rng_1D_get(SAMPLING_TRANSPARENCY),
+                                          sd.P))
   {
     gpu_discard_fragment();
-    return frag_out;
+    return;
   }
   /* Coverage already applied Alpha. A surviving sample is opaque, including volume resolve. */
-  g_emission *= safe_rcp(1.0f - shell_transparency);
-  g_transmittance = float3(0.0f);
+  sd.emission *= safe_rcp(1.0f - shell_transparency);
+  sd.transmittance = float3(0.0f);
 #  endif
 #endif
 
-  /* NPR: Forward/blended materials must still feed the Normal render pass. The deferred path writes
-   * it from the GBuffer during the combine stage, but forward surfaces are never gbuffered, so the
-   * pass would stay black without this explicit write (matches npr-port-5.1 forward behavior).
-   * Forward materials always get the raw `eevee_render_pass_out` create-info (`rp_color_img` +
-   * MAT_RENDER_PASS_SUPPORT), so write to that bound image directly. The BSL RenderPassOutput
-   * resource-table struct is only present for AOV materials, so it cannot be used here. */
-#if defined(MAT_RENDER_PASS_SUPPORT)
-  if (uni.uniform_buf.render_pass.normal_id >= 0) {
-    imageStoreFast(rp_color_img,
-                   int3(int2(gl_FragCoord.xy), uni.uniform_buf.render_pass.normal_id),
-                   float4(g_data.N, 1.0f));
-  }
-#endif
+  /* Forward surfaces do not pass through the GBuffer combine, but still write the Normal pass. */
+  [[resource_table]] RenderPassOutput &render_passes = resource_table_get(RenderPassOutput);
+  render_passes.store_color(
+      int2(frag_co.xy), uni.uniform_buf.render_pass.normal_id, float4(sd.N, 1.0f));
 
   float3 radiance, transmittance;
-  float3 nodetree_P = g_data.P;
-  g_data.P = g_forward_surface_lighting_P;
+  float3 nodetree_P = sd.P;
+  sd.P = sd.forward_lighting_P;
   eevee::forward_lighting_eval(
-      view, resource_id, g_thickness_forward, gl_FragCoord.xy, radiance, transmittance);
-  g_data.P = nodetree_P;
+      kg, sd, view, resource_id, sd.thickness, frag_co.xy, radiance, transmittance);
+
+  if (pipe.use_lighting_nodes) [[static_branch]] {
+    radiance += sd.light_accum.diffuse_light;
+    radiance += sd.light_accum.glossy_light;
+    radiance += sd.light_accum.transmission_light;
+  }
+  sd.P = nodetree_P;
   attenuate_outline(saturate(average(transmittance)));
-  outline_output_flush(1.0f - saturate(average(transmittance)));
+  outline_output_flush(1.0f - saturate(average(transmittance)), resource_id);
 
   /* Volumetric resolve and compositing. */
-  float2 uvs = gl_FragCoord.xy * uni.uniform_buf.volumes.main_view_extent_inv;
+  float2 uvs = frag_co.xy * uni.uniform_buf.volumes.main_view_extent_inv;
   VolumeResolveSample vol = volumes.resolve(float3(uvs, volume_depth));
   /* Removes the part of the volume scattering that has
    * already been added to the destination pixels by the opaque resolve.
    * Since we do that using the blending pipeline we need to account for material transmittance. */
-  vol.scattering -= vol.scattering * g_transmittance;
+  vol.scattering -= vol.scattering * sd.transmittance;
   radiance = radiance * vol.transmittance + vol.scattering;
 
-  eObjectInfoFlag ob_flag = object_infos_get().flag;
+  eObjectInfoFlag ob_flag = kg.object_infos_get(sd).flag;
   if (flag_test(ob_flag, OBJECT_HOLDOUT)) {
-    g_holdout = 1.0f - average(g_transmittance);
+    sd.holdout = 1.0f - average(sd.transmittance);
     radiance *= 0.0f;
   }
 
-  g_holdout = saturate(g_holdout);
+  sd.holdout = saturate(sd.holdout);
 
-  radiance *= 1.0f - g_holdout;
+  radiance *= 1.0f - sd.holdout;
 
   /* There can be 2 frame-buffer layout for forward transparency:
    * - Combined RGB radiance with Monochromatic transmittance.
@@ -242,25 +204,25 @@ SurfaceForwardFragOut surf_forward_impl(
     frag_out.combined_r = float4(radiance.r, 0.0f, 0.0f, transmittance.r);
     frag_out.combined_g = float4(radiance.g, 0.0f, 0.0f, transmittance.g);
     frag_out.combined_b = float4(radiance.b, 0.0f, 0.0f, transmittance.b);
-    frag_out.combined_a = float4(g_holdout, 0.0f, 0.0f, average(transmittance));
+    frag_out.combined_a = float4(sd.holdout, 0.0f, 0.0f, average(transmittance));
   }
 #ifdef MAT_OUTLINE_SHELL_AOV
   /* Execute side outputs only after the visible shell sample survived all coverage tests. */
-  nodetree_outline_shell_aov(closure_rand);
+  nodetree_outline_shell_aov(kg, sd, closure_rand);
 #endif
 
-  return frag_out;
+  return;
 }
 
 /* Early fragment test is needed for render pass support for forward surfaces.
  * NOTE: This removes the possibility of using gl_FragDepth. Depth Offset materials use the
  * sibling entry-point below so they can keep late depth tests and write gl_FragDepth. */
 [[fragment]] [[early_fragment_tests]]
-void surf_forward([[resource_table]] PipelineConstants &pipe,
-                  [[resource_table]] SurfaceForward &srt,
+void surf_forward([[resource_table]] KernelGlobals &kg,
+                  [[resource_table]] PipelineConstants &pipe,
                   [[resource_table]] LightEvalIterator &lights,
-                  [[resource_table]] eevee::LightprobeRenderData &lightprobes,
-                  [[resource_table]] eevee::LightprobePlaneRenderData &lightprobe_planes,
+                  [[resource_table]] LightprobeRenderData &lightprobes,
+                  [[resource_table]] LightprobePlaneRenderData &lightprobe_planes,
                   [[resource_table]] const draw::View &views,
                   [[resource_table]] const draw::Model &models,
                   [[resource_table]] const draw::Infos &infos,
@@ -268,65 +230,113 @@ void surf_forward([[resource_table]] PipelineConstants &pipe,
                   [[resource_table]] const Uniform &uni,
                   [[resource_table]] const Sampling &sampling,
                   [[resource_table]] const UtilityTexture &util_tx,
+                  [[in]] const VertOutCommon &interp,
+                  [[in]] [[condition(is_curves)]] const VertOutCurves &curves_interp,
+                  [[in]] [[condition(is_pointcloud)]] const VertOutPointcloud &ptcloud_interp,
                   [[frag_coord]] const float4 frag_co,
                   [[out]] SurfaceForwardFragOut &frag_out,
+                  [[bary_coord]] [[condition(use_barycentric)]] const float3 bary_co,
                   [[front_facing]] const bool front_face)
 {
-  SurfaceForwardFragOut result = surf_forward_impl(pipe,
-                                                   srt,
-                                                   lights,
-                                                   lightprobes,
-                                                   lightprobe_planes,
-                                                   views,
-                                                   models,
-                                                   infos,
-                                                   volumes,
-                                                   uni,
-                                                   sampling,
-                                                   util_tx,
-                                                   frag_co,
-                                                   front_face);
-  frag_out.combined_r = result.combined_r;
-  frag_out.combined_g = result.combined_g;
-  frag_out.combined_b = result.combined_b;
-  frag_out.combined_a = result.combined_a;
+  float out_depth = frag_co.z;
+  material_surface_cull_discard(front_face);
+  const ViewMatrices view = views.get(0);
+  float3 barycentric_co = float3(0.0f);
+  if (pipe.use_barycentric) [[static_branch]] {
+    barycentric_co = bary_co;
+  }
+
+  ShadingData sd = init_globals(pipe, uni, interp, view, front_face, frag_co);
+  sd.forward_lighting_P = sd.P;
+  if (pipe.is_mesh) [[static_branch]] {
+    init_globals_mesh(interp, sd, barycentric_co);
+  }
+  else if (pipe.is_curves) [[static_branch]] {
+    init_globals_curves(interp, curves_interp, sd, view);
+  }
+  else if (pipe.is_pointcloud) [[static_branch]] {
+    init_globals_pointcloud(ptcloud_interp, sd);
+  }
+
+  surf_forward_impl(kg,
+                    pipe,
+                    lights,
+                    lightprobes,
+                    lightprobe_planes,
+                    views,
+                    models,
+                    infos,
+                    volumes,
+                    uni,
+                    sampling,
+                    util_tx,
+                    interp,
+                    frag_co,
+                    frag_out,
+                    out_depth,
+                    sd);
 }
 
 [[fragment]]
-void surf_forward_depth_offset([[resource_table]] PipelineConstants &pipe,
-                               [[resource_table]] SurfaceForward &srt,
-                               [[resource_table]] LightEvalIterator &lights,
-                               [[resource_table]] eevee::LightprobeRenderData &lightprobes,
-                               [[resource_table]] eevee::LightprobePlaneRenderData &lightprobe_planes,
-                               [[resource_table]] const draw::View &views,
-                               [[resource_table]] const draw::Model &models,
-                               [[resource_table]] const draw::Infos &infos,
-                               [[resource_table]] const UnifiedVolumeData &volumes,
-                               [[resource_table]] const Uniform &uni,
-                               [[resource_table]] const Sampling &sampling,
-                               [[resource_table]] const UtilityTexture &util_tx,
-                               [[frag_coord]] const float4 frag_co,
-                               [[out]] SurfaceForwardFragOut &frag_out,
-                               [[front_facing]] const bool front_face)
+void surf_forward_depth_offset(
+    [[resource_table]] KernelGlobals &kg,
+    [[resource_table]] PipelineConstants &pipe,
+    [[resource_table]] LightEvalIterator &lights,
+    [[resource_table]] LightprobeRenderData &lightprobes,
+    [[resource_table]] LightprobePlaneRenderData &lightprobe_planes,
+    [[resource_table]] const draw::View &views,
+    [[resource_table]] const draw::Model &models,
+    [[resource_table]] const draw::Infos &infos,
+    [[resource_table]] const UnifiedVolumeData &volumes,
+    [[resource_table]] const Uniform &uni,
+    [[resource_table]] const Sampling &sampling,
+    [[resource_table]] const UtilityTexture &util_tx,
+    [[in]] const VertOutCommon &interp,
+    [[in]] [[condition(is_curves)]] const VertOutCurves &curves_interp,
+    [[in]] [[condition(is_pointcloud)]] const VertOutPointcloud &ptcloud_interp,
+    [[frag_coord]] const float4 frag_co,
+    [[out]] SurfaceForwardFragOut &frag_out,
+    [[bary_coord]] [[condition(use_barycentric)]] const float3 bary_co,
+    [[front_facing]] const bool front_face,
+    [[frag_depth(any)]] float &out_depth)
 {
-  SurfaceForwardFragOut result = surf_forward_impl(pipe,
-                                                   srt,
-                                                   lights,
-                                                   lightprobes,
-                                                   lightprobe_planes,
-                                                   views,
-                                                   models,
-                                                   infos,
-                                                   volumes,
-                                                   uni,
-                                                   sampling,
-                                                   util_tx,
-                                                   frag_co,
-                                                   front_face);
-  frag_out.combined_r = result.combined_r;
-  frag_out.combined_g = result.combined_g;
-  frag_out.combined_b = result.combined_b;
-  frag_out.combined_a = result.combined_a;
+  out_depth = frag_co.z;
+  material_surface_cull_discard(front_face);
+  const ViewMatrices view = views.get(0);
+  float3 barycentric_co = float3(0.0f);
+  if (pipe.use_barycentric) [[static_branch]] {
+    barycentric_co = bary_co;
+  }
+
+  ShadingData sd = init_globals(pipe, uni, interp, view, front_face, frag_co);
+  sd.forward_lighting_P = sd.P;
+  if (pipe.is_mesh) [[static_branch]] {
+    init_globals_mesh(interp, sd, barycentric_co);
+  }
+  else if (pipe.is_curves) [[static_branch]] {
+    init_globals_curves(interp, curves_interp, sd, view);
+  }
+  else if (pipe.is_pointcloud) [[static_branch]] {
+    init_globals_pointcloud(ptcloud_interp, sd);
+  }
+
+  surf_forward_impl(kg,
+                    pipe,
+                    lights,
+                    lightprobes,
+                    lightprobe_planes,
+                    views,
+                    models,
+                    infos,
+                    volumes,
+                    uni,
+                    sampling,
+                    util_tx,
+                    interp,
+                    frag_co,
+                    frag_out,
+                    out_depth,
+                    sd);
 }
 
 }  // namespace eevee

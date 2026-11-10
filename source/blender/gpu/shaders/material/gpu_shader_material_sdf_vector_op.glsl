@@ -1,5 +1,5 @@
 #include "gpu_shader_material_sdf_util.glsl"
-#include "gpu_shader_common_hash.glsl"
+#include "gpu_shader_common_hash.bsl.hh"
 
 /**
  * SDF Functions based on these sources, inc comments:

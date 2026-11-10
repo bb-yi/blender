@@ -32,6 +32,10 @@ bool OIIOImageLoader::load_metadata(ImageMetaData &metadata,
                                     const ImageLoaderParams &params,
                                     Progress &progress)
 {
+  if (original_filepath_.empty()) {
+    return false;
+  }
+
   if (params.use_texture_cache) {
     const std::string &filepath = get_filepath();
     const bool found = resolve_tx(filepath,
@@ -97,6 +101,7 @@ static bool oiio_load_pixels_tile(const unique_ptr<ImageInput> &in,
 
 {
   const int channels = metadata.channels;
+  int64_t read_x_stride = x_stride;
   int64_t read_y_stride = y_stride;
 
   /* Read pixels through OpenImageIO. */
@@ -105,6 +110,7 @@ static bool oiio_load_pixels_tile(const unique_ptr<ImageInput> &in,
   if (channels > 4) {
     tmppixels.resize(w * h * channels);
     readpixels = &tmppixels[0];
+    read_x_stride = channels * sizeof(StorageType);
     read_y_stride = w * channels * sizeof(StorageType);
   }
 
@@ -120,7 +126,7 @@ static bool oiio_load_pixels_tile(const unique_ptr<ImageInput> &in,
                       channels,
                       typedesc,
                       readpixels,
-                      x_stride,
+                      read_x_stride,
                       read_y_stride))
   {
     return false;

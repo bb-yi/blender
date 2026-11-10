@@ -2,7 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/**
+/** \file
+ * \ingroup eevee
+ *
  * Shared code between host and client code-bases.
  */
 
@@ -186,8 +188,7 @@ struct ShadowTileData {
   bool is_allocated;
   /** True if the tile has been staged for rendering. This will remove the `do_update` flag. */
   bool is_rendered;
-  /** True if the tile is inside the pages_cached_buf (mutually exclusive with `is_allocated`).
-   */
+  /** True if the tile is inside the pages_cached_buf (mutually exclusive with `is_allocated`). */
   bool is_cached;
 };
 /** \note Stored packed as a uint. */
@@ -220,24 +221,28 @@ enum [[host_shared]] eShadowFlag : uint32_t {
  */
 static inline uint shadow_page_pack(uint3 page)
 {
+#ifndef GPU_SHADER
   BLI_STATIC_ASSERT(SHADOW_PAGE_PER_ROW <= 8 && SHADOW_PAGE_PER_COL <= 8 &&
                         SHADOW_PAGE_MAX_LAYER <= 512,
                     "Update page packing")
   BLI_STATIC_ASSERT(SHADOW_MAX_PAGE <= 32768, "Update page packing")
+#endif
   return (page.x << 0u) | (page.y << 3u) | (page.z << 6u);
 }
 static inline uint3 shadow_page_unpack(uint data)
 {
   uint3 page;
-  /* clang-format off */ /* Multi-line macros break shader error lines. */
-  BLI_STATIC_ASSERT(SHADOW_PAGE_PER_ROW <= 8 && SHADOW_PAGE_PER_COL <= 8 && SHADOW_PAGE_MAX_LAYER <= 512, "Update page packing")
-  /* clang-format on */
   page.x = (data >> 0u) & 7u;
   page.y = (data >> 3u) & 7u;
   page.z = (data >> SHADOW_PAGE_PER_LAYER_LOD) & SHADOW_PAGE_LAYER_MASK;
-  /* clang-format off */ /* Multi-line macros break shader error lines. */
-  BLI_STATIC_ASSERT(SHADOW_MAX_PAGE == (SHADOW_PAGE_PER_ROW * SHADOW_PAGE_PER_COL * SHADOW_PAGE_MAX_LAYER), "Update page packing")
-  /* clang-format on */
+#ifndef GPU_SHADER
+  BLI_STATIC_ASSERT(SHADOW_PAGE_PER_ROW <= 8 && SHADOW_PAGE_PER_COL <= 8 &&
+                        SHADOW_PAGE_MAX_LAYER <= 512,
+                    "Update page packing")
+  BLI_STATIC_ASSERT(SHADOW_MAX_PAGE ==
+                        (SHADOW_PAGE_PER_ROW * SHADOW_PAGE_PER_COL * SHADOW_PAGE_MAX_LAYER),
+                    "Update page packing")
+#endif
   return page;
 }
 
@@ -302,7 +307,9 @@ struct ShadowSamplingTile {
 /* NOTE: Trust the input to be in valid range [0, 127]. */
 static inline uint shadow_lod_offset_pack(uint2 ofs)
 {
+#ifndef GPU_SHADER
   BLI_STATIC_ASSERT(SHADOW_TILEMAP_MAX_CLIPMAP_LOD <= 8, "Update page packing")
+#endif
   return (ofs.x & SHADOW_SAMPLING_TILE_LOD_OFFSET_MASK) |
          ((ofs.y & SHADOW_SAMPLING_TILE_LOD_OFFSET_MASK) <<
           SHADOW_SAMPLING_TILE_LOD_OFFSET_BITS);
@@ -344,6 +351,8 @@ static inline ShadowSamplingTilePacked shadow_sampling_tile_pack(ShadowSamplingT
     tile.lod_offset.x = 1;
   }
   uint data = shadow_page_pack(tile.page) & SHADOW_PAGE_MASK;
+#ifndef GPU_SHADER
+#endif
   data |= (tile.lod & SHADOW_SAMPLING_TILE_LOD_MASK) << 15u;
   data |= shadow_lod_offset_pack(tile.lod_offset) << 18u;
   return data;

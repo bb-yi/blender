@@ -19,10 +19,10 @@ bool npr_light_linking_affects_receiver(uint2 light_set_membership, uchar receiv
 float npr_light_power_get(LightData light, LightingType type)
 {
   /* Mask anything above 3. See LIGHT_TRANSLUCENT_WITH_THICKNESS. */
-  return light.power[type & 3u];
+  return eevee::light::power_get(light, type);
 }
 
-bool foreach_light_setup(uint l_idx,
+bool foreach_light_setup(KernelGlobals &kg, ShadingData &sd, uint l_idx,
                          bool is_directional,
                          float3 N,
                          out float4 out_color,
@@ -36,22 +36,21 @@ bool foreach_light_setup(uint l_idx,
     return false;
   }
 
-  ObjectInfos object_infos = drw_infos[drw_resource_id()];
+  ObjectInfos object_infos = drw_infos[kg.resource_id_get(sd)];
   uchar receiver_light_set = receiver_light_set_get(object_infos);
   if (!npr_light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
     return false;
   }
 
-  LightVector lv = light_vector_get(light, is_directional, g_data.P);
+  LightVector lv = light_vector_get(light, is_directional, sd.P);
   float attenuation = light_attenuation_volume(light, is_directional, lv);
   if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
     return false;
   }
 
-  float3 V = drw_world_incident_vector(g_data.P);
+  float3 V = kg.view_matrices_get(sd).world_incident_vector(sd.P);
   float4 ltc_mat = float4(1.0f, 0.0f, 0.0f, 1.0f);
-  LightVertices light_shape_vertices = light_shape_corners(light, lv);
-  float ltc = light_ltc(utility_tx, light, lv.L, V, lv, ltc_mat, light_shape_vertices);
+  float ltc = eevee_light_ltc(utility_tx, light, lv.L, V, lv, ltc_mat);
   attenuation *= ltc * npr_light_power_get(light, LIGHT_DIFFUSE);
   if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
     return false;
@@ -59,18 +58,18 @@ bool foreach_light_setup(uint l_idx,
 
   float shadow_mask = 1.0f;
   if (light.tilemap_index != LIGHT_NO_SHADOW) {
-    shadow_mask = eevee_shadow_eval(light,
+    shadow_mask = eevee_shadow_eval(sd.frag_co.xy, light,
                                     is_directional,
                                     false,
                                     false,
                                     0.0f,
-                                    g_data.P,
-                                    g_data.Ng,
+                                    sd.P,
+                                    sd.Ng,
                                     N,
                                     0.0f,
                                     0.0f,
-                                    uniform_buf.shadow.ray_count,
-                                    uniform_buf.shadow.step_count);
+                                    eevee_uniform_data_get().shadow.ray_count,
+                                    eevee_uniform_data_get().shadow.step_count);
     shadow_mask *= dot(N, lv.L) > 0.0f ? 1.0f : 0.0f;
   }
 
@@ -187,7 +186,7 @@ bool npr_light_chunk_iterator_next(NPRLightChunkIterator &iterator,
         N, out_color, out_vector, out_distance, out_attenuation, out_shadow_mask) \
       { \
         NPRLightChunkIterator npr_light_iterator = npr_light_chunk_iterator_init( \
-            gl_FragCoord.xy, drw_point_world_to_view(g_data.P).z); \
+            sd.frag_co.xy, kg.view_matrices_get(sd).point_world_to_view(sd.P).z); \
         uint npr_light_chunk_base; \
         uint npr_light_chunk_word; \
         bool is_local; \
@@ -198,7 +197,7 @@ bool npr_light_chunk_iterator_next(NPRLightChunkIterator &iterator,
           while ((npr_light_bit_index = findLSB(npr_light_chunk_word)) != -1) { \
             npr_light_chunk_word &= ~(1u << uint(npr_light_bit_index)); \
             uint l_idx = npr_light_chunk_base + uint(npr_light_bit_index); \
-      if (!foreach_light_setup(l_idx, \
+      if (!foreach_light_setup(kg, sd, l_idx, \
                                !is_local, \
                                N, \
                                out_color, \
@@ -248,10 +247,10 @@ void FOREACH_LIGHT_END(float dummy)
 #endif
 
 [[node]]
-void npr_image_sample_view(TextureHandle image, float3 offset, float4 &color, float &alpha)
+void npr_image_sample_view(TextureHandle image, float3 offset, [[resource_table]] KernelGlobals &kg, ShadingData &sd, float4 &color, float &alpha)
 {
 #if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
-  color = TextureHandle_eval(image, offset.xy, false);
+  color = TextureHandle_eval(kg, sd, image, offset.xy, false);
   alpha = color.a;
 #  if defined(MAT_FILTER)
   if (TextureHandle_stores_transmittance_alpha(image)) {
@@ -272,10 +271,10 @@ void npr_image_sample_view(TextureHandle image, float3 offset, float4 &color, fl
 }
 
 [[node]]
-void npr_image_sample_texel(TextureHandle image, float3 offset, float4 &color, float &alpha)
+void npr_image_sample_texel(TextureHandle image, float3 offset, [[resource_table]] KernelGlobals &kg, ShadingData &sd, float4 &color, float &alpha)
 {
 #if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
-  color = TextureHandle_eval(image, offset.xy, true);
+  color = TextureHandle_eval(kg, sd, image, offset.xy, true);
   alpha = color.a;
 #  if defined(MAT_FILTER)
   if (TextureHandle_stores_transmittance_alpha(image)) {
@@ -296,10 +295,10 @@ void npr_image_sample_texel(TextureHandle image, float3 offset, float4 &color, f
 }
 
 [[node]]
-void npr_image_sample_uv(TextureHandle image, float3 uv, float4 &color, float &alpha)
+void npr_image_sample_uv(TextureHandle image, float3 uv, [[resource_table]] KernelGlobals &kg, ShadingData &sd, float4 &color, float &alpha)
 {
 #if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
-  color = TextureHandle_eval_uv(image, uv.xy);
+  color = TextureHandle_eval_uv(kg, sd, image, uv.xy);
   alpha = color.a;
 #  if defined(MAT_FILTER)
   if (TextureHandle_stores_transmittance_alpha(image)) {
@@ -372,10 +371,10 @@ void npr_output_vec3(float3 color, float4 &out_color)
 }
 
 [[node]]
-void npr_output_texture_handle(TextureHandle color, float4 &out_color)
+void npr_output_texture_handle(TextureHandle color, [[resource_table]] KernelGlobals &kg, ShadingData &sd, float4 &out_color)
 {
 #if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
-  out_color = TextureHandle_eval(color, float2(0.0f), false);
+  out_color = TextureHandle_eval(kg, sd, color, float2(0.0f), false);
 #else
   out_color = float4(0.0f);
 #endif

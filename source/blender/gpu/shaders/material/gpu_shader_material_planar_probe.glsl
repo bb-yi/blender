@@ -17,6 +17,8 @@ void node_planar_probe(float3 position,
                        float explicit_normal,
                        float explicit_uv,
                        float supported,
+                       KernelGlobals kg,
+                       ShadingData &sd,
                        out float4 color,
                        out float depth,
                        out float3 result_uv,
@@ -35,8 +37,8 @@ void node_planar_probe(float3 position,
     if (supported == 0.0f || !probe_uniforms.pipeline_buf.planar_probe_ready) {
       return;
     }
-    float3 P = explicit_position != 0.0f ? position : g_data.P;
-    float3 N = explicit_normal != 0.0f ? normal : g_data.N;
+    float3 P = explicit_position != 0.0f ? position : sd.P;
+    float3 N = explicit_normal != 0.0f ? normal : sd.N;
     float normal_length_squared = dot(N, N);
     if (!planar_probe_finite(P) || !planar_probe_finite(N) ||
         !(normal_length_squared >= 1e-16f) || !(normal_length_squared < 3.402823e+38f))
@@ -87,7 +89,7 @@ void node_planar_probe(float3 position,
       public_uv = uv.xy;
     }
     else {
-      const ViewMatrices view = view_matrices_get();
+      const ViewMatrices view = kg.view_matrices_get(sd);
       float3 V = view.world_incident_vector(P);
       float3 projected_P = eevee::lightprobe::plane::parallax(probe, P, N, V);
       float4 clip = view.point_world_to_homogenous(projected_P);

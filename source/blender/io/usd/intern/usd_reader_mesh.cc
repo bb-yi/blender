@@ -8,7 +8,6 @@
 #include "usd_reader_mesh.hh"
 #include "usd.hh"
 #include "usd_attribute_utils.hh"
-#include "usd_hash_types.hh"
 #include "usd_mesh_utils.hh"
 #include "usd_reader_material.hh"
 #include "usd_skel_convert.hh"
@@ -234,6 +233,15 @@ void USDMeshReader::read_object_data(Main *bmain, const pxr::UsdTimeCode time)
     is_time_varying_ = true;
   }
 
+  /* Make one final check against the special primvars:normals in case that was set. */
+  if (!is_time_varying_) {
+    const pxr::UsdGeomPrimvarsAPI primvarsAPI(mesh_prim_);
+    const pxr::UsdGeomPrimvar primvar = primvarsAPI.GetPrimvar(usdtokens::normalsPrimvar);
+    if (primvar.HasValue() && primvar.ValueMightBeTimeVarying()) {
+      is_time_varying_ = true;
+    }
+  }
+
   if (is_time_varying_) {
     add_cache_modifier();
   }
@@ -433,7 +441,7 @@ void USDMeshReader::read_uv_data_primvar(Mesh *mesh,
 
 void USDMeshReader::read_subdiv()
 {
-  ModifierData *md = static_cast<ModifierData *>(object_->modifiers.last);
+  ModifierData *md = object_->modifiers.last();
   SubsurfModifierData *subdiv_data = reinterpret_cast<SubsurfModifierData *>(md);
 
   pxr::TfToken uv_smooth;
@@ -739,7 +747,7 @@ void USDMeshReader::read_mesh_sample(ImportSettings *settings,
 
   /* Process point normals after reading faces. */
   if ((settings->read_flag & MOD_MESHSEQ_READ_VERT) != 0 &&
-      usd_data.normal_interpolation == pxr::UsdGeomTokens->vertex)
+      ELEM(usd_data.normal_interpolation, pxr::UsdGeomTokens->vertex, pxr::UsdGeomTokens->varying))
   {
     process_normals_vertex_varying(mesh, usd_data.normals_for_write());
   }
@@ -785,8 +793,8 @@ void USDMeshReader::read_custom_data(const ImportSettings *settings,
       continue;
     }
 
-    /* We handle the non-standard primvar:velocity elsewhere. */
-    if (ELEM(name, "velocity")) {
+    /* We handle certain primvars elsewhere. */
+    if (ELEM(name, "velocity", "normals")) {
       continue;
     }
 

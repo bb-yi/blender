@@ -25,7 +25,8 @@ void node_stencil_value(float3 uv, float use_uv, out float value, out float dept
 
 [[node]]
 void node_stencil_surface(
-    float3 uv, float use_uv, out float value, out float depth, out float valid)
+    float3 uv, float use_uv, KernelGlobals kg, ShadingData &sd,
+    out float value, out float depth, out float valid)
 {
   value = 0.0f;
   depth = 0.0f;
@@ -46,7 +47,7 @@ void node_stencil_surface(
     float hardware_depth = texelFetch(stencil_surface_depth_tx, texel, 0).r;
     /* Own depth is cleared to reverse-Z far. Reference zero is a valid hit. */
     if (hardware_depth > 0.0f) {
-      depth = -drw_depth_screen_to_view(1.0f - hardware_depth);
+      depth = -kg.view_matrices_get(sd).depth_screen_to_view(1.0f - hardware_depth);
       value = float(texelFetch(stencil_surface_value_tx, texel, 0).r & 15u);
       valid = float(depth > 0.0f);
     }

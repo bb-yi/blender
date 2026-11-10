@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "DNA_node_types.h"
 #include "node_shader_util.hh"
 #include "node_util.hh"
@@ -11,6 +15,8 @@
 #include "BKE_scene.hh"
 
 #include "DEG_depsgraph_query.hh"
+
+#include "ED_node.hh"
 
 #include "RNA_access.hh"
 
@@ -43,8 +49,7 @@ static void node_shader_buts_normal_map(ui::Layout &layout, bContext *C, Pointer
   if (RNA_enum_get(ptr, "space") == SHD_SPACE_TANGENT) {
     layout.prop(ptr, "base", ui::ITEM_R_SPLIT_EMPTY_NAME, "", ICON_NONE);
 
-    PointerRNA obptr = CTX_data_pointer_get(C, "active_object");
-    Object *object = static_cast<Object *>(obptr.data);
+    Object *object = ed::space_node::get_space_editor_object(C);
 
     if (object && object->type == OB_MESH) {
       Depsgraph *depsgraph = CTX_data_depsgraph_pointer(C);
@@ -81,7 +86,7 @@ static int gpu_shader_normal_map(GPUMaterial *mat,
   }
   else {
     strength = GPU_uniform_from_socket(
-        mat, static_cast<bNodeSocket *>(node->inputs.first), in[0].vec);
+        mat, node->inputs.first(), in[0]);
   }
 
   GPUNodeLink *newnormal;
@@ -90,7 +95,7 @@ static int gpu_shader_normal_map(GPUMaterial *mat,
   }
   else {
     newnormal = GPU_uniform_from_socket(
-        mat, static_cast<bNodeSocket *>(node->inputs.first)->next, in[1].vec);
+        mat, node->inputs.first()->next, in[1]);
   }
 
   const char *color_to_normal_fnc_name = "color_to_normal_new_shading";
@@ -109,7 +114,7 @@ static int gpu_shader_normal_map(GPUMaterial *mat,
                                   "input_normal_original";
 
   GPUNodeLink *input_normal;
-  GPU_link(mat, input_fn_name, &input_normal);
+  GPU_link(mat, input_fn_name, GPU_shading_data(), &input_normal);
 
   switch (nm->space) {
     case SHD_SPACE_TANGENT:
@@ -122,11 +127,18 @@ static int gpu_shader_normal_map(GPUMaterial *mat,
                strength,
                newnormal,
                input_normal,
+               GPU_kernel_globals(),
+               GPU_shading_data(),
                &out[0].link);
       return true;
     case SHD_SPACE_OBJECT:
     case SHD_SPACE_BLENDER_OBJECT:
-      GPU_link(mat, "normal_transform_object_to_world", newnormal, &newnormal);
+      GPU_link(mat,
+               "normal_transform_object_to_world",
+               newnormal,
+               GPU_kernel_globals(),
+               GPU_shading_data(),
+               &newnormal);
       break;
     case SHD_SPACE_WORLD:
     case SHD_SPACE_BLENDER_WORLD:
@@ -135,7 +147,7 @@ static int gpu_shader_normal_map(GPUMaterial *mat,
   }
 
   /* Final step - mix and apply strength for all other than tangent space. */
-  GPU_link(mat, "node_normal_map_mix", strength, newnormal, &out[0].link);
+  GPU_link(mat, "node_normal_map_mix", strength, newnormal, GPU_shading_data(), &out[0].link);
 
   return true;
 }

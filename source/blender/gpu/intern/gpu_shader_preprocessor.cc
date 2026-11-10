@@ -37,9 +37,11 @@ class Directive;
 
 struct TokenPastingBuffer : lexit::TokenBuffer {
  private:
-  /** WORKAROUND: We need the string to be immutable since the atomization_map_ contains StringRef.
+  /**
+   * WORKAROUND: We need the string to be immutable since the atomization_map_ contains StringRef.
    * But we also need the pasted token to be in a continuous string buffer for the TokenBuffer.
-   * So we keep the old string around when we need to grow the buffer. */
+   * So we keep the old string around when we need to grow the buffer.
+   */
   Vector<std::unique_ptr<std::string>> pasted_tokens_str;
 
  public:
@@ -120,7 +122,7 @@ struct AtomicLexer : lexit::TokenBuffer {
                                       const bool followed_by_space)
   {
     TokenMut tok = pasting_buf.paste_token(tok_str, type, followed_by_space);
-    /** IMPORTANT: The hash function need to store a StringRef of the string. We have to make sure
+    /* IMPORTANT: The hash function need to store a StringRef of the string. We have to make sure
      * to feed it the final stored string to avoid referencing freed memory. */
     tok.atom() = hash(tok.str());
     return tok;
@@ -530,7 +532,7 @@ struct TokenStream {
   TokenStream &operator<<(Token tok)
   {
     bool followed_by_space = tok.followed_by_whitespace();
-    if (UNLIKELY(concat_next_)) {
+    if (concat_next_) [[unlikely]] {
       tok = paste_token(tokens.last().str(), tok.str(), followed_by_space);
       tok.flag = followed_by_space;
       tokens.last() = tok;
@@ -1496,7 +1498,7 @@ struct Preprocessor {
       if (tok != ParOpen) {
         /* Macro doesn't have parameters. It should not expand. */
         /* Currently still replace by the original token (noop).
-         * Would be better to bypass replacement alltogether. */
+         * Would be better to bypass replacement altogether. */
         TokenStreamPtr expanded = stream_pool.alloc();
         *expanded << expanded_tok;
         return {std::move(expanded), expanded_tok};

@@ -10,16 +10,16 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_heap_simple.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
+#include "BLI_heap_simple.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines.hh"
 
 #include "bmesh.hh"
 
 #include "intern/bmesh_operators_private.hh" /* own include */
 
-#include "BLI_mempool.h"
+#include "BLI_mempool.hh"
 
 namespace blender {
 
@@ -110,6 +110,11 @@ struct PathLinkState {
   float dist;
   float co_prev[3];
 };
+
+static void state_free(void *state)
+{
+  MEM_delete(static_cast<PathLinkState *>(state));
+}
 
 /* -------------------------------------------------------------------- */
 /** \name Min Dist Dir Utilities
@@ -530,7 +535,7 @@ static void bm_vert_pair_to_matrix(BMVert *v_pair[2], float r_unit_mat[3][3])
   cross_v3_v3v3(basis_tmp, basis_dir, basis_nor);
 
   /* Try get the axis from surrounding faces, fallback to 'ortho_v3_v3' */
-  if (UNLIKELY(normalize_v3(basis_tmp) < eps)) {
+  if (normalize_v3(basis_tmp) < eps) [[unlikely]] {
     /* vertex normals are directly opposite */
 
     /* find the loop with the lowest angle */
@@ -574,7 +579,7 @@ static void bm_vert_pair_to_matrix(BMVert *v_pair[2], float r_unit_mat[3][3])
     cross_v3_v3v3(basis_tmp, basis_dir, basis_nor);
 
     /* last resort, pick _any_ ortho axis */
-    if (UNLIKELY(normalize_v3(basis_tmp) < eps)) {
+    if (normalize_v3(basis_tmp) < eps) [[unlikely]] {
       ortho_v3_v3(basis_nor, basis_dir);
       normalize_v3(basis_nor);
       cross_v3_v3v3(basis_tmp, basis_dir, basis_nor);
@@ -660,7 +665,7 @@ void bmo_connect_vert_pair_exec(BMesh *bm, BMOperator *op)
         state_best = *state;
 
         /* we're done, exit all loops */
-        BLI_heapsimple_clear(pc.states, MEM_delete_void);
+        BLI_heapsimple_clear(pc.states, state_free);
         continue_search = false;
       }
       else if (state_step(&pc, state)) {
@@ -722,7 +727,7 @@ void bmo_connect_vert_pair_exec(BMesh *bm, BMOperator *op)
 
   BLI_mempool_destroy(pc.link_pool);
 
-  BLI_heapsimple_free(pc.states, MEM_delete_void);
+  BLI_heapsimple_free(pc.states, state_free);
 
 #if 1
   if (state_best.link_last) {

@@ -16,9 +16,9 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -152,6 +152,13 @@ static void object_shape_key_add(bContext *C, Object *ob, const bool from_mix)
     /* for absolute shape keys, new keys may not be added last */
     ob->shapenr = BLI_findindex(&key->block, kb) + 1;
 
+    /* Explicitly deselect current selection when adding a new key, rather than
+     * relying on the tree view's state. This is problematic when the same data is
+     * shown in more than one view instance, see #161071. */
+    for (KeyBlock &other : key->block) {
+      SET_FLAG_FROM_TEST(other.flag, &other == kb, KEYBLOCK_SEL);
+    }
+
     WM_event_add_notifier(C, NC_OBJECT | ND_DRAW, ob);
   }
 }
@@ -173,7 +180,7 @@ void shape_key_mirror(
     float *fp1, *fp2;
     float tvec[3];
 
-    ED_mesh_mirror_spatial_table_begin(ob, nullptr, nullptr);
+    ED_mesh_mirror_spatial_table_begin(ob, nullptr);
 
     for (i1 = 0; i1 < mesh->verts_num; i1++) {
       i2 = mesh_get_x_mirror_vert(ob, nullptr, i1, use_topology);
@@ -348,6 +355,18 @@ static wmOperatorStatus shape_key_add_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
+static std::string shape_key_add_get_description(bContext * /*C*/,
+                                                 wmOperatorType * /*ot*/,
+                                                 PointerRNA *ptr)
+{
+  const bool do_from_mix = RNA_boolean_get(ptr, "from_mix");
+  if (do_from_mix) {
+    return TIP_("Create a new shape key from the visual result of existing mix of keys");
+  }
+
+  return "";
+}
+
 void OBJECT_OT_shape_key_add(wmOperatorType *ot)
 {
   /* identifiers */
@@ -358,6 +377,7 @@ void OBJECT_OT_shape_key_add(wmOperatorType *ot)
   /* API callbacks. */
   ot->poll = shape_key_mode_poll;
   ot->exec = shape_key_add_exec;
+  ot->get_description = shape_key_add_get_description;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
@@ -367,7 +387,7 @@ void OBJECT_OT_shape_key_add(wmOperatorType *ot)
                   "from_mix",
                   true,
                   "From Mix",
-                  "Create the new shape key from the existing mix of keys");
+                  "Create a new shape key from the visual result of existing mix of keys");
 }
 
 /** \} */
@@ -380,9 +400,34 @@ static wmOperatorStatus shape_key_copy_exec(bContext *C, wmOperator * /*op*/)
 {
   Object *ob = context_object(C);
   Key *key = BKE_key_from_object(ob);
-  KeyBlock *kb_src = BKE_keyblock_from_object(ob);
-  KeyBlock *kb_new = BKE_keyblock_duplicate(key, kb_src);
-  ob->shapenr = BLI_findindex(&key->block, kb_new) + 1;
+
+  /* List selected shape keys. */
+  blender::Vector<KeyBlock *> to_duplicate;
+  for (auto [index, keyblock] : key->block.enumerate()) {
+    const bool is_selected = shape_key_is_selected(*ob, keyblock, index);
+
+    /* Deselect all keys, so that only new ones are selected. */
+    keyblock.flag &= ~KEYBLOCK_SEL;
+
+    if (index == 0) {
+      /* Never duplicate the base key, it's special. */
+      continue;
+    }
+    if (is_selected) {
+      to_duplicate.append(&keyblock);
+    }
+  }
+
+  KeyBlock *kb_new = nullptr;
+  for (KeyBlock *kb_src : to_duplicate) {
+    kb_new = BKE_keyblock_duplicate(key, kb_src);
+    kb_new->flag |= KEYBLOCK_SEL;
+  }
+
+  if (kb_new != nullptr) {
+    ob->shapenr = BLI_findindex(&key->block, kb_new) + 1;
+  }
+
   WM_event_add_notifier(C, NC_OBJECT | ND_DRAW, ob);
   DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
   DEG_relations_tag_update(CTX_data_main(C));
@@ -504,6 +549,11 @@ static std::string shape_key_remove_get_description(bContext * /*C*/,
     return TIP_("Apply current visible shape to the object data, and delete all shape keys");
   }
 
+  const bool do_remove_all = RNA_boolean_get(ptr, "all");
+  if (do_remove_all) {
+    return TIP_("Remove all shape keys from the object");
+  }
+
   return "";
 }
 
@@ -512,7 +562,7 @@ void OBJECT_OT_shape_key_remove(wmOperatorType *ot)
   /* identifiers */
   ot->name = "Remove Shape Key";
   ot->idname = "OBJECT_OT_shape_key_remove";
-  ot->description = "Remove shape key from the object";
+  ot->description = "Remove selected shape keys from the object";
 
   /* API callbacks. */
   ot->poll = shape_key_mode_exists_poll;
@@ -635,16 +685,31 @@ static wmOperatorStatus shape_key_mirror_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
+static std::string shape_key_mirror_get_description(bContext * /*C*/,
+                                                    wmOperatorType * /*ot*/,
+                                                    PointerRNA *ptr)
+{
+  const bool do_use_topology = RNA_boolean_get(ptr, "use_topology");
+  if (do_use_topology) {
+    return TIP_(
+        "Mirror the active shape key along the local X axis using topology based mirroring\n"
+        "(for when both sides of mesh have matching, unique topology)");
+  }
+
+  return "";
+}
+
 void OBJECT_OT_shape_key_mirror(wmOperatorType *ot)
 {
   /* identifiers */
   ot->name = "Mirror Shape Key";
   ot->idname = "OBJECT_OT_shape_key_mirror";
-  ot->description = "Mirror the current shape key along the local X axis";
+  ot->description = "Mirror the active shape key along the local X axis";
 
   /* API callbacks. */
   ot->poll = shape_key_mode_exists_poll;
   ot->exec = shape_key_mirror_exec;
+  ot->get_description = shape_key_mirror_get_description;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
@@ -875,7 +940,7 @@ static wmOperatorStatus shape_key_make_basis_exec(bContext *C, wmOperator * /*op
 {
   Object *ob = context_object(C);
   Key *key = BKE_key_from_object(ob);
-  KeyBlock *old_basis_key = static_cast<KeyBlock *>(key->block.first);
+  KeyBlock *old_basis_key = key->block.first();
 
   /* Make the new basis by moving the active key to index 0. */
   const int from_index = -1; /* Interpreted as "the active key". */
@@ -893,7 +958,7 @@ static wmOperatorStatus shape_key_make_basis_exec(bContext *C, wmOperator * /*op
    * matter much, as it's treated as special anyway, but keeping it relative to another key makes
    * no sense. For the old basis key (which just became a normal key), it would otherwise still be
    * relative to itself, effectively disabling it. */
-  KeyBlock *new_basis_key = static_cast<KeyBlock *>(key->block.first);
+  KeyBlock *new_basis_key = key->block.first();
   new_basis_key->relative = 0;
   old_basis_key->relative = 0;
 
@@ -930,8 +995,8 @@ void OBJECT_OT_shape_key_make_basis(wmOperatorType *ot)
   ot->name = "Make Shape Key the Basis Key";
   ot->idname = "OBJECT_OT_shape_key_make_basis";
   ot->description =
-      "Make this shape key the new basis key, effectively applying it to the mesh. Note that this "
-      "applies the shape key at its 100% value";
+      "Make the active shape key the new basis key, effectively applying it to the mesh.\n"
+      "Note that this applies the shape key at its 100% value";
 
   /* API callbacks. */
   ot->poll = shape_key_make_basis_poll;
@@ -976,7 +1041,7 @@ static wmOperatorStatus shape_key_apply_to_basis_exec(bContext *C, wmOperator *o
   Main *bmain = CTX_data_main(C);
   Object *ob = context_object(C);
   Key *key = BKE_key_from_object(ob);
-  KeyBlock *basis_key = static_cast<KeyBlock *>(key->block.first);
+  KeyBlock *basis_key = key->block.first();
   MutableSpan<float3> basis_data(static_cast<float3 *>(basis_key->data), basis_key->totelem);
   Mesh &mesh = id_cast<Mesh &>(*ob->data);
 

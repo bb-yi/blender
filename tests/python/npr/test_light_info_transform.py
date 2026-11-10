@@ -17,6 +17,7 @@ from mathutils import Matrix, Vector
 ARGS = None
 OUT = None
 FIELDS = ("Origin", "X Axis", "Y Axis", "Z Axis")
+LIGHT_INFO_NODE_TYPE = "ShaderNodeNPRLightInfo" if bpy.app.version >= (5, 3, 0) else "ShaderNodeLightInfo"
 BASIC = ("Color", "Power", "Type", "Position", "Direction", "Radius", "Spot Size",
          "Sun Angle", "Visible")
 VALUE = Vector((0.37, -0.24, 0.61))
@@ -84,7 +85,7 @@ def create_material(index, spec, obj, npr):
         emission = tree.nodes.new("ShaderNodeEmission")
         tree.links.new(emission.outputs[0], output.inputs["Surface"])
         destination = emission.inputs["Color"]
-    info = tree.nodes.new("ShaderNodeLightInfo")
+    info = tree.nodes.new(LIGHT_INFO_NODE_TYPE)
     info.name = "LightInfo"
     info.light_object = obj
     if kind == "RAW":
@@ -171,7 +172,7 @@ def setup(npr=False):
 def all_infos():
     trees = [material.node_tree for material in bpy.data.materials if material.use_nodes]
     trees += [tree for tree in bpy.data.node_groups if tree.bl_idname == "ShaderNodeTree"]
-    return [node for tree in trees for node in tree.nodes if node.bl_idname == "ShaderNodeLightInfo"]
+    return [node for tree in trees for node in tree.nodes if node.bl_idname == LIGHT_INFO_NODE_TYPE]
 
 
 def expected(obj):

@@ -10,7 +10,7 @@
 #include "BKE_editmesh.hh"
 #include "BKE_layer.hh"
 #include "BKE_object.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLT_translation.hh"
 
 #include <numbers>
@@ -60,19 +60,19 @@ static wmOperatorStatus edbm_circularize_exec(bContext *C, wmOperator *op)
 
   const Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
       *bmain, scene, view_layer, CTX_wm_view3d(C));
-  bool changed = false;
+  bool changed_multi = false;
+  bool has_valid_selection = false;
 
   for (Object *obedit : objects) {
-    BMEditMesh *em = BKE_editmesh_from_object(obedit);
-    BMesh *bm = em->bm;
-
+    BMesh *bm = BKE_editmesh_bmesh_get_for_write(obedit);
     if (bm->totvertsel < 3) {
       continue;
     }
+    has_valid_selection = true;
     bool mirror_axis[3];
     BKE_object_get_mirror_axes(obedit, mirror_axis);
 
-    if (!EDBM_op_callf(em,
+    if (!EDBM_op_callf(bm,
                        op,
                        "circularize geom=%hvef factor=%f flatten=%f regular=%b fit_method=%i "
                        "custom_radius=%f angle=%f lock_x=%b lock_y=%b lock_z=%b mirror_x=%b "
@@ -93,14 +93,19 @@ static wmOperatorStatus edbm_circularize_exec(bContext *C, wmOperator *op)
     {
       continue;
     }
-    changed = true;
+    changed_multi = true;
     EDBMUpdate_Params params{};
     params.calc_looptris = true;
     params.calc_normals = true;
     EDBM_update(id_cast<Mesh *>(obedit->data), &params);
   }
+  if (!changed_multi) {
+    if (!has_valid_selection) {
+      BKE_report(op->reports, RPT_WARNING, "No edge loops found containing 2 or more edges");
+    }
+  }
 
-  return changed ? OPERATOR_FINISHED : OPERATOR_CANCELLED;
+  return changed_multi ? OPERATOR_FINISHED : OPERATOR_CANCELLED;
 }
 
 static void edbm_circularize_ui(bContext * /*C*/, wmOperator *op)

@@ -23,8 +23,8 @@
 #include "BKE_node.hh"
 #include "BKE_report.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_string_utf8.hh"
 
 #include "BLT_translation.hh"
 
@@ -195,7 +195,7 @@ void convert_legacy_action_assignments(Main &bmain, ReportList *reports)
     /* If there is already a slot assigned, there's nothing to do here. */
     PointerRNA current_slot_ptr = RNA_property_pointer_get(&action_slot_owner_ptr,
                                                            &action_slot_prop);
-    if (current_slot_ptr.data) {
+    if (current_slot_ptr) {
       return true;
     }
 

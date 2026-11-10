@@ -11,7 +11,7 @@
 #include "BLI_function_ref.hh"
 #include "BLI_hash.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 namespace blender {
 
@@ -44,14 +44,20 @@ struct BVHTreeOverlap {
 };
 
 struct BVHTreeNearest {
-  /** The index of the nearest found
-   * (untouched if none is found within a dist radius from the given coordinates) */
+  /**
+   * The index of the nearest found
+   * (untouched if none is found within a dist radius from the given coordinates)
+   */
   int index;
-  /** Nearest coordinates
-   * (untouched it none is found within a dist radius from the given coordinates). */
+  /**
+   * Nearest coordinates
+   * (untouched it none is found within a dist radius from the given coordinates).
+   */
   float co[3];
-  /** Normal at nearest coordinates
-   * (untouched it none is found within a dist radius from the given coordinates). */
+  /**
+   * Normal at nearest coordinates
+   * (untouched it none is found within a dist radius from the given coordinates).
+   */
   float no[3];
   /** squared distance to search around */
   float dist_sq;

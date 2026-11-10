@@ -31,15 +31,15 @@
 #include "CLG_log.h"
 
 #include "BLI_enum_flags.hh"
-#include "BLI_fileops.h"
-#include "BLI_listbase.h"
+#include "BLI_fileops.hh"
+#include "BLI_listbase.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_rect.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_system.h"
-#include "BLI_time.h"
+#include "BLI_rect.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_system.hh"
+#include "BLI_time.hh"
 
 #include "IMB_colormanagement.hh"
 #include "IMB_imbuf.hh"
@@ -125,7 +125,7 @@ static bool buffer_from_filepath(const char *filepath,
 {
   errno = 0;
   const int file = BLI_open(filepath, O_BINARY | O_RDONLY, 0);
-  if (UNLIKELY(file == -1)) {
+  if (file == -1) [[unlikely]] {
     *r_error_message = BLI_sprintfN("failure '%s' to open file", strerror(errno));
     return false;
   }
@@ -134,7 +134,7 @@ static bool buffer_from_filepath(const char *filepath,
   uchar *mem = nullptr;
   const size_t size = BLI_file_descriptor_size(file);
   int64_t size_read;
-  if (UNLIKELY(size == size_t(-1))) {
+  if (size == size_t(-1)) [[unlikely]] {
     *r_error_message = BLI_sprintfN("failure '%s' to access size", strerror(errno));
   }
   else if (r_mem && UNLIKELY(!(mem = MEM_new_array_uninitialized<uchar>(size, __func__)))) {
@@ -377,6 +377,10 @@ static void playanim_window_csd_params_update(GhostData &ghost_data)
 
       /*cursor_drag_threshold*/ 6 /* NOTE: `U.drag_threshold_mouse` isn't initialized. */,
       /*cursor_double_click_ms*/ 350 /* NOTE: `U.dbl_click_time` isn't initialized. */,
+      /*resize_margin_size*/ WM_WINDOW_CSD_RESIZE_MARGIN_SIZE,
+      /* Square corners to avoid window transparency and because they won't be expected here
+       * anyway. */
+      /*corner_radius*/ 0,
   };
   ghost_data.system->setWindowCSD(csd_params);
 }
@@ -528,7 +532,7 @@ static bool frame_cache_limit_exceeded()
 static void frame_cache_limit_apply(ImBuf *ibuf_keep)
 {
   /* Really basic memory conservation scheme. Keep frames in a FIFO queue. */
-  LinkData *node = static_cast<LinkData *>(g_frame_cache.pics.last);
+  LinkData *node = g_frame_cache.pics.last();
   while (node && frame_cache_limit_exceeded()) {
     PlayAnimPict *pic = static_cast<PlayAnimPict *>(node->data);
     BLI_assert(pic->frame_cache_node == node);
@@ -898,8 +902,7 @@ static void playanim_toscreen(PlayState &ps, const PlayAnimPict *picture, const 
 {
   float frame_indicator_factor = -1.0f;
   if (ps.show_frame_indicator) {
-    const int frame_range = static_cast<const PlayAnimPict *>(ps.picsbase.last)->frame -
-                            static_cast<const PlayAnimPict *>(ps.picsbase.first)->frame;
+    const int frame_range = ps.picsbase.last()->frame - ps.picsbase.first()->frame;
     if (frame_range > 0) {
       frame_indicator_factor = float(double(picture->frame) / double(frame_range));
     }
@@ -956,7 +959,7 @@ static void build_pict_list_from_anim(ListBaseT<PlayAnimPict> &picsbase,
     BLI_addtail(&picsbase, picture);
   }
 
-  const PlayAnimPict *picture = static_cast<const PlayAnimPict *>(picsbase.last);
+  const PlayAnimPict *picture = picsbase.last();
   if (!(picture && picture->anim == anim)) {
     MOV_close(anim);
     CLOG_WARN(&LOG, "no frames added for: '%s'", filepath_first);
@@ -1093,14 +1096,14 @@ static void build_pict_list(ListBaseT<PlayAnimPict> &picsbase,
    * it's important the frame number increases each time. Otherwise playing `*.png`
    * in a directory will expand into many arguments, each calling this function adding
    * a frame that's set to zero. */
-  const PlayAnimPict *picture_last = static_cast<PlayAnimPict *>(picsbase.last);
+  const PlayAnimPict *picture_last = picsbase.last();
   const int frame_offset = picture_last ? (picture_last->frame + 1) : 0;
 
   bool do_image_load = false;
   if (MOV_is_movie_file(filepath_first)) {
     build_pict_list_from_anim(picsbase, ghost_data, display_ctx, filepath_first, frame_offset);
 
-    if (picsbase.last == picture_last) {
+    if (picsbase.last_ == picture_last) {
       /* FFMPEG detected JPEG2000 as a video which would load with zero duration.
        * Resolve this by using images as a fallback when a video file has no frames to display. */
       do_image_load = true;
@@ -1152,7 +1155,7 @@ static void playanim_change_frame(PlayState &ps)
   }
 
   const int2 window_size = playanim_window_size_get(ps.ghost_data.window);
-  const int i_last = static_cast<PlayAnimPict *>(ps.picsbase.last)->frame;
+  const int i_last = ps.picsbase.last()->frame;
   /* Without this the frame-indicator location isn't closest to the cursor. */
   const int correct_rounding = (window_size[0] / (i_last + 1)) / 2;
   const int i = clamp_i(
@@ -1379,7 +1382,7 @@ static bool ghost_event_proc(const GHOST_IEvent *ghost_event, GHOST_TUserDataPtr
             playanim_audio_stop(ps);
 
             if (ps.ghost_data.qual & WS_QUAL_SHIFT) {
-              ps.picture = static_cast<PlayAnimPict *>(ps.picsbase.first);
+              ps.picture = ps.picsbase.first();
               ps.next_frame = 0;
             }
             else {
@@ -1408,7 +1411,7 @@ static bool ghost_event_proc(const GHOST_IEvent *ghost_event, GHOST_TUserDataPtr
             playanim_audio_stop(ps);
 
             if (ps.ghost_data.qual & WS_QUAL_SHIFT) {
-              ps.picture = static_cast<PlayAnimPict *>(ps.picsbase.last);
+              ps.picture = ps.picsbase.last();
               ps.next_frame = 0;
             }
             else {
@@ -1971,7 +1974,7 @@ static std::optional<int> wm_main_playanim_intern(int argc, const char **argv, P
 
       GHOST_ISystem::createSystem();
       ps.ghost_data.system = GHOST_ISystem::getSystem();
-      if (UNLIKELY(ps.ghost_data.system == nullptr)) {
+      if (ps.ghost_data.system == nullptr) [[unlikely]] {
         /* GHOST will have reported the back-ends that failed to load. */
         fprintf(stderr, "%s: unable to initialize GHOST, exiting!\n", message_prefix);
         return EXIT_FAILURE;
@@ -1995,7 +1998,7 @@ static std::optional<int> wm_main_playanim_intern(int argc, const char **argv, P
                                                   ibuf->x,
                                                   ibuf->y);
 
-      if (UNLIKELY(ps.ghost_data.window == nullptr)) {
+      if (ps.ghost_data.window == nullptr) [[unlikely]] {
         fprintf(stderr, "%s: unable to create window, exiting!\n", message_prefix);
         return EXIT_FAILURE;
       }
@@ -2022,7 +2025,8 @@ static std::optional<int> wm_main_playanim_intern(int argc, const char **argv, P
   // GHOST_ActivateWindowDrawingContext(ps.ghost_data.window);
 
   /* Init Blender GPU context. */
-  ps.ghost_data.gpu_context = GPU_context_create(ps.ghost_data.window, nullptr);
+  ps.ghost_data.gpu_context = GPU_context_create(ps.ghost_data.window,
+                                                 ps.ghost_data.window->getDrawingContext());
   GPU_init();
 
   /* Initialize the font. */
@@ -2078,7 +2082,7 @@ static std::optional<int> wm_main_playanim_intern(int argc, const char **argv, P
 #ifdef WITH_AUDASPACE
   g_audaspace.source = AUD_Sound(new aud::File(filepath));
   if (!BLI_listbase_is_empty(&ps.picsbase)) {
-    const MovieReader *anim_movie = static_cast<PlayAnimPict *>(ps.picsbase.first)->anim;
+    const MovieReader *anim_movie = ps.picsbase.first()->anim;
     if (anim_movie) {
       g_playanim.fps_movie = MOV_get_fps(anim_movie);
       /* Enforce same fps for movie as sound. */
@@ -2113,10 +2117,10 @@ static std::optional<int> wm_main_playanim_intern(int argc, const char **argv, P
     }
 
     if (ps.direction == 1) {
-      ps.picture = static_cast<PlayAnimPict *>(ps.picsbase.first);
+      ps.picture = ps.picsbase.first();
     }
     else {
-      ps.picture = static_cast<PlayAnimPict *>(ps.picsbase.last);
+      ps.picture = ps.picsbase.last();
     }
 
     if (ps.picture == nullptr) {

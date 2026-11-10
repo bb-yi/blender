@@ -2,7 +2,11 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_listbase.h"
+/** \file
+ * \ingroup nodes
+ */
+
+#include "BLI_listbase.hh"
 
 #include "BKE_compute_context_cache.hh"
 #include "BKE_compute_contexts.hh"
@@ -252,7 +256,7 @@ static void foreach_active_gizmo_in_open_node_editor(
     return;
   }
   const std::optional<ed::space_node::ObjectAndModifier> object_and_modifier =
-      ed::space_node::get_modifier_for_node_editor(snode);
+      ed::space_node::get_geometry_nodes_modifier_for_node_editor(snode);
   if (!object_and_modifier) {
     return;
   }
@@ -289,12 +293,12 @@ static void foreach_active_gizmo_in_open_node_editor(
   for (auto &&item : gizmo_propagation.gizmo_inputs_by_value_nodes.items()) {
     const bNode &node = *item.key.node;
     const bNodeSocket &output_socket = node.output_socket(0);
-    if ((node.flag & NODE_SELECT) || (output_socket.flag & SOCK_GIZMO_PIN)) {
+    if (node.is_selected() || (output_socket.flag & SOCK_GIZMO_PIN)) {
       used_gizmo_inputs.add_multiple(item.value);
       continue;
     }
     for (const ie::SocketElem &socket_elem : item.value) {
-      if (socket_elem.socket->owner_node().flag & NODE_SELECT) {
+      if (socket_elem.socket->owner_node().is_selected()) {
         used_gizmo_inputs.add(socket_elem);
       }
     }
@@ -306,12 +310,12 @@ static void foreach_active_gizmo_in_open_node_editor(
       continue;
     }
     const bNode &node = socket.owner_node();
-    if ((node.flag & NODE_SELECT) || (socket.flag & SOCK_GIZMO_PIN)) {
+    if (node.is_selected() || (socket.flag & SOCK_GIZMO_PIN)) {
       used_gizmo_inputs.add_multiple(item.value);
       continue;
     }
     for (const ie::SocketElem &socket_elem : item.value) {
-      if (socket_elem.socket->owner_node().flag & NODE_SELECT) {
+      if (socket_elem.socket->owner_node().is_selected()) {
         used_gizmo_inputs.add(socket_elem);
       }
     }
@@ -322,7 +326,7 @@ static void foreach_active_gizmo_in_open_node_editor(
       continue;
     }
     const bNodeSocket &gizmo_input_socket = gizmo_node->input_socket(0);
-    if ((gizmo_node->flag & NODE_SELECT) || (gizmo_input_socket.flag & SOCK_GIZMO_PIN)) {
+    if (gizmo_node->is_selected() || (gizmo_input_socket.flag & SOCK_GIZMO_PIN)) {
       used_gizmo_inputs.add(
           {&gizmo_input_socket, *ie::get_elem_variant_for_socket_type(gizmo_input_socket.type)});
     }
@@ -350,12 +354,12 @@ static void foreach_active_gizmo_in_open_editors(const wmWindowManager &wm,
     const bScreen *active_screen = BKE_workspace_active_screen_get(window.workspace_hook);
     Vector<const bScreen *> screens = {active_screen};
     if (ELEM(active_screen->state, SCREENMAXIMIZED, SCREENFULL)) {
-      const ScrArea *area = static_cast<const ScrArea *>(active_screen->areabase.first);
+      const ScrArea *area = active_screen->areabase.first();
       screens.append(area->full);
     }
     for (const bScreen *screen : screens) {
       for (const ScrArea &area : screen->areabase) {
-        const SpaceLink *sl = static_cast<SpaceLink *>(area.spacedata.first);
+        const SpaceLink *sl = area.spacedata.first_as<SpaceLink>();
         if (sl == nullptr) {
           continue;
         }
@@ -402,8 +406,8 @@ static void foreach_active_gizmo_exposed_to_modifier(
       *nmd.node_group, scope, value_inferencer, compute_context_cache);
 
   const ComputeContext &object_context = compute_context_cache.for_data_block(nullptr, object.id);
-  const ComputeContext &root_compute_context = compute_context_cache.for_modifier(&object_context,
-                                                                                  nmd);
+  const ComputeContext &root_compute_context = compute_context_cache.for_geometry_nodes_modifier(
+      &object_context, nmd);
   for (auto &&item : tree.runtime->gizmo_propagation->gizmo_inputs_by_group_inputs.items()) {
     const ie::GroupInputElem &group_input_elem = item.key;
     if (item.value.is_empty()) {

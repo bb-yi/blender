@@ -12,7 +12,7 @@
 #include "BKE_modifier.hh"
 #include "BKE_screen.hh"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "ED_object.hh"
 
@@ -59,7 +59,7 @@ void template_modifiers(Layout * /*layout*/, bContext *C)
   }
   else {
     /* Assuming there's only one group of instanced panels, update the custom data pointers. */
-    Panel *panel = static_cast<Panel *>(region->panels.first);
+    Panel *panel = region->panels.first();
     for (ModifierData &md : *modifiers) {
       const ModifierTypeInfo *mti = BKE_modifier_get_info(md.type);
       if (mti->panel_register == nullptr) {

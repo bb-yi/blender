@@ -13,7 +13,7 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "BKE_nla.hh"
 
@@ -224,9 +224,7 @@ static void box_select_nla_strips(bAnimContext *ac, rcti rect, short mode, short
 
   /* loop over data, doing box select */
   float ymax = NLATRACK_FIRST_TOP(ac);
-  for (bAnimListElem *ale = static_cast<bAnimListElem *>(anim_data.first); ale;
-       ale = ale->next, ymax -= NLATRACK_STEP(snla))
-  {
+  for (bAnimListElem *ale = anim_data.first(); ale; ale = ale->next, ymax -= NLATRACK_STEP(snla)) {
     float ymin = ymax - NLATRACK_HEIGHT(snla);
 
     /* perform vertical suitability check (if applicable) */

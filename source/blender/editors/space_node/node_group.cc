@@ -15,17 +15,17 @@
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_c.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_listbase.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_vector.hh"
 
 #include "BLT_translation.hh"
 
 #include "BKE_action.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_context.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_library.hh"
@@ -152,7 +152,7 @@ static wmOperatorStatus node_filter_pass_edit_material_exec(bContext *C, bNode &
   ED_node_tree_push(region, snode, material->nodetree, &node);
   snode->id = &material->id;
   snode->from = nullptr;
-  bNodeTreePath *path = static_cast<bNodeTreePath *>(snode->treepath.last);
+  bNodeTreePath *path = snode->treepath.last();
   if (path != nullptr) {
     STRNCPY_UTF8(path->display_name, material->id.name + 2);
   }
@@ -556,7 +556,7 @@ static wmOperatorStatus node_group_ungroup_exec(bContext *C, wmOperator * /*op*/
 
   Vector<bNode *> nodes_to_ungroup;
   for (bNode *node : snode->edittree->all_nodes()) {
-    if (node->flag & NODE_SELECT) {
+    if (node->is_selected()) {
       if (node->idname == node_idname) {
         if (node->id != nullptr) {
           nodes_to_ungroup.append(node);
@@ -1106,7 +1106,7 @@ static wmOperatorStatus node_default_group_width_set_exec(bContext *C, wmOperato
   SpaceNode *snode = CTX_wm_space_node(C);
   bNodeTree *ntree = snode->edittree;
 
-  bNodeTreePath *last_path_item = static_cast<bNodeTreePath *>(snode->treepath.last);
+  bNodeTreePath *last_path_item = snode->treepath.last();
   bNodeTreePath *parent_path_item = last_path_item->prev;
   if (!parent_path_item) {
     return OPERATOR_CANCELLED;

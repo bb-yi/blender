@@ -1,11 +1,11 @@
 /* SPDX-FileCopyrightText: 2026 Blender Authors
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
-#include "gpu_shader_material_mix_color.glsl"
-#include "gpu_shader_bicubic_sampler_lib.glsl"
-#include "gpu_shader_common_math.glsl"
-#include "gpu_shader_material_vector_math.glsl"
-#include "gpu_shader_material_tex_white_noise.glsl"
+#include "gpu_shader_material_mix_color.bsl.hh"
+#include "gpu_shader_bicubic_sampler.bsl.hh"
+#include "gpu_shader_common_math.bsl.hh"
+#include "gpu_shader_material_vector_math.bsl.hh"
+#include "gpu_shader_material_tex_white_noise.bsl.hh"
 
 #define LINE_FIELD_ALLOW_GAP_CAPS 16
 

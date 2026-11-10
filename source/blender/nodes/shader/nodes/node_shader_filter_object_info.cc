@@ -8,7 +8,7 @@
 
 #include "node_shader_util.hh"
 
-#include "BLI_math_bits.h"
+#include "BLI_math_bits.hh"
 
 #include "DNA_object_types.h"
 

@@ -18,12 +18,13 @@
 #include "BKE_material.hh"
 #include "DNA_light_types.h"
 #include "DNA_material_types.h"
+#include "DNA_pointcloud_types.h"
 
 CCL_NAMESPACE_BEGIN
 
 static Geometry::Type determine_geom_type(BObjectInfo &b_ob_info, bool use_particle_hair)
 {
-  if (GS(b_ob_info.object_data->name) == blender::ID_LA) {
+  if (b_ob_info.object_data->id_type() == blender::ID_LA) {
     blender::Light &b_light = *blender::id_cast<blender::Light *>(b_ob_info.object_data);
     switch (b_light.type) {
       case blender::LA_LOCAL:
@@ -41,15 +42,15 @@ static Geometry::Type determine_geom_type(BObjectInfo &b_ob_info, bool use_parti
     }
   }
 
-  if (GS(b_ob_info.object_data->name) == blender::ID_CV || use_particle_hair) {
+  if (b_ob_info.object_data->id_type() == blender::ID_CV || use_particle_hair) {
     return Geometry::HAIR;
   }
 
-  if (GS(b_ob_info.object_data->name) == blender::ID_PT) {
+  if (b_ob_info.object_data->id_type() == blender::ID_PT) {
     return Geometry::POINTCLOUD;
   }
 
-  if (GS(b_ob_info.object_data->name) == blender::ID_VO ||
+  if (b_ob_info.object_data->id_type() == blender::ID_VO ||
       (b_ob_info.object_data ==
            object_get_data(*b_ob_info.real_object, b_ob_info.use_adaptive_subdivision) &&
        object_fluid_gas_domain_find(*b_ob_info.real_object)))
@@ -58,6 +59,22 @@ static Geometry::Type determine_geom_type(BObjectInfo &b_ob_info, bool use_parti
   }
 
   return Geometry::MESH;
+}
+
+static Shader *get_default_shader(const Scene *scene, const blender::Object &b_ob)
+{
+  if (b_ob.type == blender::OB_VOLUME) {
+    return scene->default_volume;
+  }
+
+  if (b_ob.type == blender::OB_POINTCLOUD &&
+      blender::id_cast<const blender::PointCloud *>(b_ob.data)->type ==
+          blender::PointCloudType::GSplat)
+  {
+    return scene->default_gsplat;
+  }
+
+  return scene->default_surface;
 }
 
 array<Node *> BlenderSync::find_used_shaders(blender::Object &b_ob)
@@ -70,8 +87,7 @@ array<Node *> BlenderSync::find_used_shaders(blender::Object &b_ob)
   }
 
   blender::Material *material_override = view_layer.material_override;
-  Shader *default_shader = (b_ob.type == blender::OB_VOLUME) ? scene->default_volume :
-                                                               scene->default_surface;
+  Shader *default_shader = get_default_shader(scene, b_ob);
 
   for (const int i : blender::IndexRange(BKE_object_material_count_eval(&b_ob))) {
     if (material_override) {
@@ -281,16 +297,16 @@ void BlenderSync::sync_geometry_motion(BObjectInfo &b_ob_info,
       return;
     }
 
-    if (GS(b_ob_info.object_data->name) == blender::ID_CV || use_particle_hair) {
+    if (b_ob_info.object_data->id_type() == blender::ID_CV || use_particle_hair) {
       Hair *hair = static_cast<Hair *>(geom);
       sync_hair_motion(b_ob_info, hair, motion_step);
     }
-    else if (GS(b_ob_info.object_data->name) == blender::ID_VO ||
+    else if (b_ob_info.object_data->id_type() == blender::ID_VO ||
              object_fluid_gas_domain_find(*b_ob_info.real_object))
     {
       /* No volume motion blur support yet. */
     }
-    else if (GS(b_ob_info.object_data->name) == blender::ID_PT) {
+    else if (b_ob_info.object_data->id_type() == blender::ID_PT) {
       PointCloud *pointcloud = static_cast<PointCloud *>(geom);
       sync_pointcloud_motion(pointcloud, b_ob_info, motion_step);
     }

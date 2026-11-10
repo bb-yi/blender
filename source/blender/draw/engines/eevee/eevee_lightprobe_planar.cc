@@ -2,8 +2,14 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup eevee
+ */
+
 #include "eevee_lightprobe_planar.hh"
 #include "eevee_instance.hh"
+
+#include "draw_common.hh"
 
 namespace blender::eevee {
 
@@ -168,6 +174,9 @@ void PlanarProbeModule::set_view(const draw::View &main_view, int2 main_view_ext
 
     world_clip_buf_.plane = probe.reflection_clip_plane_get();
     world_clip_buf_.push_update();
+
+    /* Hand off gsplat compute workload for the planar view before draws. */
+    DRW_gsplat_ensure_radiance(*inst_.manager, res.view);
 
     RenderBuffers &rbufs = inst_.render_buffers;
     const bool with_raycast = inst_.pipelines.has_raycast;

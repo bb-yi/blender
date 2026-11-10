@@ -4,17 +4,17 @@
 
 #include "BKE_attribute.hh"
 #include "BKE_main.hh"
-#include "BLI_assert.h"
+#include "BLI_assert.hh"
 #include "BLI_bounds.hh"
 #include "BLI_color_types.hh"
-#include "BLI_math_color.h"
+#include "BLI_math_color_c.hh"
 #include "BLI_math_euler_types.hh"
 #include "BLI_math_matrix.hh"
-#include "BLI_math_rotation.h"
+#include "BLI_math_rotation_c.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_offset_indices.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BKE_curves.hh"
 #include "BKE_grease_pencil.hh"
@@ -390,7 +390,7 @@ bool SVGImporter::read(StringRefNull filepath)
                                      context_.scene->unit.scale_length :
                                      1.0f;
   /* Overall scale for SVG coordinates in millimeters. */
-  const float svg_scale = 0.001f * scene_unit_scale * params_.scale;
+  const float svg_scale = 0.001f / scene_unit_scale * params_.scale;
   /* Grease pencil is rotated 90 degrees in X axis by default. */
   const float4x4 transform = math::scale(
       math::from_rotation<float4x4>(math::EulerXYZ(DEG2RAD(-90), 0, 0)), float3(svg_scale));

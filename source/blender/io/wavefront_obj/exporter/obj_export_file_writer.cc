@@ -15,14 +15,14 @@
 
 #include "BLI_color_types.hh"
 #include "BLI_enumerable_thread_specific.hh"
-#include "BLI_fileops.h"
-#include "BLI_math_color.h"
-#include "BLI_math_matrix.h"
+#include "BLI_fileops.hh"
+#include "BLI_math_color_c.hh"
 #include "BLI_math_matrix.hh"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_task.hh"
 
 #include "IO_path_util.hh"
@@ -57,7 +57,8 @@ static const char *DEFORM_GROUP_DISABLED = "off";
  * Per reference http://www.martinreddy.net/gfx/3d/OBJ.spec:
  * Once a material is assigned, it cannot be turned off; it can only be changed.
  * If a material name is not specified, a white material is used.
- * So an empty material name is written. */
+ * So an empty material name is written.
+ */
 static const char *MATERIAL_GROUP_DISABLED = "";
 
 OBJWriter::OBJWriter(const char *filepath, const OBJExportParams &export_params) noexcept(false)

@@ -6,12 +6,12 @@
 #include <climits>
 #include <sstream>
 
-#include "BLI_fileops.h"
+#include "BLI_fileops.hh"
 #include "BLI_hash_md5.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 
 #include "DNA_packedFile_types.h"
 #include "DNA_space_types.h"
@@ -467,13 +467,13 @@ class LUTOperation : public NodeOperation {
         output.share_data(input);
         return;
       }
-      input.bind_as_texture(shader, "input_tx");
-      factor.bind_as_texture(shader, "factor_tx");
+      gpu::Texture *input_single_value = input.bind_as_texture_or_single_value(shader, "input_tx");
+      gpu::Texture *factor_single_value = factor.bind_as_texture_or_single_value(shader, "factor_tx");
       output.allocate_texture(domain);
       output.bind_as_image(shader, "output_img");
       compute_dispatch_threads_at_least(shader, domain.data_size);
-      input.unbind_as_texture();
-      factor.unbind_as_texture();
+      input.unbind_as_texture_or_single_value(input_single_value);
+      factor.unbind_as_texture_or_single_value(factor_single_value);
       output.unbind_as_image();
       lut.unbind_shader_and_resources();
     }
@@ -491,12 +491,7 @@ class LUTOperation : public NodeOperation {
  private:
   void report_error(const std::string &message)
   {
-    context().set_info_message(message);
-    if (auto *log = context().nodes_evaluation_log()) {
-      auto &logger = log->get_local_tree_logger(get_compute_context());
-      logger.node_warnings.append(*logger.allocator,
-                                  {node().identifier, {NodeWarningType::Error, message}});
-    }
+    this->add_warning(NodeWarningType::Error, message);
   }
 
   static Color grade(const OCIOLUT &lut, const Color &input, float factor)

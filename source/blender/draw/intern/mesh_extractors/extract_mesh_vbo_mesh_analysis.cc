@@ -10,13 +10,15 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_jitter_2d.h"
+#include "BLI_jitter_2d.hh"
 #include "BLI_map.hh"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector.hh"
 #include "BLI_ordered_edge.hh"
 
+#include "BKE_bvh.hh"
 #include "BKE_bvhutils.hh"
 #include "BKE_editmesh.hh"
 #include "BKE_editmesh_bvh.hh"
@@ -73,9 +75,8 @@ static void statvis_calc_overhang(const MeshRenderData &mr,
   normalize_v3(dir);
 
   if (mr.extract_type == MeshExtractType::BMesh) {
-    BMEditMesh *em = mr.edit_bmesh;
     BMIter iter;
-    BMesh *bm = em->bm;
+    BMesh *bm = mr.bm;
     BMFace *f;
     int l_index = 0;
     BM_ITER_MESH (f, &iter, bm, BM_FACES_OF_MESH) {
@@ -152,10 +153,10 @@ static void statvis_calc_thickness(const MeshRenderData &mr,
 
   if (mr.extract_type == MeshExtractType::BMesh) {
     BMEditMesh *em = mr.edit_bmesh;
-    BMesh *bm = em->bm;
+    BMesh *bm = mr.bm;
     BM_mesh_elem_index_ensure(bm, BM_FACE);
 
-    BMBVHTree *bmtree = BKE_bmbvh_new_from_editmesh(em, 0, nullptr, false);
+    BMBVHTree *bmtree = BKE_bmbvh_new_from_editmesh(em, bm, 0, nullptr, false);
     const Span<std::array<BMLoop *, 3>> looptris = em->looptris;
     for (int i = 0; i < mr.corner_tris_num; i++) {
       const BMLoop *const *ltri = looptris[i].data();
@@ -201,12 +202,10 @@ static void statvis_calc_thickness(const MeshRenderData &mr,
     }
   }
   else {
-    bke::BVHTreeFromMesh treeData = mr.mesh->bvh_corner_tris();
-    const BVHTree *tree = treeData.tree;
-    if (tree == nullptr) {
+    if (mr.mesh->faces_num == 0) {
       return;
     }
-
+    const bke::bvh::Tree &tree = mr.mesh->bvh_tris();
     const Span<int3> corner_tris = mr.mesh->corner_tris();
     const Span<int> tri_faces = mr.mesh->corner_tri_faces();
     for (const int i : corner_tris.index_range()) {
@@ -223,19 +222,14 @@ static void statvis_calc_thickness(const MeshRenderData &mr,
         interp_v3_v3v3v3_uv(ray_co, cos[0], cos[1], cos[2], jit_ofs[j]);
         madd_v3_v3fl(ray_co, ray_no, eps_offset);
 
-        BVHTreeRayHit hit;
-        hit.index = -1;
-        hit.dist = face_dists[index];
-        if ((BLI_bvhtree_ray_cast(
-                 tree, ray_co, ray_no, 0.0f, &hit, treeData.raycast_callback, &treeData) != -1) &&
-            hit.dist < face_dists[index])
-        {
-          float angle_fac = fabsf(dot_v3v3(mr.face_normals[index], hit.no));
+        const bke::bvh::Ray ray(ray_co, ray_no, face_dists[index]);
+        const std::optional<bke::bvh::RayHit> hit = tree.ray_intersect(ray);
+        if (hit && hit->distance < face_dists[index]) {
+          float angle_fac = fabsf(dot_v3v3(mr.face_normals[index], math::normalize(hit->normal)));
           angle_fac = 1.0f - angle_fac;
           angle_fac = angle_fac * angle_fac * angle_fac;
           angle_fac = 1.0f - angle_fac;
-          hit.dist /= angle_fac;
-          face_dists[index] = std::min(hit.dist, face_dists[index]);
+          face_dists[index] = std::min(hit->distance / angle_fac, face_dists[index]);
         }
       }
     }
@@ -262,7 +256,7 @@ static bool bvh_overlap_cb(void *userdata, int index_a, int index_b, int /*threa
 {
   BVHTree_OverlapData *data = static_cast<BVHTree_OverlapData *>(userdata);
 
-  if (UNLIKELY(data->tri_faces[index_a] == data->tri_faces[index_b])) {
+  if (data->tri_faces[index_a] == data->tri_faces[index_b]) [[unlikely]] {
     return false;
   }
 
@@ -300,11 +294,11 @@ static void statvis_calc_intersect(const MeshRenderData &mr, MutableSpan<float> 
   if (mr.extract_type == MeshExtractType::BMesh) {
     BMEditMesh *em = mr.edit_bmesh;
     uint overlap_len;
-    BMesh *bm = em->bm;
+    BMesh *bm = mr.bm;
 
     BM_mesh_elem_index_ensure(bm, BM_FACE);
 
-    BMBVHTree *bmtree = BKE_bmbvh_new_from_editmesh(em, 0, nullptr, false);
+    BMBVHTree *bmtree = BKE_bmbvh_new_from_editmesh(em, bm, 0, nullptr, false);
     BVHTreeOverlap *overlap = BKE_bmbvh_overlap_self(bmtree, &overlap_len);
 
     if (overlap) {
@@ -381,9 +375,8 @@ static void statvis_calc_distort(const MeshRenderData &mr, MutableSpan<float> r_
   const float minmax_irange = 1.0f / (max - min);
 
   if (mr.extract_type == MeshExtractType::BMesh) {
-    BMEditMesh *em = mr.edit_bmesh;
     BMIter iter;
-    BMesh *bm = em->bm;
+    BMesh *bm = mr.bm;
     BMFace *f;
 
     int l_index = 0;
@@ -488,9 +481,8 @@ static void statvis_calc_sharp(const MeshRenderData &mr, MutableSpan<float> r_sh
   std::fill_n(vert_angles, mr.verts_num, -M_PI);
 
   if (mr.extract_type == MeshExtractType::BMesh) {
-    BMEditMesh *em = mr.edit_bmesh;
     BMIter iter;
-    BMesh *bm = em->bm;
+    BMesh *bm = mr.bm;
     BMFace *efa;
     BMEdge *e;
     /* first assign float values to verts */

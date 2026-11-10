@@ -49,10 +49,10 @@ const EnumPropertyItem rna_enum_stroke_depth_order_items[] = {
 #  include "BKE_global.hh"
 #  include "BKE_grease_pencil.hh"
 
-#  include "BLI_listbase.h"
+#  include "BLI_listbase.hh"
 #  include "BLI_math_matrix.hh"
 #  include "BLI_span.hh"
-#  include "BLI_string.h"
+#  include "BLI_string.hh"
 
 #  include "DEG_depsgraph.hh"
 #  include "DEG_depsgraph_build.hh"
@@ -218,14 +218,14 @@ static PointerRNA rna_Frame_drawing_get(PointerRNA *ptr)
   const GreasePencil &grease_pencil = *rna_grease_pencil(ptr);
   GreasePencilFrame &frame_to_find = *static_cast<GreasePencilFrame *>(ptr->data);
   if (frame_to_find.is_end()) {
-    return PointerRNA_NULL;
+    return {};
   }
 
   /* RNA doesn't give access to the parented layer object, so we have to iterate over all layers
    * and search for the matching GreasePencilFrame pointer in the frames collection. */
   auto [frame_number, this_layer] = find_layer_of_frame(grease_pencil, frame_to_find);
   if (this_layer == nullptr) {
-    return PointerRNA_NULL;
+    return {};
   }
 
   const Drawing *drawing = grease_pencil.get_drawing_at(*this_layer, frame_number);
@@ -352,10 +352,8 @@ static std::optional<std::string> tree_node_name_path(bke::greasepencil::TreeNod
 {
   using namespace bke::greasepencil;
   BLI_assert(!node.name().is_empty());
-  const size_t name_length = node.name().size();
-  std::string name_esc(name_length * 2, '\0');
-  BLI_str_escape(name_esc.data(), node.name().c_str(), name_length * 2);
-  return fmt::format("{}[\"{}\"]", prefix, name_esc.c_str());
+  std::string name_esc = BLI_str_escape(node.name());
+  return fmt::format("{}[\"{}\"]", prefix, name_esc);
 }
 
 static StructRNA *rna_GreasePencilTreeNode_refine(PointerRNA *ptr)
@@ -398,7 +396,7 @@ static PointerRNA rna_GreasePencilTreeNode_parent_layer_group_get(PointerRNA *pt
   GreasePencilLayerTreeNode *node = static_cast<GreasePencilLayerTreeNode *>(ptr->data);
   /* Return 'None' when node is in the root group. This group is not meant to be seen. */
   if (node->parent == nullptr || node->parent == grease_pencil->root_group_ptr) {
-    return PointerRNA_NULL;
+    return {};
   }
   return RNA_pointer_create_with_parent(
       *ptr, RNA_GreasePencilLayerGroup, static_cast<void *>(node->parent));
@@ -613,7 +611,7 @@ static PointerRNA rna_GreasePencil_active_layer_get(PointerRNA *ptr)
     return RNA_pointer_create_with_parent(
         *ptr, RNA_GreasePencilLayer, static_cast<void *>(grease_pencil->get_active_layer()));
   }
-  return PointerRNA_NULL;
+  return {};
 }
 
 static void rna_GreasePencil_active_layer_set(PointerRNA *ptr,
@@ -632,7 +630,7 @@ static PointerRNA rna_GreasePencil_active_group_get(PointerRNA *ptr)
     return RNA_pointer_create_with_parent(
         *ptr, RNA_GreasePencilLayerGroup, static_cast<void *>(grease_pencil->get_active_group()));
   }
-  return PointerRNA_NULL;
+  return {};
 }
 
 static void rna_GreasePencil_active_group_set(PointerRNA *ptr,
@@ -1177,9 +1175,12 @@ static void rna_def_grease_pencil_layer(BlenderRNA *brna)
       prop, "Use Lights", "Enable the use of lights on stroke and fill materials");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_grease_pencil_update");
 
-  /* pass index for compositing and modifiers */
+  /* Pass index for modifiers. */
   prop = RNA_def_property(srna, "pass_index", PROP_INT, PROP_UNSIGNED);
-  RNA_def_property_ui_text(prop, "Pass Index", "Index number for the \"Layer Index\" pass");
+  RNA_def_property_ui_text(prop,
+                           "Pass Index",
+                           "Identifier that can be used with some modifiers to restrict their "
+                           "influence to only certain layers");
   RNA_def_property_int_funcs(prop,
                              "rna_GreasePencilLayer_pass_index_get",
                              "rna_GreasePencilLayer_pass_index_set",

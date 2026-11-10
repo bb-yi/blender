@@ -26,7 +26,7 @@
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 #include "RNA_access.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "../node_shader_util.hh"
 #include "node_util.hh"

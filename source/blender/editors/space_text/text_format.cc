@@ -10,10 +10,10 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
 
 #include "DNA_space_types.h"
@@ -196,11 +196,11 @@ TextFormatType *ED_text_format_get(Text *text)
 
     /* If we make it here we never found an extension that worked - return
      * the "default" text format. */
-    return static_cast<TextFormatType *>(tft_lb.first);
+    return tft_lb.first();
   }
 
   /* Return the "default" text format. */
-  return static_cast<TextFormatType *>(tft_lb.first);
+  return tft_lb.first();
 }
 
 const char *ED_text_format_comment_line_prefix(Text *text)

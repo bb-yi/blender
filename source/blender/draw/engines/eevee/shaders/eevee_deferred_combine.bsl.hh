@@ -6,12 +6,13 @@
 
 #include "draw_view.bsl.hh"
 #include "draw_model.bsl.hh"
+#include "eevee_closure.bsl.hh"
 #include "eevee_colorspace_lib.bsl.hh"
 #include "eevee_gbuffer_read.bsl.hh"
 #include "eevee_hiz.bsl.hh"
 #include "eevee_renderpass.bsl.hh"
-#include "gpu_shader_fullscreen_lib.glsl"
-#include "gpu_shader_shared_exponent_lib.glsl"
+#include "gpu_shader_fullscreen.bsl.hh"
+#include "gpu_shader_shared_exponent.bsl.hh"
 
 namespace eevee::deferred {
 
@@ -22,35 +23,26 @@ struct Combine {
   [[specialization_constant(false)]] bool render_pass_specular_light_enabled;
   [[specialization_constant(false)]] bool render_pass_normal_enabled;
   [[specialization_constant(false)]] bool render_pass_position_enabled;
+  [[specialization_constant(false)]] bool render_passes_denoising_depth_enabled;
+  [[specialization_constant(false)]] bool render_passes_denoising_normal_enabled;
+  [[specialization_constant(false)]] bool render_passes_denoising_roughness_enabled;
+  [[specialization_constant(false)]] bool render_passes_denoising_diffuse_albedo_enabled;
+  [[specialization_constant(false)]] bool render_passes_denoising_specular_albedo_enabled;
+  [[specialization_constant(false)]] bool use_albedo_roughness_weighting;
   [[specialization_constant(false)]] bool use_radiance_feedback;
   [[specialization_constant(true)]] bool use_split_radiance;
 
   /* Inputs. */
-  [[sampler(2)]] usampler2D direct_radiance_1_tx;
-  [[sampler(4)]] usampler2D direct_radiance_2_tx;
-  [[sampler(5)]] usampler2D direct_radiance_3_tx;
-  [[sampler(6)]] sampler2D indirect_radiance_1_tx;
-  [[sampler(7)]] sampler2D indirect_radiance_2_tx;
-  [[sampler(8)]] sampler2D indirect_radiance_3_tx;
+  [[sampler(2)]] usampler2DArray direct_radiance_txs;
+  [[sampler(4)]] sampler2D indirect_radiance_1_tx;
+  [[sampler(5)]] sampler2D indirect_radiance_2_tx;
+  [[sampler(6)]] sampler2D indirect_radiance_3_tx;
 
   [[image(5, read_write, SFLOAT_16_16_16_16)]] image2D radiance_feedback_img;
 
   float3 load_radiance_direct(int2 texel, uchar i) const
   {
-    uint data = 0u;
-    switch (i) {
-      case 0:
-        data = texelFetch(direct_radiance_1_tx, texel, 0).r;
-        break;
-      case 1:
-        data = texelFetch(direct_radiance_2_tx, texel, 0).r;
-        break;
-      case 2:
-        data = texelFetch(direct_radiance_3_tx, texel, 0).r;
-        break;
-      default:
-        break;
-    }
+    uint data = texelFetch(direct_radiance_txs, int3(texel, i), 0).r;
     return rgb9e5_decode(data);
   }
 
@@ -118,15 +110,24 @@ void combine_frag([[resource_table]] Combine &srt,
         infos.get(reader.read_object_id(texel)));
   }
 
-  float3 diffuse_color = float3(0.0f);
-  float3 diffuse_direct = float3(0.0f);
+  float sum_weight = 0.0f;
+  float3 diffuse_color =
+      render_passes.load_color(texel, uni.uniform_buf.render_pass.diffuse_color_id).rgb;
+  float3 diffuse_direct =
+      render_passes.load_color(texel, uni.uniform_buf.render_pass.diffuse_light_id).rgb;
   float3 diffuse_indirect = float3(0.0f);
-  float3 specular_color = float3(0.0f);
-  float3 specular_direct = float3(0.0f);
+  float3 specular_color =
+      render_passes.load_color(texel, uni.uniform_buf.render_pass.specular_color_id).rgb;
+  float3 specular_direct =
+      render_passes.load_color(texel, uni.uniform_buf.render_pass.specular_light_id).rgb;
   float3 specular_indirect = float3(0.0f);
-  float3 out_direct = float3(0.0f);
+  float3 out_direct = diffuse_direct + specular_direct;
   float3 out_indirect = float3(0.0f);
   float3 average_normal = float3(0.0f);
+  /* Denoising render pass data. */
+  float average_roughness = 0.0f;
+  float3 diffuse_albedo = diffuse_color;
+  float3 specular_albedo = specular_color;
 
   /* Unroll needed for gbuf.layer access. */
   for (int i = 0; i < 3 /* GBUFFER_LAYER_MAX */; i++) [[unroll]] {
@@ -155,7 +156,27 @@ void combine_frag([[resource_table]] Combine &srt,
           }
         }
 
-        average_normal += cl.N * reduce_add(cl.color);
+        float closure_weight = reduce_add(cl.color);
+        sum_weight += closure_weight;
+
+        average_normal += cl.N * closure_weight;
+
+        if (srt.render_passes_denoising_diffuse_albedo_enabled ||
+            srt.render_passes_denoising_specular_albedo_enabled ||
+            srt.render_passes_denoising_roughness_enabled)
+        {
+          /* These two values are equivalent between Cycles and EEVEE:
+           * - Cycles: sqrtf(bsdf_get_specular_roughness_squared(sc))
+           * - EEVEE: square(closure_apparent_roughness_get(cl)) */
+          float closure_roughness = closure_apparent_roughness_get(cl);
+          average_roughness += closure_roughness * closure_weight;
+          if (srt.use_albedo_roughness_weighting) {
+            float roughness_sq = square(closure_roughness);
+            float diffuse_weight = smoothstep(0.0f, 0.15f, roughness_sq);
+            diffuse_albedo += diffuse_weight * cl.color;
+            specular_albedo += (1.0 - diffuse_weight) * cl.color;
+          }
+        }
 
         switch (cl.type) {
           case CLOSURE_BSDF_TRANSLUCENT_ID:
@@ -164,6 +185,11 @@ void combine_frag([[resource_table]] Combine &srt,
             diffuse_color += cl.color;
             diffuse_direct += shaded_direct;
             diffuse_indirect += shaded_indirect;
+            if (srt.render_passes_denoising_diffuse_albedo_enabled &&
+                !srt.use_albedo_roughness_weighting)
+            {
+              diffuse_albedo += cl.color;
+            }
             break;
           case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID:
           case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID:
@@ -171,6 +197,11 @@ void combine_frag([[resource_table]] Combine &srt,
             specular_color += cl.color;
             specular_direct += shaded_direct;
             specular_indirect += shaded_indirect;
+            if (srt.render_passes_denoising_specular_albedo_enabled &&
+                !srt.use_albedo_roughness_weighting)
+            {
+              specular_albedo += cl.color;
+            }
             break;
           case CLOSURE_NONE_ID:
             assert(false);
@@ -244,10 +275,12 @@ void combine_frag([[resource_table]] Combine &srt,
     render_passes.store_color(
         texel, uni.uniform_buf.render_pass.specular_light_id, float4(specular_light, 1.0f));
   }
-  if (srt.render_pass_normal_enabled) {
+  if (srt.render_pass_normal_enabled || srt.render_passes_denoising_normal_enabled) {
     float normal_len = length(average_normal);
     /* Normalize or fallback to default normal. */
     average_normal = (normal_len < 1e-5f) ? gbuf.surface_N() : (average_normal / normal_len);
+  }
+  if (srt.render_pass_normal_enabled) {
     render_passes.store_color(
         texel, uni.uniform_buf.render_pass.normal_id, float4(average_normal, 1.0f));
   }
@@ -256,6 +289,31 @@ void combine_frag([[resource_table]] Combine &srt,
     float depth = texelFetch(hiz.hiz_tx, texel, 0).r;
     float3 P = view.point_screen_to_world(float3(v_out.screen_uv, depth));
     render_passes.store_color(texel, uni.uniform_buf.render_pass.position_id, float4(P, 1.0f));
+  }
+  if (srt.render_passes_denoising_normal_enabled) {
+    const ViewMatrices view = views.get(0);
+    average_normal = view.normal_world_to_view(average_normal);
+    /* For compatibility with Cycles */
+    average_normal.z *= -1.0f;
+    render_passes.store_color(
+        texel, uni.uniform_buf.render_pass.denoising_normal_id, float4(average_normal, 1.0f));
+  }
+  if (srt.render_passes_denoising_diffuse_albedo_enabled) {
+    render_passes.store_color(texel,
+                              uni.uniform_buf.render_pass.denoising_diffuse_albedo_id,
+                              float4(diffuse_albedo, 1.0f));
+  }
+  if (srt.render_passes_denoising_specular_albedo_enabled) {
+    render_passes.store_color(texel,
+                              uni.uniform_buf.render_pass.denoising_specular_albedo_id,
+                              float4(specular_albedo, 1.0f));
+  }
+  if (srt.render_passes_denoising_roughness_enabled) {
+    if (sum_weight > 0.0f) {
+      average_roughness /= sum_weight;
+    }
+    render_passes.store_value(
+        texel, uni.uniform_buf.render_pass.denoising_roughness_id, average_roughness);
   }
 
   frag_out.combined = float4(out_direct + out_indirect, 0.0f);

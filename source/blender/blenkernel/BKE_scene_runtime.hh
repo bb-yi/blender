@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "BKE_compositor.hh"
 #include "BKE_sound_types.hh"
 
 #include "BLI_mutex.hh"
@@ -38,6 +39,8 @@ class CompositorRuntime {
 
   /* A nodes log of the last compositor evaluation. */
   std::unique_ptr<nodes::eval_log::NodesEvalLog> nodes_evaluation_log;
+  /* Cached data for the interactive compositor. */
+  bke::compositor::Cache cache;
   /* A dependency graph used for interactive compositing. This is initialized the first time it is
    * needed, and then kept persistent for the lifetime of the scene. This is done to allow the
    * compositor to track changes to resources its uses as well as reduce the overhead of creating

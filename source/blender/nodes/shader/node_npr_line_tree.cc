@@ -11,10 +11,10 @@
 #include "DNA_collection_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_color_types.h"
-#include "BLI_string.h"
-#include "BLI_rect.h"
+#include "BLI_string.hh"
+#include "BLI_rect.hh"
 #include "BLI_listbase_iterator.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BKE_context.hh"
 #include "BKE_collection.hh"
 #include "BKE_colortools.hh"
@@ -96,7 +96,7 @@ bool npr_line_timing_enabled(const bNodeTree &tree)
 {
   const ID *id = DEG_get_original_id(&tree.id);
   std::lock_guard lock(solo_mutex);
-  auto found = timings.find(id->session_uid);
+  auto found = timings.find(id->session_uid.uid_);
   return found != timings.end() && found->second.enabled;
 }
 
@@ -106,11 +106,11 @@ void npr_line_set_timing_enabled(Main &bmain, bNodeTree &tree, bool enabled)
     std::lock_guard lock(solo_mutex);
     std::erase_if(timings, [&](const auto &entry) {
       for (const bNodeTree &candidate : bmain.nodetrees) {
-        if (candidate.id.session_uid == entry.first) { return false; }
+        if (candidate.id.session_uid.uid_ == entry.first) { return false; }
       }
       return true;
     });
-    timings[tree.id.session_uid].enabled = enabled;
+    timings[tree.id.session_uid.uid_].enabled = enabled;
   }
   npr_line_tag_tree_changed(bmain, tree);
 }
@@ -119,7 +119,7 @@ void npr_line_set_timing(const bNodeTree &tree, const std::string &text)
 {
   const ID *id = DEG_get_original_id(&tree.id);
   std::lock_guard lock(solo_mutex);
-  auto found = timings.find(id->session_uid);
+  auto found = timings.find(id->session_uid.uid_);
   if (found != timings.end() && found->second.enabled) { found->second.text = text; }
 }
 
@@ -127,7 +127,7 @@ std::string npr_line_timing(const bNodeTree &tree)
 {
   const ID *id = DEG_get_original_id(&tree.id);
   std::lock_guard lock(solo_mutex);
-  auto found = timings.find(id->session_uid);
+  auto found = timings.find(id->session_uid.uid_);
   return found == timings.end() ? std::string() : found->second.text;
 }
 
@@ -135,7 +135,7 @@ int npr_line_solo_node(const bNodeTree &tree)
 {
   const ID *id = DEG_get_original_id(&tree.id);
   std::lock_guard lock(solo_mutex);
-  const auto found = solo_nodes.find(id->session_uid);
+  const auto found = solo_nodes.find(id->session_uid.uid_);
   return found == solo_nodes.end() ? 0 : found->second;
 }
 
@@ -146,17 +146,17 @@ void npr_line_set_solo_node(Main &bmain, bNodeTree &tree, int node_identifier)
     /* Keep only IDs still present in Main; opening a file cannot inherit a previous solo. */
     std::erase_if(solo_nodes, [&](const auto &entry) {
       for (const bNodeTree &candidate : bmain.nodetrees) {
-        if (candidate.id.session_uid == entry.first) {
+        if (candidate.id.session_uid.uid_ == entry.first) {
           return false;
         }
       }
       return true;
     });
     if (node_identifier) {
-      solo_nodes[tree.id.session_uid] = node_identifier;
+      solo_nodes[tree.id.session_uid.uid_] = node_identifier;
     }
     else {
-      solo_nodes.erase(tree.id.session_uid);
+      solo_nodes.erase(tree.id.session_uid.uid_);
     }
   }
   npr_line_tag_tree_changed(bmain, tree);
@@ -428,7 +428,7 @@ static void brush_declare(NodeDeclarationBuilder &b)
     auto &tree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
     tree.ensure_topology_cache();
     const bNode &node = *ptr->data_as<bNode>();
-    const auto *output = static_cast<const bNodeSocket *>(node.outputs.first);
+    const auto *output = static_cast<const bNodeSocket *>(node.outputs.first_);
     const int count = output ? output->directly_linked_links().size() : 0;
     layout.label(std::to_string(count) + " " + IFACE_("brush connections"), ICON_LINKED);
     for (const bNodeSocket &socket : node.inputs) {
@@ -812,7 +812,7 @@ static void combine_declare(NodeDeclarationBuilder &b)
     auto &tree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
     tree.ensure_topology_cache();
     const bNode &node = *ptr->data_as<bNode>();
-    const auto *socket = static_cast<const bNodeSocket *>(node.inputs.first);
+    const auto *socket = static_cast<const bNodeSocket *>(node.inputs.first_);
     if (!socket) { return; }
     for (const bNodeLink *link : socket->directly_linked_links()) {
       ui::Layout &row = layout.row(true);

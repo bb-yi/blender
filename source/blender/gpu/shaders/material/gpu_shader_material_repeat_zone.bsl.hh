@@ -1,0 +1,34 @@
+/* SPDX-FileCopyrightText: 2025 Blender Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+
+#pragma once
+
+#ifdef GPU_SHADER
+
+#  ifndef REPEAT_BEGIN
+#    define REPEAT_BEGIN(count, var) \
+      for (int var##_i = 0; var##_i < count; var##_i++) { \
+        var = var##_i;
+#  endif
+
+#  ifndef REPEAT_END
+#    define REPEAT_END() }
+#  endif
+
+#else
+
+/**
+ * Dummy functions for gpu_shader_dependency.
+ * Functions need parameters to be reflected, but we don't really rely on the reflection data.
+ */
+[[node]]
+void REPEAT_BEGIN(int dummy)
+{
+}
+[[node]]
+void REPEAT_END(float dummy)
+{
+}
+
+#endif

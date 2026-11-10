@@ -12,10 +12,11 @@
 #include "MEM_guardedalloc.h" /* For `MEM_CXX_CLASS_ALLOC_FUNCS`. */
 
 #include "BLI_bounds_types.hh"
-#include "BLI_kdopbvh.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_shared_cache.hh"
 #include "BLI_string_ref.hh"
+
+#include "BKE_bvh.hh"
 
 #include "DNA_pointcloud_types.h"
 
@@ -44,17 +45,17 @@ struct PointCloudRuntime {
   /** Stores weak references to material data blocks. */
   std::unique_ptr<bake::BakeMaterialsList> bake_materials;
 
-  SharedCache<std::unique_ptr<BVHTree, BVHTreeDeleter>> bvh_cache;
+  SharedCache<bke::bvh::Tree> bvh_cache;
 
   MEM_CXX_CLASS_ALLOC_FUNCS("PointCloudRuntime");
 };
 
-PointCloud *pointcloud_new_no_attributes(int totpoint);
+PointCloud *pointcloud_new_no_attributes(PointCloudType type, int totpoint);
 
 }  // namespace bke
 
 PointCloud *BKE_pointcloud_add(Main *bmain, const char *name);
-PointCloud *BKE_pointcloud_new_nomain(int totpoint);
+PointCloud *BKE_pointcloud_new_nomain(PointCloudType type, int totpoint);
 void BKE_pointcloud_nomain_to_pointcloud(PointCloud *pointcloud_src, PointCloud *pointcloud_dst);
 
 bool BKE_pointcloud_attribute_required(const PointCloud *pointcloud, StringRef name);
@@ -89,6 +90,8 @@ void BKE_pointcloud_batch_cache_free(PointCloud *pointcloud);
 
 extern void (*BKE_pointcloud_batch_cache_dirty_tag_cb)(PointCloud *pointcloud, int mode);
 extern void (*BKE_pointcloud_batch_cache_free_cb)(PointCloud *pointcloud);
+extern void (*BKE_gsplat_batch_cache_dirty_tag_cb)(PointCloud *pointcloud, int mode);
+extern void (*BKE_gsplat_batch_cache_free_cb)(PointCloud *pointcloud);
 
 namespace bke {
 struct AttributeAccessorFunctions;

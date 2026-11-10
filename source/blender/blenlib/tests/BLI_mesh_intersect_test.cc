@@ -12,8 +12,8 @@
 #include "BLI_math_mpq.hh"
 #include "BLI_math_vector_mpq_types.hh"
 #include "BLI_mesh_intersect.hh"
-#include "BLI_task.h"
-#include "BLI_time.h"
+#include "BLI_task_c.hh"
+#include "BLI_time.hh"
 #include "BLI_vector.hh"
 
 #define DO_REGULAR_TESTS 1
@@ -21,6 +21,7 @@
 
 #ifdef WITH_GMP
 namespace blender::meshintersect::tests {
+namespace {
 
 constexpr bool DO_OBJ = false;
 
@@ -1273,5 +1274,6 @@ TEST(mesh_intersect_perf, GridGridTilt)
 
 #  endif
 
+}  // namespace
 }  // namespace blender::meshintersect::tests
 #endif

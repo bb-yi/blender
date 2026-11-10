@@ -45,7 +45,7 @@ static void node_layout(ui::Layout &layout, bContext *, PointerRNA *ptr)
 static int node_gpu(GPUMaterial *mat, bNode *node, bNodeExecData *, GPUNodeStack *in, GPUNodeStack *out)
 {
   if (!in[2].link) {
-    GPU_link(mat, "world_normals_get", &in[2].link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &in[2].link);
   }
   const Material *material = GPU_material_get_material(mat);
   float supported = !material || material->surface_render_method != MA_SURFACE_METHOD_FORWARD;
@@ -54,7 +54,8 @@ static int node_gpu(GPUMaterial *mat, bNode *node, bNodeExecData *, GPUNodeStack
   }
   float mode = float(node->custom1);
   return GPU_stack_link(mat, node, "node_npr_rim", in, out,
-                        GPU_constant(&mode), GPU_constant(&supported));
+                        GPU_constant(&mode), GPU_constant(&supported),
+                        GPU_kernel_globals(), GPU_shading_data());
 }
 }  // namespace nodes::node_shader_npr_rim_cc
 

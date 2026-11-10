@@ -10,9 +10,9 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 #include "BKE_screen.hh"
@@ -258,6 +258,7 @@ void ED_spacetype_info()
 
   st->spaceid = SPACE_INFO;
   STRNCPY_UTF8(st->name, "Info");
+  st->struct_size = sizeof(SpaceInfo);
 
   st->create = info_create;
   st->free = info_free;

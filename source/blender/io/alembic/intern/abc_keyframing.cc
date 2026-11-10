@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup balembic
+ */
+
 #include "abc_keyframing.h"
 #include "abc_reader_archive.h"
 
@@ -14,8 +18,7 @@
 
 using Alembic::Abc::ISampleSelector;
 
-namespace blender {
-namespace io::alembic {
+namespace blender::io::alembic {
 
 /* Utility: create new fcurve and add it as a channel to a group. */
 static FCurve *create_fcurve(animrig::Channelbag &channelbag,
@@ -107,5 +110,4 @@ void create_keyframes(Main *bmain,
   }
 }
 
-}  // namespace io::alembic
-}  // namespace blender
+}  // namespace blender::io::alembic

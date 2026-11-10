@@ -10,8 +10,8 @@
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_string.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
 #include "BLI_vector.hh"
 
 #include "BKE_lib_id.hh"
@@ -102,7 +102,7 @@ static bNodeSocket *filter_graph_find_first_image_socket(bNode &node,
                                                          const eNodeSocketInOut in_out)
 {
   ListBase &sockets = (in_out == SOCK_IN) ? node.inputs : node.outputs;
-  for (bNodeSocket *socket = static_cast<bNodeSocket *>(sockets.first); socket != nullptr;
+  for (bNodeSocket *socket = static_cast<bNodeSocket *>(sockets.first_); socket != nullptr;
        socket = socket->next)
   {
     if (socket->type == SOCK_IMAGE && !STREQ(socket->idname, "NodeSocketVirtual")) {
@@ -480,7 +480,7 @@ static bool filter_graph_legacy_entry_is_valid(const SceneFilterMaterial &entry)
 static bool filter_graph_scene_has_legacy_entries(const Scene &scene)
 {
   for (const SceneFilterMaterial *entry = static_cast<const SceneFilterMaterial *>(
-           scene.eevee.filter_materials.first);
+           scene.eevee.filter_materials.first_);
        entry != nullptr;
        entry = entry->next)
   {
@@ -494,7 +494,7 @@ static bool filter_graph_scene_has_legacy_entries(const Scene &scene)
 static bool filter_graph_scene_stage_has_legacy_entries(const Scene &scene, const int stage)
 {
   for (const SceneFilterMaterial *entry = static_cast<const SceneFilterMaterial *>(
-           scene.eevee.filter_materials.first);
+           scene.eevee.filter_materials.first_);
        entry != nullptr;
        entry = entry->next)
   {
@@ -524,10 +524,10 @@ static bool filter_graph_is_legacy_generated_shape(const bNodeTree &ntree)
 
 static void filter_graph_clear_nodes(Main &bmain, bNodeTree &ntree)
 {
-  while (bNode *node = static_cast<bNode *>(ntree.nodes.first)) {
+  while (bNode *node = static_cast<bNode *>(ntree.nodes.first())) {
     bke::node_remove_node(&bmain, ntree, *node, true);
   }
-  while (bNodeLink *link = static_cast<bNodeLink *>(ntree.links.first)) {
+  while (bNodeLink *link = static_cast<bNodeLink *>(ntree.links.first())) {
     bke::node_remove_link(&ntree, *link);
   }
 }
@@ -535,7 +535,7 @@ static void filter_graph_clear_nodes(Main &bmain, bNodeTree &ntree)
 static void filter_graph_clear_legacy_filter_materials(Scene &scene)
 {
   for (SceneFilterMaterial *entry = static_cast<SceneFilterMaterial *>(
-           scene.eevee.filter_materials.first);
+           scene.eevee.filter_materials.first_);
        entry != nullptr;
        entry = entry->next)
   {
@@ -625,7 +625,7 @@ bool filter_graph_sync_legacy_filter_materials(Main &bmain,
     int pass_index = 0;
 
     for (SceneFilterMaterial *entry = static_cast<SceneFilterMaterial *>(
-             scene.eevee.filter_materials.first);
+             scene.eevee.filter_materials.first_);
          entry != nullptr;
          entry = entry->next)
     {

@@ -7,10 +7,10 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_ghash.h"
+#include "BLI_ghash.hh"
 #include "BLI_map.hh"
-#include "BLI_mempool.h"
-#include "BLI_utildefines.h"
+#include "BLI_mempool.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_ID.h"
 
@@ -200,7 +200,7 @@ ID *BKE_main_idmap_lookup_name(IDNameLib_Map *id_map,
 {
   IDNameLib_TypeMap *type_map = main_idmap_from_idcode(id_map, id_type);
 
-  if (UNLIKELY(type_map == nullptr)) {
+  if (type_map == nullptr) [[unlikely]] {
     return nullptr;
   }
 
@@ -213,7 +213,7 @@ ID *BKE_main_idmap_lookup_name(IDNameLib_Map *id_map,
 
     GHash *map = type_map->map = BLI_ghash_new(idkey_hash, idkey_cmp, __func__);
     ListBaseT<ID> *lb = which_libbase(id_map->bmain, id_type);
-    for (ID *id = static_cast<ID *>(lb->first); id; id = static_cast<ID *>(id->next)) {
+    for (ID *id = lb->first(); id; id = static_cast<ID *>(id->next)) {
       IDNameLib_Key *key = static_cast<IDNameLib_Key *>(
           BLI_mempool_alloc(id_map->type_maps_keys_pool));
       key->name = id->name + 2;

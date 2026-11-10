@@ -7,7 +7,7 @@
 #include "BLI_array.hh"
 #include "BLI_index_mask.hh"
 #include "BLI_math_base.hh"
-#include "BLI_math_geom.h"
+#include "BLI_math_geom_c.hh"
 #include "BLI_task.hh"
 
 #include "BKE_asset_edit.hh"
@@ -1005,7 +1005,7 @@ struct EraseOperationExecutor {
 
       if (erased) {
         /* Set the new geometry. */
-        drawing.geometry.wrap() = std::move(dst);
+        drawing.strokes_for_write() = std::move(dst);
         drawing.tag_topology_changed();
         changed = true;
         self.affected_drawings_.add(&drawing);
@@ -1063,9 +1063,12 @@ void EraseOperation::on_stroke_begin(const bContext &C, const InputSample & /*st
             scene, GPAINT_BRUSH_TYPE_ERASE, PaintMode::GPencil);
     /* This should only fail in the case where the essential assets are not found. */
     if (asset_reference) {
-      eraser_brush_ = reinterpret_cast<Brush *>(
+      Brush *eraser_brush = reinterpret_cast<Brush *>(
           bke::asset_edit_id_from_weak_reference(*bmain, ID_BR, *asset_reference));
-      radius_ = BKE_brush_radius_get(paint, eraser_brush_);
+      if (eraser_brush) {
+        eraser_brush_ = eraser_brush;
+        radius_ = BKE_brush_radius_get(paint, eraser_brush_);
+      }
     }
 
     grease_pencil->runtime->temp_eraser_radius = radius_;

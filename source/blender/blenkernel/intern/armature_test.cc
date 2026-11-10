@@ -10,12 +10,12 @@
 #include "BKE_object.hh"
 #include "BKE_object_types.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_matrix.hh"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_string.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string.hh"
 
 #include "DNA_ID.h"
 #include "DNA_action_types.h"
@@ -506,7 +506,7 @@ TEST_F(ArmatureBoneIndexTest, armature_copy_data)
   EXPECT_EQ(3, copy->runtime->bones.size());
 
   /* Getting the indexed bone should return a copied bone, and not the original. */
-  Bone *copybone_root = static_cast<Bone *>(copy->bonebase.first);
+  Bone *copybone_root = copy->bonebase.first();
   EXPECT_EQ(copybone_root, copy->bone_get_indexed(0));
 
   /* CoW-copy, should reuse the generation counter. */

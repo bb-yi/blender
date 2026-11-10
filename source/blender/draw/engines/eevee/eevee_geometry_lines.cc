@@ -22,9 +22,8 @@
 #include "DNA_layer_types.h"
 #include "DNA_object_types.h"
 #include "BLI_math_matrix.hh"
-#include "BLI_hash.h"
+#include "BLI_hash_c.hh"
 #include "BKE_image.hh"
-#include "BKE_image_partial_update.hh"
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 #include "GPU_framebuffer.hh"
@@ -477,7 +476,7 @@ struct GeometryLineModule::Impl {
   struct ImageUpdate {
     blender::Image *image;
     uint32_t session_uid;
-    PartialUpdateUser *user;
+    uint64_t revision;
   };
   std::vector<ImageUpdate> image_updates;
   uint64_t accumulated_samples = 0;
@@ -536,7 +535,6 @@ struct GeometryLineModule::Impl {
   explicit Impl(Instance &instance) : inst(instance) {}
   ~Impl()
   {
-    for (auto &image : image_updates) { BKE_image_partial_update_free(image.user); }
     for (auto &chunk : expanded_chunks) { chunk.free(); }
     for (auto *buffer : {parts_buffer, brushes_buffer, curves_buffer, reductions_buffer, maps_buffer, instances_buffer,
                         fields_buffer, ramps_buffer, original_buffer}) {
@@ -546,7 +544,6 @@ struct GeometryLineModule::Impl {
 
   bool refresh_images()
   {
-    using namespace bke::image::partial_update;
     std::vector<blender::Image *> referenced;
     auto add = [&](blender::Image *image) {
       if (image && std::find(referenced.begin(), referenced.end(), image) == referenced.end()) {
@@ -561,8 +558,7 @@ struct GeometryLineModule::Impl {
     for (const auto &rule : graph.occlusion) { if (rule.mode == 2) { add(rule.image); } }
     for (auto it = image_updates.begin(); it != image_updates.end();) {
       const auto found = std::find(referenced.begin(), referenced.end(), it->image);
-      if (found == referenced.end() || (*found)->id.session_uid != it->session_uid) {
-        BKE_image_partial_update_free(it->user);
+      if (found == referenced.end() || (*found)->id.session_uid.uid_ != it->session_uid) {
         it = image_updates.erase(it);
       }
       else { ++it; }
@@ -572,11 +568,12 @@ struct GeometryLineModule::Impl {
       auto it = std::find_if(image_updates.begin(), image_updates.end(),
                              [&](const ImageUpdate &item) { return item.image == image; });
       if (it == image_updates.end()) {
-        image_updates.push_back({image, image->id.session_uid, BKE_image_partial_update_create(image)});
+        image_updates.push_back({image, image->id.session_uid.uid_, 0});
         it = image_updates.end() - 1;
       }
-      changed |= BKE_image_partial_update_collect_changes(image, it->user) !=
-                 ePartialUpdateCollectResult::NoChangesDetected;
+      const uint64_t revision = BKE_image_partial_update_revision(image);
+      changed |= revision != it->revision;
+      it->revision = revision;
     }
     return changed;
   }

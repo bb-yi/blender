@@ -10,7 +10,7 @@
 
 #include <cstring>
 
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BKE_customdata.hh"
 
@@ -123,7 +123,7 @@ static void bmw_VertShellWalker_begin(BMWalker *walker, void *data)
   BMEdge *e;
   BMVert *v;
 
-  if (UNLIKELY(h == nullptr)) {
+  if (h == nullptr) [[unlikely]] {
     return;
   }
 
@@ -252,7 +252,7 @@ static void bmw_LoopShellWalker_begin(BMWalker *walker, void *data)
   BMIter iter;
   BMHeader *h = static_cast<BMHeader *>(data);
 
-  if (UNLIKELY(h == nullptr)) {
+  if (h == nullptr) [[unlikely]] {
     return;
   }
 
@@ -416,7 +416,7 @@ static void bmw_LoopShellWireWalker_begin(BMWalker *walker, void *data)
 {
   BMHeader *h = static_cast<BMHeader *>(data);
 
-  if (UNLIKELY(h == nullptr)) {
+  if (h == nullptr) [[unlikely]] {
     return;
   }
 
@@ -883,16 +883,22 @@ static bool bmw_EdgeLoopWalker_delimit_mark_check(BMWalker *walker,
                                                   BMLoop *l)
 {
   if ((walker->delimit & BMW_DELIMIT_EDGE_MARK_SEAM) &&
-      bmw_EdgeLoopWalker_delimit_by_mark(walker, v, e, l, [](const BMEdge *e) -> bool {
-        return BM_elem_flag_test(e, BM_ELEM_SEAM);
-      }))
+      bmw_EdgeLoopWalker_delimit_by_mark(
+          walker,
+          v,
+          e,
+          l,
+          [](const BMEdge *e) -> bool { return BM_elem_flag_test(e, BM_ELEM_SEAM); }))
   {
     return true;
   }
   if ((walker->delimit & BMW_DELIMIT_EDGE_MARK_SHARP) &&
-      bmw_EdgeLoopWalker_delimit_by_mark(walker, v, e, l, [](const BMEdge *e) -> bool {
-        return !BM_elem_flag_test(e, BM_ELEM_SMOOTH);
-      }))
+      bmw_EdgeLoopWalker_delimit_by_mark(
+          walker,
+          v,
+          e,
+          l,
+          [](const BMEdge *e) -> bool { return !BM_elem_flag_test(e, BM_ELEM_SMOOTH); }))
   {
     return true;
   }
@@ -1846,7 +1852,7 @@ static void *bmw_NonManifoldedgeWalker_step(BMWalker *walker)
 
     /* If `lwalk.lastv` can't be walked along, start walking in the opposite direction
      * on the initial edge, do this at most one time during this walk operation. */
-    if (UNLIKELY(pass == 1)) {
+    if (pass == 1) [[unlikely]] {
       e = lwalk->start;
       v = lwalk->startv;
     }
@@ -1892,13 +1898,13 @@ static void *bmw_NonManifoldedgeWalker_step(BMWalker *walker)
 
 static const BMWalker bmw_VertShellWalker_Type = {
     /*begin_htype*/ BM_VERT | BM_EDGE,
-    /*step*/ bmw_VertShellWalker_begin,
+    /*begin*/ bmw_VertShellWalker_begin,
     /*step*/ bmw_VertShellWalker_step,
     /*yield*/ bmw_VertShellWalker_yield,
     /*structsize*/ sizeof(BMwShellWalker),
     /*order*/ BMW_BREADTH_FIRST,
     /*valid_mask*/ BM_EDGE, /* Valid restrict masks. */
-    /*delimit_supported=*/BMW_DELIMIT_NONE,
+    /*delimit_supported*/ BMW_DELIMIT_NONE,
 };
 
 static const BMWalker bmw_LoopShellWalker_Type = {

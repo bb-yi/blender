@@ -23,10 +23,10 @@
 #include "DNA_image_types.h"
 #include "DNA_texture_types.h"
 
-#include "BLI_math_vector.h"
-#include "BLI_rect.h"
-#include "BLI_threads.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_vector_c.hh"
+#include "BLI_rect.hh"
+#include "BLI_threads.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_image.hh"
 
@@ -237,12 +237,17 @@ int imagewrap(Tex *tex,
     filterx = (0.5f * tex->filtersize) / ibuf->x;
     filtery = (0.5f * tex->filtersize) / ibuf->y;
 
-    /* Important that this value is wrapped #27782.
-     * this applies the modifications made by the checks above,
-     * back to the floating point values */
-    fx -= float(xi - x) / float(ibuf->x);
-    fy -= float(yi - y) / float(ibuf->y);
-
+    /* Important that this value is wrapped #27782. */
+    if (tex->extend == TEX_EXTEND) {
+      CLAMP(fx, 0.0f, 1.0f);
+      CLAMP(fy, 0.0f, 1.0f);
+    }
+    else {
+      /* this applies the modifications made by the checks above,
+       * back to the floating point values */
+      fx -= float(xi - x) / float(ibuf->x);
+      fy -= float(yi - y) / float(ibuf->y);
+    }
     boxsample(ibuf,
               fx - filterx,
               fy - filtery,
@@ -644,7 +649,7 @@ void image_sample(
   TexResult texres;
   ImBuf *ibuf = BKE_image_pool_acquire_ibuf(ima, nullptr, pool);
 
-  if (UNLIKELY(ibuf == nullptr)) {
+  if (ibuf == nullptr) [[unlikely]] {
     zero_v4(result);
     return;
   }

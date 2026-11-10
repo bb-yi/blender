@@ -2,13 +2,17 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include "BKE_main_invariants.hh"
 #include "BKE_main.hh"
 #include "BKE_material.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_tree_update.hh"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "DEG_depsgraph.hh"
 
@@ -50,6 +54,7 @@ static void send_notifiers_after_node_tree_change(ID *id, bNodeTree *ntree)
      * scene, then the notifier is dropped. So we need to pass `nullptr` here to make sure the
      * notifier is sent. */
     WM_main_add_notifier(NC_SCENE | ND_NODES, nullptr);
+    WM_main_add_notifier(NC_SCENE | ND_COMPO_RESULT, nullptr);
   }
   else if (ntree->type == NTREE_TEXTURE) {
     WM_main_add_notifier(NC_TEXTURE | ND_NODES, id);
@@ -104,13 +109,13 @@ static void propagate_node_tree_changes(Main &bmain,
     GPU_material_free(&material.gpumaterial);
     DEG_id_tag_update(&material.id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
 
-    for (Scene *scene = static_cast<Scene *>(bmain.scenes.first); scene != nullptr;
+    for (Scene *scene = bmain.scenes.first(); scene != nullptr;
          scene = scene->id.next ? reinterpret_cast<Scene *>(scene->id.next) : nullptr)
     {
       bool uses_filter_material = false;
       bNodeTree *filter_graph = scene->eevee.filter_graph;
       if (filter_graph != nullptr && filter_graph->type == NTREE_EEVEE_FILTER_GRAPH) {
-        for (bNode *node = static_cast<bNode *>(filter_graph->nodes.first); node != nullptr;
+        for (bNode *node = static_cast<bNode *>(filter_graph->nodes.first()); node != nullptr;
              node = node->next)
         {
           if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL &&
@@ -123,7 +128,7 @@ static void propagate_node_tree_changes(Main &bmain,
       }
       if (!uses_filter_material) {
         for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
-                 scene->eevee.filter_materials.first);
+                 scene->eevee.filter_materials.first_);
              filter_entry != nullptr;
              filter_entry = filter_entry->next)
         {
@@ -152,7 +157,7 @@ static void propagate_node_tree_changes(Main &bmain,
       return;
     }
 
-    for (bNode *node = static_cast<bNode *>(ntree.nodes.first); node != nullptr; node = node->next)
+    for (bNode *node = static_cast<bNode *>(ntree.nodes.first()); node != nullptr; node = node->next)
     {
       if (node->type_legacy == SH_NODE_OUTPUT_FILTER && (node->flag & NODE_DO_OUTPUT)) {
         nodes::filter_graph_filter_output_interface_changed(bmain, ntree, *node);
@@ -203,7 +208,7 @@ static Vector<bNodeTree *> ensure_default_light_shader_nodes(
     return changed_trees;
   }
 
-  for (Light *light = static_cast<Light *>(bmain.lights.first); light != nullptr;
+  for (Light *light = bmain.lights.first(); light != nullptr;
        light = static_cast<Light *>(light->id.next))
   {
     if (bNodeTree *ntree = ensure_light_default_shader_nodes(*light)) {

@@ -47,20 +47,22 @@ class DenoiserGPU : public Denoiser {
 
   /* Run corresponding filter kernels, preparing data for the denoiser or copying data from the
    * denoiser result to the render buffer. */
-  bool denoise_filter_color_preprocess(const DenoiseContext &context, const DenoisePass &pass);
-  bool denoise_filter_color_postprocess(const DenoiseContext &context, const DenoisePass &pass);
+  virtual bool denoise_filter_color_preprocess(const DenoiseContext &context,
+                                               const DenoisePass &pass);
+  virtual bool denoise_filter_color_postprocess(const DenoiseContext &context,
+                                                const DenoisePass &pass);
   bool denoise_filter_color_flip_y(const DenoiseContext &context,
                                    const BufferParams &buffer_params,
                                    const DenoisePass &pass);
   bool denoise_filter_guiding_flip_y(const DenoiseContext &context);
-  bool denoise_filter_guiding_set_fake_albedo(const DenoiseContext &context);
+  bool denoise_filter_guiding_set_fake_albedo(DenoiseContext &context);
 
   /* Read guiding passes from the render buffers, preprocess them in a way which is expected by
    * the GPU denoiser and store in the guiding passes memory within the given context.
    *
    * Pre-processing of the guiding passes is to only happen once per context lifetime. DO not
    * preprocess them for every pass which is being denoised. */
-  bool denoise_filter_guiding_preprocess(const DenoiseContext &context);
+  virtual bool denoise_filter_guiding_preprocess(DenoiseContext &context);
 
   bool denoise_pass(DenoiseContext &context, PassType pass_type);
 
@@ -78,7 +80,6 @@ class DenoiserGPU : public Denoiser {
 
       const PassInfo pass_info = Pass::get_info(type);
       num_components = pass_info.num_components;
-      use_compositing = pass_info.use_compositing;
       use_denoising_albedo = pass_info.use_denoising_albedo;
     }
 
@@ -88,7 +89,6 @@ class DenoiserGPU : public Denoiser {
     int denoised_offset;
 
     int num_components;
-    int use_compositing;
     bool use_denoising_albedo;
   };
 

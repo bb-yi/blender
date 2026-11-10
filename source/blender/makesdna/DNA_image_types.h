@@ -39,18 +39,6 @@ enum eImageUser_Flag : short {
 };
 ENUM_OPERATORS(eImageUser_Flag)
 
-/* Used to get the correct gpu texture from an Image datablock. */
-enum eGPUTextureTarget : int {
-  TEXTARGET_2D = 0,
-  TEXTARGET_2D_ARRAY = 1,
-  TEXTARGET_TILE_MAPPING = 2,
-  TEXTARGET_CUBE = 3,
-  TEXTARGET_COUNT = 4,
-  /* Cached separately from Image.runtime.gputexture because many dimensions can exist per image.
-   */
-  TEXTARGET_3D_LUT_STRIP = TEXTARGET_COUNT,
-};
-
 /** #Image.flag */
 enum eImage_Flag : int {
   IMA_HIGH_BITDEPTH = (1 << 0),
@@ -78,13 +66,6 @@ enum eImage_Flag : int {
   IMA_USE_EXR_PART_COLORSPACES = (1 << 18),
 };
 ENUM_OPERATORS(eImage_Flag)
-
-/** #Image.gpuflag */
-enum eImage_GPUFlag : int {
-  /** All mipmap levels in OpenGL texture set? */
-  IMA_GPU_MIPMAP_COMPLETE = (1 << 0),
-};
-ENUM_OPERATORS(eImage_GPUFlag)
 
 /* Image.source, where the image comes from */
 enum eImageSource : short {

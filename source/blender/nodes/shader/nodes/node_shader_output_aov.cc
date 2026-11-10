@@ -2,12 +2,16 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "node_shader_util.hh"
 #include "node_util.hh"
 
-#include "BLI_hash.h"
-#include "GPU_material.hh"
+#include "BLI_hash_c.hh"
 #include "DEG_depsgraph_query.hh"
+#include "GPU_material.hh"
 
 namespace blender {
 
@@ -48,13 +52,13 @@ static int node_shader_gpu_output_aov(GPUMaterial *mat,
   GPU_material_flag_set(mat, GPU_MATFLAG_AOV | GPU_MATFLAG_OBJECT_INFO);
   Material *material = GPU_material_get_material(mat);
   const ID *source = material ? DEG_get_original_id(&material->id) : nullptr;
-  const uint32_t identity = source ? source->session_uid : 0;
-  const float material_tag[3] = {float(identity & 2047u),
-                                 float((identity >> 11u) & 2047u), float(identity >> 22u)};
+  const uint32_t identity = source ? source->session_uid.uid_ : 0;
+  const float material_tag[3] = {
+      float(identity & 2047u), float((identity >> 11u) & 2047u), float(identity >> 22u)};
   /* Keep per-material identity in the uniform buffer, so otherwise identical
    * AOV materials can still share their compiled shader. */
-  GPU_stack_link(mat, node, "node_output_aov", in, out, hash_link,
-                 GPU_uniform(material_tag), &outlink);
+  GPU_stack_link(
+      mat, node, "node_output_aov", in, out, hash_link, GPU_uniform(material_tag), GPU_kernel_globals(), GPU_shading_data(), &outlink);
   GPU_material_add_output_link_aov(mat, outlink, hash);
   return true;
 }

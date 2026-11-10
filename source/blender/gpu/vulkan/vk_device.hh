@@ -9,9 +9,9 @@
 #pragma once
 
 #include <atomic>
+#include <thread>
 
-#include "BLI_task.h"
-#include "BLI_threads.h"
+#include "BLI_threads.hh"
 #include "BLI_utility_mixins.hh"
 #include "BLI_vector.hh"
 
@@ -32,10 +32,6 @@ namespace blender::gpu {
 class VKBackend;
 
 struct VKExtensions {
-  /** Does the device support VkPhysicalDeviceVulkan12Features::shaderOutputViewportIndex. */
-  bool shader_output_viewport_index = false;
-  /** Does the device support VkPhysicalDeviceVulkan12Features::shaderOutputLayer. */
-  bool shader_output_layer = false;
   /**
    * Does the device support
    * VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR::fragmentShaderBarycentric.
@@ -65,11 +61,6 @@ struct VKExtensions {
 
   /** VK_KHR_maintenance4 */
   bool maintenance4 = false;
-
-  /**
-   * Does the device support logic ops.
-   */
-  bool logic_ops = false;
 
   /**
    * Does the device support VK_EXT_memory_priority
@@ -102,9 +93,35 @@ struct VKExtensions {
   bool vertex_input_dynamic_state = false;
 
   /**
+   * Does the device support VK_EXT_provoking_vertex
+   */
+  bool provoking_vertex = false;
+
+  /**
    * Does the device support VK_EXT_host_image_copy
    */
   bool host_image_copy = false;
+
+  /**
+   * Does the device support VK_EXT_shader_viewport_index_layer.
+   */
+  bool shader_viewport_index_layer = false;
+
+  /**
+   * Does the device support VK_KHR_spirv_1_4.
+   */
+  bool spirv_1_4 = false;
+
+  /**
+   * Does the device support VkPhysicalDeviceFeatures::multiDrawIndirect.
+   * When false, multi_draw_indirect is emulated with individual draw calls.
+   */
+  bool multi_draw_indirect = false;
+
+  /**
+   * Device supports `shaderClipDistance` feature.
+   */
+  bool shader_clip_distance = false;
 
   /** Log enabled features and extensions. */
   void log() const;
@@ -123,6 +140,20 @@ struct VKWorkarounds {
    * Certain Intel GPUs show visual artifacts with texture pool usage.
    */
   bool no_texture_pool = false;
+
+  /**
+   * Some Qualcomm drivers keep command-buffer-local state written by `vkCmdSetViewport` across
+   * command buffer resets.
+   *
+   * When set, viewports and scissors are baked into the pipeline as static state and
+   * `vkCmdSetViewport`/`vkCmdSetScissor` are never used.
+   */
+  bool static_viewport_scissor = false;
+
+  /**
+   * Legacy AMD drivers do not perform sRGB conversions when clearing attachments.
+   */
+  bool missing_srgb_clear_conversion = false;
 
   /** Log enabled workarounds. */
   void log() const;
@@ -164,13 +195,14 @@ class VKDevice : public NonCopyable {
   bool is_initialized_ = false;
 
   /**
-   * Task pool for render graph submission.
+   * Render graph submission thread.
    *
-   * Multiple threads in Blender can build a render graph. Building the command buffer for a render
-   * graph is faster when doing it in serial. Submission pool ensures that only one task is
-   * building at a time (background_serial).
+   * Multiple threads in Blender can build a render graph. All submitted
+   * render graphs are queued and consumed one at a time by this thread.
    */
-  TaskPool *submission_pool_ = nullptr;
+  std::thread submission_thread_;
+  std::atomic<bool> submission_thread_should_exit_ = false;
+
   /**
    * All created render graphs.
    */
@@ -214,10 +246,16 @@ class VKDevice : public NonCopyable {
   VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT
       vk_physical_device_graphics_pipeline_library_properties_ = {
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT};
+  VkPhysicalDeviceAccelerationStructurePropertiesKHR
+      vk_physical_device_acceleration_structure_properties_ = {
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
   /** Features support. */
   VkPhysicalDeviceFeatures vk_physical_device_features_ = {};
   VkPhysicalDeviceVulkan11Features vk_physical_device_vulkan_11_features_ = {};
-  VkPhysicalDeviceVulkan12Features vk_physical_device_vulkan_12_features_ = {};
+  VkPhysicalDeviceAccelerationStructureFeaturesKHR
+      vk_physical_device_acceleration_structure_features_ = {
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+      };
   Array<VkExtensionProperties> device_extensions_;
 
   /** Functions of vk_ext_debugutils for this device/instance. */
@@ -246,44 +284,7 @@ class VKDevice : public NonCopyable {
   /** Buffer to bind to unbound resource locations. */
   VKBuffer dummy_buffer;
 
-  /**
-   * This struct contains the functions pointer to extension provided functions.
-   */
-  struct {
-    /* Extension: VK_KHR_dynamic_rendering */
-    PFN_vkCmdBeginRendering vkCmdBeginRendering = nullptr;
-    PFN_vkCmdEndRendering vkCmdEndRendering = nullptr;
-
-    /* Extension: VK_EXT_debug_utils */
-    PFN_vkCmdBeginDebugUtilsLabelEXT vkCmdBeginDebugUtilsLabel = nullptr;
-    PFN_vkCmdEndDebugUtilsLabelEXT vkCmdEndDebugUtilsLabel = nullptr;
-    PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectName = nullptr;
-    PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessenger = nullptr;
-    PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessenger = nullptr;
-
-    /* Extension: VK_EXT_extended_dynamic_state */
-    PFN_vkCmdSetFrontFace vkCmdSetFrontFace = nullptr;
-
-    /* Extension: VK_EXT_vertex_input_dynamic_state */
-    PFN_vkCmdSetVertexInputEXT vkCmdSetVertexInput = nullptr;
-
-    /* Extension: VK_KHR_external_memory_fd */
-    PFN_vkGetMemoryFdKHR vkGetMemoryFd = nullptr;
-
-    /* Extension: VK_EXT_host_image_copy */
-    PFN_vkCopyMemoryToImageEXT vkCopyMemoryToImage = nullptr;
-    PFN_vkTransitionImageLayoutEXT vkTransitionImageLayout = nullptr;
-
-    /* Extension: VK_KHR_maintenance4 */
-    PFN_vkGetDeviceImageMemoryRequirements vkGetDeviceImageMemoryRequirements = nullptr;
-    PFN_vkGetDeviceBufferMemoryRequirements vkGetDeviceBufferMemoryRequirements = nullptr;
-
-#ifdef _WIN32
-    /* Extension: VK_KHR_external_memory_win32 */
-    PFN_vkGetMemoryWin32HandleKHR vkGetMemoryWin32Handle = nullptr;
-#endif
-
-  } functions;
+  VolkDeviceTable functions = {};
 
   VKMemoryPools vma_pools;
 
@@ -324,19 +325,21 @@ class VKDevice : public NonCopyable {
     return vk_physical_device_graphics_pipeline_library_properties_;
   }
 
+  inline const VkPhysicalDeviceAccelerationStructurePropertiesKHR &
+  physical_device_acceleration_structure_properties_get()
+  {
+    return vk_physical_device_acceleration_structure_properties_;
+  }
+
   const VkPhysicalDeviceFeatures &physical_device_features_get() const
   {
     return vk_physical_device_features_;
   }
 
-  const VkPhysicalDeviceVulkan11Features &physical_device_vulkan_11_features_get() const
+  inline const VkPhysicalDeviceAccelerationStructureFeaturesKHR &
+  physical_device_acceleration_structure_features_get() const
   {
-    return vk_physical_device_vulkan_11_features_;
-  }
-
-  const VkPhysicalDeviceVulkan12Features &physical_device_vulkan_12_features_get() const
-  {
-    return vk_physical_device_vulkan_12_features_;
+    return vk_physical_device_acceleration_structure_features_;
   }
 
   VkInstance instance_get() const
@@ -409,16 +412,17 @@ class VKDevice : public NonCopyable {
     return extensions_;
   }
 
-  std::string glsl_vertex_patch_get() const;
+  std::string glsl_vertex_patch_get(bool use_ray_query) const;
   std::string glsl_geometry_patch_get() const;
-  std::string glsl_fragment_patch_get() const;
-  std::string glsl_compute_patch_get() const;
-  shader::GeneratedSource extensions_define(StringRefNull stage_define) const;
+  std::string glsl_fragment_patch_get(bool use_ray_query) const;
+  std::string glsl_compute_patch_get(bool use_ray_query) const;
+  shader::GeneratedSource extensions_define(StringRefNull stage_define, bool use_ray_query) const;
+  uint32_t glsl_patch_version_get(bool use_ray_query) const;
 
   /* -------------------------------------------------------------------- */
   /** \name Render graph
    * \{ */
-  static void submission_runner(TaskPool *__restrict pool, void *task_data);
+  static void submission_runner(VKDevice *device);
   render_graph::VKRenderGraph *render_graph_new();
 
   TimelineValue render_graph_submit(render_graph::VKRenderGraph *render_graph,
@@ -491,8 +495,8 @@ class VKDevice : public NonCopyable {
   void init_physical_device_features();
   void init_physical_device_extensions();
   void init_debug_callbacks();
-  void init_submission_pool();
-  void deinit_submission_pool();
+  void init_submission_thread();
+  void deinit_submission_thread();
   /**
    * Initialize the functions struct with extension specific function pointer.
    */

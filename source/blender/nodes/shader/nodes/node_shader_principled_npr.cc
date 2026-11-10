@@ -25,7 +25,7 @@
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "GPU_material.hh"
 
@@ -178,10 +178,7 @@ static GPUNodeLink *npr_input_link(GPUNodeStack &socket)
   if (socket.link != nullptr) {
     return socket.link;
   }
-  if (socket.type == GPU_FLOAT) {
-    return GPU_uniform(&socket.vec[0]);
-  }
-  return GPU_uniform(socket.vec);
+  return GPU_uniform(socket);
 }
 
 static GPUNodeLink *npr_socket(const bNode &node,
@@ -735,66 +732,66 @@ static void node_declare(NodeDeclarationBuilder &b)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .short_label("Weight");
+      .short_label("Weight"_ustr);
   PanelDeclarationBuilder &subsurface = b.add_panel("Subsurface"_ustr).default_closed(true);
   subsurface.add_input<decl::Float>("Subsurface Weight"_ustr, "subsurface_weight"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .short_label("Weight");
+      .short_label("Weight"_ustr);
   subsurface.add_input<decl::Vector>("Subsurface Radius"_ustr, "subsurface_radius"_ustr)
       .default_value({1.0f, 0.2f, 0.1f})
       .min(0.0f)
       .max(100.0f)
-      .short_label("Radius");
+      .short_label("Radius"_ustr);
   subsurface.add_input<decl::Float>("Subsurface Scale"_ustr, "subsurface_scale"_ustr)
       .default_value(0.005f)
       .min(0.0f)
       .max(10.0f)
       .subtype(PROP_DISTANCE)
-      .short_label("Scale");
+      .short_label("Scale"_ustr);
   PanelDeclarationBuilder &coat = b.add_panel("Coat"_ustr).default_closed(true);
   coat.add_input<decl::Float>("Coat Weight"_ustr, "coat_weight"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .short_label("Weight");
+      .short_label("Weight"_ustr);
   coat.add_input<decl::Float>("Coat Roughness"_ustr, "coat_roughness"_ustr)
       .default_value(0.03f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .short_label("Roughness");
+      .short_label("Roughness"_ustr);
   coat.add_input<decl::Float>("Coat IOR"_ustr, "coat_ior"_ustr)
       .default_value(1.5f)
       .min(1.0f)
       .max(1000.0f)
-      .short_label("IOR")
+      .short_label("IOR"_ustr)
       .translation_context("NPR");
   coat.add_input<decl::Color>("Coat Tint"_ustr, "coat_tint"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
-      .short_label("Tint");
+      .short_label("Tint"_ustr);
   coat.add_input<decl::Vector>("Coat Normal"_ustr, "coat_normal"_ustr)
       .hide_value()
-      .short_label("Normal");
+      .short_label("Normal"_ustr);
   PanelDeclarationBuilder &sheen = b.add_panel("Sheen"_ustr).default_closed(true);
   sheen.add_input<decl::Float>("Sheen Weight"_ustr, "sheen_weight"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .short_label("Weight");
+      .short_label("Weight"_ustr);
   sheen.add_input<decl::Float>("Sheen Roughness"_ustr, "sheen_roughness"_ustr)
       .default_value(0.5f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .short_label("Roughness");
+      .short_label("Roughness"_ustr);
   sheen.add_input<decl::Color>("Sheen Tint"_ustr, "sheen_tint"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
-      .short_label("Tint");
+      .short_label("Tint"_ustr);
   material.add_input<decl::Float>("Thin Wall"_ustr, "thin_wall"_ustr)
       .default_value(0.0f)
       .min(0.0f)
@@ -1244,7 +1241,7 @@ static int node_gpu(GPUMaterial *mat,
     return node_gpu_v2(mat, node, in, out);
   }
   if (!in[SOCK_NORMAL].link) {
-    GPU_link(mat, "world_normals_get", &in[SOCK_NORMAL].link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &in[SOCK_NORMAL].link);
   }
   GPU_material_flag_set(mat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
 
@@ -1409,7 +1406,7 @@ static int node_gpu(GPUMaterial *mat,
                            stop_positions_4_7,
                            diffuse_ramp,
                            specular_ramp,
-                           mode_controls,
+                           mode_controls,GPU_kernel_globals(), GPU_shading_data(),
                            &shader_link,
                            &color_link,
                            &alpha_link);

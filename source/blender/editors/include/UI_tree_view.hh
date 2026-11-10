@@ -206,8 +206,7 @@ class AbstractTreeView : public AbstractView, public TreeViewItemContainer {
   bool supports_scrolling() const override;
 
   void draw_hierarchy_lines(const ARegion &region, const Block &block) const;
-  void get_hierarchy_lines(const ARegion &region,
-                           const TreeViewOrItem &parent,
+  void get_hierarchy_lines(const TreeViewOrItem &parent,
                            const float aspect,
                            Vector<std::pair<int2, int2>> &lines,
                            int &visible_item_index) const;
@@ -219,6 +218,8 @@ class AbstractTreeView : public AbstractView, public TreeViewItemContainer {
   AbstractViewItem *navigate_right(AbstractViewItem *from) override;
   AbstractViewItem *navigate_up(AbstractViewItem *from) override;
   AbstractViewItem *navigate_down(AbstractViewItem *from) override;
+
+  void page_scroll(bContext *C, PageScrollDirection direction) override;
 };
 
 /** \} */

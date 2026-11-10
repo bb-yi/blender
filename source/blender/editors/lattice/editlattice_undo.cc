@@ -13,9 +13,9 @@
 
 #include "CLG_log.h"
 
-#include "BLI_array_utils.h"
-#include "BLI_listbase.h"
-#include "BLI_string.h"
+#include "BLI_array_utils_c.hh"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
 
 #include "DNA_curve_types.h"
 #include "DNA_lattice_types.h"
@@ -345,7 +345,7 @@ static void lattice_undosys_foreach_ID_ref(UndoStep *us_p,
 
 void ED_lattice_undosys_type(UndoType *ut)
 {
-  ut->name = "Edit Lattice";
+  ut->identifier = "EDIT_LATTICE";
   ut->poll = lattice_undosys_poll;
   ut->step_encode = lattice_undosys_step_encode;
   ut->step_decode = lattice_undosys_step_decode;
@@ -353,7 +353,7 @@ void ED_lattice_undosys_type(UndoType *ut)
 
   ut->step_foreach_ID_ref = lattice_undosys_foreach_ID_ref;
 
-  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE;
+  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE | UNDOTYPE_FLAG_ENCODE_PRE_MEMFILE_SUPPORTED;
 
   ut->step_size = sizeof(LatticeUndoStep);
 }

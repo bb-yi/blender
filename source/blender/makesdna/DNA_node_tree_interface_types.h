@@ -13,7 +13,7 @@
 #include "BLI_function_ref.hh"
 #include "BLI_span.hh"
 #include "BLI_string_ref.hh"
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 namespace blender {
 
@@ -129,8 +129,8 @@ struct bNodeTreeInterfaceSocket {
   bNodeTreeInterfaceItem item;
 
   /* UI name of the socket. */
-  char *name = nullptr;
-  char *description = nullptr;
+  char *name_ = nullptr;
+  char *description_ = nullptr;
   /* Type idname of the socket to generate, e.g. "NodeSocketFloat". */
   char *socket_type = nullptr;
   NodeTreeInterfaceSocketFlag flag = {};
@@ -155,6 +155,9 @@ struct bNodeTreeInterfaceSocket {
   char _pad[6] = {};
 
 #ifdef __cplusplus
+  StringRefNull name() const;
+  StringRefNull description() const;
+
   bke::bNodeSocketType *socket_typeinfo() const;
   ColorGeometry4f socket_color() const;
 
@@ -185,8 +188,8 @@ struct bNodeTreeInterfacePanel {
   bNodeTreeInterfaceItem item;
 
   /* UI name of the panel. */
-  char *name = nullptr;
-  char *description = nullptr;
+  char *name_ = nullptr;
+  char *description_ = nullptr;
   NodeTreeInterfacePanelFlag flag = {};
   char _pad[4] = {};
 
@@ -197,6 +200,9 @@ struct bNodeTreeInterfacePanel {
   int identifier = 0;
 
 #ifdef __cplusplus
+  StringRefNull name() const;
+  StringRefNull description() const;
+
   IndexRange items_range() const;
   Span<const bNodeTreeInterfaceItem *> items() const;
   MutableSpan<bNodeTreeInterfaceItem *> items();

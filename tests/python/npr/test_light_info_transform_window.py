@@ -64,7 +64,7 @@ if args.npr:
     tree = bpy.data.node_groups.new("LightSpaceWindowNPR", "ShaderNodeTree")
     destination = tree.nodes.new("ShaderNodeNPR_Output").inputs["Color"]
     output.nprtree = tree
-info = tree.nodes.new("ShaderNodeLightInfo")
+info = tree.nodes.new("ShaderNodeNPRLightInfo" if bpy.app.version >= (5, 3, 0) else "ShaderNodeLightInfo")
 info.light_object = light
 info.location = (-400, 0)
 transform_panel = next(p for p in info.panel_states if p.identifier == 3)

@@ -6,7 +6,7 @@
  * \ingroup bke
  */
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "BKE_callbacks.hh"
 
@@ -124,9 +124,7 @@ void BKE_callback_global_finalize()
     ListBaseT<bCallbackFuncStore> *lb = &callback_slots[evt];
     bCallbackFuncStore *funcstore;
     bCallbackFuncStore *funcstore_next;
-    for (funcstore = static_cast<bCallbackFuncStore *>(lb->first); funcstore;
-         funcstore = funcstore_next)
-    {
+    for (funcstore = lb->first(); funcstore; funcstore = funcstore_next) {
       funcstore_next = funcstore->next;
       BKE_callback_remove(funcstore, evt);
     }

@@ -9,7 +9,7 @@
 #pragma once
 
 #include "BLI_math_vector_types.hh"
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 namespace blender {
 
@@ -64,8 +64,8 @@ enum eTfmMode {
   TFM_TIME_SCALE,
   TFM_TIME_EXTEND,
   /* TFM_TIME_DUPLICATE (deprecated). */
-  TFM_BAKE_TIME = 26,
-  TFM_DEPRECATED, /* was BEVEL */
+  /* TFM_BAKE_TIME (deprecated). */
+  TFM_DEPRECATED = 27, /* was BEVEL */
   TFM_BWEIGHT,
   TFM_ALIGN,
   TFM_EDGE_SLIDE,
@@ -178,6 +178,7 @@ void ED_widgetgroup_gizmo2d_resize_callbacks_set(wmGizmoGroupType *gzgt);
 void ED_widgetgroup_gizmo2d_rotate_callbacks_set(wmGizmoGroupType *gzgt);
 
 #define SNAP_INCREMENTAL_ANGLE DEG2RAD(5.0)
+#define SNAP_INCREMENTAL_SNAP_STEP 1.0f
 
 struct TransformBounds {
   /** Center for transform widget. */

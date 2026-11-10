@@ -10,7 +10,7 @@
 
 #include "BKE_global.hh"
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "gpu_context_private.hh"
 
@@ -41,7 +41,7 @@ void GPU_debug_group_end()
   ctx->debug_group_end();
 }
 
-void GPU_debug_get_groups_names(int name_buf_len, char *r_name_buf)
+void GPU_debug_get_groups_names(int name_buf_maxncpy, char *r_name_buf)
 {
   Context *ctx = Context::get();
   if (ctx == nullptr) {
@@ -54,7 +54,7 @@ void GPU_debug_get_groups_names(int name_buf_len, char *r_name_buf)
   }
   size_t len = 0;
   for (StringRef &name : stack) {
-    len += BLI_snprintf_rlen(r_name_buf + len, name_buf_len - len, "%s > ", name.data());
+    len += BLI_snprintf_rlen(r_name_buf + len, name_buf_maxncpy - len, "%s > ", name.data());
   }
   r_name_buf[len - 3] = '\0';
 }
@@ -208,7 +208,7 @@ void debug_validate_binding_image_format()
        * shader. */
       continue;
     }
-    if (UNLIKELY(texture_formats_shader[image_unit] != texture_formats_state[image_unit])) {
+    if (texture_formats_shader[image_unit] != texture_formats_state[image_unit]) [[unlikely]] {
       fprintf(
           stderr,
           "Error in GPU_debug_validate_binding_image_format: Image format mismatch detected for "

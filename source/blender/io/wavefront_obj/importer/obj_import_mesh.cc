@@ -22,8 +22,8 @@
 #include "BKE_node_tree_update.hh"
 #include "BKE_object.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_set.hh"
 
 #include "IO_validate.hh"

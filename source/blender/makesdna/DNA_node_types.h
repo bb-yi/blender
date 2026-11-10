@@ -39,6 +39,8 @@ class bNodeTreeRuntime;
 class bNodeRuntime;
 class bNodeSocketRuntime;
 }  // namespace bke
+
+struct bNodeInternalLink;
 namespace bke {
 class bNodeTreeZones;
 class bNodeTreeZone;
@@ -217,8 +219,7 @@ enum eNode_Flag : int {
   NODE_MUTED = 1 << 9,
   // NODE_CUSTOM_NAME = 1 << 10, /* Deprecated, dirty. */
   // NODE_CONST_OUTPUT = 1 << 11, /* Deprecated, dirty. */
-  /** Node is always behind others. */
-  NODE_BACKGROUND = 1 << 12,
+  // NODE_BACKGROUND = 1 << 12, /* Deprecated, dirty. */
   /** Automatic flag for nodes included in transforms */
   // NODE_TRANSFORM = 1 << 13, /* Deprecated, dirty. */
 
@@ -336,6 +337,7 @@ ENUM_OPERATORS(GeometryNodeAssetTraitFlag);
 
 enum CompositorNodeAssetTraitFlag {
   COMPOSIT_NODE_ASSET_STRIP_MODIFIER = (1 << 0),
+  COMPOSIT_NODE_ASSET_SCENE_EFFECT = (1 << 1),
 };
 ENUM_OPERATORS(CompositorNodeAssetTraitFlag);
 
@@ -482,6 +484,12 @@ enum eNodeGlossy_Dist : short {
   SHD_GLOSSY_MULTI_GGX = 4,
 };
 
+/* Light evaluation mode. */
+enum eNodeLightEval_Mode : short {
+  SHD_LIGHT_EVAL_DIFFUSE = 0,
+  SHD_LIGHT_EVAL_GLOSSY = 1,
+};
+
 /* sheen distributions */
 #define SHD_SHEEN_ASHIKHMIN 0
 #define SHD_SHEEN_MICROFIBER 1
@@ -497,6 +505,7 @@ enum eNodeVectorTransform_Space : short {
   SHD_VECT_TRANSFORM_SPACE_WORLD = 0,
   SHD_VECT_TRANSFORM_SPACE_OBJECT = 1,
   SHD_VECT_TRANSFORM_SPACE_CAMERA = 2,
+  SHD_VECT_TRANSFORM_SPACE_LIGHT = 3,
 };
 
 enum {
@@ -522,6 +531,7 @@ enum eNodeShader_AttributeType : short {
   SHD_ATTRIBUTE_OBJECT = 1,
   SHD_ATTRIBUTE_INSTANCER = 2,
   SHD_ATTRIBUTE_VIEW_LAYER = 3,
+  SHD_ATTRIBUTE_LIGHT = 4,
 };
 
 /* toon modes */
@@ -1710,6 +1720,17 @@ enum NodeGeometryTransformMode {
   GEO_NODE_TRANSFORM_MODE_MATRIX = 1,
 };
 
+enum NodeGeometryMergeLayersMode {
+  GEO_NODE_MERGE_LAYERS_BY_NAME = 0,
+  GEO_NODE_MERGE_LAYERS_BY_ID = 1,
+};
+
+enum NodeGeometryGreasePencilStrokeType : int8_t {
+  GEO_NODE_GREASE_PENCIL_STROKE = 0,
+  GEO_NODE_GREASE_PENCIL_FILL = 1,
+  GEO_NODE_GREASE_PENCIL_BOTH = 2,
+};
+
 struct bNodeStack {
   float vec[4] = {};
   float min = 0, max = 0;
@@ -2037,6 +2058,7 @@ struct bNode {
   int index() const;
   StringRefNull label_or_name() const;
   bool is_muted() const;
+  bool is_selected() const;
   bool is_reroute() const;
   bool is_frame() const;
   bool is_group() const;
@@ -2056,7 +2078,7 @@ struct bNode {
 
   const nodes::NodeDeclaration *declaration() const;
   /** A span containing all internal links when the node is muted. */
-  Span<bNodeLink> internal_links() const;
+  Span<bNodeInternalLink> internal_links() const;
 
   /* This node is reroute which is not logically connected to any source of value. */
   bool is_dangling_reroute() const;
@@ -2199,7 +2221,11 @@ struct bNodeTree {
   /** Width of the current view. Used to store and set zoom level. */
   float view_width = 0.0f;
 
-  char _pad[4];
+  /**
+   * Seed used when generating the next #bNode.identifier randomly. Using a more predictable seed
+   * helps keeping .blend files more stable.
+   */
+  uint32_t next_node_identifier_seed = 0;
 
   ListBaseT<bNode> nodes;
   ListBaseT<bNodeLink> links;
@@ -2312,8 +2338,10 @@ struct bNodeTree {
   Span<bNodeLink *> all_links();
   Span<const bNodeLink *> all_links() const;
   /**
-   * Cached toposort of all nodes. If there are cycles, the returned array is not actually a
-   * toposort. However, if a connected component does not contain a cycle, this component is sorted
+   * Cached toposort of all nodes.
+   * As if you go from left to right then for any right node all connected left nodes already being
+   * visited and vice versa. If there are cycles, the returned array is not actually a toposort.
+   * However, if a connected component does not contain a cycle, this component is sorted
    * correctly. Use #has_available_link_cycle to check for cycles.
    */
   Span<bNode *> toposort_left_to_right();
@@ -2777,7 +2805,7 @@ struct NodeDefocus {
 
   char bktype = 0;
   DNA_DEPRECATED char gamco = 0;
-  char no_zbuf = 0;
+  char no_zbuf = 1;
   char _pad0 = {};
   float fstop = 0;
   float maxblur = 0;
@@ -2876,7 +2904,10 @@ struct NodeConvertColorSpace {
   DNA_DEFINE_CXX_METHODS(NodeConvertColorSpace)
 
   char from_color_space[64] = "";
+  char from_interop_id[64] = "";
+
   char to_color_space[64] = "";
+  char to_interop_id[64] = "";
 };
 
 struct NodeCompositorLUT {
@@ -3714,7 +3745,7 @@ struct NodeInputIntVector {
 struct NodeInputColor {
   DNA_DEFINE_CXX_METHODS(NodeInputColor)
 
-  float color[4] = {};
+  float color[4] = {0.5f, 0.5f, 0.5f, 1.0f};
 };
 
 struct NodeInputString {
@@ -4077,7 +4108,7 @@ struct NodeGeometryMergeLayers {
   DNA_DEFINE_CXX_METHODS(NodeGeometryMergeLayers)
 
   /** #MergeLayerMode. */
-  int8_t mode = 0;
+  DNA_DEPRECATED int8_t mode = 0;
 };
 
 struct NodeGeometrySeparateGeometry {
@@ -4116,7 +4147,7 @@ struct NodeGeometryViewer {
 
   /** #eCustomDataType. */
   int8_t data_type_legacy = 0;
-  /** #AttrDomain. */
+  /** #AttrDomainSelection. */
   int8_t domain = 0;
 
   char _pad[2] = {};
@@ -4432,6 +4463,25 @@ struct NodeIndexSwitch {
 #endif
 };
 
+struct CombineListItem {
+  int identifier = 0;
+};
+
+struct NodeCombineList {
+  DNA_DEFINE_CXX_METHODS(NodeCombineList)
+
+  CombineListItem *items = nullptr;
+  int items_num = 0;
+  int next_identifier = 0;
+  eNodeSocketDatatype data_type = {};
+
+  char _pad[6] = {};
+#ifdef __cplusplus
+  Span<CombineListItem> items_span() const;
+  MutableSpan<CombineListItem> items_span();
+#endif
+};
+
 struct GeometryNodeFieldToGridItem {
   eNodeSocketDatatype data_type = {};
   char _pad[2] = {};
@@ -4487,6 +4537,51 @@ struct NodeGeometryDistributePointsInVolume {
   /** #GeometryNodePointDistributeVolumeMode. */
   uint8_t mode = 0;
 };
+
+typedef struct NodeGeometryRasterizePointsItem {
+  char *name;
+  /* #NodeGeometryRasterizePointsItemType */
+  short type;
+  char _pad1[2];
+  /**
+   * Generated unique identifier for sockets which stays the same even when the item order or
+   * names change.
+   */
+  int identifier;
+} NodeGeometryRasterizePointsItem;
+
+/* Note: The field/grid type combination of an item is using this enum instead of a simple
+ * eNodeSocketDatatype. This is because in the future other modes of attribute rasterization will
+ * likely be added, such as
+ *   scalar -> vector gradients
+ *   vector -> scalar divergence
+ *   3x3 matrix -> vector divergence
+ *   full APIC transfer schemes (4x4 matrix -> vector)
+ *
+ * In these modes the input field type does not match the output grid type, so identifying an item
+ * by socket type would require additional mode selection, which is unnecessarily complicated.
+ * A dedicated enum for these modes makes it easier to add such advanced conversions later.
+ */
+typedef enum NodeGeometryRasterizePointsItemType {
+  GEO_NODE_RASTERIZE_POINTS_ITEM_TYPE_SCALAR = 0,
+  GEO_NODE_RASTERIZE_POINTS_ITEM_TYPE_VECTOR = 1,
+} NodeGeometryRasterizePointsItemType;
+
+typedef struct NodeGeometryRasterizePoints {
+  DNA_DEFINE_CXX_METHODS(NodeGeometryRasterizePoints)
+
+  NodeGeometryRasterizePointsItem *items;
+  int items_num;
+  int active_index;
+  /** Identifier to give to the next repeat item. */
+  int next_identifier;
+  char _pad[4];
+
+#ifdef __cplusplus
+  blender::Span<NodeGeometryRasterizePointsItem> items_span() const;
+  blender::MutableSpan<NodeGeometryRasterizePointsItem> items_span();
+#endif
+} NodeGeometryRasterizePoints;
 
 struct NodeFunctionCompare {
   DNA_DEFINE_CXX_METHODS(NodeFunctionCompare)
@@ -4645,6 +4740,20 @@ struct NodeStoreBundleItem {
   eNodeSocketDatatype socket_type = {};
   NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
   char _pad = {};
+};
+
+enum class NodeCommentFlag : uint8_t {
+  /** Whether the text is being edited inside of the node. */
+  Edit = (1 << 0),
+};
+ENUM_OPERATORS(NodeCommentFlag)
+
+struct NodeComment {
+  char *text = nullptr;
+  TextboxState textbox_state_node;
+  TextboxState textbox_state_panel;
+  NodeCommentFlag flag = {};
+  char _pad[7] = {};
 };
 
 }  // namespace blender

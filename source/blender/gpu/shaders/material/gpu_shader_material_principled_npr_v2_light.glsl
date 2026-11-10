@@ -381,7 +381,7 @@ void npr_v2_emitter_response(NPRV2Emitter emitter,
 #ifndef NPR_V2_LIGHT_MATH_ONLY
 #  include "gpu_shader_material_glsl_light_access.glsl"
 
-void npr_v2_light_response(uint light_index,
+void npr_v2_light_response(KernelGlobals &kg, ShadingData &sd, uint light_index,
                            bool is_local,
                            GLSLLight lamp,
                            float3 N,
@@ -425,15 +425,15 @@ void npr_v2_light_response(uint light_index,
   LightData light;
   LightVector lv;
   bool is_directional;
-  if (!glsl_light_lookup(light_index, is_local, light, lv, is_directional)) {
+  if (!glsl_light_lookup(kg, sd, light_index, is_local, light, lv, is_directional)) {
     return;
   }
   /* light_vector_get has an undefined direction exactly at a local light's center.
    * Inside a sphere every direction emits, so any finite frame is equivalent. */
   lv.L = npr_v2_safe_normalize(lv.L, npr_v2_safe_normalize(N, float3(0.0f, 0.0f, 1.0f)));
 
-  bool punctual = is_directional ? light.sun().shadow_angle == 0.0f :
-                  is_point_light(light.type) ? light.local().local.shadow_radius == 0.0f :
+  bool punctual = is_directional ? light_sun_data_get(light).shadow_angle == 0.0f :
+                  is_point_light(light.type) ? light_local_data_get(light).local.shadow_radius == 0.0f :
                                               false;
   if (punctual) {
     float3 intensity = lamp.specular_color * lamp.attenuation;
@@ -463,10 +463,10 @@ void npr_v2_light_response(uint light_index,
     emitter.axis_u = light.x_axis();
     emitter.axis_v = light.y_axis();
     emitter.normal = light.z_axis();
-    emitter.half_size = light.area().size;
+    emitter.half_size = light_area_data_get(light).size;
   }
   else if (is_sphere_light(light.type)) {
-    float radius = light.local().local.shape_radius;
+    float radius = light_local_data_get(light).local.shape_radius;
     if (lv.dist <= radius) {
       /* Match the engine's inside-sphere convention: emission covers every direction. */
       emitter.one_minus_cosine = 2.0f;
@@ -478,8 +478,8 @@ void npr_v2_light_response(uint light_index,
   }
   else {
     /* Native omni/spot DISK is receiver-facing. Sun radius is tan(half-angle) at distance 1. */
-    float tangent_radius = is_directional ? light.sun().shape_radius :
-                                            light.local().local.shape_radius / lv.dist;
+    float tangent_radius = is_directional ? light_sun_data_get(light).shape_radius :
+                                            light_local_data_get(light).local.shape_radius / lv.dist;
     float hypotenuse = sqrt(1.0f + tangent_radius * tangent_radius);
     emitter.one_minus_cosine = tangent_radius * tangent_radius /
                               (hypotenuse * (hypotenuse + 1.0f));
@@ -494,7 +494,7 @@ void npr_v2_light_response(uint light_index,
    * references share this offset. Direction mode and true punctual lights have
    * already returned without reading the accumulation sampler. */
   float2 light_phase = fract(float(light_index + 1u) * float2(0.754877666f, 0.569840291f));
-  float2 sample_offset = fract(sampling_rng_2D_get(SAMPLING_RAYTRACE_U) + light_phase);
+  float2 sample_offset = fract(eevee_sampling_rng_2D_get(SAMPLING_RAYTRACE_U) + light_phase);
   /* The caller needs no reference for the unresized GGX identity with a constant tint.
    * Keep the actual response's complete MIS integral, only omitting unused reference integrals. */
 #      if defined(MAT_NPR_REFERENCE_HIGHLIGHT)

@@ -33,7 +33,7 @@ enum eGPDbrush_Flag : int {
   /* lazy mouse override (internal only) */
   GP_BRUSH_STABILIZE_MOUSE_TEMP = (1 << 9),
   /* deprecated, was default eraser brush for quick switch */
-  GP_BRUSH_DEPRECATED1 = (1 << 10),
+  GP_BRUSH_UNUSED_1 = (1 << 10),
   /* settings group */
   GP_BRUSH_GROUP_SETTINGS = (1 << 11),
   /* Random settings group */
@@ -59,19 +59,21 @@ enum eGPDbrush_Flag : int {
   GP_BRUSH_FILL_AUTO_REMOVE_FILL_GUIDES = (1 << 21),
   /* Fill Tool create internal gaps. */
   GP_BRUSH_FILL_INTERNAL_GAPS = (1 << 22),
+  /* Create a cyclic stroke. */
+  GP_BRUSH_USE_CYCLIC_STROKE = (1 << 23),
 };
 ENUM_OPERATORS(eGPDbrush_Flag)
 
 enum eGPDbrush_Flag2 : int {
   /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_HUE_AT_STROKE */
   /* Brush use random Hue at stroke level */
-  GP_BRUSH_USE_HUE_AT_STROKE = (1 << 0),
+  GP_BRUSH_UNUSED_2 = (1 << 0),
   /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_SAT_AT_STROKE */
   /* Brush use random Saturation at stroke level */
-  GP_BRUSH_USE_SAT_AT_STROKE = (1 << 1),
+  GP_BRUSH_UNUSED_3 = (1 << 1),
   /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_VAL_AT_STROKE */
   /* Brush use random Value at stroke level */
-  GP_BRUSH_USE_VAL_AT_STROKE = (1 << 2),
+  GP_BRUSH_UNUSED_4 = (1 << 2),
   /* Brush use random Pressure at stroke level */
   GP_BRUSH_USE_PRESS_AT_STROKE = (1 << 3),
   /* Brush use random Strength at stroke level */
@@ -80,13 +82,13 @@ enum eGPDbrush_Flag2 : int {
   GP_BRUSH_USE_UV_AT_STROKE = (1 << 5),
   /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_HUE_RAND_PRESS */
   /* Brush use Hue random pressure */
-  GP_BRUSH_USE_HUE_RAND_PRESS = (1 << 6),
+  GP_BRUSH_UNUSED_5 = (1 << 6),
   /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_SAT_RAND_PRESS */
   /* Brush use Saturation random pressure */
-  GP_BRUSH_USE_SAT_RAND_PRESS = (1 << 7),
+  GP_BRUSH_UNUSED_6 = (1 << 7),
   /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_VAL_RAND_PRESS */
   /* Brush use Value random pressure */
-  GP_BRUSH_USE_VAL_RAND_PRESS = (1 << 8),
+  GP_BRUSH_UNUSED_7 = (1 << 8),
   /* Brush use Pressure random pressure */
   GP_BRUSH_USE_PRESSURE_RAND_PRESS = (1 << 9),
   /* Brush use Strength random pressure */
@@ -313,8 +315,10 @@ enum eAutomasking_flag : int {
 ENUM_OPERATORS(eAutomasking_flag)
 
 enum ePaintBrush_flag : int {
-  BRUSH_PAINT_HARDNESS_PRESSURE = (1 << 0),
-  BRUSH_PAINT_HARDNESS_PRESSURE_INVERT = (1 << 1),
+  /* DEPRECATED: see BRUSH_HARDNESS_PRESSURE */
+  BRUSH_PAINT_UNUSED_1 = (1 << 0),
+  /* DEPRECATED: replaced by pressure curves. */
+  BRUSH_PAINT_UNUSED_2 = (1 << 1),
   BRUSH_PAINT_FLOW_PRESSURE = (1 << 2),
   BRUSH_PAINT_FLOW_PRESSURE_INVERT = (1 << 3),
   BRUSH_PAINT_WET_MIX_PRESSURE = (1 << 4),
@@ -351,7 +355,7 @@ enum eBrushStrokeType : int8_t {
 
 /** #Brush.flag */
 enum eBrushFlags : uint32_t {
-  BRUSH_UNUSED_1 = (1 << 0),
+  BRUSH_HARDNESS_PRESSURE = (1 << 0),
   BRUSH_INVERT_TO_SCRAPE_FILL = (1 << 1),
   BRUSH_ALPHA_PRESSURE = (1 << 2),
   BRUSH_SIZE_PRESSURE = (1 << 3),
@@ -375,11 +379,12 @@ enum eBrushFlags : uint32_t {
   BRUSH_USE_GRADIENT = (1 << 21),
   BRUSH_EDGE_TO_EDGE = (1 << 22),
   BRUSH_UNUSED_4 = (1 << 23),
-  BRUSH_INVERSE_SMOOTH_PRESSURE = (1 << 24),
-  BRUSH_FRONTFACE_FALLOFF = (1 << 25),
+  BRUSH_SMOOTH_PRESSURE = (1 << 24),
+  /* Deprecated. To be removed in 6.0 - @Sean-Kim */
+  BRUSH_UNUSED_7 = (1 << 25),
   BRUSH_PLANE_TRIM = (1 << 26),
   BRUSH_FRONTFACE = (1 << 27),
-  /* BRUSH_CUSTOM_ICON = (1 << 28), */
+  BRUSH_UNUSED_8 = (1 << 28),
   BRUSH_UNUSED_5 = (1 << 29),
   BRUSH_ABSOLUTE_JITTER = (1 << 30),
   BRUSH_UNUSED_6 = (1u << 31),
@@ -408,6 +413,16 @@ enum eBrushFlags2 : int {
   BRUSH_PROJECT_USE_BIDIRECTIONAL = (1 << 11),
 };
 ENUM_OPERATORS(eBrushFlags2)
+
+/** #Brush.unified_paint_flags */
+enum eBrushUnifiedPaintFlags : int {
+  BRUSH_USE_UNIFIED_PAINT_SIZE = (1 << 0),
+  BRUSH_USE_UNIFIED_PAINT_ALPHA = (1 << 1),
+  BRUSH_USE_UNIFIED_PAINT_WEIGHT = (1 << 2),
+  BRUSH_USE_UNIFIED_PAINT_COLOR = (1 << 3),
+  BRUSH_USE_UNIFIED_PAINT_INPUT_SAMPLES = (1 << 4),
+};
+ENUM_OPERATORS(eBrushUnifiedPaintFlags)
 
 enum BrushMaskPressureFlags : int {
   BRUSH_MASK_PRESSURE_RAMP = (1 << 1),
@@ -486,6 +501,7 @@ enum eBrushCurvesSculptType : char {
   CURVES_SCULPT_BRUSH_TYPE_PUFF = 8,
   CURVES_SCULPT_BRUSH_TYPE_DENSITY = 9,
   CURVES_SCULPT_BRUSH_TYPE_SLIDE = 10,
+  CURVES_SCULPT_BRUSH_TYPE_CUT = 11,
 };
 
 /** #Brush.image_brush_type */

@@ -13,11 +13,13 @@
 
 #include "BKE_node.hh"
 #include "BKE_node_runtime.hh"
+#include "BKE_node_tree_zones.hh"
 
 #include "NOD_eval_log.hh"
 
 #include "COM_algorithm_compute_preview.hh"
 #include "COM_context.hh"
+#include "COM_node_tree_evaluator.hh"
 #include "COM_operation.hh"
 #include "COM_pixel_operation.hh"
 #include "COM_result.hh"
@@ -27,11 +29,11 @@
 namespace blender::compositor {
 
 PixelOperation::PixelOperation(Context &context,
-                               CompileState &compile_state,
+                               NodeTreeEvaluator &node_tree_evaluator,
                                const ComputeContext &compute_context,
                                const bool is_single_value)
     : Operation(context),
-      compile_state_(compile_state),
+      node_tree_evaluator_(node_tree_evaluator),
       compute_context_(compute_context),
       is_single_value_(is_single_value)
 {
@@ -78,7 +80,7 @@ void PixelOperation::log_data()
   /* All inputs and outputs of pixel operations operate in the same domain, so the operation domain
    * should be logged for all. The exception is inputs that are single values, in which case, their
    * value is simply logged. */
-  for (const bNode *node : compile_state_.get_pixel_compile_unit()) {
+  for (const bNode *node : node_tree_evaluator_.pixel_compile_unit()) {
     /* Log output values. */
     for (const bNodeSocket *output_socket : node->output_sockets()) {
       if (!is_socket_available(output_socket)) {
@@ -102,7 +104,7 @@ void PixelOperation::log_data()
         continue;
       }
 
-      if (compile_state_.get_schedule().unneeded_inputs.contains(input_socket)) {
+      if (node_tree_evaluator_.schedule().unneeded_inputs.contains(input_socket)) {
         continue;
       }
 
@@ -133,15 +135,15 @@ void PixelOperation::log_data()
       /* The input is linked to a node that is inside the pixel operation, so skip it since it will
        * inherit its value from an output that was logged above. */
       const bNodeSocket &linked_output = *input_socket->logically_linked_sockets()[0];
-      if (compile_state_.get_pixel_compile_unit().contains(&linked_output.owner_node())) {
+      if (node_tree_evaluator_.pixel_compile_unit().contains(&linked_output.owner_node())) {
         continue;
       }
 
       /* Otherwise, it is linked to a node that is outside of the compile unit. If it is a single
-       * value, log that single value, if not, we log the operation domain. */
-      const Result &input = compile_state_.get_result_from_output_socket(linked_output);
+       * value, skip it since it will inherit its value from an output that was logged before, if
+       * not, we log the operation domain. */
+      const Result &input = node_tree_evaluator_.get_result_from_output_socket(linked_output);
       if (input.is_single_value()) {
-        tree_logger.log_value(*node, *input_socket, input.single_value());
         continue;
       }
 
@@ -189,31 +191,24 @@ int PixelOperation::get_internal_input_reference_count(const StringRef &identifi
 void PixelOperation::compute_results_reference_counts(const Schedule &schedule)
 {
   for (const auto item : output_sockets_to_output_identifiers_map_.items()) {
-    int reference_count = number_of_inputs_linked_to_output_conditioned(
-        *item.key, [&](const bNodeSocket &input) {
-          /* We only consider inputs that are not part of the pixel operations, because inputs
-           * that are part of the pixel operations are internal and do not deal with the result
-           * directly. */
-          return schedule.nodes.contains(&input.owner_node()) &&
-                 !schedule.unneeded_inputs.contains(&input) &&
-                 !compile_state_.get_pixel_compile_unit().contains(&input.owner_node());
-        });
+    const bNodeSocket &output = *item.key;
+    const std::string identifier = item.value;
 
-    if (preview_outputs_.contains(item.key)) {
+    /* We ignore inputs that are part of the pixel compile unit, because they are internal and do
+     * not deal with the result directly. */
+    int reference_count = compute_output_reference_count(
+        output, schedule, &node_tree_evaluator_.pixel_compile_unit());
+
+    if (preview_outputs_.contains(&output)) {
       reference_count++;
     }
 
-    if (logged_outputs_.contains(item.key)) {
+    if (logged_outputs_.contains(&output)) {
       reference_count++;
     }
 
-    get_result(item.value).set_reference_count(reference_count);
+    this->get_result(identifier).set_reference_count(reference_count);
   }
-}
-
-void PixelOperation::set_needs_node_previews(const bool needed)
-{
-  needs_node_previews_ = needed;
 }
 
 }  // namespace blender::compositor

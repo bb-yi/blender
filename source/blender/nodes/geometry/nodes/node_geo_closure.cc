@@ -6,7 +6,7 @@
 
 #include "node_geometry_util.hh"
 
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "BKE_idprop.hh"
 
@@ -362,7 +362,10 @@ static int gpu_shader_closure_input(GPUMaterial *mat,
     {
       found_callback_input = true;
       const bool extract_xy = callback_type == GPU_VEC3 && out[output_index].type == GPU_VEC2;
-      if ((!extract_xy && callback_type != out[output_index].type) || callback_type == GPU_NONE ||
+      const bool scalar_conversion = callback_type == GPU_FLOAT &&
+                                     ELEM(out[output_index].type, GPU_INT, GPU_BOOL);
+      if ((!extract_xy && !scalar_conversion && callback_type != out[output_index].type) ||
+          callback_type == GPU_NONE ||
           function_input_index < 0)
       {
         GPU_material_closure_callback_input_frame_error_set(
@@ -400,10 +403,20 @@ static int gpu_shader_closure_input(GPUMaterial *mat,
                 std::string(node->output_socket(index).name) + "'");
         return 0;
       }
-      const std::string input_expr = "$OUT = in" +
-                                     std::to_string(binding.function_input_index);
+      std::string input_value = "in" + std::to_string(binding.function_input_index);
+      /* The public callback ABI retains its exact-range float transport. Shader sockets
+       * now use native Int/Bool GPU values, so materialize those explicitly at the boundary. */
+      if (out[index].type == GPU_INT) {
+        input_value = "int(round(" + input_value + "))";
+      }
+      else if (out[index].type == GPU_BOOL) {
+        input_value = "(" + input_value + " != 0.0)";
+      }
+      const std::string input_expr = "$OUT = " + input_value;
       GPUNodeLink *input_link = GPU_function_call(input_expr.c_str());
-      const char *set_function = binding.transport_type == GPU_FLOAT ? "set_value" :
+      const char *set_function = out[index].type == GPU_INT          ? "set_int" :
+                                 out[index].type == GPU_BOOL         ? "set_bool" :
+                                 binding.transport_type == GPU_FLOAT ? "set_value" :
                                  binding.transport_type == GPU_VEC3  ? "set_rgb" :
                                  binding.transport_type == GPU_VEC4  ? "set_rgba" :
                                                                       nullptr;

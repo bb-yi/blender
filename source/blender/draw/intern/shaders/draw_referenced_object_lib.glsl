@@ -4,6 +4,9 @@
 
 #pragma once
 
+#include "draw_model.bsl.hh"
+#include "gpu_shader_common_hash.bsl.hh"
+
 /* Runtime lookup for Object data packed into the existing ObjectAttribute SSBO. */
 
 bool light_shader_parameter_read(uint object_uid, uint key_lo, uint key_hi, uint type, float4 &value)
@@ -15,8 +18,7 @@ bool light_shader_parameter_read(uint object_uid, uint key_lo, uint key_hi, uint
   /* Limit the generated resource guard to this block. Resource-less legacy shaders must keep
    * the explicit false fallback instead of the shader tool's unsupported bool() default. */
   {
-    const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
-    ObjectAttribute header = attrs_buf[DRW_LIGHT_SHADER_PARAMETER_HEADER];
+    ObjectAttribute header = draw_referenced_attribute_get(DRW_LIGHT_SHADER_PARAMETER_HEADER);
     uint offset = floatBitsToUint(header.data_x);
     uint size = floatBitsToUint(header.data_y);
     if (header.hash_code != DRW_LIGHT_SHADER_PARAMETER_MAGIC || size == 0u) {
@@ -24,7 +26,7 @@ bool light_shader_parameter_read(uint object_uid, uint key_lo, uint key_hi, uint
     }
     uint slot = ((object_uid * 1664525u) ^ key_lo ^ key_hi) & (size - 1u);
     for (uint probe = 0u; probe < size; probe++) {
-      ObjectAttribute entry = attrs_buf[offset + slot * 2u];
+      ObjectAttribute entry = draw_referenced_attribute_get(offset + slot * 2u);
       if (entry.hash_code == 0u) {
         return false;
       }
@@ -34,7 +36,7 @@ bool light_shader_parameter_read(uint object_uid, uint key_lo, uint key_hi, uint
         if (floatBitsToUint(entry.data_z) != type) {
           return false;
         }
-        ObjectAttribute payload = attrs_buf[offset + slot * 2u + 1u];
+        ObjectAttribute payload = draw_referenced_attribute_get(offset + slot * 2u + 1u);
         value = float4(payload.data_x, payload.data_y, payload.data_z, payload.data_w);
         return true;
       }
@@ -51,8 +53,7 @@ uint referenced_object_data_find(uint session_uid)
     return invalid_record;
   }
 
-  const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
-  ObjectAttribute header = attrs_buf[0];
+  ObjectAttribute header = draw_referenced_attribute_get(0);
   if (header.hash_code != DRW_REFERENCED_OBJECT_DATA_MAGIC) {
     return invalid_record;
   }
@@ -71,7 +72,7 @@ uint referenced_object_data_find(uint session_uid)
   uint slot = hash_uint2(session_uid, 0u) & (table_size - 1u);
   for (uint probe = 0u; probe < table_size; probe++) {
     const uint record_index = table_offset + slot * record_stride;
-    ObjectAttribute metadata = attrs_buf[record_index];
+    ObjectAttribute metadata = draw_referenced_attribute_get(record_index);
     if (metadata.hash_code == session_uid) {
       return record_index;
     }
@@ -85,7 +86,6 @@ uint referenced_object_data_find(uint session_uid)
 
 ObjectAttribute referenced_object_data_lane_at(uint record_index, uint lane)
 {
-  const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
   if (record_index == 0xFFFFFFFFu || lane >= 10u) {
     ObjectAttribute empty_lane;
     empty_lane.data_x = 0.0f;
@@ -95,7 +95,7 @@ ObjectAttribute referenced_object_data_lane_at(uint record_index, uint lane)
     empty_lane.hash_code = 0u;
     return empty_lane;
   }
-  return attrs_buf[record_index + lane];
+  return draw_referenced_attribute_get(record_index + lane);
 }
 
 ObjectAttribute referenced_object_data_lane(uint session_uid, uint lane)
@@ -109,8 +109,7 @@ uint referenced_object_data_object_type(uint session_uid)
   if (record_index == 0xFFFFFFFFu) {
     return 0u;
   }
-  const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
-  return floatBitsToUint(attrs_buf[record_index].data_x);
+  return floatBitsToUint(draw_referenced_attribute_get(record_index).data_x);
 }
 
 float referenced_object_data_light_type(uint session_uid)
@@ -119,8 +118,7 @@ float referenced_object_data_light_type(uint session_uid)
   if (record_index == 0xFFFFFFFFu) {
     return -1.0f;
   }
-  const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
-  return float(floatBitsToInt(attrs_buf[record_index].data_y));
+  return float(floatBitsToInt(draw_referenced_attribute_get(record_index).data_y));
 }
 
 float3 referenced_object_data_location(uint session_uid)
@@ -129,8 +127,7 @@ float3 referenced_object_data_location(uint session_uid)
   if (record_index == 0xFFFFFFFFu) {
     return float3(0.0f);
   }
-  const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
-  ObjectAttribute lane = attrs_buf[record_index + 4u];
+  ObjectAttribute lane = draw_referenced_attribute_get(record_index + 4u);
   return float3(lane.data_x, lane.data_y, lane.data_z);
 }
 
@@ -140,8 +137,7 @@ float3 referenced_object_data_rotation(uint session_uid)
   if (record_index == 0xFFFFFFFFu) {
     return float3(0.0f);
   }
-  const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
-  ObjectAttribute lane = attrs_buf[record_index + 5u];
+  ObjectAttribute lane = draw_referenced_attribute_get(record_index + 5u);
   return float3(lane.data_x, lane.data_y, lane.data_z);
 }
 
@@ -151,8 +147,7 @@ float3 referenced_object_data_scale(uint session_uid)
   if (record_index == 0xFFFFFFFFu) {
     return float3(1.0f);
   }
-  const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
-  ObjectAttribute lane = attrs_buf[record_index + 6u];
+  ObjectAttribute lane = draw_referenced_attribute_get(record_index + 6u);
   return float3(lane.data_x, lane.data_y, lane.data_z);
 }
 
@@ -162,8 +157,7 @@ float4 referenced_object_data_color(uint session_uid)
   if (record_index == 0xFFFFFFFFu) {
     return float4(0.0f);
   }
-  const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
-  ObjectAttribute lane = attrs_buf[record_index + 7u];
+  ObjectAttribute lane = draw_referenced_attribute_get(record_index + 7u);
   return float4(lane.data_x, lane.data_y, lane.data_z, lane.data_w);
 }
 
@@ -173,8 +167,7 @@ float4 referenced_object_data_light_payload(uint session_uid)
   if (record_index == 0xFFFFFFFFu) {
     return float4(0.0f);
   }
-  const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
-  ObjectAttribute lane = attrs_buf[record_index + 8u];
+  ObjectAttribute lane = draw_referenced_attribute_get(record_index + 8u);
   return float4(lane.data_x, lane.data_y, lane.data_z, lane.data_w);
 }
 
@@ -184,8 +177,7 @@ float4 referenced_object_data_light_shape(uint session_uid)
   if (record_index == 0xFFFFFFFFu) {
     return float4(0.0f);
   }
-  const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
-  ObjectAttribute lane = attrs_buf[record_index + 9u];
+  ObjectAttribute lane = draw_referenced_attribute_get(record_index + 9u);
   return float4(lane.data_x, lane.data_y, lane.data_z, lane.data_w);
 }
 
@@ -195,6 +187,5 @@ float referenced_object_data_visible(uint session_uid)
   if (record_index == 0xFFFFFFFFu) {
     return 0.0f;
   }
-  const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
-  return floatBitsToUint(attrs_buf[record_index].data_z) == 0u ? 1.0f : 0.0f;
+  return floatBitsToUint(draw_referenced_attribute_get(record_index).data_z) == 0u ? 1.0f : 0.0f;
 }

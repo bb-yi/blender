@@ -15,7 +15,7 @@
 
 #include "../blenlib/BLI_enum_flags.hh"
 #include "../blenlib/BLI_function_ref.hh"
-#include "../blenlib/BLI_sys_types.h"
+#include "../blenlib/BLI_sys_types.hh"
 #include "../blenlib/BLI_vector.hh"
 
 namespace blender {
@@ -42,16 +42,28 @@ struct AncestorPointerRNA {
 constexpr int64_t ANCESTOR_POINTERRNA_DEFAULT_SIZE = 2;
 
 /**
- * Pointer
+ * RNA pointers are not a single C pointer but include additional information. This allows
+ * e.g. computing rna paths or triggering updates after changes.
  *
- * RNA pointers are not a single C pointer but include the type,
- * and a pointer to the ID struct that owns the struct, since
- * in some cases this information is needed to correctly get/set
- * the properties and validate them. */
+ * Null-checks should generally not check the data members directly but use the provided API
+ * (including the implicit to-bool-conversion).
+ */
 
 struct PointerRNA {
+  /**
+   * The ID owning the referenced data. May be null when there is no owner ID. Generally, whenever
+   * these is an owner ID this should be set though for things like rna paths and ancestors to
+   * work.
+   */
   ID *owner_id = nullptr;
+  /**
+   * Type of the referenced data. If there is any data, this has to be set. This may also be set in
+   * some cases even if the data is null, leading to a "typed null" which is used in some cases.
+   */
   StructRNA *type = nullptr;
+  /**
+   * Actual referenced data of the given #type. If set, the #type must also be set.
+   */
   void *data = nullptr;
 
   /**
@@ -77,6 +89,7 @@ struct PointerRNA {
    */
   Vector<AncestorPointerRNA, ANCESTOR_POINTERRNA_DEFAULT_SIZE> ancestors = {};
 
+  /** Default constructor creates the equivalent of a null pointer. */
   PointerRNA() = default;
   PointerRNA(const PointerRNA &) = default;
   PointerRNA(PointerRNA &&) = default;
@@ -97,7 +110,7 @@ struct PointerRNA {
   {
   }
 
-  /** Reset the pointer to its initial empty state, such that it equals to PointerRNA_NULL. */
+  /** Reset the pointer to its initial empty state which is equivalent to a null pointer. */
   void reset()
   {
     *this = {};
@@ -139,9 +152,42 @@ struct PointerRNA {
 
     return PointerRNA(owner_id, ancestors.last().type, ancestors.last().data);
   }
-};
 
-extern const PointerRNA PointerRNA_NULL;
+  /**
+   * Evaluates to true if data is set. In this case, the type must also be set.
+   * This is similar how raw pointers are std::optional cast to bool.
+   */
+  operator bool() const
+  {
+    return this->has_data();
+  }
+
+  /**
+   * True when #data is set.
+   * If #data is set, #type is expected to be set as well.
+   */
+  bool has_data() const
+  {
+    /* If there is data, there should also be a type. */
+    BLI_assert(!this->data || this->type);
+    return this->data != nullptr;
+  }
+
+  /**
+   * True when the type is set.
+   * The data may still be null.
+   */
+  bool has_type() const
+  {
+    return this->type != nullptr;
+  }
+
+  /** True when #owner_id is set. */
+  bool has_owner_id() const
+  {
+    return this->owner_id != nullptr;
+  }
+};
 
 struct PropertyPointerRNA {
   PointerRNA ptr = {};
@@ -238,15 +284,24 @@ enum PropertySubType {
   PROP_FILEPATH = 1,
   PROP_DIRPATH = 2,
   PROP_FILENAME = 3,
-  /** A string which should be represented as bytes in python, NULL terminated though. */
+  /**
+   * A string which should be represented as bytes in python, NULL terminated though.
+   *
+   * WARNING: Default generated RNA accessor code will treat the underlying data as a regular
+   * C string (using `strlen` e.g. to get its length). If the bytes array may contain null chars,
+   * the RNA property _must_ have custom accessors defined (through
+   * #RNA_def_property_string_funcs).
+   */
   PROP_BYTESTRING = 4,
   /* 5 was used by "PROP_TRANSLATE" sub-type, which is now a flag. */
   /** A string which should not be displayed in UI. */
   PROP_PASSWORD = 6,
 
   /* numbers */
-  /** A dimension in pixel units, possibly before DPI scaling (so value may not be the final pixel
-   * value but the one to apply DPI scale to). */
+  /**
+   * A dimension in pixel units, possibly before DPI scaling (so value may not be the final pixel
+   * value but the one to apply DPI scale to).
+   */
   PROP_PIXEL = 12,
   PROP_UNSIGNED = 13,
   PROP_PERCENTAGE = 14,
@@ -311,8 +366,8 @@ inline int operator&(const PropertySubType subtype, const PropertyUnit unit)
 
 /* Make sure enums are updated with these */
 /* HIGHEST FLAG IN USE: 1u << 31
- * FREE FLAGS: 13. */
-enum PropertyFlag {
+ * FREE FLAGS: NONE. */
+enum PropertyFlag : uint32_t {
   /**
    * Editable means the property is editable in the user
    * interface, properties are editable by default except
@@ -489,6 +544,13 @@ enum PropertyFlag {
 
   /** Use full geometry depsgraph evaluation when this property changes. */
   PROP_FORCE_GEOMETRY_EVAL = (1 << 3),
+
+  /**
+   * When set, this property always performs an undo,
+   * even when #STRUCT_UNDO is unset on the struct it contains.
+   */
+  PROP_FORCE_UNDO = (1 << 13),
+
 };
 ENUM_OPERATORS(PropertyFlag)
 
@@ -508,6 +570,11 @@ enum PropertyPathTemplateType {
    *
    * \see BKE_add_template_variables_for_render_path() */
   PROP_VARIABLES_RENDER_OUTPUT,
+
+  /* Supports only project variables, for project settings.
+   *
+   * \see BKE_add_template_variables_for_project() */
+  PROP_VARIABLES_PROJECT,
 };
 
 /**
@@ -516,7 +583,7 @@ enum PropertyPathTemplateType {
  *
  * FREE FLAGS: 2, 3, 4, 5, 6, 7, 8, 9, 12 and above.
  */
-enum PropertyOverrideFlag {
+enum PropertyOverrideFlag : int32_t {
   /** Means that the property can be overridden by a local override of some linked datablock. */
   PROPOVERRIDE_OVERRIDABLE_LIBRARY = (1 << 0),
 
@@ -537,7 +604,8 @@ enum PropertyOverrideFlag {
    * system. It is used for example for ID's names, since we cannot prevent local override to
    * get a different name from the linked reference, and ID names are 'rna name property' (i.e. are
    * used in overrides of collections of IDs). See also `BKE_lib_override_library_update()` where
-   * we deal manually with the value of that property at DNA level. */
+   * we deal manually with the value of that property at DNA level.
+   */
   PROPOVERRIDE_IGNORE = (1 << 2),
 
   /*** Collections-related ***/
@@ -559,7 +627,7 @@ ENUM_OPERATORS(PropertyOverrideFlag);
  * Function parameters flags.
  * \warning 16bits only.
  */
-enum ParameterFlag {
+enum ParameterFlag : int16_t {
   PARM_REQUIRED = (1 << 0),
   PARM_OUTPUT = (1 << 1),
   PARM_RNAPTR = (1 << 2),
@@ -904,7 +972,7 @@ struct ParameterDynAlloc {
  *             <other RNA-defined parameters>);
  * </pre>
  */
-enum FunctionFlag {
+enum FunctionFlag : int32_t {
   /**
    * Pass ID owning 'self' data
    * (i.e. ptr->owner_id, might be same as self in case data is an ID...).
@@ -964,6 +1032,7 @@ enum FunctionFlag {
    */
   FUNC_FREE_POINTERS = (1 << 10),
 };
+ENUM_OPERATORS(FunctionFlag)
 
 using CallFunc = void (*)(bContext *C, ReportList *reports, PointerRNA *ptr, ParameterList *parms);
 
@@ -971,7 +1040,7 @@ struct FunctionRNA;
 
 /* Struct */
 
-enum StructFlag {
+enum StructFlag : int32_t {
   /** Indicates that this struct is an ID struct. */
   STRUCT_ID = (1 << 0),
   /**
@@ -980,7 +1049,12 @@ enum StructFlag {
    * assigned).
    */
   STRUCT_ID_REFCOUNT = (1 << 1),
-  /** defaults on, indicates when changes in members of a StructRNA should trigger undo steps. */
+  /**
+   * Defaults on, indicates when changes in members of a StructRNA should trigger undo steps.
+   *
+   * \note When unset (disabling undo)
+   * this can still be overridden per-property using the #PROP_FORCE_UNDO flag.
+   */
   STRUCT_UNDO = (1 << 2),
 
   /* internal flags */
@@ -1003,7 +1077,19 @@ enum StructFlag {
    * So accessing the property should not read from the current context to derive values/limits.
    */
   STRUCT_NO_CONTEXT_WITHOUT_OWNER_ID = (1 << 11),
+  /**
+   * Set on the RNA definition meta-types (`Struct`, `Property` and their sub-types).
+   *
+   * A #PointerRNA of such a type refers to an RNA type/property *definition*,
+   * never to actual data, so its data callbacks must not be run.
+   * In this case #PointerRNA.data is the definition itself: a #StructRNA for a `Struct`
+   * type, a #PropertyRNA for a `Property` type (not the DNA data such a callback expects).
+   * A more efficient alternative to walking the type hierarchy
+   * checking for Struct or Property types, see: #161362.
+   */
+  STRUCT_RNA_DEFINITION = (1 << 12),
 };
+ENUM_OPERATORS(StructFlag)
 
 using StructValidateFunc = int (*)(PointerRNA *ptr, void *data, bool *have_function);
 using StructCallbackFunc = int (*)(bContext *C,
@@ -1057,7 +1143,11 @@ struct ExtensionRNA {
 struct DeprecatedRNA {
   /** Single line deprecation message, suggest alternatives where possible. */
   const char *note;
-  /** The released version this was deprecated. */
+  /**
+   * The released version this was deprecated.
+   * The value represents major, minor versions (sub-version isn't supported).
+   * Compatible with #Main::versionfile (e.g. `502` for `v5.2`).
+   */
   short version;
   /**
    * The version this will be removed.

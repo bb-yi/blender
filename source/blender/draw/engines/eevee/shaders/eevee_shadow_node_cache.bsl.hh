@@ -148,7 +148,7 @@ struct Surface {
         LightData world_sun = lrd.sunlight_buf[i];
         if (reduce_max(abs(world_sun.color)) > 0.0f &&
             length(light.color - world_sun.color) < 1e-4f &&
-            dot(light.sun().direction, world_sun.object_to_world.z_axis()) > 0.9999f)
+            dot(light.sun.direction, world_sun.object_to_world.z_axis()) > 0.9999f)
         {
           continue;
         }
@@ -157,11 +157,11 @@ struct Surface {
         continue;
       }
       bool soft = is_sun_light(light.type) ?
-                      light.sun().shadow_angle > 0.0f :
+                      light.sun.shadow_angle > 0.0f :
                   is_area_light(light.type) ?
-                      light.area().shadow_scale > 0.0f :
+                      light.area.shadow_scale > 0.0f :
                       (light.type == LIGHT_OMNI_SPHERE || light.type == LIGHT_OMNI_DISK) &&
-                          light.local().local.shadow_radius > 0.0f;
+                          light.local.local.shadow_radius > 0.0f;
       if (soft && selected++ == cache_layer) {
         return index;
       }

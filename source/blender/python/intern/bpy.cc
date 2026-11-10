@@ -16,9 +16,9 @@
 #include <Python.h>
 #include <optional>
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_string_utils.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BKE_appdir.hh"
 #include "BKE_blender_version.h"
@@ -129,7 +129,7 @@ static PyObject *bpy_blend_paths(PyObject * /*self*/, PyObject *args, PyObject *
 
   static const char *_keywords[] = {"absolute", "packed", "local", nullptr};
   static _PyArg_Parser _parser = {
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "O&" /* `absolute` */
       "O&" /* `packed` */
       "O&" /* `local` */
@@ -236,7 +236,7 @@ static PyObject *bpy_user_resource(PyObject * /*self*/, PyObject *args, PyObject
   static const char *_keywords[] = {"type", "path", nullptr};
   static _PyArg_Parser _parser = {
       "O&" /* `type` */
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "O&" /* `path` */
       ":user_resource",
       _keywords,
@@ -289,7 +289,7 @@ static PyObject *bpy_system_resource(PyObject * /*self*/, PyObject *args, PyObje
   static const char *_keywords[] = {"type", "path", nullptr};
   static _PyArg_Parser _parser = {
       "O&" /* `type` */
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "O&" /* `path` */
       ":system_resource",
       _keywords,
@@ -352,7 +352,7 @@ static PyObject *bpy_resource_path(PyObject * /*self*/, PyObject *args, PyObject
   static const char *_keywords[] = {"type", "major", "minor", nullptr};
   static _PyArg_Parser _parser = {
       "O&" /* `type` */
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "O&" /* `major` */
       "O&" /* `minor` */
       ":resource_path",
@@ -406,8 +406,8 @@ static PyObject *bpy_driver_secure_code_test(PyObject * /*self*/, PyObject *args
   bool verbose = false;
   static const char *_keywords[] = {"code", "namespace", "verbose", nullptr};
   static _PyArg_Parser _parser = {
-      "O!" /* `expression` */
-      "|$" /* Optional keyword only arguments. */
+      "O!" /* `code` */
+      "|$" /* Optional, keyword only arguments. */
       "O&" /* `namespace` */
       "O&" /* `verbose` */
       ":driver_secure_code_test",
@@ -492,7 +492,8 @@ static PyObject *bpy_unescape_identifier(PyObject * /*self*/, PyObject *value)
 
   const size_t size = value_str_len + 1;
   char *value_unescape_str = static_cast<char *>(PyMem_MALLOC(size));
-  const Py_ssize_t value_unescape_str_len = BLI_str_unescape(value_unescape_str, value_str, size);
+  const Py_ssize_t value_unescape_str_len = BLI_str_unescape(
+      value_unescape_str, value_str, value_str_len);
 
   PyObject *value_unescape;
   if (value_unescape_str_len == value_str_len) {
@@ -644,7 +645,7 @@ static PyObject *bpy_wm_capabilities(PyObject *self)
       const eWM_CapabilitiesFlag flag = WM_capabilities_flag();
 
 #define SetFlagItem(x) \
-  PyDict_SetItemString(result, STRINGIFY(x), PyBool_FromLong((WM_CAPABILITY_##x) & flag));
+  PyDict_SetItemString(result, STRINGIFY(x), ((WM_CAPABILITY_##x) & flag) ? Py_True : Py_False);
 
       /* Only exposed flags which are used, by Blender's built-in scripts
        * since this is a private API. */

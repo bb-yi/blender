@@ -14,8 +14,8 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_array.hh"
-#include "BLI_math_vector.h"
-#include "BLI_utildefines_stack.h"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines_stack.hh"
 
 #include "BKE_customdata.hh"
 
@@ -84,7 +84,7 @@ void bmo_offset_edgeloops_exec(BMesh *bm, BMOperator *op)
 
   BM_mesh_elem_hflag_disable_all(bm, BM_VERT | BM_EDGE | BM_FACE, BM_ELEM_TAG, false);
 
-  /* over alloc */
+  /* Over allocate. */
   verts = MEM_new_array_uninitialized<BMVert *>((edges_num * 2), __func__);
 
   STACK_INIT(verts, (edges_num * 2));
@@ -128,7 +128,7 @@ void bmo_offset_edgeloops_exec(BMesh *bm, BMOperator *op)
   }
 
   /* possible but unlikely we have no mixed vertices */
-  if (UNLIKELY(STACK_SIZE(verts) == 0)) {
+  if (STACK_SIZE(verts) == 0) [[unlikely]] {
     MEM_delete(verts);
     return;
   }

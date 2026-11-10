@@ -6,6 +6,7 @@
  * \ingroup bke
  */
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,12 +22,12 @@
 #include "DNA_sdna_type_ids.hh"
 #include "DNA_texture_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_rotation.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -124,22 +125,16 @@ static void linestyle_free_data(ID *id)
     linestyle->nodetree = nullptr;
   }
 
-  while ((linestyle_modifier = static_cast<LineStyleModifier *>(linestyle->color_modifiers.first)))
-  {
+  while ((linestyle_modifier = linestyle->color_modifiers.first())) {
     BKE_linestyle_color_modifier_remove(linestyle, linestyle_modifier);
   }
-  while ((linestyle_modifier = static_cast<LineStyleModifier *>(linestyle->alpha_modifiers.first)))
-  {
+  while ((linestyle_modifier = linestyle->alpha_modifiers.first())) {
     BKE_linestyle_alpha_modifier_remove(linestyle, linestyle_modifier);
   }
-  while ((
-      linestyle_modifier = static_cast<LineStyleModifier *>(linestyle->thickness_modifiers.first)))
-  {
+  while ((linestyle_modifier = linestyle->thickness_modifiers.first())) {
     BKE_linestyle_thickness_modifier_remove(linestyle, linestyle_modifier);
   }
-  while (
-      (linestyle_modifier = static_cast<LineStyleModifier *>(linestyle->geometry_modifiers.first)))
-  {
+  while ((linestyle_modifier = linestyle->geometry_modifiers.first())) {
     BKE_linestyle_geometry_modifier_remove(linestyle, linestyle_modifier);
   }
 }
@@ -488,10 +483,9 @@ static void linestyle_blend_write(BlendWriter *writer, ID *id, const void *id_ad
   }
   if (linestyle->nodetree) {
     BLO_Write_IDBuffer temp_embedded_id_buffer{linestyle->nodetree->id, writer};
-    writer->write_struct_at_address_cast<bNodeTree>(linestyle->nodetree,
-                                                    temp_embedded_id_buffer.get());
-    bke::node_tree_blend_write(writer,
-                               reinterpret_cast<bNodeTree *>(temp_embedded_id_buffer.get()));
+    bNodeTree *temp_ntree = reinterpret_cast<bNodeTree *>(temp_embedded_id_buffer.get());
+    writer->write_embedded_id_struct(linestyle->nodetree, temp_ntree);
+    bke::node_tree_blend_write(writer, temp_ntree);
   }
 }
 
@@ -678,23 +672,39 @@ static void direct_link_linestyle_geometry_modifier(BlendDataReader * /*reader*/
 {
 }
 
+static size_t color_modifier_struct_size(eLineStyleModifier_Type type);
+static size_t alpha_modifier_struct_size(eLineStyleModifier_Type type);
+static size_t thickness_modifier_struct_size(eLineStyleModifier_Type type);
+static size_t geometry_modifier_struct_size(eLineStyleModifier_Type type);
+
+static void linestyle_modifiers_read(BlendDataReader *reader,
+                                     ListBaseT<LineStyleModifier> *modifiers,
+                                     size_t (*struct_size)(eLineStyleModifier_Type))
+{
+  BLO_read_struct_list_with_type_size<LineStyleModifier>(
+      reader, modifiers, [&](const LineStyleModifier &modifier) {
+        return std::max(struct_size(modifier.type), sizeof(LineStyleModifier));
+      });
+}
+
 static void linestyle_blend_read_data(BlendDataReader *reader, ID *id)
 {
   FreestyleLineStyle *linestyle = id_cast<FreestyleLineStyle *>(id);
 
-  BLO_read_struct_list(reader, LineStyleModifier, &linestyle->color_modifiers);
+  linestyle_modifiers_read(reader, &linestyle->color_modifiers, color_modifier_struct_size);
   for (LineStyleModifier &modifier : linestyle->color_modifiers) {
     direct_link_linestyle_color_modifier(reader, &modifier);
   }
-  BLO_read_struct_list(reader, LineStyleModifier, &linestyle->alpha_modifiers);
+  linestyle_modifiers_read(reader, &linestyle->alpha_modifiers, alpha_modifier_struct_size);
   for (LineStyleModifier &modifier : linestyle->alpha_modifiers) {
     direct_link_linestyle_alpha_modifier(reader, &modifier);
   }
-  BLO_read_struct_list(reader, LineStyleModifier, &linestyle->thickness_modifiers);
+  linestyle_modifiers_read(
+      reader, &linestyle->thickness_modifiers, thickness_modifier_struct_size);
   for (LineStyleModifier &modifier : linestyle->thickness_modifiers) {
     direct_link_linestyle_thickness_modifier(reader, &modifier);
   }
-  BLO_read_struct_list(reader, LineStyleModifier, &linestyle->geometry_modifiers);
+  linestyle_modifiers_read(reader, &linestyle->geometry_modifiers, geometry_modifier_struct_size);
   for (LineStyleModifier &modifier : linestyle->geometry_modifiers) {
     direct_link_linestyle_geometry_modifier(reader, &modifier);
   }
@@ -723,6 +733,7 @@ IDTypeInfo IDType_ID_LS = {
     .foreach_cache = nullptr,
     .foreach_path = nullptr,
     .foreach_working_space_color = linestyle_foreach_working_space_color,
+    .foreach_asset_weak_reference = nullptr,
     .owner_pointer_get = nullptr,
 
     .blend_write = linestyle_blend_write,
@@ -789,39 +800,36 @@ static void add_to_modifier_list(ListBaseT<LineStyleModifier> *lb, LineStyleModi
       lb, m, modifier_name[m->type], '.', offsetof(LineStyleModifier, name), sizeof(m->name));
 }
 
-static LineStyleModifier *alloc_color_modifier(const char *name, eLineStyleModifier_Type type)
+static size_t color_modifier_struct_size(const eLineStyleModifier_Type type)
 {
-  size_t size;
-
   switch (type) {
     case LS_MODIFIER_ALONG_STROKE:
-      size = sizeof(LineStyleColorModifier_AlongStroke);
-      break;
+      return sizeof(LineStyleColorModifier_AlongStroke);
     case LS_MODIFIER_DISTANCE_FROM_CAMERA:
-      size = sizeof(LineStyleColorModifier_DistanceFromCamera);
-      break;
+      return sizeof(LineStyleColorModifier_DistanceFromCamera);
     case LS_MODIFIER_DISTANCE_FROM_OBJECT:
-      size = sizeof(LineStyleColorModifier_DistanceFromObject);
-      break;
+      return sizeof(LineStyleColorModifier_DistanceFromObject);
     case LS_MODIFIER_MATERIAL:
-      size = sizeof(LineStyleColorModifier_Material);
-      break;
+      return sizeof(LineStyleColorModifier_Material);
     case LS_MODIFIER_TANGENT:
-      size = sizeof(LineStyleColorModifier_Tangent);
-      break;
+      return sizeof(LineStyleColorModifier_Tangent);
     case LS_MODIFIER_NOISE:
-      size = sizeof(LineStyleColorModifier_Noise);
-      break;
+      return sizeof(LineStyleColorModifier_Noise);
     case LS_MODIFIER_CREASE_ANGLE:
-      size = sizeof(LineStyleColorModifier_CreaseAngle);
-      break;
+      return sizeof(LineStyleColorModifier_CreaseAngle);
     case LS_MODIFIER_CURVATURE_3D:
-      size = sizeof(LineStyleColorModifier_Curvature_3D);
-      break;
+      return sizeof(LineStyleColorModifier_Curvature_3D);
     default:
-      return nullptr; /* unknown modifier type */
+      return 0; /* unknown modifier type */
   }
+}
 
+static LineStyleModifier *alloc_color_modifier(const char *name, eLineStyleModifier_Type type)
+{
+  const size_t size = color_modifier_struct_size(type);
+  if (size == 0) {
+    return nullptr;
+  }
   return new_modifier(name, type, size);
 }
 
@@ -832,7 +840,7 @@ LineStyleModifier *BKE_linestyle_color_modifier_add(FreestyleLineStyle *linestyl
   LineStyleModifier *m;
 
   m = alloc_color_modifier(name, type);
-  if (UNLIKELY(m == nullptr)) {
+  if (m == nullptr) [[unlikely]] {
     return nullptr;
   }
   m->blend = LS_VALUE_BLEND;
@@ -898,7 +906,7 @@ LineStyleModifier *BKE_linestyle_color_modifier_copy(FreestyleLineStyle *linesty
   LineStyleModifier *new_m;
 
   new_m = alloc_color_modifier(m->name, m->type);
-  if (UNLIKELY(new_m == nullptr)) {
+  if (new_m == nullptr) [[unlikely]] {
     return nullptr;
   }
   new_m->influence = m->influence;
@@ -1036,37 +1044,35 @@ int BKE_linestyle_color_modifier_remove(FreestyleLineStyle *linestyle, LineStyle
   return 0;
 }
 
-static LineStyleModifier *alloc_alpha_modifier(const char *name, eLineStyleModifier_Type type)
+static size_t alpha_modifier_struct_size(const eLineStyleModifier_Type type)
 {
-  size_t size;
-
   switch (type) {
     case LS_MODIFIER_ALONG_STROKE:
-      size = sizeof(LineStyleAlphaModifier_AlongStroke);
-      break;
+      return sizeof(LineStyleAlphaModifier_AlongStroke);
     case LS_MODIFIER_DISTANCE_FROM_CAMERA:
-      size = sizeof(LineStyleAlphaModifier_DistanceFromCamera);
-      break;
+      return sizeof(LineStyleAlphaModifier_DistanceFromCamera);
     case LS_MODIFIER_DISTANCE_FROM_OBJECT:
-      size = sizeof(LineStyleAlphaModifier_DistanceFromObject);
-      break;
+      return sizeof(LineStyleAlphaModifier_DistanceFromObject);
     case LS_MODIFIER_MATERIAL:
-      size = sizeof(LineStyleAlphaModifier_Material);
-      break;
+      return sizeof(LineStyleAlphaModifier_Material);
     case LS_MODIFIER_TANGENT:
-      size = sizeof(LineStyleAlphaModifier_Tangent);
-      break;
+      return sizeof(LineStyleAlphaModifier_Tangent);
     case LS_MODIFIER_NOISE:
-      size = sizeof(LineStyleAlphaModifier_Noise);
-      break;
+      return sizeof(LineStyleAlphaModifier_Noise);
     case LS_MODIFIER_CREASE_ANGLE:
-      size = sizeof(LineStyleAlphaModifier_CreaseAngle);
-      break;
+      return sizeof(LineStyleAlphaModifier_CreaseAngle);
     case LS_MODIFIER_CURVATURE_3D:
-      size = sizeof(LineStyleAlphaModifier_Curvature_3D);
-      break;
+      return sizeof(LineStyleAlphaModifier_Curvature_3D);
     default:
-      return nullptr; /* unknown modifier type */
+      return 0; /* unknown modifier type */
+  }
+}
+
+static LineStyleModifier *alloc_alpha_modifier(const char *name, eLineStyleModifier_Type type)
+{
+  const size_t size = alpha_modifier_struct_size(type);
+  if (size == 0) {
+    return nullptr;
   }
   return new_modifier(name, type, size);
 }
@@ -1154,6 +1160,9 @@ LineStyleModifier *BKE_linestyle_alpha_modifier_copy(FreestyleLineStyle *linesty
   LineStyleModifier *new_m;
 
   new_m = alloc_alpha_modifier(m->name, m->type);
+  if (new_m == nullptr) [[unlikely]] {
+    return nullptr;
+  }
   new_m->influence = m->influence;
   new_m->flags = m->flags;
   new_m->blend = m->blend;
@@ -1298,42 +1307,38 @@ int BKE_linestyle_alpha_modifier_remove(FreestyleLineStyle *linestyle, LineStyle
   return 0;
 }
 
-static LineStyleModifier *alloc_thickness_modifier(const char *name, eLineStyleModifier_Type type)
+static size_t thickness_modifier_struct_size(const eLineStyleModifier_Type type)
 {
-  size_t size;
-
   switch (type) {
     case LS_MODIFIER_ALONG_STROKE:
-      size = sizeof(LineStyleThicknessModifier_AlongStroke);
-      break;
+      return sizeof(LineStyleThicknessModifier_AlongStroke);
     case LS_MODIFIER_DISTANCE_FROM_CAMERA:
-      size = sizeof(LineStyleThicknessModifier_DistanceFromCamera);
-      break;
+      return sizeof(LineStyleThicknessModifier_DistanceFromCamera);
     case LS_MODIFIER_DISTANCE_FROM_OBJECT:
-      size = sizeof(LineStyleThicknessModifier_DistanceFromObject);
-      break;
+      return sizeof(LineStyleThicknessModifier_DistanceFromObject);
     case LS_MODIFIER_MATERIAL:
-      size = sizeof(LineStyleThicknessModifier_Material);
-      break;
+      return sizeof(LineStyleThicknessModifier_Material);
     case LS_MODIFIER_CALLIGRAPHY:
-      size = sizeof(LineStyleThicknessModifier_Calligraphy);
-      break;
+      return sizeof(LineStyleThicknessModifier_Calligraphy);
     case LS_MODIFIER_TANGENT:
-      size = sizeof(LineStyleThicknessModifier_Tangent);
-      break;
+      return sizeof(LineStyleThicknessModifier_Tangent);
     case LS_MODIFIER_NOISE:
-      size = sizeof(LineStyleThicknessModifier_Noise);
-      break;
+      return sizeof(LineStyleThicknessModifier_Noise);
     case LS_MODIFIER_CREASE_ANGLE:
-      size = sizeof(LineStyleThicknessModifier_CreaseAngle);
-      break;
+      return sizeof(LineStyleThicknessModifier_CreaseAngle);
     case LS_MODIFIER_CURVATURE_3D:
-      size = sizeof(LineStyleThicknessModifier_Curvature_3D);
-      break;
+      return sizeof(LineStyleThicknessModifier_Curvature_3D);
     default:
-      return nullptr; /* unknown modifier type */
+      return 0; /* unknown modifier type */
   }
+}
 
+static LineStyleModifier *alloc_thickness_modifier(const char *name, eLineStyleModifier_Type type)
+{
+  const size_t size = thickness_modifier_struct_size(type);
+  if (size == 0) {
+    return nullptr;
+  }
   return new_modifier(name, type, size);
 }
 
@@ -1623,57 +1628,48 @@ int BKE_linestyle_thickness_modifier_remove(FreestyleLineStyle *linestyle, LineS
   return 0;
 }
 
-static LineStyleModifier *alloc_geometry_modifier(const char *name, eLineStyleModifier_Type type)
+static size_t geometry_modifier_struct_size(const eLineStyleModifier_Type type)
 {
-  size_t size;
-
   switch (type) {
     case LS_MODIFIER_SAMPLING:
-      size = sizeof(LineStyleGeometryModifier_Sampling);
-      break;
+      return sizeof(LineStyleGeometryModifier_Sampling);
     case LS_MODIFIER_BEZIER_CURVE:
-      size = sizeof(LineStyleGeometryModifier_BezierCurve);
-      break;
+      return sizeof(LineStyleGeometryModifier_BezierCurve);
     case LS_MODIFIER_SINUS_DISPLACEMENT:
-      size = sizeof(LineStyleGeometryModifier_SinusDisplacement);
-      break;
+      return sizeof(LineStyleGeometryModifier_SinusDisplacement);
     case LS_MODIFIER_SPATIAL_NOISE:
-      size = sizeof(LineStyleGeometryModifier_SpatialNoise);
-      break;
+      return sizeof(LineStyleGeometryModifier_SpatialNoise);
     case LS_MODIFIER_PERLIN_NOISE_1D:
-      size = sizeof(LineStyleGeometryModifier_PerlinNoise1D);
-      break;
+      return sizeof(LineStyleGeometryModifier_PerlinNoise1D);
     case LS_MODIFIER_PERLIN_NOISE_2D:
-      size = sizeof(LineStyleGeometryModifier_PerlinNoise2D);
-      break;
+      return sizeof(LineStyleGeometryModifier_PerlinNoise2D);
     case LS_MODIFIER_BACKBONE_STRETCHER:
-      size = sizeof(LineStyleGeometryModifier_BackboneStretcher);
-      break;
+      return sizeof(LineStyleGeometryModifier_BackboneStretcher);
     case LS_MODIFIER_TIP_REMOVER:
-      size = sizeof(LineStyleGeometryModifier_TipRemover);
-      break;
+      return sizeof(LineStyleGeometryModifier_TipRemover);
     case LS_MODIFIER_POLYGONIZATION:
-      size = sizeof(LineStyleGeometryModifier_Polygonalization);
-      break;
+      return sizeof(LineStyleGeometryModifier_Polygonalization);
     case LS_MODIFIER_GUIDING_LINES:
-      size = sizeof(LineStyleGeometryModifier_GuidingLines);
-      break;
+      return sizeof(LineStyleGeometryModifier_GuidingLines);
     case LS_MODIFIER_BLUEPRINT:
-      size = sizeof(LineStyleGeometryModifier_Blueprint);
-      break;
+      return sizeof(LineStyleGeometryModifier_Blueprint);
     case LS_MODIFIER_2D_OFFSET:
-      size = sizeof(LineStyleGeometryModifier_2DOffset);
-      break;
+      return sizeof(LineStyleGeometryModifier_2DOffset);
     case LS_MODIFIER_2D_TRANSFORM:
-      size = sizeof(LineStyleGeometryModifier_2DTransform);
-      break;
+      return sizeof(LineStyleGeometryModifier_2DTransform);
     case LS_MODIFIER_SIMPLIFICATION:
-      size = sizeof(LineStyleGeometryModifier_Simplification);
-      break;
+      return sizeof(LineStyleGeometryModifier_Simplification);
     default:
-      return nullptr; /* unknown modifier type */
+      return 0; /* unknown modifier type */
   }
+}
 
+static LineStyleModifier *alloc_geometry_modifier(const char *name, eLineStyleModifier_Type type)
+{
+  const size_t size = geometry_modifier_struct_size(type);
+  if (size == 0) {
+    return nullptr;
+  }
   return new_modifier(name, type, size);
 }
 
@@ -1810,6 +1806,9 @@ LineStyleModifier *BKE_linestyle_geometry_modifier_copy(FreestyleLineStyle *line
   LineStyleModifier *new_m;
 
   new_m = alloc_geometry_modifier(m->name, m->type);
+  if (new_m == nullptr) [[unlikely]] {
+    return nullptr;
+  }
   new_m->flags = m->flags;
 
   switch (m->type) {

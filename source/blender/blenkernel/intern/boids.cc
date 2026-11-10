@@ -15,15 +15,15 @@
 #include "DNA_scene_types.h"
 
 #include "BLI_kdtree.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_base_safe.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_safe.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_rand.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_rand_c.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_boids.h"
 #include "BKE_collision.h"
@@ -1025,7 +1025,7 @@ static bool apply_boid_rule(
 }
 static BoidState *get_boid_state(BoidSettings *boids, ParticleData *pa)
 {
-  BoidState *state = static_cast<BoidState *>(boids->states.first);
+  BoidState *state = boids->states.first();
   BoidParticle *bpa = pa->boid;
 
   for (; state; state = state->next) {
@@ -1035,7 +1035,7 @@ static BoidState *get_boid_state(BoidSettings *boids, ParticleData *pa)
   }
 
   /* for some reason particle isn't at a valid state */
-  state = static_cast<BoidState *>(boids->states.first);
+  state = boids->states.first();
   if (state) {
     bpa->data.state_id = state->id;
   }
@@ -1068,7 +1068,7 @@ void boid_brain(BoidBrainData *bbd, int p, ParticleData *pa)
 
 /* Planned for near future. */
 #if 0
-  BoidCondition *cond = state->conditions.first;
+  BoidCondition *cond = state->conditions.first();
   for (; cond; cond = cond->next) {
     if (boid_condition_is_true(cond)) {
       pa->boid->state_id = cond->state_id;
@@ -1694,7 +1694,7 @@ BoidState *boid_duplicate_state(BoidSettings *boids, BoidState *state)
 void boid_free_settings(BoidSettings *boids)
 {
   if (boids) {
-    BoidState *state = static_cast<BoidState *>(boids->states.first);
+    BoidState *state = boids->states.first();
 
     for (; state; state = state->next) {
       state->rules.free_no_destruct();
@@ -1719,8 +1719,8 @@ BoidSettings *boid_copy_settings(const BoidSettings *boids)
 
     BLI_duplicatelist(&nboids->states, &boids->states);
 
-    state = static_cast<BoidState *>(boids->states.first);
-    nstate = static_cast<BoidState *>(nboids->states.first);
+    state = boids->states.first();
+    nstate = nboids->states.first();
     for (; state; state = state->next, nstate = nstate->next) {
       BLI_duplicatelist(&nstate->rules, &state->rules);
       BLI_duplicatelist(&nstate->conditions, &state->conditions);
@@ -1732,7 +1732,7 @@ BoidSettings *boid_copy_settings(const BoidSettings *boids)
 }
 BoidState *boid_get_current_state(BoidSettings *boids)
 {
-  BoidState *state = static_cast<BoidState *>(boids->states.first);
+  BoidState *state = boids->states.first();
 
   for (; state; state = state->next) {
     if (state->flag & BOIDSTATE_CURRENT) {

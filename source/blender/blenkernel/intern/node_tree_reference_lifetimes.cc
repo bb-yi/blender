@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include <iostream>
 
 #include <fmt/format.h>
@@ -283,7 +287,7 @@ static Vector<ReferenceSetInfo> find_reference_sets(
       for (const rl::AvailableRelation &relation : relations->available_relations) {
         const bNodeSocket &data_socket = node->output_socket(relation.data_output);
         const bNodeSocket &reference_socket = node->output_socket(relation.reference_output);
-        if (!reference_socket.is_available() || !reference_socket.is_available()) {
+        if (!reference_socket.is_available() || !data_socket.is_available()) {
           continue;
         }
         if (!reference_socket.is_directly_linked() || !data_socket.is_directly_linked()) {
@@ -418,9 +422,9 @@ static bool pass_left_to_right(const bNodeTree &tree,
       }
     }
     if (node->is_muted()) {
-      for (const bNodeLink &link : node->internal_links()) {
-        const bNodeSocket &input_socket = *link.fromsock;
-        const bNodeSocket &output_socket = *link.tosock;
+      for (const bNodeInternalLink &link : node->internal_links()) {
+        const bNodeSocket &input_socket = *link.in;
+        const bNodeSocket &output_socket = *link.out;
         if (!input_socket.is_available() || !output_socket.is_available()) {
           continue;
         }
@@ -720,9 +724,9 @@ static bool pass_right_to_left(const bNodeTree &tree,
       }
     }
     if (node->is_muted()) {
-      for (const bNodeLink &link : node->internal_links()) {
-        const bNodeSocket &input_socket = *link.fromsock;
-        const bNodeSocket &output_socket = *link.tosock;
+      for (const bNodeInternalLink &link : node->internal_links()) {
+        const bNodeSocket &input_socket = *link.in;
+        const bNodeSocket &output_socket = *link.out;
         if (!input_socket.is_available() || !output_socket.is_available()) {
           continue;
         }

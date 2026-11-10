@@ -46,7 +46,7 @@ enum eViewLayerEEVEEPassType : int {
   EEVEE_RENDER_PASS_AOV = (1 << 15),
   /*
    * TODO(@jbakker): Clean up conflicting bits after EEVEE has been removed.
-   * #EEVEE_RENDER_PASS_CRYPTOMATTE is for EEVEE, `EEVEE_RENDER_PASS_CRYTPOMATTE_*` are for
+   * #EEVEE_RENDER_PASS_CRYPTOMATTE is for EEVEE, `EEVEE_RENDER_PASS_CRYPTOMATTE_*` are for
    * EEVEE-Next.
    */
   EEVEE_RENDER_PASS_CRYPTOMATTE = (1 << 16),
@@ -56,14 +56,32 @@ enum eViewLayerEEVEEPassType : int {
   EEVEE_RENDER_PASS_VECTOR = (1 << 19),
   EEVEE_RENDER_PASS_TRANSPARENT = (1 << 20),
   EEVEE_RENDER_PASS_POSITION = (1 << 21),
-  EEVEE_RENDER_PASS_OUTLINE = (1 << 22),
+  /*
+   * Set of denoising render passes. The flags are left as zero in DNA and controlled via
+   * eViewLayerEEVEEDenoisingPassCategory.
+   */
+  EEVEE_RENDER_PASS_DENOISING_DEPTH = (1 << 22),
+  EEVEE_RENDER_PASS_DENOISING_NORMAL = (1 << 23),
+  EEVEE_RENDER_PASS_DENOISING_ROUGHNESS = (1 << 24),
+  EEVEE_RENDER_PASS_DENOISING_DIFFUSE_ALBEDO = (1 << 25),
+  EEVEE_RENDER_PASS_DENOISING_SPECULAR_ALBEDO = (1 << 26),
+  EEVEE_RENDER_PASS_OUTLINE = (1 << 27),
   /** Separate final-render instance output, not a Film accumulation pass. */
-  EEVEE_RENDER_PASS_PRE_FX = (1 << 23),
+  EEVEE_RENDER_PASS_PRE_FX = (1 << 28),
   /** Viewport-only debug display. Not stored in #ViewLayerEEVEE.render_passes. */
   EEVEE_RENDER_PASS_STENCIL_VALUE = (1 << 29),
 };
-#define EEVEE_RENDER_PASS_MAX_BIT 23
+#define EEVEE_RENDER_PASS_MAX_BIT 27
 ENUM_OPERATORS(eViewLayerEEVEEPassType)
+
+/** #SceneRenderLayer::passflag */
+enum eViewLayerEEVEEDenoisingPassFlag : uint32_t {
+  /* Can be changed in the future if not all passes should be enabled by the same flag. */
+  EEVEE_DENOISING_PASS_STORE = (1 << 0),
+  /* Whether to use roughness-based weighting for the albedo or split by the BSDF type. */
+  EEVEE_DENOISING_PASS_USE_ALBEDO_ROUGHNESS_WEIGHTING = (1 << 1),
+};
+ENUM_OPERATORS(eViewLayerEEVEEDenoisingPassFlag)
 
 /* #ViewLayer::grease_pencil_flags */
 enum eViewLayerGreasePencilFlags : int {
@@ -256,6 +274,8 @@ struct ViewLayerEEVEE {
   float ambient_occlusion_distance = 10.0f;
   int geometry_lines_disabled = 0;
   int use_pass_geometry_line = 0;
+  int denoising_pass_flags = EEVEE_DENOISING_PASS_USE_ALBEDO_ROUGHNESS_WEIGHTING;
+  char _pad[4] = {};
 };
 
 /** AOV Render-pass definition. */

@@ -2,16 +2,24 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup buttons
+ */
+
+#include <fmt/format.h>
+
 #include "BKE_screen.hh"
 
 #include "BLF_api.hh"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_listbase_iterator.hh"
-#include "BLI_rect.h"
-#include "BLI_string.h"
+#include "BLI_rect.hh"
+#include "BLI_string.hh"
 
 #include "DNA_screen_types.h"
+
+#include "RNA_access.hh"
 
 #include "UI_interface_c.hh"
 
@@ -23,13 +31,19 @@ namespace blender::ui {
 void invalidate_text_wrap_cache(const ARegion &region)
 {
   for (Block &block : region.runtime->uiblocks) {
+    block.text_wrap_cache.clear();
+    block.markdown_layout_cache.clear();
     for (Button &button : block.buttons()) {
-      if (button.type != ButtonType::TextBox) {
-        continue;
+      if (button.type == ButtonType::TextBox) {
+        auto &textbox = static_cast<ButtonTextBox &>(button);
+        textbox.wrap_cache.reset();
+        textbox.placeholder_wrap_cache.reset();
       }
-      ButtonTextBox &textbox = static_cast<ButtonTextBox &>(button);
-      textbox.wrap_cache.reset();
-      textbox.placeholder_wrap_cache.reset();
+      if (button.type == ButtonType::Label) {
+        auto &label = static_cast<ButtonLabel &>(button);
+        label.wrap_cache.reset();
+        label.markdown_cache.reset();
+      }
     }
   }
 }
@@ -48,7 +62,7 @@ void textbox_scroll_to_cursor(ButtonTextBox *textbox)
 #ifdef WITH_INPUT_IME
   /* Include the ime composition string when scrolling to the cursor. */
   const wmIMEData *ime_data = button_ime_data_get(textbox);
-  if (ime_data && ime_data->composite.size() && ime_data->cursor_pos != -1) {
+  if (ime_data && !ime_data->composite.empty() && ime_data->cursor_pos != -1) {
     but_pos += ime_data->cursor_pos;
   }
 #endif
@@ -110,9 +124,8 @@ void textbox_textedit_set_cursor_pos(ButtonTextBox *textbox,
       fstyle.uifont_id, line.data(), line.size(), int(xy.x - start.x));
   int position = line.begin() - lines[0].data() + offset;
 #ifdef WITH_INPUT_IME
-  /* Textbox text wrap includes the IME composition string, remove the ime string pad from the
-   * selection.
-   */
+  /* Text-box text wrap includes the IME composition string, remove the IME string pad from the
+   * selection. */
   const wmIMEData *ime_data = button_ime_data_get(textbox);
   if (ime_data && position > int(textbox->pos)) {
     position = std::max<int>(int(textbox->pos), position - int(ime_data->composite.size()));
@@ -207,14 +220,14 @@ Vector<StringRef> textbox_wrap_lines(ButtonTextBox *textbox)
                     aspect;
   StringRef text = textbox->drawstr;
 #ifdef WITH_INPUT_IME
+  std::string ime_text;
   const wmIMEData *ime_data = button_ime_data_get(textbox);
-  if (ime_data && ime_data->composite.size() > 0) {
+  if (ime_data && !ime_data->composite.empty()) {
     StringRef edit_str = textbox->editstr;
     StringRef l = edit_str.is_empty() ? StringRef("") : edit_str.substr(0, textbox->pos);
     StringRef r = edit_str.is_empty() ? StringRef("") : edit_str.substr(textbox->pos);
-    StringRef ime_str = ime_data->composite;
-    textbox->drawstr = fmt::format("{}{}{}", l, ime_str, r);
-    text = textbox->drawstr;
+    ime_text = fmt::format("{}{}{}", l, ime_data->composite, r);
+    text = ime_text;
   }
   else
 #endif
@@ -248,8 +261,8 @@ Vector<StringRef> textbox_wrap_lines(ButtonTextBox *textbox)
   }
   textbox->last_total_lines = lines.size();
 
-  /* WORKAROUND: Textbox event handling and drawing requires lines to not include line breaks, but
-   * sometimes text wrap adds them and other times not. */
+  /* WORKAROUND: Text-box event handling and drawing requires lines to not include line breaks,
+   * but sometimes text wrap adds them and other times not. */
   for (int i : lines.index_range()) {
     if (lines[i].endswith("\n")) {
       lines[i] = lines[i].drop_suffix(1);
@@ -335,6 +348,57 @@ int ButtonTextBox::line_scroll() const
 int ButtonTextBox::visible_lines() const
 {
   return std::max<int>(this->state->visible_lines, textbox_minimum_visible_lines);
+}
+
+int textbox_but_height(const TextboxState &state)
+{
+  const int visible_lines = std::max(state.visible_lines, textbox_minimum_visible_lines);
+  const float line_height = fontstyle_height_max(UI_FSTYLE_WIDGET);
+  return std::max<int>(
+      UI_UNIT_Y, int(std::round(line_height * visible_lines + textbox_vertical_padding() * 2.0f)));
+}
+
+Button *uiDefButTextBoxR(Block *block,
+                         PointerRNA *ptr,
+                         StringRefNull propname,
+                         TextboxState *state,
+                         const int x,
+                         const int y,
+                         const short width)
+{
+  BLI_assert(state);
+
+  PropertyRNA *prop = RNA_struct_find_property_check(*ptr, propname.c_str(), PROP_STRING);
+  if (!prop) {
+    RNA_warning(
+        "string property not found: %s.%s", RNA_struct_identifier(ptr->type), propname.c_str());
+    return nullptr;
+  }
+
+  state->visible_lines = std::max(state->visible_lines, textbox_minimum_visible_lines);
+
+  Button *but = uiDefButR_prop(block,
+                               ButtonType::TextBox,
+                               RNA_property_ui_name(prop),
+                               x,
+                               y,
+                               width,
+                               textbox_but_height(*state),
+                               ptr,
+                               prop,
+                               0,
+                               0,
+                               0,
+                               std::nullopt);
+
+  ButtonTextBox *textbox = static_cast<ButtonTextBox *>(but);
+  textbox->state = state;
+
+  if (RNA_property_flag(prop) & PROP_TEXTEDIT_UPDATE) {
+    button_flag_enable(but, BUT_TEXTEDIT_UPDATE);
+  }
+
+  return but;
 }
 
 }  // namespace blender::ui

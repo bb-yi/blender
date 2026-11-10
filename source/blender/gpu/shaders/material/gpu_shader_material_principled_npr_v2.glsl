@@ -40,10 +40,15 @@ void npr_v2_alpha(float alpha, float &value)
 }
 
 [[node]]
-void npr_v2_default_tangent(float4 uv_tangent, float3 orco, float3 N, float3 &tangent)
+void npr_v2_default_tangent(float4 uv_tangent,
+                            float3 orco,
+                            float3 N,
+                            [[resource_table]] KernelGlobals &kg,
+                            ShadingData &sd,
+                            float3 &tangent)
 {
   float3 generated = orco.yxz * float3(-0.5f, 0.5f, 0.0f) + float3(0.25f, -0.25f, 0.0f);
-  const ObjectMatrices object = object_matrices_get();
+  const ObjectMatrices object = kg.object_matrices_get(sd);
   generated = to_float3x3(object.model) * generated;
   float3 input_tangent = dot(uv_tangent.xyz, uv_tangent.xyz) > 1e-16f ?
                             uv_tangent.xyz : generated;
@@ -51,7 +56,7 @@ void npr_v2_default_tangent(float4 uv_tangent, float3 orco, float3 N, float3 &ta
   npr_v2_tangent_basis(N, input_tangent, 0.0f, tangent, bitangent);
 }
 
-float npr_v2_visibility(uint index,
+float npr_v2_visibility(KernelGlobals &kg, ShadingData &sd, uint index,
                        bool is_local,
                        float3 N,
                        float4 policy,
@@ -66,18 +71,18 @@ float npr_v2_visibility(uint index,
   LightData light;
   LightVector vector;
   bool directional;
-  if (!glsl_light_lookup(index, is_local, light, vector, directional) ||
+  if (!glsl_light_lookup(kg, sd, index, is_local, light, vector, directional) ||
       light.tilemap_index == LIGHT_NO_SHADOW)
   {
     return 1.0f;
   }
   casts_shadow = true;
-  ObjectInfos object = object_infos_get();
-  float3 Ng = glsl_light_resolve_normal(g_data.Ng);
+  ObjectInfos object = kg.object_infos_get(sd);
+  float3 Ng = glsl_light_resolve_normal(kg, sd, sd.Ng);
 #  if defined(SHADOW_CASTER_CLASSIFY)
   if (int(policy.x) == 1 || int(policy.x) == 3) {
-    ShaderInfoShadowClassification classified = shader_info_shadow_classified_visibility(
-        light, directional, vector.L, g_data.P, Ng, N,
+    ShaderInfoShadowClassification classified = shader_info_shadow_classified_visibility(kg, sd,
+        light, directional, vector.L, sd.P, Ng, N,
         object.shadow_terminator_normal_offset, object.shadow_terminator_geometry_offset,
         policy.y, policy.z);
     return 1.0f - saturate(int(policy.x) == 1 ? classified.cast_shadow :
@@ -85,17 +90,17 @@ float npr_v2_visibility(uint index,
   }
 #  endif
 #  if defined(MAT_NPR_SHADOW_ONLY_TEMPORAL)
-  return shader_info_shadow_visibility_builtin(
-      light, directional, g_data.P, Ng, N,
+  return shader_info_shadow_visibility_builtin(kg, sd,
+      light, directional, sd.P, Ng, N,
       object.shadow_terminator_normal_offset, object.shadow_terminator_geometry_offset);
 #  elif defined(MAT_NPR_SHADOW_ONLY_STABLE)
-  return shader_info_shadow_visibility_stable(
-      light, directional, g_data.P, Ng, N,
+  return shader_info_shadow_visibility_stable(kg, sd,
+      light, directional, sd.P, Ng, N,
       object.shadow_terminator_normal_offset, object.shadow_terminator_geometry_offset,
       policy.z);
 #  else
-  return shader_info_shadow_visibility(
-      light, directional, vector.L, g_data.P, Ng, N,
+  return shader_info_shadow_visibility(kg, sd,
+      light, directional, vector.L, sd.P, Ng, N,
       object.shadow_terminator_normal_offset, object.shadow_terminator_geometry_offset,
       policy.y, policy.z);
 #  endif
@@ -131,7 +136,7 @@ float3 npr_v2_highlight_filtered(float3 response, float3 reference, float softne
 #endif
 }
 
-float3 npr_v2_reflection_transport_gain(float3 base,
+float3 npr_v2_reflection_transport_gain(KernelGlobals &kg, ShadingData &sd, float3 base,
                                        float metallic,
                                        float transmission,
                                        bool thin_wall,
@@ -144,17 +149,17 @@ float3 npr_v2_reflection_transport_gain(float3 base,
    * it after reshaping would reintroduce a view-dependent gradient into the plateau. */
   float3 F0 = float3(F0_from_ior(ior));
   float3 dielectric_single, dielectric_multi, unused;
-  bsdf_lut(F0, float3(1.0f), float3(0.0f), NV, roughness, ior, false,
+  bsdf_lut(kg, F0, float3(1.0f), float3(0.0f), NV, roughness, ior, false,
            dielectric_single, unused);
-  bsdf_lut(F0, float3(1.0f), float3(0.0f), NV, roughness, ior, true,
+  bsdf_lut(kg, F0, float3(1.0f), float3(0.0f), NV, roughness, ior, true,
            dielectric_multi, unused);
   float3 metal_single, metal_multi;
-  brdf_f82_tint_lut(base, float3(1.0f), NV, roughness, false, metal_single);
-  brdf_f82_tint_lut(base, float3(1.0f), NV, roughness, true, metal_multi);
+  brdf_f82_tint_lut(kg, base, float3(1.0f), NV, roughness, false, metal_single);
+  brdf_f82_tint_lut(kg, base, float3(1.0f), NV, roughness, true, metal_multi);
   float3 transmission_reflection = dielectric_multi;
   if (transmission > 0.0f && metallic < 1.0f) {
     float3 transmittance;
-    bsdf_lut(F0, float3(1.0f), thin_wall ? float3(1.0f) : sqrt(base),
+    bsdf_lut(kg, F0, float3(1.0f), thin_wall ? float3(1.0f) : sqrt(base),
              NV, roughness, ior, true, transmission_reflection, transmittance);
     if (thin_wall) {
       float3 tint = slab_transmittance_at_angle(base, NV, ior);
@@ -190,7 +195,7 @@ void node_principled_npr_v2(float4 base_color,
                           sampler1DArray tables,
                           sampler1DArray specular_table,
                           float4 table_info,
-                          float4 execution,
+                          float4 execution,[[resource_table]] KernelGlobals &kg, ShadingData &sd,
                           Closure &shader,
                           float4 &local_color,
                           float &alpha_out,
@@ -214,8 +219,8 @@ void node_principled_npr_v2(float4 base_color,
   ClosureNPRLightPolicy light_policy = closure_npr_light_policy(
       shading[3], shading[1].w, max(shading[1].x, 0.0f));
   float3 base = clamp(base_color.rgb, float3(0.0f), float3(1.0f));
-  N = npr_v2_safe_normalize(N, npr_v2_safe_normalize(g_data.N, g_data.Ng));
-  float3 V = npr_v2_safe_normalize(coordinate_incoming(g_data.P), N);
+  N = npr_v2_safe_normalize(N, npr_v2_safe_normalize(sd.N, sd.Ng));
+  float3 V = npr_v2_safe_normalize(coordinate_incoming(kg, sd, sd.P), N);
   float NV = max(dot(N, V), 1e-6f);
   float3 CN = npr_v2_safe_normalize(coat_normal, N);
   float3 T;
@@ -230,7 +235,7 @@ void node_principled_npr_v2(float4 base_color,
   if (emit_shader) {
     /* Match native albedo baking: do not accumulate coat/metal/SSS lobe weights
      * or artistic direct radiance as a replacement for the material's Base Color. */
-    bake_color_principled_begin(base, execution.x);
+    bake_color_principled_begin(sd, base, execution.x);
   }
 #endif
 
@@ -247,14 +252,14 @@ void node_principled_npr_v2(float4 base_color,
     float coat_r = saturate(surface[0].y);
     float coat_ior = max(surface[0].z, 1.0f);
     float coat_NV = max(dot(CN, V), 1e-6f);
-    float coat_reflectance = bsdf_lut(coat_NV, coat_r, coat_ior, false).x;
+    float coat_reflectance = bsdf_lut(kg, coat_NV, coat_r, coat_ior, false).x;
     if (emit_shader) {
       ClosureReflection coat;
       coat.N = CN;
       coat.roughness = coat_r;
       coat.color = float3(coat_reflectance);
-      coat.weight = weight * layer * coat_weight;
-      closure_eval_npr_native(coat, indirect_specular, light_policy);
+      coat.color *= weight * layer * coat_weight;
+      closure_eval_npr_native(kg, sd, coat, indirect_specular, light_policy);
     }
     layer *= max(1.0f - coat_reflectance * coat_weight, 0.0f);
     coat_tint = mix(float3(1.0f),
@@ -268,15 +273,15 @@ void node_principled_npr_v2(float4 base_color,
   float Fd = F0_from_ior(ior);
   float3 dielectric_reflectance;
   float3 unused_transmittance;
-  bsdf_lut(float3(Fd), float3(1.0f), float3(0.0f), NV, roughness, ior, true,
+  bsdf_lut(kg, float3(Fd), float3(1.0f), float3(0.0f), NV, roughness, ior, true,
            dielectric_reflectance, unused_transmittance);
   float3 metal_reflectance;
-  brdf_f82_tint_lut(base, float3(1.0f), NV, roughness, true, metal_reflectance);
+  brdf_f82_tint_lut(kg, base, float3(1.0f), NV, roughness, true, metal_reflectance);
   float3 transmission_reflectance = dielectric_reflectance;
   float3 transmittance = float3(0.0f);
   if (transmission > 0.0f && metallic < 1.0f) {
     if (thin_wall) {
-      bsdf_lut(float3(Fd), float3(1.0f), float3(1.0f), NV, roughness, ior, true,
+      bsdf_lut(kg, float3(Fd), float3(1.0f), float3(1.0f), NV, roughness, ior, true,
                transmission_reflectance, transmittance);
       float3 tint = slab_transmittance_at_angle(base, NV, ior);
       transmittance = safe_divide(tint * square(transmittance),
@@ -284,7 +289,7 @@ void node_principled_npr_v2(float4 base_color,
       transmission_reflectance *= float3(1.0f) + transmittance * tint;
     }
     else {
-      bsdf_lut(float3(Fd), float3(1.0f), sqrt(base), NV, roughness, ior, true,
+      bsdf_lut(kg, float3(Fd), float3(1.0f), sqrt(base), NV, roughness, ior, true,
                transmission_reflectance, transmittance);
     }
     if (emit_shader) {
@@ -293,8 +298,8 @@ void node_principled_npr_v2(float4 base_color,
         refract.N = N;
         refract.roughness = thin_glass_transmission_roughness(roughness, ior);
         refract.color = transmittance * coat_tint;
-        refract.weight = weight * layer * (1.0f - metallic) * transmission;
-        closure_eval_npr_native(refract, light_policy);
+        refract.color *= weight * layer * (1.0f - metallic) * transmission;
+        closure_eval_npr_native(kg, sd, refract, light_policy);
       }
       else {
         ClosureRefraction refract;
@@ -302,8 +307,8 @@ void node_principled_npr_v2(float4 base_color,
         refract.roughness = roughness;
         refract.ior = ior;
         refract.color = transmittance * coat_tint;
-        refract.weight = weight * layer * (1.0f - metallic) * transmission;
-        closure_eval_npr_native(refract, light_policy);
+        refract.color *= weight * layer * (1.0f - metallic) * transmission;
+        closure_eval_npr_native(kg, sd, refract, light_policy);
       }
     }
   }
@@ -344,11 +349,11 @@ void node_principled_npr_v2(float4 base_color,
   beta = npr_v2_sample_beta(tables, table_info.x, softness);
 #endif
   float4 spec_shape = float4(roughness, highlight[2].x, highlight[2].y, size_scale);
-  float3 direct_reflection_gain = npr_v2_reflection_transport_gain(
+  float3 direct_reflection_gain = npr_v2_reflection_transport_gain(kg, sd,
       base, metallic, transmission, thin_wall, ior, roughness, NV);
   float3 reference_reflection_gain = float3(0.0f);
 #ifdef MAT_NPR_REFERENCE_HIGHLIGHT
-  reference_reflection_gain = npr_v2_reflection_transport_gain(
+  reference_reflection_gain = npr_v2_reflection_transport_gain(kg, sd,
       base, metallic, transmission, thin_wall, ior, roughness, 1.0f);
 #endif
   float3 diffuse_mul = float3(0.0f);
@@ -380,11 +385,11 @@ void node_principled_npr_v2(float4 base_color,
     for (uint light_index = 0u; light_index < light_cull_buf.items_count; light_index++) {
       bool is_local = light_index < light_cull_buf.local_lights_len;
       if ((is_local && light_index >= light_cull_buf.visible_count) ||
-          !glsl_light_loop_accept(light_index, is_local))
+          !glsl_light_loop_accept(kg, sd, light_index, is_local))
       {
         continue;
       }
-      GLSLLight lamp = glsl_light_build(light_index, is_local, light_index);
+      GLSLLight lamp = glsl_light_build(kg, sd, light_index, is_local, light_index);
       if (!lamp.valid || (shading[3].w >= 0.0f && lamp.lightgroup_id != int(shading[3].w))) {
         continue;
       }
@@ -398,7 +403,7 @@ void node_principled_npr_v2(float4 base_color,
       float visible_fraction = 1.0f;
       if (shadow_strength > 0.0f && int(shading[3].x) != 0) {
         bool casts_shadow;
-        float visibility = npr_v2_visibility(light_index, is_local, N, shading[3], casts_shadow);
+        float visibility = npr_v2_visibility(kg, sd, light_index, is_local, N, shading[3], casts_shadow);
         if (casts_shadow) {
           visible_fraction = mix(1.0f, visibility, shadow_strength);
         }
@@ -412,11 +417,11 @@ void node_principled_npr_v2(float4 base_color,
   for (uint light_index = 0u; light_index < light_cull_buf.items_count; light_index++) {
     bool is_local = light_index < light_cull_buf.local_lights_len;
     if ((is_local && light_index >= light_cull_buf.visible_count) ||
-        !glsl_light_loop_accept(light_index, is_local))
+        !glsl_light_loop_accept(kg, sd, light_index, is_local))
     {
       continue;
     }
-    GLSLLight lamp = glsl_light_build(light_index, is_local, light_index);
+    GLSLLight lamp = glsl_light_build(kg, sd, light_index, is_local, light_index);
     if (!lamp.valid ||
         (shading[3].w >= 0.0f && lamp.lightgroup_id != int(shading[3].w)))
     {
@@ -425,7 +430,7 @@ void node_principled_npr_v2(float4 base_color,
     float3 L = npr_v2_safe_normalize(lamp.vector, N);
     bool casts_shadow;
     float visibility = shadow_strength <= 0.0f ? 1.0f :
-        npr_v2_visibility(light_index, is_local, N, shading[3], casts_shadow);
+        npr_v2_visibility(kg, sd, light_index, is_local, N, shading[3], casts_shadow);
     if (shadow_strength <= 0.0f) {
       casts_shadow = false;
     }
@@ -519,7 +524,7 @@ void node_principled_npr_v2(float4 base_color,
       float3 lamp_color = max(lamp.specular_color, float3(0.0f));
       specular_lamp.specular_color = mix(float3(npr_v2_luminance(lamp_color)), lamp_color,
                                          saturate(highlight[1].w));
-      npr_v2_light_response(light_index, is_local, specular_lamp, N, V, tangent, spec_shape,
+      npr_v2_light_response(kg, sd, light_index, is_local, specular_lamp, N, V, tangent, spec_shape,
                             base, metallic, ior,
                             int(highlight[2].w) == 0,
                             softness < 1.0f || size_scale != 1.0f || int(highlight[2].z) == 1,
@@ -620,14 +625,14 @@ void node_principled_npr_v2(float4 base_color,
   float rim_shape = 0.0f;
   if (rim[0].w > 0.0f && rim[2].z > 0.0f) {
     if (int(rim[2].w) == 0) {
-      rim_shape = npr_v2_rim_shape(N, V, rim[1], rim[2].x);
+      rim_shape = npr_v2_rim_shape(kg, sd, N, V, rim[1], rim[2].x);
     }
 #ifdef MAT_NPR_DEPTH_RIM
     if (int(rim[2].w) == 1) {
       /* Fractional stochastic coverage is not a solid silhouette. Never
        * substitute unrelated opaque depth for a Blended surface. */
       if (rim[3].w > 0.5f && alpha >= 1.0f) {
-        rim_shape = npr_v2_depth_rim(rim[3].x, rim[3].y, rim[3].z,
+        rim_shape = npr_v2_depth_rim(kg, sd, rim[3].x, rim[3].y, rim[3].z,
                                      rim[1].x, rim[1].y, rim[1].z, rim[2].x);
       }
     }
@@ -655,71 +660,70 @@ void node_principled_npr_v2(float4 base_color,
   }
 
   ClosureEmission emissive;
-  emissive.emission = emission;
-  emissive.weight = execution.x * alpha;
-  closure_eval(emissive);
+  emissive.emission = emission * execution.x * alpha;
+  closure_eval(kg, sd, emissive);
   ClosureTransparency transparent;
-  transparent.transmittance = float3(1.0f - alpha);
-  transparent.weight = execution.x;
+  transparent.transmittance = float3(1.0f - alpha) * execution.x;
   transparent.holdout = 0.0f;
-  closure_eval(transparent);
-  closure_npr_rim_add(rim_radiance, weight);
+  closure_eval(kg, sd, transparent);
+  closure_npr_rim_add(kg, sd, rim_radiance, weight);
 
   /* Transport color remains physical. Artificial metal body is direct-only. */
   if (body_weight > 0.0f) {
     ClosureDiffuse body;
     body.N = N;
     body.color = float3(0.0f);
-    body.weight = weight * body_weight;
-    closure_eval_npr(body, float3(0.0f),
-                     (base * diffuse_mul + diffuse_add) * coat_tint, 0.0f, light_policy);
+    closure_eval_npr(kg, sd, body, float3(0.0f),
+                     (base * diffuse_mul + diffuse_add) * coat_tint * weight * body_weight,
+                     0.0f, light_policy);
   }
   if (diffuse_weight > 0.0f || max(sheen_tint.x, max(sheen_tint.y, sheen_tint.z)) > 0.0f) {
     float3 physical_color = base * coat_tint;
     /* The transport gain is separate from albedo and direct radiance. */
     ClosureDiffuse diffuse;
     diffuse.N = N;
-    diffuse.color = physical_color;
-    diffuse.weight = weight * diffuse_weight * (1.0f - subsurface);
-    closure_eval_npr(diffuse, diffuse_mul, diffuse_add * coat_tint, indirect_diffuse, light_policy);
+    float diffuse_lobe_weight = weight * diffuse_weight * (1.0f - subsurface);
+    diffuse.color = physical_color * diffuse_lobe_weight;
+    closure_eval_npr(kg, sd, diffuse, diffuse_mul, diffuse_add * coat_tint * diffuse_lobe_weight,
+                     indirect_diffuse, light_policy);
     if (subsurface > 0.0f) {
       if (thin_wall) {
-        diffuse.weight = weight * diffuse_weight * subsurface * 0.5f;
-        closure_eval_npr(diffuse, diffuse_mul, diffuse_add * coat_tint, indirect_diffuse, light_policy);
+        float subsurface_lobe_weight = weight * diffuse_weight * subsurface * 0.5f;
+        diffuse.color = physical_color * subsurface_lobe_weight;
+        closure_eval_npr(kg, sd, diffuse, diffuse_mul, diffuse_add * coat_tint * subsurface_lobe_weight,
+                         indirect_diffuse, light_policy);
         ClosureTranslucent transmitted;
         transmitted.N = N;
-        transmitted.color = physical_color;
-        transmitted.weight = weight * diffuse_weight * subsurface * 0.5f;
-        closure_eval_npr_native(transmitted, indirect_diffuse, light_policy);
+        transmitted.color = physical_color * subsurface_lobe_weight;
+        closure_eval_npr_native(kg, sd, transmitted, indirect_diffuse, light_policy);
       }
       else {
         ClosureSubsurface scattered;
         scattered.N = N;
-        scattered.color = physical_color;
-        scattered.weight = weight * diffuse_weight * subsurface;
+        float subsurface_lobe_weight = weight * diffuse_weight * subsurface;
+        scattered.color = physical_color * subsurface_lobe_weight;
         /* Match the default native Random Walk radius units. EEVEE's diffusion kernel
          * retains the legacy 1/(4*pi) conversion internally. */
         scattered.sss_radius = max(material[2].xyz, float3(0.0f)) *
                                max(material[1].z, 0.0f) * (4.0f * float(M_PI));
-        closure_eval_npr(scattered, diffuse_mul, diffuse_add * coat_tint, indirect_diffuse, light_policy);
+        closure_eval_npr(kg, sd, scattered, diffuse_mul, diffuse_add * coat_tint * subsurface_lobe_weight,
+                         indirect_diffuse, light_policy);
       }
     }
     if (max(sheen_tint.x, max(sheen_tint.y, sheen_tint.z)) > 0.0f) {
       ClosureDiffuse sheen;
       sheen.N = N;
-      sheen.color = sheen_tint;
-      sheen.weight = weight;
-      closure_eval_npr_native(sheen, indirect_diffuse, light_policy);
+      sheen.color = sheen_tint * weight;
+      closure_eval_npr_native(kg, sd, sheen, indirect_diffuse, light_policy);
     }
   }
   ClosureReflection reflection;
   reflection.N = N;
   reflection.roughness = roughness;
-  reflection.color = reflection_color * coat_tint;
-  reflection.weight = weight * layer;
-  closure_eval_npr(reflection, float3(0.0f), direct_specular * coat_tint,
+  reflection.color = reflection_color * coat_tint * weight * layer;
+  closure_eval_npr(kg, sd, reflection, float3(0.0f), direct_specular * coat_tint * weight * layer,
                    saturate(highlight[2].x), T, indirect_specular, light_policy);
 #ifdef MAT_BAKE_COLOR
-  bake_color_principled_end();
+  bake_color_principled_end(sd);
 #endif
 }

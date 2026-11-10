@@ -5,10 +5,11 @@
 #include "eevee_dlss5.hh"
 
 #include "BKE_scene_runtime.hh"
-#include "BLI_fileops.h"
-#include "BLI_string.h"
-#include "CLG_log.h"
 #include "DEG_depsgraph_query.hh"
+#include "BLI_string.hh"
+#include "BLI_fileops.hh"
+#include "BLI_string.hh"
+#include "CLG_log.h"
 #include "DRW_engine.hh"
 #include "MEM_guardedalloc.h"
 
@@ -16,7 +17,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <sstream>
-
 #include "DNA_object_types.h"
 #include "RE_engine.h"
 #include "RE_pipeline.h"

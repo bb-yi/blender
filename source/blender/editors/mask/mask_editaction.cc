@@ -13,13 +13,15 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_mask_types.h"
 #include "DNA_scene_types.h"
 
 #include "BKE_mask.hh"
+
+#include "DEG_depsgraph_build.hh"
 
 #include "ED_keyframes_edit.hh"
 #include "ED_markers.hh"
@@ -211,7 +213,7 @@ void ED_masklayer_frames_select_region(KeyframeEditData *ked,
 /* ***************************************** */
 /* Frame Editing Tools */
 
-bool ED_masklayer_frames_delete(MaskLayer *mask_layer)
+bool ED_masklayer_frames_delete(Main *main, MaskLayer *mask_layer)
 {
   bool changed = false;
 
@@ -219,6 +221,8 @@ bool ED_masklayer_frames_delete(MaskLayer *mask_layer)
   if (mask_layer == nullptr) {
     return false;
   }
+
+  const bool mask_was_animated = BKE_mask_layer_is_animated(*mask_layer);
 
   /* check for frames to delete */
   for (MaskLayerShape &mask_layer_shape : mask_layer->splines_shapes.items_mutable()) {
@@ -228,10 +232,18 @@ bool ED_masklayer_frames_delete(MaskLayer *mask_layer)
     }
   }
 
+  const bool mask_now_animated = BKE_mask_layer_is_animated(*mask_layer);
+
+  /* The depsgraph relations were built assuming the mask was animated, so need to update
+   * relations. */
+  if (mask_was_animated != mask_now_animated) {
+    DEG_relations_tag_update(main);
+  }
+
   return changed;
 }
 
-bool ED_masklayer_frames_duplicate(MaskLayer *mask_layer)
+bool ED_masklayer_frames_duplicate(Main *main, MaskLayer *mask_layer)
 {
   bool changed = false;
 
@@ -239,6 +251,8 @@ bool ED_masklayer_frames_duplicate(MaskLayer *mask_layer)
   if (mask_layer == nullptr) {
     return changed;
   }
+
+  const bool mask_was_animated = BKE_mask_layer_is_animated(*mask_layer);
 
   /* Duplicate selected frames. */
   for (MaskLayerShape &mask_layer_shape : mask_layer->splines_shapes.items_mutable()) {
@@ -255,6 +269,14 @@ bool ED_masklayer_frames_duplicate(MaskLayer *mask_layer)
       BLI_insertlinkafter(&mask_layer->splines_shapes, &mask_layer_shape, mask_shape_dupe);
       changed = true;
     }
+  }
+
+  const bool mask_now_animated = BKE_mask_layer_is_animated(*mask_layer);
+
+  /* The depsgraph relations were built assuming the mask was not animated, so need to update
+   * relations. */
+  if (mask_was_animated != mask_now_animated) {
+    DEG_relations_tag_update(main);
   }
 
   return changed;

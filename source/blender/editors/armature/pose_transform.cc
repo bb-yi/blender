@@ -15,16 +15,16 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
 
 #include "BKE_action.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_appdir.hh"
 #include "BKE_armature.hh"
 #include "BKE_blender_copybuffer.hh"
@@ -49,6 +49,7 @@
 #include "WM_types.hh"
 
 #include "ED_anim_api.hh"
+#include "ED_anim_transformable.hh"
 #include "ED_armature.hh"
 #include "ED_keyframing.hh"
 #include "ED_screen.hh"
@@ -100,9 +101,7 @@ static void applyarmature_fix_boneparents(const bContext *C, Scene *scene, Objec
   Main *bmain = CTX_data_main(C);
 
   /* go through all objects in database */
-  for (Object *ob = static_cast<Object *>(bmain->objects.first); ob;
-       ob = static_cast<Object *>(ob->id.next))
-  {
+  for (Object *ob = bmain->objects.first(); ob; ob = static_cast<Object *>(ob->id.next)) {
     /* if parent is bone in this armature, apply corrections */
     if ((ob->parent == armob) && (ob->partype == PARBONE)) {
       /* apply current transform from parent (not yet destroyed),
@@ -240,9 +239,9 @@ static void applyarmature_process_selected_recursive(bArmature *arm,
   ApplyArmature_ParentState new_pstate{};
   new_pstate.bone = bone;
 
-  if (std::find_if(selected.begin(), selected.end(), [&](const PointerRNA &ptr) {
-        return ptr.data == pchan;
-      }) != selected.end())
+  if (std::find_if(selected.begin(),
+                   selected.end(),
+                   [&](const PointerRNA &ptr) { return ptr.data == pchan; }) != selected.end())
   {
     /* SELECTED BONE: Snap to final pose transform minus un-applied parent effects.
      *
@@ -611,167 +610,210 @@ void POSE_OT_visual_transform_apply(wmOperatorType *ot)
  * \{ */
 
 /**
+ * Blend bbone values on `paste_bone` towards `copy_bone`. At factor 1 the values of `copy_bone`
+ * are copied.
+ */
+static void blend_bbone_values(const bPoseChannel &copy_bone,
+                               bPoseChannel &paste_bone,
+                               const float factor,
+                               const bool do_flip)
+{
+  const float flip_factor = do_flip ? -1 : 1;
+  const float curve_in_x = copy_bone.curve_in_x * flip_factor;
+  const float curve_out_x = copy_bone.curve_out_x * flip_factor;
+  const float roll1 = copy_bone.roll1 * flip_factor;
+  const float roll2 = copy_bone.roll2 * flip_factor;
+
+  /* B-Bone posing options should also be included... */
+  paste_bone.curve_in_x = interpf(curve_in_x, paste_bone.curve_in_x, factor);
+  paste_bone.curve_in_z = interpf(copy_bone.curve_in_z, paste_bone.curve_in_z, factor);
+  paste_bone.curve_out_x = interpf(curve_out_x, paste_bone.curve_out_x, factor);
+  paste_bone.curve_out_z = interpf(copy_bone.curve_out_z, paste_bone.curve_out_z, factor);
+
+  paste_bone.roll1 = interpf(roll1, paste_bone.roll1, factor);
+  paste_bone.roll2 = interpf(roll2, paste_bone.roll2, factor);
+  paste_bone.ease1 = interpf(copy_bone.ease1, paste_bone.ease1, factor);
+  paste_bone.ease2 = interpf(copy_bone.ease2, paste_bone.ease2, factor);
+
+  interp_v3_v3v3(paste_bone.scale_in, paste_bone.scale_in, copy_bone.scale_in, factor);
+  interp_v3_v3v3(paste_bone.scale_out, paste_bone.scale_out, copy_bone.scale_out, factor);
+}
+
+/**
+ * Blend the values of `prop` towards `target` based on the given `factor`. At 1.0, the target
+ * values are copied 100%. Properties that cannot be interpolated (booleans, ID pointers, arrays of
+ * arrays, etc. ) will just be copied when the factor is > 0.5.
+ */
+static void blend_id_property(IDProperty &prop, const IDProperty &target, const float factor)
+{
+  BLI_assert(prop.type == target.type);
+  BLI_assert(prop.subtype == target.subtype);
+
+  switch (prop.type) {
+    case IDP_INT: {
+      const int prop_val = IDP_int_get(&prop);
+      const int target_val = IDP_int_get(&target);
+      IDP_int_set(&prop, round_fl_to_int(interpf(target_val, prop_val, factor)));
+      return;
+    }
+    case IDP_FLOAT: {
+      const float prop_val = IDP_float_get(&prop);
+      const float target_val = IDP_float_get(&target);
+      IDP_float_set(&prop, interpf(target_val, prop_val, factor));
+      return;
+    }
+    case IDP_DOUBLE: {
+      const double prop_val = IDP_double_get(&prop);
+      const double target_val = IDP_double_get(&target);
+      IDP_double_set(&prop, interpd(target_val, prop_val, factor));
+      return;
+    }
+    case IDP_ARRAY: {
+      if (prop.len != target.len) {
+        /* For arrays, their length has to match too. */
+        return;
+      }
+      switch (prop.subtype) {
+        case IDP_INT: {
+          int *prop_val = IDP_array_int_get(&prop);
+          const int *target_val = IDP_array_int_get(&target);
+          for (int i = 0; i < prop.len; i++) {
+            prop_val[i] = round_fl_to_int(interpf(target_val[i], prop_val[i], factor));
+          }
+          return;
+        }
+        case IDP_FLOAT: {
+          float *prop_val = IDP_array_float_get(&prop);
+          const float *target_val = IDP_array_float_get(&target);
+          for (int i = 0; i < prop.len; i++) {
+            prop_val[i] = interpf(target_val[i], prop_val[i], factor);
+          }
+          return;
+        }
+        case IDP_DOUBLE: {
+          double *prop_val = IDP_array_double_get(&prop);
+          const double *target_val = IDP_array_double_get(&target);
+          for (int i = 0; i < prop.len; i++) {
+            prop_val[i] = interpd(target_val[i], prop_val[i], factor);
+          }
+          return;
+        }
+        default:
+          break;
+      }
+      break;
+    }
+    default:
+      break;
+  }
+
+  /* Default case for properties that can't be interpolated. */
+  if (factor > 0.5) {
+    IDP_CopyPropertyContent(&prop, &target);
+  }
+}
+
+/**
+ * Blend the given `copy_props` towards `paste_props`. At factor 1, paste_props is used 100%.
+ */
+static void blend_properties(IDProperty *copy_props, IDProperty *paste_props, const float factor)
+{
+  IDP_foreach_property(copy_props, 0, [&](IDProperty *copy_prop) {
+    IDProperty *paste_prop = IDP_GetPropertyFromGroup(paste_props, copy_prop->name);
+    if (!paste_prop || copy_prop->type != paste_prop->type ||
+        copy_prop->subtype != paste_prop->subtype)
+    {
+      return;
+    }
+    blend_id_property(*paste_prop, *copy_prop, factor);
+  });
+}
+
+/**
  * Perform paste pose, for a single bone.
  *
- * \param ob: Object where bone to paste to lives
- * \param chan: Bone that pose to paste comes from
- * \param selOnly: Only paste on selected bones
+ * \param paste_ob: Object where bone to paste to lives
+ * \param copy_transformable: Transformable that the data comes from. Assumed to be a bPoseChannel.
+ * \param selected_only: Only paste on selected bones
  * \param flip: Flip on x-axis
  * \param r_is_found: optional return param, indicates whether the expected bone was found. This
  * helps to distinguish between "not found" and "found, but skipped because not selected" cases.
  * \return The channel of the bone that was pasted to, or nullptr if no paste was performed.
  */
-static bPoseChannel *pose_bone_do_paste(Object *ob,
-                                        const bPoseChannel *chan,
-                                        const bool selOnly,
+static bPoseChannel *pose_bone_blend_to(Object &paste_ob,
+                                        const ed::AnimTransformable &copy_transformable,
+                                        const bool selected_only,
                                         const bool flip,
+                                        const float factor,
                                         bool *r_is_found = nullptr)
 {
+  BLI_assert(copy_transformable.type() == ed::AnimTransformable::Type::POSE_BONE);
   char name[MAXBONENAME];
 
-  /* get the name - if flipping, we must flip this first */
+  /* Get the name of the bone to paste to - if flipping, we must flip this first. */
   if (flip) {
-    BLI_string_flip_side_name(name, chan->name, false, sizeof(name));
+    BLI_string_flip_side_name(name, copy_transformable.name().c_str(), false, sizeof(name));
   }
   else {
-    STRNCPY_UTF8(name, chan->name);
+    STRNCPY_UTF8(name, copy_transformable.name().c_str());
   }
 
-  /* only copy when:
-   *  1) channel exists - poses are not meant to add random channels to anymore
-   *  2) if selection-masking is on, channel is selected -
-   *     only selected bones get pasted on, allowing making both sides symmetrical.
-   */
-  bPoseChannel *pchan = BKE_pose_channel_find_name(ob->pose, name);
+  bPoseChannel *paste_bone = BKE_pose_channel_find_name(paste_ob.pose, name);
   if (r_is_found) {
-    *r_is_found = pchan != nullptr;
+    *r_is_found = paste_bone != nullptr;
   }
-  if (pchan == nullptr) {
+  if (paste_bone == nullptr) {
     return nullptr;
   }
-  if (selOnly && (pchan->flag & POSE_SELECTED) == 0) {
+  /* If selection-masking is on, only selected bones get pasted on, which allows making both sides
+   * symmetrical. */
+  if (selected_only && (paste_bone->flag & POSE_SELECTED) == 0) {
     return nullptr;
   }
 
-  /* only loc rot size
-   * - only copies transform info for the pose
-   */
-  copy_v3_v3(pchan->loc, chan->loc);
-  copy_v3_v3(pchan->scale, chan->scale);
-
-  /* check if rotation modes are compatible (i.e. do they need any conversions) */
-  if (pchan->rotmode == chan->rotmode) {
-    /* copy the type of rotation in use */
-    if (pchan->rotmode > 0) {
-      copy_v3_v3(pchan->eul, chan->eul);
-    }
-    else if (pchan->rotmode == ROT_MODE_AXISANGLE) {
-      copy_v3_v3(pchan->rotAxis, chan->rotAxis);
-      pchan->rotAngle = chan->rotAngle;
-    }
-    else {
-      copy_qt_qt(pchan->quat, chan->quat);
-    }
-  }
-  else if (pchan->rotmode > 0) {
-    /* quat/axis-angle to euler */
-    if (chan->rotmode == ROT_MODE_AXISANGLE) {
-      axis_angle_to_eulO(pchan->eul, pchan->rotmode, chan->rotAxis, chan->rotAngle);
-    }
-    else {
-      quat_to_eulO(pchan->eul, pchan->rotmode, chan->quat);
-    }
-  }
-  else if (pchan->rotmode == ROT_MODE_AXISANGLE) {
-    /* quat/euler to axis angle */
-    if (chan->rotmode > 0) {
-      eulO_to_axis_angle(pchan->rotAxis, &pchan->rotAngle, chan->eul, chan->rotmode);
-    }
-    else {
-      quat_to_axis_angle(pchan->rotAxis, &pchan->rotAngle, chan->quat);
-    }
-  }
-  else {
-    /* euler/axis-angle to quat */
-    if (chan->rotmode > 0) {
-      eulO_to_quat(pchan->quat, chan->eul, chan->rotmode);
-    }
-    else {
-      axis_angle_to_quat(pchan->quat, chan->rotAxis, pchan->rotAngle);
-    }
-  }
-
-  /* B-Bone posing options should also be included... */
-  pchan->curve_in_x = chan->curve_in_x;
-  pchan->curve_in_z = chan->curve_in_z;
-  pchan->curve_out_x = chan->curve_out_x;
-  pchan->curve_out_z = chan->curve_out_z;
-
-  pchan->roll1 = chan->roll1;
-  pchan->roll2 = chan->roll2;
-  pchan->ease1 = chan->ease1;
-  pchan->ease2 = chan->ease2;
-
-  copy_v3_v3(pchan->scale_in, chan->scale_in);
-  copy_v3_v3(pchan->scale_out, chan->scale_out);
-
-  /* paste flipped pose? */
+  ed::AnimTransformable paste_transformable(paste_ob, *paste_bone);
+  ed::TransformFloats location = copy_transformable.get_property(
+      ed::AnimTransformable::PropertyType::LOCATION);
+  ed::Rotation rotation = copy_transformable.get_rotation();
   if (flip) {
-    pchan->loc[0] *= -1;
-
-    pchan->curve_in_x *= -1;
-    pchan->curve_out_x *= -1;
-    pchan->roll1 *= -1; /* XXX? */
-    pchan->roll2 *= -1; /* XXX? */
-
-    /* has to be done as eulers... */
-    if (pchan->rotmode > 0) {
-      pchan->eul[1] *= -1;
-      pchan->eul[2] *= -1;
-    }
-    else if (pchan->rotmode == ROT_MODE_AXISANGLE) {
-      float eul[3];
-
-      axis_angle_to_eulO(eul, EULER_ORDER_DEFAULT, pchan->rotAxis, pchan->rotAngle);
-      eul[1] *= -1;
-      eul[2] *= -1;
-      eulO_to_axis_angle(pchan->rotAxis, &pchan->rotAngle, eul, EULER_ORDER_DEFAULT);
-    }
-    else {
-      float eul[3];
-
-      normalize_qt(pchan->quat);
-      quat_to_eul(eul, pchan->quat);
-      eul[1] *= -1;
-      eul[2] *= -1;
-      eul_to_quat(pchan->quat, eul);
-    }
+    /* Flips on the y-z plane. Has to be done here to correctly blend to the flipped pose. */
+    location[0] *= -1;
+    rotation.mirror();
   }
+  paste_transformable.blend_property_to(
+      ed::AnimTransformable::PropertyType::LOCATION, location, factor, ed::AXIS_MUTABLE_ALL);
+  paste_transformable.blend_rotation_to(rotation, factor, ed::AXIS_MUTABLE_ALL);
+  paste_transformable.blend_property_to(
+      ed::AnimTransformable::PropertyType::SCALE,
+      copy_transformable.get_property(ed::AnimTransformable::PropertyType::SCALE),
+      factor,
+      ed::AXIS_MUTABLE_ALL);
 
-  /* ID properties */
-  if (chan->prop) {
-    if (pchan->prop) {
-      /* If we have existing properties on a bone, just copy over the values of
-       * matching properties (i.e. ones which will have some impact) on to the target
-       * instead of just blindly replacing all. */
-      IDP_SyncGroupValues(pchan->prop, chan->prop);
+  bPoseChannel *copy_bone = copy_transformable.data<bPoseChannel *>();
+  /* B-Bone posing options should also be included... */
+  blend_bbone_values(*copy_bone, *paste_bone, factor, flip);
+
+  /* ID properties. */
+  if (copy_bone->prop) {
+    if (paste_bone->prop) {
+      blend_properties(copy_bone->prop, paste_bone->prop, factor);
     }
     else {
       /* no existing properties, so assume that we want copies too? */
-      pchan->prop = IDP_CopyProperty(chan->prop);
+      paste_bone->prop = IDP_CopyProperty(copy_bone->prop);
     }
   }
-  if (chan->system_properties) {
+  if (copy_bone->system_properties) {
     /* Same logic as above for system IDProperties, for now. */
-    if (pchan->system_properties) {
-      IDP_SyncGroupValues(pchan->system_properties, chan->system_properties);
+    if (paste_bone->system_properties) {
+      blend_properties(copy_bone->system_properties, paste_bone->system_properties, factor);
     }
     else {
-      pchan->system_properties = IDP_CopyProperty(chan->system_properties);
+      paste_bone->system_properties = IDP_CopyProperty(copy_bone->system_properties);
     }
   }
 
-  return pchan;
+  return paste_bone;
 }
 
 /** \} */
@@ -795,6 +837,7 @@ static wmOperatorStatus pose_copy_exec(bContext *C, wmOperator *op)
   if (ID_IS_PACKED(&ob->id)) {
     /* Direct link/append of packed IDs is not supported currently, so neither is their
      * copy/pasting. */
+    /* TODO: Think that this is not necessary in fact, since we 'make local' the copied object? */
     BKE_report(op->reports, RPT_ERROR, "Cannot copy/paste packed data");
     return OPERATOR_CANCELLED;
   }
@@ -861,7 +904,7 @@ static wmOperatorStatus pose_paste_exec(bContext *C, wmOperator *op)
   Object *ob = BKE_object_pose_armature_get(CTX_data_active_object(C));
   Scene *scene = CTX_data_scene(C);
   const bool flip = RNA_boolean_get(op->ptr, "flipped");
-  bool selOnly = RNA_boolean_get(op->ptr, "selected_mask");
+  bool selected_only = RNA_boolean_get(op->ptr, "selected_mask");
 
   /* Get KeyingSet to use. */
   KeyingSet *ks = animrig::get_keyingset_for_autokeying(scene, ANIM_KS_WHOLE_CHARACTER_ID);
@@ -909,23 +952,22 @@ static wmOperatorStatus pose_paste_exec(bContext *C, wmOperator *op)
     return OPERATOR_CANCELLED;
   }
 
-  /* If selOnly option is enabled, if user hasn't selected any bones,
+  /* If selected_only option is enabled, if user hasn't selected any bones,
    * just go back to default behavior to be more in line with other
-   * pose tools.
-   */
-  if (selOnly) {
+   * pose tools. */
+  if (selected_only) {
     if (CTX_DATA_COUNT(C, selected_pose_bones) == 0) {
-      selOnly = false;
+      selected_only = false;
     }
   }
 
   /* Safely merge all of the channels in the buffer pose into any
-   * existing pose.
-   */
+   * existing pose. */
   int num_pasted_bones = 0;
   int num_skipped_bones = 0;
   int num_copied_bones = 0;
-  for (const bPoseChannel &pchan_from : pose_from->chanbase) {
+  const float factor = RNA_float_get(op->ptr, "factor");
+  for (bPoseChannel &pchan_from : pose_from->chanbase) {
     if ((pchan_from.flag & POSE_SELECTED) == 0) {
       /* This code pretends that bones that were not selected at copy time do not exist. */
       continue;
@@ -935,10 +977,12 @@ static wmOperatorStatus pose_paste_exec(bContext *C, wmOperator *op)
 
     /* Try to perform paste on this bone. */
     bool is_found;
-    bPoseChannel *pchan_to = pose_bone_do_paste(ob, &pchan_from, selOnly, flip, &is_found);
+    bPoseChannel *pchan_to = pose_bone_blend_to(
+        *ob, {*object_from, pchan_from}, selected_only, flip, factor, &is_found);
     if (!pchan_to) {
       if (is_found) {
-        /* The bone was found, but not selected (and selOnly), so nothing was pasted to it. */
+        /* The bone was found, but not selected (and selected_only), so nothing was pasted to it.
+         */
         num_skipped_bones++;
         continue;
       }
@@ -956,8 +1000,8 @@ static wmOperatorStatus pose_paste_exec(bContext *C, wmOperator *op)
   BKE_main_free(temp_bmain);
 
   if (num_pasted_bones == 0) {
-    const char *msg = selOnly ? "None of the %d copied bones are selected now" :
-                                "None of the %d copied bones could be pasted";
+    const char *msg = selected_only ? "None of the %d copied bones are selected now" :
+                                      "None of the %d copied bones could be pasted";
     BKE_reportf(op->reports, RPT_WARNING, msg, num_copied_bones);
     /* Return OPERATOR_FINISHED to show the redo panel. It should be possible to
      * turn off "Selected Only" if necessary. */
@@ -1001,10 +1045,9 @@ static wmOperatorStatus pose_paste_exec(bContext *C, wmOperator *op)
 
   /* Recalculate paths if any of the bones have paths... */
   if (ob->pose->avs.path_bakeflag & MOTIONPATH_BAKE_HAS_PATHS) {
-    ED_pose_recalculate_paths(C, scene, ob, ANIMVIZ_CALC_RANGE_FULL);
+    ED_pose_recalculate_paths(C, scene, ob);
   }
 
-  /* Notifiers for updates, */
   WM_event_add_notifier(C, NC_OBJECT | ND_POSE, ob);
 
   return OPERATOR_FINISHED;
@@ -1039,6 +1082,18 @@ void POSE_OT_paste(wmOperatorType *ot)
                   false,
                   "On Selected Only",
                   "Only paste the stored pose on to selected bones in the current pose");
+
+  RNA_def_float_factor(
+      ot->srna,
+      "factor",
+      1.0f,
+      -FLT_MAX,
+      FLT_MAX,
+      "Factor",
+      "Blends the current pose to the pose to paste. At 1, the pasted pose completely "
+      "overwrites the current pose",
+      0.0f,
+      1.0f);
 }
 
 /** \} */
@@ -1318,7 +1373,7 @@ static wmOperatorStatus pose_clear_transform_generic_exec(bContext *C,
 
         /* now recalculate paths */
         if (ob_iter->pose->avs.path_bakeflag & MOTIONPATH_BAKE_HAS_PATHS) {
-          ED_pose_recalculate_paths(C, scene, ob_iter, ANIMVIZ_CALC_RANGE_FULL);
+          ED_pose_recalculate_paths(C, scene, ob_iter);
         }
       }
 
@@ -1448,6 +1503,40 @@ void POSE_OT_transforms_clear(wmOperatorType *ot)
 /** \name Clear User Transforms Operator
  * \{ */
 
+static void pose_bone_copy_transform_values(Object &paste_ob,
+                                            const bPoseChannel &copy_bone,
+                                            const bool selected_only)
+{
+  bPoseChannel *paste_bone = BKE_pose_channel_find_name(paste_ob.pose, copy_bone.name);
+  if (paste_bone == nullptr) {
+    return;
+  }
+  if (selected_only && (paste_bone->flag & POSE_SELECTED) == 0) {
+    return;
+  }
+
+  copy_v3_v3(paste_bone->loc, copy_bone.loc);
+  copy_v3_v3(paste_bone->eul, copy_bone.eul);
+  copy_v3_v3(paste_bone->rotAxis, copy_bone.rotAxis);
+  paste_bone->rotAngle = copy_bone.rotAngle;
+  copy_v4_v4(paste_bone->quat, copy_bone.quat);
+  copy_v3_v3(paste_bone->scale, copy_bone.scale);
+
+  blend_bbone_values(copy_bone, *paste_bone, 1.0, /*flip=*/false);
+
+  /* ID properties */
+  if (copy_bone.prop && paste_bone->prop) {
+    /* If we have existing properties on a bone, just copy over the values of
+     * matching properties (i.e. ones which will have some impact) on to the target
+     * instead of just blindly replacing all. */
+    IDP_SyncGroupValues(paste_bone->prop, copy_bone.prop);
+  }
+  if (copy_bone.system_properties && paste_bone->system_properties) {
+    /* Same logic as above for system IDProperties. */
+    IDP_SyncGroupValues(paste_bone->system_properties, copy_bone.system_properties);
+  }
+}
+
 static wmOperatorStatus pose_clear_user_transforms_exec(bContext *C, wmOperator *op)
 {
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -1461,13 +1550,12 @@ static wmOperatorStatus pose_clear_user_transforms_exec(bContext *C, wmOperator 
 
   FOREACH_OBJECT_IN_MODE_BEGIN (bmain, scene, view_layer, v3d, OB_ARMATURE, OB_MODE_POSE, ob) {
     if ((ob->adt) && (ob->adt->action)) {
-      /* XXX: this is just like this to avoid contaminating anything else;
-       * just pose values should change, so this should be fine
-       */
+      /* In order to reset only a single pose bone to its keyed values we need to evaluate it and
+       * copy the evaluated data back onto it. */
       bPose *dummyPose = nullptr;
       Object workob{};
 
-      /* execute animation step for current frame using a dummy copy of the pose */
+      /* Execute animation step for current frame using a dummy copy of the pose. */
       BKE_pose_copy_data(&dummyPose, ob->pose, false);
 
       STRNCPY_UTF8(workob.id.name, "OB<ClearTfmWorkOb>");
@@ -1479,12 +1567,11 @@ static wmOperatorStatus pose_clear_user_transforms_exec(bContext *C, wmOperator 
       BKE_animsys_evaluate_animdata(
           &workob.id, workob.adt, &anim_eval_context, ADT_RECALC_ANIM, false);
 
-      /* Copy back values, but on selected bones only. */
       for (bPoseChannel &pchan : dummyPose->chanbase) {
-        pose_bone_do_paste(ob, &pchan, only_select, false);
+        pose_bone_copy_transform_values(*ob, pchan, only_select);
       }
 
-      /* free temp data - free manually as was copied without constraints */
+      /* Free temp data - free manually as was copied without constraints. */
       for (bPoseChannel &pchan : dummyPose->chanbase) {
         if (pchan.prop) {
           IDP_FreeProperty(pchan.prop);
@@ -1494,8 +1581,9 @@ static wmOperatorStatus pose_clear_user_transforms_exec(bContext *C, wmOperator 
         }
       }
 
-      /* was copied without constraints */
+      /* Was copied without constraints so we can't use `BKE_pose_free_data`. */
       dummyPose->chanbase.free_no_destruct();
+      MEM_delete(dummyPose->runtime);
       MEM_delete(dummyPose);
     }
     else {
@@ -1503,7 +1591,6 @@ static wmOperatorStatus pose_clear_user_transforms_exec(bContext *C, wmOperator 
       BKE_pose_rest(*ob, only_select);
     }
 
-    /* notifiers and updates */
     DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
     WM_event_add_notifier(C, NC_OBJECT | ND_TRANSFORM, ob);
   }

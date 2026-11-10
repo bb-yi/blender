@@ -20,8 +20,8 @@
 
 #  include "DNA_armature_types.h"
 
-#  include "BLI_math_matrix.h"
-#  include "BLI_math_vector.h"
+#  include "BLI_math_matrix_c.hh"
+#  include "BLI_math_vector_c.hh"
 
 #  include "BKE_armature.hh"
 #  include "BKE_report.hh"
@@ -121,7 +121,7 @@ static bool rna_BoneCollection_assign_abstract(BoneCollection *bcoll,
                                                bonecoll_assign_func_ebone assign_ebone)
 
 {
-  if (RNA_pointer_is_null(bone_ptr)) {
+  if (!*bone_ptr) {
     return false;
   }
 

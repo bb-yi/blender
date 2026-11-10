@@ -69,7 +69,7 @@ CPUDevice::~CPUDevice()
   image_info->free();
 }
 
-BVHLayoutMask CPUDevice::get_bvh_layout_mask(uint /*kernel_features*/) const
+BVHLayoutMask CPUDevice::get_bvh_layout_mask(uint64_t /*kernel_features*/) const
 {
   BVHLayoutMask bvh_layout_mask = BVH_LAYOUT_BVH2;
 #ifdef WITH_EMBREE
@@ -255,8 +255,12 @@ void CPUDevice::image_alloc(device_image &mem)
     image_info->copy_to_device();
   }
 
-  (*image_info)[image_info_id] = mem.info;
-  (*image_info)[image_info_id].data = (uint64_t)mem.host_pointer;
+  /* Assign with the final host pointer in one go, as this is updating memory
+   * that is read by live rendering threads. It works because the smaller array
+   * with same contents for the first part is kept alive.  */
+  KernelImageInfo info = mem.info;
+  info.data = (uint64_t)mem.host_pointer;
+  (*image_info)[image_info_id] = info;
 }
 
 void CPUDevice::image_free(device_image &mem)
@@ -266,11 +270,6 @@ void CPUDevice::image_free(device_image &mem)
     stats.mem_free(mem.device_size);
     mem.device_size = 0;
   }
-}
-
-bool CPUDevice::has_unified_memory_any() const
-{
-  return true;
 }
 
 bool CPUDevice::has_unified_image_memory_all() const
@@ -361,7 +360,7 @@ void CPUDevice::set_image_cache_func(KernelImageLoadRequestedCPU image_load_requ
   kernel_globals.image_load_requested_cpu = image_load_requested_cpu;
 }
 
-bool CPUDevice::load_kernels(const uint /*kernel_features*/)
+bool CPUDevice::load_kernels(const uint64_t /*kernel_features*/)
 {
   return true;
 }

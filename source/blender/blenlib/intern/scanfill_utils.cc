@@ -12,15 +12,15 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
-#include "BLI_math_geom.h"
-#include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines.hh"
 
-#include "BLI_scanfill.h" /* own include */
+#include "BLI_scanfill.hh" /* own include */
 
-#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
+#include "BLI_strict_flags.hh" /* IWYU pragma: keep. Keep last. */
 
 namespace blender {
 
@@ -80,11 +80,11 @@ void BLI_scanfill_obj_dump(ScanFillContext *sf_ctx)
   ScanFillVert *eve;
   ScanFillEdge *eed;
 
-  for (eve = sf_ctx->fillvertbase.first; eve; eve = eve->next, i++) {
+  for (eve = sf_ctx->fillvertbase.first_; eve; eve = eve->next, i++) {
     fprintf(f, "v %f %f %f\n", UNPACK3(eve->co));
     eve->keyindex = i;
   }
-  for (eed = sf_ctx->filledgebase.first; eed; eed = eed->next) {
+  for (eed = sf_ctx->filledgebase.first_; eed; eed = eed->next) {
     fprintf(f, "f %d %d\n", eed->v1->keyindex, eed->v2->keyindex);
   }
   fclose(f);
@@ -96,7 +96,7 @@ using IsectMap = Map<ScanFillEdge *, ListBaseT<LinkData> *>;
 static ListBaseT<LinkData> *edge_isect_ls_ensure(IsectMap *isect_hash, ScanFillEdge *eed)
 {
   return isect_hash->lookup_or_add_cb(
-      eed, []() { return MEM_new_zeroed<ListBaseT<LinkData>>(__func__); });
+      eed, []() { return MEM_new_zeroed<ListBaseT<LinkData>>("edge_isect_ls_ensure"); });
 }
 
 static ListBaseT<LinkData> *edge_isect_ls_add(IsectMap *isect_hash,
@@ -189,7 +189,7 @@ static bool scanfill_preprocess_self_isect(ScanFillContext *sf_ctx,
           {
             ScanFillIsect *isect;
 
-            if (UNLIKELY(isect_hash == nullptr)) {
+            if (isect_hash == nullptr) [[unlikely]] {
               isect_hash = MEM_new<IsectMap>(__func__);
             }
 
@@ -225,7 +225,7 @@ static bool scanfill_preprocess_self_isect(ScanFillContext *sf_ctx,
       if (eed->user_flag & E_ISISECT) {
         ListBaseT<LinkData> *e_ls = isect_hash->lookup_default(eed, nullptr);
 
-        if (UNLIKELY(e_ls == nullptr)) {
+        if (e_ls == nullptr) [[unlikely]] {
           /* only happens in very rare cases (entirely overlapping splines).
            * in this case we can't do much useful. but at least don't crash */
           continue;
@@ -365,7 +365,7 @@ bool BLI_scanfill_calc_self_isect(ScanFillContext *sf_ctx,
   const uint poly_num = uint(sf_ctx->poly_nr) + 1;
   bool changed = false;
 
-  if (UNLIKELY(sf_ctx->poly_nr == SF_POLY_UNSET)) {
+  if (sf_ctx->poly_nr == SF_POLY_UNSET) [[unlikely]] {
     return false;
   }
 
@@ -373,8 +373,8 @@ bool BLI_scanfill_calc_self_isect(ScanFillContext *sf_ctx,
 
   /* get the polygon span */
   if (sf_ctx->poly_nr == 0) {
-    poly_info->edge_first = static_cast<ScanFillEdge *>(sf_ctx->filledgebase.first);
-    poly_info->edge_last = static_cast<ScanFillEdge *>(sf_ctx->filledgebase.last);
+    poly_info->edge_first = sf_ctx->filledgebase.first();
+    poly_info->edge_last = sf_ctx->filledgebase.last();
   }
   else {
     ushort poly_nr = 0;

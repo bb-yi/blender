@@ -186,7 +186,7 @@ class VolumeModule {
 
   void end_sync();
 
-  void set_view(View &main_view);
+  void set_view(View &main_view, int2 render_extent);
   /* Configure an auxiliary view with its own extent and without temporal history. */
   void set_view(View &main_view, int2 extent, bool use_history);
 

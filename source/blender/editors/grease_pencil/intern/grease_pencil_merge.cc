@@ -6,7 +6,7 @@
  * \ingroup edgreasepencil
  */
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_matrix.hh"
 
 #include "BKE_attribute_math.hh"
@@ -197,7 +197,7 @@ void merge_layers(const GreasePencil &src_grease_pencil,
         if (item.value.is_end()) {
           continue;
         }
-        const int duration = src_layer.get_frame_duration_at(item.key);
+        const int duration = 0 /* src_layer.get_frame_duration_at(item.key) */;
         BLI_assert(duration >= 0);
         dst_frames.add_or_modify(
             item.key,
@@ -318,8 +318,8 @@ void merge_layers(const GreasePencil &src_grease_pencil,
 
       /* Gather all the source curves to be merged. */
       Vector<const bke::CurvesGeometry *> all_src_curves;
-      for (const int src_darwing_i : src_drawing_indices) {
-        const GreasePencilDrawingBase *src_base = src_drawings[src_darwing_i];
+      for (const int src_drawing_i : src_drawing_indices) {
+        const GreasePencilDrawingBase *src_base = src_drawings[src_drawing_i];
         BLI_assert(src_base->type == GP_DRAWING);
         const Drawing &src_drawing =
             reinterpret_cast<const GreasePencilDrawing *>(src_base)->wrap();

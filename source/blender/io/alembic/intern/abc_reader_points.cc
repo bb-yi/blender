@@ -35,6 +35,26 @@ namespace io::alembic {
 
 static CLG_LogRef LOG = {"io.alembic"};
 
+/* Specialization of #has_animations() as defined in abc_reader_object.h. */
+template<> bool has_animations(Alembic::AbcGeom::IPointsSchema &schema, ImportSettings *settings)
+{
+  if (settings->is_sequence || !schema.isConstant()) {
+    return true;
+  }
+
+  IFloatGeomParam widths_param = schema.getWidthsParam();
+  if (widths_param.valid() && !widths_param.isConstant()) {
+    return true;
+  }
+
+  IV3fArrayProperty velocities_prop = schema.getVelocitiesProperty();
+  if (velocities_prop.valid() && !velocities_prop.isConstant()) {
+    return true;
+  }
+
+  return false;
+}
+
 AbcPointsReader::AbcPointsReader(const AbcReaderConstructorArgs &args) : AbcObjectReader(args)
 {
   IPoints ipoints(m_iobject, kWrapExisting);
@@ -246,7 +266,7 @@ void AbcPointsReader::read_geometry(bke::GeometrySet &geometry_set,
   }
 
   if (pointcloud->totpoint != positions->size()) {
-    pointcloud = BKE_pointcloud_new_nomain(positions->size());
+    pointcloud = BKE_pointcloud_new_nomain(PointCloudType::Points, positions->size());
   }
 
   bke::MutableAttributeAccessor attribute_accessor = pointcloud->attributes_for_write();
@@ -254,13 +274,36 @@ void AbcPointsReader::read_geometry(bke::GeometrySet &geometry_set,
   MutableSpan<float3> point_positions = pointcloud->positions_for_write();
   read_points_sample(m_schema, sample_sel, point_positions);
 
+  bool widths_handled = false;
   if (widths) {
-    MutableSpan<float> point_radii = pointcloud->radius_for_write();
-    for (const int64_t i : IndexRange(std::min(point_radii.size(), int64_t(widths->size())))) {
-      point_radii[i] = (*widths)[i] / 2.0f;
+    switch (widths_param.getScope()) {
+      case Alembic::AbcGeom::kConstantScope: {
+        if (widths->size() >= 1) {
+          const float radius = (*widths)[0] / 2.0f;
+          attribute_accessor.remove("radius");
+          attribute_accessor.add<float>(
+              "radius", bke::AttrDomain::Point, bke::AttributeInitValue(radius));
+          widths_handled = true;
+        }
+        break;
+      }
+      case Alembic::AbcGeom::kUniformScope:
+      case Alembic::AbcGeom::kVaryingScope:
+      case Alembic::AbcGeom::kVertexScope:
+      case Alembic::AbcGeom::kFacevaryingScope: {
+        MutableSpan<float> point_radii = pointcloud->radius_for_write();
+        for (const int64_t i : IndexRange(std::min(point_radii.size(), int64_t(widths->size())))) {
+          point_radii[i] = (*widths)[i] / 2.0f;
+        }
+        widths_handled = true;
+        break;
+      }
+      case Alembic::AbcGeom::kUnknownScope:
+        break;
     }
   }
-  else {
+
+  if (!widths_handled) {
     attribute_accessor.remove("radius");
     attribute_accessor.add<float>(
         "radius", bke::AttrDomain::Point, bke::AttributeInitValue(0.01f));
@@ -268,7 +311,7 @@ void AbcPointsReader::read_geometry(bke::GeometrySet &geometry_set,
 
   read_point_arb_geom_params(m_schema, sample_sel, attribute_accessor);
 
-  if (read_params.velocity_name != "" && read_params.velocity_scale != 0.0f) {
+  if (!read_params.velocity_name.empty() && read_params.velocity_scale != 0.0f) {
     V3fArraySamplePtr velocities = get_velocity_prop(
         m_schema, sample_sel, read_params.velocity_name);
     if (velocities && pointcloud->totpoint == int(velocities->size())) {

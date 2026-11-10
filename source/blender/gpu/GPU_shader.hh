@@ -198,6 +198,7 @@ const char *GPU_shader_get_name(gpu::Shader *shader);
 int GPU_shader_get_ubo_binding(gpu::Shader *shader, const char *name);
 int GPU_shader_get_ssbo_binding(gpu::Shader *shader, const char *name);
 int GPU_shader_get_sampler_binding(gpu::Shader *shader, const char *name);
+int GPU_shader_get_tlas_binding(gpu::Shader *shader, const char *name);
 
 /**
  * Returns uniform location.
@@ -358,7 +359,8 @@ void GPU_shader_async_specialization_cancel(AsyncSpecializationHandle &handle);
  *
  * \param: shader: The shader whose cache to warm.
  * \param limit: The maximum number of PSOs to compile within a call. Specifying
- * a limit <= 0 will compile a PSO for all cached PSOs in the parent shader. */
+ * a limit <= 0 will compile a PSO for all cached PSOs in the parent shader.
+ */
 void GPU_shader_warm_cache(gpu::Shader *shader, int limit);
 
 /* We expect the parent shader to be compiled and already have some cached PSOs when being assigned

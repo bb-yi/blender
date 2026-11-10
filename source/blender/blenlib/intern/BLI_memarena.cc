@@ -19,9 +19,9 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_asan.h"
-#include "BLI_memarena.h"
-#include "BLI_utildefines.h"
+#include "BLI_asan.hh"
+#include "BLI_memarena.hh"
+#include "BLI_utildefines.hh"
 
 #ifdef WITH_MEM_VALGRIND
 #  include "valgrind/memcheck.h"
@@ -32,12 +32,15 @@
 #  define VALGRIND_MOVE_MEMPOOL(pool_a, pool_b) UNUSED_VARS(pool_a, pool_b)
 #endif
 
-#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
+#include "BLI_strict_flags.hh" /* IWYU pragma: keep. Keep last. */
 
 namespace blender {
 
 struct MemBuf {
   MemBuf *next;
+#ifdef WITH_ASAN
+  size_t size;
+#endif
   uchar data[0];
 };
 
@@ -57,8 +60,10 @@ static void memarena_buf_free_all(MemBuf *mb)
   while (mb != nullptr) {
     MemBuf *mb_next = mb->next;
 
+#ifdef WITH_ASAN
     /* Unpoison memory because #MEM_delete_void might overwrite it. */
-    BLI_asan_unpoison(mb, uint(MEM_allocN_len(mb)));
+    BLI_asan_unpoison(mb, uint(mb->size));
+#endif
 
     MEM_delete(mb);
     mb = mb_next;
@@ -124,7 +129,7 @@ void *BLI_memarena_alloc(MemArena *ma, size_t size)
   /* Ensure proper alignment by rounding size up to multiple of 8. */
   size = PADUP(size, ma->align);
 
-  if (UNLIKELY(size > ma->cursize)) {
+  if (size > ma->cursize) [[unlikely]] {
     if (size > ma->bufsize - (ma->align - 1)) {
       ma->cursize = PADUP(size + 1, ma->align);
     }
@@ -141,6 +146,9 @@ void *BLI_memarena_alloc(MemArena *ma, size_t size)
     }
     ma->curbuf = mb->data;
     mb->next = ma->bufs;
+#ifdef WITH_ASAN
+    mb->size = sizeof(*mb) + ma->cursize;
+#endif
     ma->bufs = mb;
 
     BLI_asan_poison(ma->curbuf, ma->cursize);
@@ -185,7 +193,7 @@ void BLI_memarena_merge(MemArena *ma_dst, MemArena *ma_src)
     return;
   }
 
-  if (UNLIKELY(ma_dst->bufs == nullptr)) {
+  if (ma_dst->bufs == nullptr) [[unlikely]] {
     BLI_assert(ma_dst->curbuf == nullptr);
     ma_dst->bufs = ma_src->bufs;
     ma_dst->curbuf = ma_src->curbuf;

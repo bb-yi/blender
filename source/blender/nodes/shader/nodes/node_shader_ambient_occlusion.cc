@@ -2,9 +2,13 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "node_shader_util.hh"
 
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
@@ -38,7 +42,7 @@ static int node_shader_gpu_ambient_occlusion(GPUMaterial *mat,
                                              GPUNodeStack *out)
 {
   if (!in[2].link) {
-    GPU_link(mat, "world_normals_get", &in[2].link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &in[2].link);
   }
 
   GPU_material_flag_set(mat, GPU_MATFLAG_AO);
@@ -52,7 +56,9 @@ static int node_shader_gpu_ambient_occlusion(GPUMaterial *mat,
                         in,
                         out,
                         GPU_constant(&inverted),
-                        GPU_constant(&f_samples));
+                        GPU_constant(&f_samples),
+                        GPU_kernel_globals(),
+                        GPU_shading_data());
 }
 
 static void node_shader_init_ambient_occlusion(bNodeTree * /*ntree*/, bNode *node)

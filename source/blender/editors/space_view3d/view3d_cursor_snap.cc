@@ -10,9 +10,9 @@
 
 #include "DNA_object_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_vector_types.hh"
 
 #include "MEM_guardedalloc.h"
@@ -412,6 +412,8 @@ static void cursor_point_draw(
       break;
     case SCE_SNAP_TO_FACE_MIDPOINT:
       imm_draw_circle_wire_3d(attr_pos, 0.0f, 0.0f, 1.0f, 24);
+      immUnbindProgram();
+      immBindBuiltinProgram(GPU_SHADER_3D_POINT_UNIFORM_COLOR);
       immBegin(GPU_PRIM_POINTS, 1);
       immVertex3f(attr_pos, 0.0f, 0.0f, 0.0f);
       immEnd();
@@ -538,21 +540,17 @@ static bool v3d_cursor_is_snap_invert(SnapCursorDataIntern *data_intern, uint8_t
 
   const int snap_on = data_intern->snap_on;
 
-  const wmWindowManager *wm = static_cast<wmWindowManager *>(G.main->wm.first);
+  const wmWindowManager *wm = G.main->wm.first();
   wmKeyMap *keymap = WM_keymap_active(wm, data_intern->keymap);
   for (const wmKeyMapItem &kmi : keymap->items) {
     if (kmi.flag & KMI_INACTIVE) {
       continue;
     }
 
-    if (kmi.propvalue == snap_on) {
-      if ((ELEM(kmi.type, EVT_LEFTCTRLKEY, EVT_RIGHTCTRLKEY) && (event_modifier & KM_CTRL)) ||
-          (ELEM(kmi.type, EVT_LEFTSHIFTKEY, EVT_RIGHTSHIFTKEY) && (event_modifier & KM_SHIFT)) ||
-          (ELEM(kmi.type, EVT_LEFTALTKEY, EVT_RIGHTALTKEY) && (event_modifier & KM_ALT)) ||
-          ((kmi.type == EVT_OSKEY) && (event_modifier & KM_OSKEY)))
-      {
-        return true;
-      }
+    if ((kmi.propvalue == snap_on) &&
+        WM_event_modifier_flag_match_kmi_press(wmEventModifierFlag(event_modifier), &kmi))
+    {
+      return true;
     }
   }
   return false;
@@ -949,7 +947,7 @@ V3DSnapCursorState *ED_view3d_cursor_snap_state_active_get()
   if (data_intern->state_intern.is_empty()) {
     return &g_data_intern.state_default;
   }
-  return &(static_cast<SnapStateIntern *>(data_intern->state_intern.last))->snap_state;
+  return &(data_intern->state_intern.last())->snap_state;
 }
 
 void ED_view3d_cursor_snap_state_active_set(V3DSnapCursorState *state)
@@ -960,7 +958,7 @@ void ED_view3d_cursor_snap_state_active_set(V3DSnapCursorState *state)
   }
 
   SnapStateIntern *state_intern = STATE_INTERN_GET(state);
-  if (state_intern == static_cast<SnapStateIntern *>(g_data_intern.state_intern.last)) {
+  if (state_intern == g_data_intern.state_intern.last()) {
     return;
   }
 
@@ -982,8 +980,7 @@ static void v3d_cursor_snap_activate()
        * TODO: ED_view3d_cursor_snap_init */
 
 #ifdef USE_SNAP_DETECT_FROM_KEYMAP_HACK
-      wmKeyConfig *keyconf =
-          (static_cast<wmWindowManager *>(G.main->wm.first))->runtime->defaultconf;
+      wmKeyConfig *keyconf = (G.main->wm.first())->runtime->defaultconf;
 
       data_intern->keymap = WM_modalkeymap_find(keyconf, "Generic Gizmo Tweak Modal Map");
       RNA_enum_value_from_id(
@@ -1004,7 +1001,7 @@ static void v3d_cursor_snap_free()
 {
   SnapCursorDataIntern *data_intern = &g_data_intern;
   if (data_intern->handle) {
-    if (G_MAIN->wm.first) {
+    if (G_MAIN->wm.first_) {
       WM_paint_cursor_end(data_intern->handle);
     }
     data_intern->handle = nullptr;

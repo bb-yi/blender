@@ -11,19 +11,19 @@ float2 curvature_rotate(float2 value, float angle)
   return float2(c * value.x - s * value.y, s * value.x + c * value.y);
 }
 
-float curvature_screen_depth_sample(float2 uv)
+float curvature_screen_depth_sample(KernelGlobals &kg, ShadingData &sd, float2 uv)
 {
-  return textureLod(hiz_tx, uv, 0.0f).r;
+  return eevee_hiz_sample(uv);
 }
 
-float curvature_depth_sample(float2 uv)
+float curvature_depth_sample(KernelGlobals &kg, ShadingData &sd, float2 uv)
 {
-  return drw_depth_screen_to_view(curvature_screen_depth_sample(uv));
+  return kg.view_matrices_get(sd).depth_screen_to_view(curvature_screen_depth_sample(kg, sd, uv));
 }
 
-float curvature_background_depth()
+float curvature_background_depth(KernelGlobals &kg, ShadingData &sd)
 {
-  return drw_depth_screen_to_view(1.0f);
+  return kg.view_matrices_get(sd).depth_screen_to_view(1.0f);
 }
 
 float2 curvature_pixel_radius_uv(float sample_radius, float2 texel_size)
@@ -31,11 +31,11 @@ float2 curvature_pixel_radius_uv(float sample_radius, float2 texel_size)
   return texel_size * sample_radius;
 }
 
-float2 curvature_view_radius_uv(float sample_radius, int2 tex_size)
+float2 curvature_view_radius_uv(KernelGlobals &kg, ShadingData &sd, float sample_radius, int2 tex_size)
 {
   float2 camera_uv_radius = float2(sample_radius / CURVATURE_VIEW_REFERENCE_PIXELS);
-  float2 screen_uv_radius = camera_uv_radius / max(uniform_buf.camera.uv_scale, float2(1e-8f));
-  return screen_uv_radius * (float2(uniform_buf.film.render_extent) / float2(tex_size));
+  float2 screen_uv_radius = camera_uv_radius / max(eevee_uniform_data_get().camera.uv_scale, float2(1e-8f));
+  return screen_uv_radius * (float2(eevee_uniform_data_get().film.render_extent) / float2(tex_size));
 }
 
 float curvature_radius_scale(float2 sample_radius_uv, float sample_radius)
@@ -56,21 +56,21 @@ uint curvature_object_id_sample(float2 uv)
 void node_screenspace_curvature(float samples,
                                 float sample_radius,
                                 float thickness,
-                                float3 scale,
+                                float3 scale,[[resource_table]] KernelGlobals &kg, ShadingData &sd,
                                 out float scene_curvature,
                                 out float scene_rim)
 {
 #if defined(GPU_FRAGMENT_SHADER) && \
     (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
-  float2 texel_size = 1.0f / float2(textureSize(hiz_tx, 0));
+  float2 texel_size = 1.0f / float2(eevee_hiz_extent_get());
   float2 sample_radius_uv = curvature_pixel_radius_uv(sample_radius, texel_size);
   float2 uvs = gl_FragCoord.xy * texel_size;
-  float mid_depth = curvature_depth_sample(uvs);
+  float mid_depth = curvature_depth_sample(kg, sd, uvs);
   float clamp_range = 0.001f;
   int n_samples = int(max(samples, 1.0f));
   float i_samples = 64.0f / float(n_samples);
 
-  float angle_offset = sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
+  float angle_offset = eevee_sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
   float accum = 0.0f;
   float rim_accum = 0.0f;
 
@@ -80,8 +80,8 @@ void node_screenspace_curvature(float samples,
 
     for (int i = 1; i <= n_samples; i++) {
       float sample_offset = float(i) * i_samples;
-      float left_depth = curvature_depth_sample(uvs + offset * sample_offset);
-      float right_depth = curvature_depth_sample(uvs - offset * sample_offset);
+      float left_depth = curvature_depth_sample(kg, sd, uvs + offset * sample_offset);
+      float right_depth = curvature_depth_sample(kg, sd, uvs - offset * sample_offset);
 
       float curve = clamp(left_depth - mid_depth, -clamp_range, clamp_range) +
                     clamp(right_depth - mid_depth, -clamp_range, clamp_range);
@@ -104,21 +104,21 @@ void node_screenspace_curvature(float samples,
 void node_screenspace_curvature_view(float samples,
                                      float sample_radius,
                                      float thickness,
-                                     float3 scale,
+                                     float3 scale,[[resource_table]] KernelGlobals &kg, ShadingData &sd,
                                      out float scene_curvature,
                                      out float scene_rim)
 {
 #if defined(GPU_FRAGMENT_SHADER) && \
     (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
-  float2 texel_size = 1.0f / float2(textureSize(hiz_tx, 0));
-  float2 sample_radius_uv = curvature_view_radius_uv(sample_radius, textureSize(hiz_tx, 0));
+  float2 texel_size = 1.0f / float2(eevee_hiz_extent_get());
+  float2 sample_radius_uv = curvature_view_radius_uv(kg, sd, sample_radius, eevee_hiz_extent_get());
   float2 uvs = gl_FragCoord.xy * texel_size;
-  float mid_depth = curvature_depth_sample(uvs);
+  float mid_depth = curvature_depth_sample(kg, sd, uvs);
   float clamp_range = 0.001f;
   int n_samples = int(max(samples, 1.0f));
   float i_samples = 64.0f / float(n_samples);
 
-  float angle_offset = sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
+  float angle_offset = eevee_sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
   float accum = 0.0f;
   float rim_accum = 0.0f;
 
@@ -128,8 +128,8 @@ void node_screenspace_curvature_view(float samples,
 
     for (int i = 1; i <= n_samples; i++) {
       float sample_offset = float(i) * i_samples;
-      float left_depth = curvature_depth_sample(uvs + offset * sample_offset);
-      float right_depth = curvature_depth_sample(uvs - offset * sample_offset);
+      float left_depth = curvature_depth_sample(kg, sd, uvs + offset * sample_offset);
+      float right_depth = curvature_depth_sample(kg, sd, uvs - offset * sample_offset);
 
       float curve = clamp(left_depth - mid_depth, -clamp_range, clamp_range) +
                     clamp(right_depth - mid_depth, -clamp_range, clamp_range);
@@ -152,25 +152,25 @@ void node_screenspace_curvature_view(float samples,
 void node_screenspace_curvature_local(float samples,
                                       float sample_radius,
                                       float thickness,
-                                      float3 scale,
+                                      float3 scale,[[resource_table]] KernelGlobals &kg, ShadingData &sd,
                                       out float scene_curvature,
                                       out float scene_rim)
 {
 #if defined(GPU_FRAGMENT_SHADER) && \
     (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER)) && defined(MAT_RAYCAST)
   float2 screen_texel_size = 1.0f / float2(textureSize(object_id_tx, 0));
-  float2 hiz_texel_size = 1.0f / float2(textureSize(hiz_tx, 0));
+  float2 hiz_texel_size = 1.0f / float2(eevee_hiz_extent_get());
   float2 screen_sample_radius_uv = curvature_pixel_radius_uv(sample_radius, screen_texel_size);
   float2 hiz_sample_radius_uv = curvature_pixel_radius_uv(sample_radius, hiz_texel_size);
   float2 screen_uv = gl_FragCoord.xy * screen_texel_size;
   float2 hiz_uv = gl_FragCoord.xy * hiz_texel_size;
-  float mid_depth = curvature_depth_sample(hiz_uv);
-  float background_depth = curvature_background_depth();
+  float mid_depth = curvature_depth_sample(kg, sd, hiz_uv);
+  float background_depth = curvature_background_depth(kg, sd);
   float clamp_range = 0.001f;
   int n_samples = int(max(samples, 1.0f));
   float i_samples = 64.0f / float(n_samples);
 
-  float angle_offset = sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
+  float angle_offset = eevee_sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
   float accum = 0.0f;
   float rim_accum = 0.0f;
   float curve_weight = 0.0f;
@@ -178,7 +178,7 @@ void node_screenspace_curvature_local(float samples,
   float rim_weight = 0.0f;
   float rim_weight_full = 0.0f;
   uint center_id = curvature_object_id_sample(screen_uv);
-  uint self_id = (center_id != 0u) ? center_id : (drw_resource_id() & 0xFFFFu);
+  uint self_id = (center_id != 0u) ? center_id : (kg.resource_id_get(sd) & 0xFFFFu);
 
   for (int r = 0; r < 8; r++) {
     float angle = (float(r) + angle_offset) * 3.1415f * 0.25f * 0.5f;
@@ -196,8 +196,8 @@ void node_screenspace_curvature_local(float samples,
 
       uint left_id = curvature_object_id_sample(left_screen_uv);
       uint right_id = curvature_object_id_sample(right_screen_uv);
-      float left_depth = curvature_depth_sample(left_hiz_uv);
-      float right_depth = curvature_depth_sample(right_hiz_uv);
+      float left_depth = curvature_depth_sample(kg, sd, left_hiz_uv);
+      float right_depth = curvature_depth_sample(kg, sd, right_hiz_uv);
 
       float afac = 1.0f - float(i - 1) / float(n_samples);
       curve_weight_full += afac * 2.0f;
@@ -236,25 +236,25 @@ void node_screenspace_curvature_local(float samples,
 void node_screenspace_curvature_local_view(float samples,
                                            float sample_radius,
                                            float thickness,
-                                           float3 scale,
+                                           float3 scale,[[resource_table]] KernelGlobals &kg, ShadingData &sd,
                                            out float scene_curvature,
                                            out float scene_rim)
 {
 #if defined(GPU_FRAGMENT_SHADER) && \
     (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER)) && defined(MAT_RAYCAST)
   float2 screen_texel_size = 1.0f / float2(textureSize(object_id_tx, 0));
-  float2 hiz_texel_size = 1.0f / float2(textureSize(hiz_tx, 0));
-  float2 screen_sample_radius_uv = curvature_view_radius_uv(sample_radius, textureSize(object_id_tx, 0));
-  float2 hiz_sample_radius_uv = curvature_view_radius_uv(sample_radius, textureSize(hiz_tx, 0));
+  float2 hiz_texel_size = 1.0f / float2(eevee_hiz_extent_get());
+  float2 screen_sample_radius_uv = curvature_view_radius_uv(kg, sd, sample_radius, textureSize(object_id_tx, 0));
+  float2 hiz_sample_radius_uv = curvature_view_radius_uv(kg, sd, sample_radius, eevee_hiz_extent_get());
   float2 screen_uv = gl_FragCoord.xy * screen_texel_size;
   float2 hiz_uv = gl_FragCoord.xy * hiz_texel_size;
-  float mid_depth = curvature_depth_sample(hiz_uv);
-  float background_depth = curvature_background_depth();
+  float mid_depth = curvature_depth_sample(kg, sd, hiz_uv);
+  float background_depth = curvature_background_depth(kg, sd);
   float clamp_range = 0.001f;
   int n_samples = int(max(samples, 1.0f));
   float i_samples = 64.0f / float(n_samples);
 
-  float angle_offset = sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
+  float angle_offset = eevee_sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
   float accum = 0.0f;
   float rim_accum = 0.0f;
   float curve_weight = 0.0f;
@@ -262,7 +262,7 @@ void node_screenspace_curvature_local_view(float samples,
   float rim_weight = 0.0f;
   float rim_weight_full = 0.0f;
   uint center_id = curvature_object_id_sample(screen_uv);
-  uint self_id = (center_id != 0u) ? center_id : (drw_resource_id() & 0xFFFFu);
+  uint self_id = (center_id != 0u) ? center_id : (kg.resource_id_get(sd) & 0xFFFFu);
 
   for (int r = 0; r < 8; r++) {
     float angle = (float(r) + angle_offset) * 3.1415f * 0.25f * 0.5f;
@@ -280,8 +280,8 @@ void node_screenspace_curvature_local_view(float samples,
 
       uint left_id = curvature_object_id_sample(left_screen_uv);
       uint right_id = curvature_object_id_sample(right_screen_uv);
-      float left_depth = curvature_depth_sample(left_hiz_uv);
-      float right_depth = curvature_depth_sample(right_hiz_uv);
+      float left_depth = curvature_depth_sample(kg, sd, left_hiz_uv);
+      float right_depth = curvature_depth_sample(kg, sd, right_hiz_uv);
 
       float afac = 1.0f - float(i - 1) / float(n_samples);
       curve_weight_full += afac * 2.0f;

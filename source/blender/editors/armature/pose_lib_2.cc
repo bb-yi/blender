@@ -18,7 +18,7 @@
 
 #include "BKE_action.hh"
 #include "BKE_anim_data.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_armature.hh"
 #include "BKE_context.hh"
 #include "BKE_lib_id.hh"
@@ -175,8 +175,8 @@ static void poselib_keytag_pose(bContext *C, Scene *scene, PoseBlendData *pbd)
     bke::BKE_action_find_fcurves_with_bones(act, slot.handle, autokey_pose_bones);
   }
 
-  /* send notifiers for this */
-  WM_event_add_notifier(C, NC_ANIMATION | ND_KEYFRAME | NA_EDITED, nullptr);
+  /* Send notifiers for this. Auto-keying can create new animation data. */
+  WM_event_add_notifier(C, NC_ANIMATION | ND_KEYFRAME | NA_ADDED, nullptr);
 }
 
 /* Apply the relevant changes to the pose */

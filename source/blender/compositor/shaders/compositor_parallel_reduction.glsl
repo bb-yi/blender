@@ -8,8 +8,7 @@ COMPUTE_SHADER_CREATE_INFO(compositor_parallel_reduction_shared)
 COMPUTE_SHADER_CREATE_INFO(compositor_parallel_reduction_output_float4)
 
 #include "gpu_shader_compositor_texture_utilities.glsl"
-#include "gpu_shader_math_base_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_base.bsl.hh"
 
 /* Texture Loading Utilities.
  *
@@ -363,17 +362,22 @@ void reduction()
   for (uint stride = reduction_size / 2; stride > 0; stride /= 2) {
     barrier();
 
-    /* All invocations read shared memory into local variables. No writes allowed between these
-     * barriers. */
-    T my_value = load_shared_data<T>(gl_LocalInvocationIndex);
-    T neighbor_value = load_shared_data<T>(gl_LocalInvocationIndex + stride);
+    /* Only the threads up to the current stride should be active as can be seen in the diagram
+     * above. Clamp the second read index to avoid out-of-bounds access for invocations at the
+     * end of the work group, which would be undefined behavior in Vulkan. */
+    const T first_value = load_shared_data<T>(gl_LocalInvocationIndex);
+    const T second_value = load_shared_data<T>(
+        min(gl_LocalInvocationIndex + stride, reduction_size - 1));
 
     /* Barrier ensures all reads complete before any writes begin. */
     barrier();
 
-    /* Only active invocations write reduced values back. Reads happen from the local variables. */
+    /* Only the threads up to the current stride should be active as can be seen in the diagram
+     * above. */
     if (gl_LocalInvocationIndex < stride) {
-      T result = reduce<T, ReduceFunction>(my_value, neighbor_value);
+      /* Reduce each two elements that are stride apart, writing the result to the element with the
+       * lower index, as can be seen in the diagram above. */
+      const T result = reduce<T, ReduceFunction>(first_value, second_value);
       store_shared_data(gl_LocalInvocationIndex, result);
     }
   }

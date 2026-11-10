@@ -6,9 +6,9 @@
  * \ingroup eevee
  */
 
-#include "BLI_hash.h"
-#include "BLI_listbase.h"
-#include "BLI_string.h"
+#include "BLI_hash_c.hh"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
 
 #include "GPU_texture.hh"
 #include "GPU_state.hh"

@@ -13,8 +13,8 @@
 #include "DRW_engine.hh"
 #include "DRW_render.hh"
 
-#include "BLI_task.h"
-#include "BLI_threads.h"
+#include "BLI_task_c.hh"
+#include "BLI_threads.hh"
 #include "BLI_vector_set.hh"
 
 #include "GPU_batch.hh"
@@ -36,6 +36,7 @@ namespace draw {
 struct CurvesModule;
 struct VolumeModule;
 struct PointCloudModule;
+struct GSplatModule;
 struct DRW_MeshCDMask;
 class CurveRefinePass;
 class View;
@@ -58,6 +59,7 @@ struct DRWData {
   draw::CurvesModule *curves_module;
   draw::VolumeModule *volume_module;
   draw::PointCloudModule *pointcloud_module;
+  draw::GSplatModule *gsplat_module;
   /** Default view that feeds every engine. */
   draw::View *default_view;
 

@@ -9,12 +9,30 @@
 #include "gpu_testing.hh"
 
 #include "GPU_batch.hh"
+#include "GPU_capabilities.hh"
 #include "GPU_context.hh"
 #include "GPU_framebuffer.hh"
 
 namespace blender::gpu::tests {
 
 using namespace blender::gpu::shader;
+
+TEST(shader_create_info, nested_resource_conditions)
+{
+  ShaderCreateInfo::Conditions conditions;
+  EXPECT_TRUE(conditions.evaluate({}));
+  bool parent_enabled = true;
+  bool child_enabled = false;
+  conditions.append([&](Span<CompilationConstant>) { return child_enabled; });
+  conditions.append([&](Span<CompilationConstant>) { return parent_enabled; });
+  EXPECT_FALSE(conditions.evaluate({}));
+  child_enabled = true;
+  EXPECT_TRUE(conditions.evaluate({}));
+  parent_enabled = false;
+  EXPECT_FALSE(conditions.evaluate({}));
+  child_enabled = false;
+  EXPECT_FALSE(conditions.evaluate({}));
+}
 
 /**
  * Test if all static shaders can be compiled.
@@ -42,6 +60,11 @@ static void test_shader_create_info_pipeline()
     GTEST_SKIP() << "NVIDIA fails to compile workaround due to reserved names. Gladly it doesn't "
                     "need the workaround.";
   }
+
+  if (!GPU_multi_viewport_support()) {
+    GTEST_SKIP() << "Device does not support multi viewport, but the test requires it.";
+  }
+
   GPU_render_begin();
 
   ShaderCreateInfo create_info("gpu_framebuffer_layer_viewport_test");

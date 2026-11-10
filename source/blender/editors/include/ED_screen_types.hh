@@ -58,47 +58,29 @@ enum {
   ANIMPLAY_FLAG_USE_NEXT_FRAME = (1 << 4),
 };
 
+/** Matching the mode argument of #ED_screen_animation_play. */
+enum class PlaybackDirection : int8_t {
+  BACKWARDS = -1,
+  FORWARDS = 1,
+};
+
+/** Matching the sync argument of #ED_screen_animation_play. */
+enum class PlaySyncMode : int8_t {
+  UNCHANGED = -1,
+  OFF = 0,
+  ON = 1,
+};
+
+/**
+ * Playback state captured by #ED_screen_scrubbing_enable when scrubbing starts,
+ * consumed by #ED_screen_scrubbing_disable to resume playback.
+ */
+struct PreScrubbingState {
+  PlaySyncMode play_sync = PlaySyncMode::UNCHANGED;
+  PlaybackDirection play_mode = PlaybackDirection::FORWARDS;
+};
+
 /* ----------------------------------------------------- */
-
-/** Enum for Action Zone Edges. Which edge of area is action zone. */
-enum AZEdge {
-  /** Region located on the left, _right_ edge is action zone.
-   * Region minimized to the top left */
-  AE_RIGHT_TO_TOPLEFT,
-  /** Region located on the right, _left_ edge is action zone.
-   * Region minimized to the top right */
-  AE_LEFT_TO_TOPRIGHT,
-  /** Region located at the bottom, _top_ edge is action zone.
-   * Region minimized to the bottom right */
-  AE_TOP_TO_BOTTOMRIGHT,
-  /** Region located at the top, _bottom_ edge is action zone.
-   * Region minimized to the top left */
-  AE_BOTTOM_TO_TOPLEFT,
-};
-
-enum AZScrollDirection {
-  AZ_SCROLL_VERT,
-  AZ_SCROLL_HOR,
-};
-
-/** For editing areas/regions. */
-struct AZone {
-  AZone *next, *prev;
-  ARegion *region;
-  int type;
-
-  union {
-    /** Region-AZone, which of the edges (only for #AZONE_REGION). */
-    AZEdge edge;
-    AZScrollDirection direction;
-  };
-  /** For drawing. */
-  short x1, y1, x2, y2;
-  /** For clip. */
-  rcti rect;
-  /** For fade in/out. */
-  float alpha;
-};
 
 /** Action-Zone Type: #AZone.type */
 enum {

@@ -25,10 +25,26 @@ static GPUNodeStack outline_control_default_input(const GPUType gpu_type,
 {
   GPUNodeStack stack = {};
   stack.type = gpu_type;
-  stack.vec[0] = value;
-  stack.vec[1] = value;
-  stack.vec[2] = value;
-  stack.vec[3] = 1.0f;
+  switch (gpu_type) {
+    case GPU_FLOAT:
+      stack.value = value;
+      break;
+    case GPU_INT:
+      stack.value = int(value);
+      break;
+    case GPU_BOOL:
+      stack.value = value != 0.0f;
+      break;
+    case GPU_VEC3:
+      stack.value = float3(value);
+      break;
+    case GPU_VEC4:
+      stack.value = float4(value, value, value, 1.0f);
+      break;
+    default:
+      BLI_assert_unreachable();
+      break;
+  }
   stack.sockettype = socket_type;
   return stack;
 }
@@ -164,13 +180,13 @@ static int node_shader_gpu_outline_control(GPUMaterial *mat,
   outline_in[8] = outline_control_input_or_default(
       *node, in, "Normal Edge Width"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_FLOAT, 1.0f));
   outline_in[9] = outline_control_input_or_default(
-      *node, in, "Outline ID"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_INT, 0.0f));
+      *node, in, "Outline ID"_ustr, outline_control_default_input(GPU_INT, SOCK_INT, 0.0f));
   outline_in[10] = outline_control_input_or_default(
-      *node, in, "ID Edge"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_BOOLEAN, 1.0f));
+      *node, in, "ID Edge"_ustr, outline_control_default_input(GPU_BOOL, SOCK_BOOLEAN, 1.0f));
   outline_in[11] = outline_control_input_or_default(
       *node, in, "ID Edge Width"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_FLOAT, 1.0f));
   outline_in[12] = outline_control_input_or_default(
-      *node, in, "Freestyle Edge"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_BOOLEAN, 1.0f));
+      *node, in, "Freestyle Edge"_ustr, outline_control_default_input(GPU_BOOL, SOCK_BOOLEAN, 1.0f));
   outline_in[13] = outline_control_input_or_default(
       *node,
       in,
@@ -187,7 +203,7 @@ static int node_shader_gpu_outline_control(GPUMaterial *mat,
                  out,
                  GPU_constant(&id_combine),
                  GPU_constant(&edge_priority),
-                 &outlink);
+                 GPU_kernel_globals(), GPU_shading_data(), &outlink);
   GPU_material_add_output_link_outline(mat, outlink);
   return true;
 }

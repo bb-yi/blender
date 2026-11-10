@@ -10,11 +10,15 @@
 #include "workbench_common.bsl.hh"            /* IWYU pragma: export */
 #include "workbench_composite.bsl.hh"         /* IWYU pragma: export */
 #include "workbench_curvature.bsl.hh"         /* IWYU pragma: export */
+#include "workbench_fx_dof.bsl.hh"            /* IWYU pragma: export */
+#include "workbench_fx_outline.bsl.hh"        /* IWYU pragma: export */
+#include "workbench_fx_taa.bsl.hh"            /* IWYU pragma: export */
 #include "workbench_image.bsl.hh"             /* IWYU pragma: export */
 #include "workbench_matcap.bsl.hh"            /* IWYU pragma: export */
 #include "workbench_material.bsl.hh"          /* IWYU pragma: export */
 #include "workbench_prepass.bsl.hh"           /* IWYU pragma: export */
 #include "workbench_shadow.bsl.hh"            /* IWYU pragma: export */
+#include "workbench_shadow_raytrace.bsl.hh"   /* IWYU pragma: export */
 #include "workbench_shadow_visibility.bsl.hh" /* IWYU pragma: export */
 #include "workbench_volume.bsl.hh"            /* IWYU pragma: export */
 #include "workbench_world_light.bsl.hh"       /* IWYU pragma: export */

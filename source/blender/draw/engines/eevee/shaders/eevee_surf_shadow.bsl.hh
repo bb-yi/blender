@@ -13,53 +13,51 @@
 
 #pragma once
 
-#include "infos/eevee_geom_infos.hh"
-#include "infos/eevee_nodetree_infos.hh"
-
-FRAGMENT_SHADER_CREATE_INFO(eevee_nodetree)
-FRAGMENT_SHADER_CREATE_INFO(eevee_geom_iface_info)
-
-#include "eevee_nodetree_frag_lib.glsl"
+#include "eevee_nodetree_frag_lib.bsl.hh"
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_shadow_shared.hh"
 #include "eevee_shadow_tilemap_lib.bsl.hh"
 #include "eevee_surf_common.bsl.hh"
 
-float4 closure_to_rgba_shadow(Closure /*cl*/)
+float4 closure_to_rgba_shadow(KernelGlobals &kg, ShadingData &sd, Closure /*cl*/)
 {
-  float3 transmittance = g_transmittance;
-  closure_weights_reset(0.0f);
+  float3 transmittance = sd.transmittance;
+  closure_weights_reset(kg, sd, 0.0f);
   return float4(0.0f, 0.0f, 0.0f, saturate(1.0f - average(transmittance)));
 }
 
 namespace eevee {
 
 struct SurfShadow {
-  [[legacy_info]] ShaderCreateInfo eevee_geom_iface_info;
-
   [[storage(SHADOW_RENDER_MAP_BUF_SLOT,
             read)]] const uint (&render_map_buf)[SHADOW_RENDER_MAP_SIZE];
 
   [[image(SHADOW_ATLAS_IMG_SLOT, read_write, UINT_32)]] uimage2DArrayAtomic shadow_atlas_img;
-  [[image(SHADOW_CASTER_ATLAS_IMG_SLOT, read_write, UINT_32)]] uimage2DArrayAtomic
-      shadow_caster_atlas_img;
+  [[image(SHADOW_CASTER_ATLAS_IMG_SLOT,
+          read_write,
+          UINT_32)]] uimage2DArrayAtomic shadow_caster_atlas_img;
 
   [[push_constant]] const int shadow_caster_id_pass;
 };
 
 [[fragment]] [[texture_atomic]]
-void surf_shadow([[resource_table]] PipelineConstants &pipe,
+void surf_shadow([[resource_table]] KernelGlobals &kg,
+                 [[resource_table]] PipelineConstants &pipe,
                  [[resource_table]] SurfShadow &srt,
                  [[resource_table]] const Uniform &uni,
                  [[resource_table]] const draw::View &views,
                  [[resource_table]] const Sampling &sampling,
                  [[resource_table]] const UtilityTexture & /*util_tx*/,
+                 [[in]] const VertOutCommon &interp,
+                 [[in]] const VertOutShadow &shadow_iface,
+                 [[in]] const VertOutShadowClipping &shadow_clip,
+                 [[in]] [[condition(is_curves)]] const VertOutCurves &curves_interp,
+                 [[in]] [[condition(is_pointcloud)]] const VertOutPointcloud &ptcloud_interp,
+                 [[in]] [[condition(is_gsplat)]] const VertOutGSplat &gsplat_interp,
+                 [[bary_coord]] [[condition(use_barycentric)]] const float3 bary_co,
                  [[front_facing]] const bool front_face,
                  [[frag_coord]] const float4 frag_co)
 {
-  auto &shadow_iface = interface_get(eevee_shadow_iface_info, shadow_iface);
-  auto &shadow_clip = interface_get(eevee_shadow_iface_info, shadow_clip);
-
   float linear_depth = length(shadow_clip.position);
 
   /* Clip to light shape. */
@@ -70,19 +68,38 @@ void surf_shadow([[resource_table]] PipelineConstants &pipe,
 
   if (pipe.use_transparency) [[static_branch]] {
     const ViewMatrices view = views.get(shadow_iface.shadow_view_id);
-    init_globals(uni, view, front_face);
 
-    nodetree_surface(0.0f);
+    float3 barycentric_co = float3(0.0f);
+    if (pipe.use_barycentric) [[static_branch]] {
+      barycentric_co = bary_co;
+    }
+
+    ShadingData sd = init_globals(pipe, uni, interp, view, front_face, frag_co);
+    if (pipe.is_mesh) [[static_branch]] {
+      init_globals_mesh(interp, sd, barycentric_co);
+    }
+    else if (pipe.is_curves) [[static_branch]] {
+      init_globals_curves(interp, curves_interp, sd, view);
+    }
+    else if (pipe.is_pointcloud) [[static_branch]] {
+      init_globals_pointcloud(ptcloud_interp, sd);
+    }
+
+    nodetree_surface(kg, sd, 0.0f);
+
+    if (pipe.is_gsplat) [[static_branch]] {
+      sd.transmittance = gsplat_amend_transmittance(gsplat_interp, sd.transmittance);
+    }
 
     float noise_offset = sampling.rng_1D_get(SAMPLING_TRANSPARENCY);
-    float random_threshold = pcg4d(float4(g_data.P, noise_offset)).x;
+    float random_threshold = random::pcg_4d(float4(sd.P, noise_offset)).x;
 
-    float transparency = average(g_transmittance);
-    if (transparency > random_threshold
+    float transparency = average(sd.transmittance);
+    bool discard_surface = transparency > random_threshold;
 #ifdef MAT_OUTLINE_SHELL
-        || transparency >= 1.0f
+    discard_surface = discard_surface || transparency >= 1.0f;
 #endif
-    ) {
+    if (discard_surface) {
       gpu_discard_fragment();
       return;
     }
@@ -92,7 +109,7 @@ void surf_shadow([[resource_table]] PipelineConstants &pipe,
 
   /* Using bitwise ops is way faster than integer ops. */
   constexpr int page_shift = SHADOW_PAGE_LOD;
-  constexpr int page_mask = ~(0xFFFFFFFF << SHADOW_PAGE_LOD);
+  constexpr int page_mask = int(~(0xFFFFFFFFu << SHADOW_PAGE_LOD));
 
   int2 tile_co = texel_co >> page_shift;
   int2 texel_page = texel_co & page_mask;
@@ -125,7 +142,8 @@ void surf_shadow([[resource_table]] PipelineConstants &pipe,
     /* The first draw has completed its full-precision depth reduction. Only a fragment
      * at that exact depth may own the texel. Exact ties use a deterministic instance ID. */
     if (u_depth == imageLoad(srt.shadow_atlas_img, out_texel).r) {
-      imageAtomicMin(srt.shadow_caster_atlas_img, out_texel, resource_id_get());
+      draw::ID id = {interp.resource_id_raw};
+      imageAtomicMin(srt.shadow_caster_atlas_img, out_texel, id.resource_id<64>());
     }
   }
   else if (uni.uniform_buf.shadow.use_debug_cost) {

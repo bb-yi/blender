@@ -44,7 +44,7 @@ class RenderBuffers {
   TextureFromPool cryptomatte_tx;
   TextureFromPool outline_color_tx;
   TextureFromPool outline_info_tx;
-  /* TODO(fclem): Use texture from pool once they support texture array. */
+  /* Auxiliary views exchange these with persistent capture-owned buffers. */
   Texture rp_color_tx;
   Texture rp_value_tx;
 
@@ -64,6 +64,8 @@ class RenderBuffers {
       case EEVEE_RENDER_PASS_MIST:
       case EEVEE_RENDER_PASS_SHADOW:
       case EEVEE_RENDER_PASS_AO:
+      case EEVEE_RENDER_PASS_DENOISING_DEPTH:
+      case EEVEE_RENDER_PASS_DENOISING_ROUGHNESS:
         return PASS_STORAGE_VALUE;
       case EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT:
       case EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET:

@@ -19,6 +19,7 @@ set(SRC
   anim_asset_ops.cc
   anim_channels_defines.cc
   anim_channels_edit.cc
+  anim_convert.cc
   anim_deps.cc
   anim_draw.cc
   anim_filter.cc
@@ -36,6 +37,7 @@ set(SRC
   keyingsets.cc
   time_scrub_ui.cc
   transformable.cc
+  world_space_copy.cc
 
   anim_intern.hh
   keyframes_general_intern.hh

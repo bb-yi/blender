@@ -233,7 +233,7 @@ static LightShaderDependency light_shader_node_dependency_get(const bNodeTree &n
   }
 
   if (node.type_legacy == NODE_REROUTE) {
-    const bNodeSocket *input_socket = static_cast<const bNodeSocket *>(node.inputs.first);
+    const bNodeSocket *input_socket = node.inputs.first();
     return input_socket ? light_shader_socket_dependency_get(nodetree, *input_socket, visited) :
                           LightShaderDependency::Uniform;
   }
@@ -246,7 +246,7 @@ static LightShaderDependency light_shader_node_dependency_get(const bNodeTree &n
   }
 
   LightShaderDependency result = LightShaderDependency::Uniform;
-  for (const bNodeSocket *input_socket = static_cast<const bNodeSocket *>(node.inputs.first);
+  for (const bNodeSocket *input_socket = node.inputs.first();
        input_socket != nullptr;
        input_socket = input_socket->next)
   {
@@ -326,11 +326,11 @@ static bool light_shader_node_uses_scene_time_get(const bNodeTree &nodetree,
   visited.add(&node);
 
   if (node.type_legacy == NODE_REROUTE) {
-    const bNodeSocket *input_socket = static_cast<const bNodeSocket *>(node.inputs.first);
+    const bNodeSocket *input_socket = node.inputs.first();
     return input_socket && light_shader_socket_uses_scene_time_get(nodetree, *input_socket, visited);
   }
 
-  for (const bNodeSocket *input_socket = static_cast<const bNodeSocket *>(node.inputs.first);
+  for (const bNodeSocket *input_socket = node.inputs.first();
        input_socket != nullptr;
        input_socket = input_socket->next)
   {
@@ -451,7 +451,8 @@ void Light::sync(ShadowModule &shadows,
                  float4x4 object_to_world,
                  char visibility_flag,
                  const blender::Light *la,
-                 const LightLinking *light_linking /* = nullptr */,
+                 uint64_t light_set_membership,
+                 uint64_t shadow_set_membership,
                  float light_shader_range_scale,
                  float threshold,
                  int lightgroup_id)
@@ -464,9 +465,10 @@ void Light::sync(ShadowModule &shadows,
   }
   this->light_shader_range_scale = light_shader_range_scale;
 
-  this->color = BKE_light_power(*la) * BKE_light_color(*la);
+  this->color = BKE_light_color(*la);
+  float base_power = BKE_light_power(*la);
   if (la->mode & LA_UNNORMALIZED) {
-    this->color *= BKE_light_area(*la, object_to_world);
+    base_power *= BKE_light_area(*la, object_to_world);
   }
 
   float3 scale;
@@ -485,21 +487,26 @@ void Light::sync(ShadowModule &shadows,
   const bool transmission_visibility = (visibility_flag & OB_HIDE_TRANSMISSION) == 0;
   const bool volume_visibility = (visibility_flag & OB_HIDE_VOLUME_SCATTER) == 0;
 
-  float shape_power = shape_radiance_get();
-  float point_power = point_radiance_get();
-  this->power[LIGHT_DIFFUSE] = la->diff_fac * shape_power * diffuse_visibility;
-  this->power[LIGHT_SPECULAR] = la->spec_fac * shape_power * glossy_visibility;
-  this->power[LIGHT_TRANSMISSION] = la->transmission_fac * shape_power * transmission_visibility;
-  this->power[LIGHT_VOLUME] = la->volume_fac * point_power * volume_visibility;
+  this->shape_power = base_power * shape_radiance_get();
+  this->point_power = base_power * point_radiance_get();
+  this->power_factor[LIGHT_DIFFUSE] = la->diff_fac * diffuse_visibility;
+  this->power_factor[LIGHT_SPECULAR] = la->spec_fac * glossy_visibility;
+  this->power_factor[LIGHT_TRANSMISSION] = la->transmission_fac * transmission_visibility;
+  this->power_factor[LIGHT_VOLUME] = la->volume_fac * volume_visibility;
 
   this->lod_bias = shadows.global_lod_bias();
   this->lod_min = shadow_lod_min_get(la);
   this->filter_radius = la->shadow_filter_radius;
-  this->shadow_jitter = (la->mode & LA_SHADOW_JITTER) != 0;
+  this->flags = LightFlag(0u);
   this->lightgroup_id = max_ii(lightgroup_id, 0);
   this->shader_parameter_uid = 0;
   this->shadow_map_scale = max_ff(la->shadow_map_scale, 0.0001f);
-  this->visible_camera = (visibility_flag & OB_HIDE_CAMERA) == 0;
+  if (la->mode & LA_SHADOW_JITTER) {
+    this->flags = LightFlag(this->flags | LIGHT_USE_SHADOW_JITTER);
+  }
+  if (visibility_flag & OB_HIDE_CAMERA) {
+    this->flags = LightFlag(this->flags | LIGHT_CAMERA_HIDDEN);
+  }
 
   if (la->mode & LA_SHADOW) {
     shadow_ensure(shadows);
@@ -508,16 +515,8 @@ void Light::sync(ShadowModule &shadows,
     shadow_discard_safe(shadows);
   }
 
-  if (light_linking) {
-    this->light_set_membership = uint64_to_uint2(light_linking->runtime.light_set_membership);
-    this->shadow_set_membership = uint64_to_uint2(light_linking->runtime.shadow_set_membership);
-  }
-  else {
-    /* Set all bits if light linking is not used. */
-    this->light_set_membership = uint64_to_uint2(~uint64_t(0));
-    this->shadow_set_membership = uint64_to_uint2(~uint64_t(0));
-  }
-
+  this->light_set_membership = uint64_to_uint2(light_set_membership);
+  this->shadow_set_membership = uint64_to_uint2(shadow_set_membership);
   this->initialized = true;
 }
 
@@ -578,10 +577,11 @@ void Light::shape_parameters_set(const blender::Light *la,
 
   /* Compute influence radius first. Can be amended by shape later. */
   if (is_local_light(this->type)) {
-    LightLocalData &l_local = this->local();
+    LightLocalData &l_local = this->local;
     const float max_power = reduce_max(BKE_light_color(*la)) *
                             fabsf(BKE_light_power(*la) / 100.0f);
-    const float surface_max_power = max(la->diff_fac, la->spec_fac) * max_power;
+    const float surface_max_power = max(max(la->diff_fac, la->spec_fac), la->transmission_fac) *
+                                    max_power;
     const float volume_max_power = la->volume_fac * max_power;
 
     float influence_radius_surface = attenuation_radius_get(la, threshold, surface_max_power) *
@@ -602,7 +602,7 @@ void Light::shape_parameters_set(const blender::Light *la,
                                 1.0f;
 
   if (is_sun_light(this->type)) {
-    LightSunData &l_sun = this->sun();
+    LightSunData &l_sun = this->sun;
     float sun_half_angle = min_ff(la->sun_angle, DEG2RADF(179.9f)) / 2.0f;
     /* Use non-clamped radius for soft shadows. Avoid having a minimum blur. */
     l_sun.shadow_angle = sun_half_angle * trace_scaling_fac;
@@ -616,7 +616,7 @@ void Light::shape_parameters_set(const blender::Light *la,
     l_sun.direction = z_axis;
   }
   else if (is_area_light(this->type)) {
-    LightAreaData &l_area = this->area();
+    LightAreaData &l_area = this->area;
     const bool is_irregular = ELEM(la->area_shape, LA_AREA_RECT, LA_AREA_ELLIPSE);
     l_area.size = float2(la->area_size, is_irregular ? la->area_sizey : la->area_size);
     /* Scale and clamp to minimum value before float imprecision artifacts appear. */
@@ -636,8 +636,8 @@ void Light::shape_parameters_set(const blender::Light *la,
     l_area.local.shape_radius = max(0.001f, length(l_area.size) / 2.0f);
   }
   else if (is_point_light(this->type)) {
-    LightSpotData &l_spot = this->spot();
-    LightLocalData &l_local = this->local();
+    LightSpotData &l_spot = this->spot;
+    LightLocalData &l_local = this->local;
     /* Spot size & blend */
     if (is_spot_light(this->type)) {
       const float spot_size = cosf(la->spotsize * 0.5f);
@@ -658,9 +658,8 @@ void Light::shape_parameters_set(const blender::Light *la,
     /* Use unclamped radius for soft shadows. Avoid having a minimum blur. */
     l_local.local.shadow_radius = max(0.0f, la->radius) * trace_scaling_fac;
     /* Clamp to a minimum to distinguish between point lights and area light shadow. */
-    l_local.local.shadow_radius = (la->radius > 0.0f) ?
-                                      max_ff(1e-8f, local().local.shadow_radius) :
-                                      0.0f;
+    l_local.local.shadow_radius = (la->radius > 0.0f) ? max_ff(1e-8f, local.local.shadow_radius) :
+                                                        0.0f;
     /* Set to default position. */
     l_local.local.shadow_position = float3(0.0f);
     l_local.local.shape_radius = la->radius;
@@ -678,7 +677,7 @@ float Light::shape_radiance_get()
     case LIGHT_RECT:
     case LIGHT_ELLIPSE: {
       /* Rectangle area. */
-      float area = this->area().size.x * this->area().size.y * 4.0f;
+      float area = this->area.size.x * this->area.size.y * 4.0f;
       /* Scale for the lower area of the ellipse compared to the surrounding rectangle. */
       if (this->type == LIGHT_ELLIPSE) {
         area *= M_PI / 4.0f;
@@ -691,13 +690,13 @@ float Light::shape_radiance_get()
     case LIGHT_SPOT_SPHERE:
     case LIGHT_SPOT_DISK: {
       /* Sphere area. */
-      float area = float(4.0f * M_PI) * square(this->local().local.shape_radius);
+      float area = float(4.0f * M_PI) * square(this->local.local.shape_radius);
       /* Convert radiant flux to radiance. */
       return 1.0f / (area * float(M_PI));
     }
     case LIGHT_SUN_ORTHO:
     case LIGHT_SUN: {
-      float inv_sin_sq = 1.0f + 1.0f / square(this->sun().shape_radius);
+      float inv_sin_sq = 1.0f + 1.0f / square(this->sun.shape_radius);
       /* Convert irradiance to radiance. */
       return float(M_1_PI) * inv_sin_sq;
     }
@@ -714,7 +713,7 @@ float Light::point_radiance_get()
     case LIGHT_ELLIPSE: {
       /* This corrects for area light most representative point trick.
        * The fit was found by reducing the average error compared to cycles. */
-      float area = this->area().size.x * this->area().size.y * 4.0f;
+      float area = this->area.size.x * this->area.size.y * 4.0f;
       float tmp = M_PI_2 / (M_PI_2 + sqrtf(area));
       /* Lerp between 1.0 and the limit (1 / pi). */
       float mrp_scaling = tmp + (1.0f - tmp) * M_1_PI;
@@ -740,7 +739,7 @@ float Light::point_radiance_get()
 void Light::debug_draw()
 {
   drw_debug_sphere(this->object_to_world.location(),
-                   this->local().local.influence_radius_max,
+                   this->local.local.influence_radius_max,
                    float4(0.8f, 0.3f, 0.0f, 1.0f));
 }
 
@@ -793,11 +792,13 @@ void LightModule::add_world_sun_light(const ObjectKey &key, bool use_diffuse, bo
                                  "World Sun" :
                                  (use_diffuse ? "World Sun Diffuse" : "World Sun Glossy"));
   light.used = true;
+  light.resource_id = 0;
   light.sync(inst_.shadows,
              float4x4::identity(),
              visibility_flag,
              &la,
-             nullptr,
+             draw::LIGHT_LINK_MASK_ALL,
+             draw::LIGHT_LINK_MASK_ALL,
              1.0f,
              light_threshold_,
              0);
@@ -876,6 +877,9 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
   Light &light = light_map_.lookup_or_add_default(ObjectKey(ob_ref));
   light_names_.add_overwrite(ObjectKey(ob_ref), ob_ref.object->id.name + 2);
   light.used = true;
+  ResourceHandleRange handle = inst_.manager->unique_handle(ob_ref);
+  inst_.manager->extract_all_object_attributes(handle, ob_ref);
+  light.resource_id = handle.index();
   const NodeTreeInfo *node_tree_info = node_tree_info_.lookup_ptr(&la);
   if (node_tree_info != nullptr) {
     node_tree_info_hits_++;
@@ -896,7 +900,8 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
                ob_ref.object_to_world(),
                ob_ref.object->visibility_flag,
                &la,
-               ob_ref.light_linking(),
+               ob_ref.get_light_set_membership(),
+               ob_ref.get_shadow_set_membership(),
                light_shader_range_scale,
                light_threshold_,
                la.lightgroup_id);
@@ -905,7 +910,7 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
     /* Directional shadow sync stores view-dependent clipmap offsets in the matrix translation.
      * Restore the source object transform before exposing it to light shader nodes this frame. */
     light.object_to_world = light_object_to_world_normalized_get(ob_ref.object_to_world());
-    light.sun().direction = light.z_axis();
+    light.sun.direction = light.z_axis();
   }
   light.light_shader_index = -1;
   light.shader_parameter_uid = ob_ref.object->id.orig_id ?
@@ -1065,7 +1070,7 @@ void LightModule::update_shadow_light_costs()
 
 void LightModule::end_sync()
 {
-  /** IMPORTANT: We cannot add new lights here since the shadow module already executed its
+  /* IMPORTANT: We cannot add new lights here since the shadow module already executed its
    * `end_sync`. Doing so ends up in very bad data access since the shadow data of the new light
    * will not exists on the GPU. */
 
@@ -1795,9 +1800,9 @@ void LightModule::set_view(View &view, const int2 extent)
         light.color = inst_.world.sunlight[src_index].color;
         light.object_to_world = inst_.world.sunlight[src_index].object_to_world;
 
-        LightSunData sun_data = light.sun();
+        LightSunData sun_data = light.sun;
         sun_data.direction = inst_.world.sunlight[src_index].object_to_world.z_axis();
-        light.sun() = sun_data;
+        light.sun = sun_data;
       }
       return light;
     };

@@ -20,7 +20,7 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_color.hh"
-#include "BLI_hash.h"
+#include "BLI_hash_c.hh"
 #include "BKE_attribute.hh"
 #include "BKE_collection.hh"
 #include "BKE_customdata.hh"
@@ -572,7 +572,7 @@ struct GeometryBuilder::Impl {
         Surface surface;
         surface.instance = instance.identity;
         surface.resource_id = instance.resource_id;
-        surface.material_tag = material ? material->id.session_uid : 0;
+        surface.material_tag = material ? material->id.session_uid.uid_ : 0;
         for (int rule = 0; rule < int(graph->scopes.size()); rule++) {
           if (matches[rule] && material_matches(graph->scopes[rule], material)) {
             surface.rules.push_back(rule);

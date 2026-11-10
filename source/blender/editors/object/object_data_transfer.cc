@@ -10,9 +10,9 @@
 #include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
 
-#include "BLI_math_matrix.h"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 #include "BKE_customdata.hh"
@@ -162,7 +162,7 @@ static const EnumPropertyItem *dt_layers_select_src_itemf(bContext *C,
     RNA_enum_item_add_separator(&item, &totitem);
 
     const ListBaseT<bDeformGroup> *defbase = BKE_object_defgroup_list(ob_src);
-    for (i = 0, dg = static_cast<const bDeformGroup *>(defbase->first); dg; i++, dg = dg->next) {
+    for (i = 0, dg = defbase->first(); dg; i++, dg = dg->next) {
       tmp_item.value = i;
       tmp_item.identifier = tmp_item.name = dg->name;
       RNA_enum_item_add(&item, &totitem, &tmp_item);

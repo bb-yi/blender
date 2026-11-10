@@ -19,8 +19,8 @@
 #include "eevee_reverse_z_lib.bsl.hh"
 #include "eevee_subsurface_lib.bsl.hh"
 #include "gpu_shader_codegen_lib.glsl"
-#include "gpu_shader_fullscreen_lib.glsl"
-#include "gpu_shader_shared_exponent_lib.glsl"
+#include "gpu_shader_fullscreen.bsl.hh"
+#include "gpu_shader_shared_exponent.bsl.hh"
 
 namespace eevee::deferred {
 
@@ -61,7 +61,10 @@ void aov_clear_frag([[resource_table]] RenderPassOutput &render_passes,
   render_passes.clear_aovs(uni, int2(frag_co.xy));
 }
 
-PipelineGraphic aov_clear(fullscreen_vert, aov_clear_frag);
+PipelineGraphic aov_clear(fullscreen_vert,
+                          aov_clear_frag,
+                          LightEvalConstants{.light_closure_count_reflect = 1,
+                                             .light_closure_count_transmit = 1});
 
 /** \} */
 
@@ -78,27 +81,16 @@ struct LightEval {
   [[specialization_constant(6)]] int shadow_ray_step_count;
 
   /* Chaining to next pass. */
-  [[image(2, write, DEFERRED_RADIANCE_FORMAT)]] uimage2D direct_radiance_1_img;
-  [[image(3, write, DEFERRED_RADIANCE_FORMAT)]] uimage2D direct_radiance_2_img;
-  [[image(4, write, DEFERRED_RADIANCE_FORMAT)]] uimage2D direct_radiance_3_img;
+  [[image(2, write, DEFERRED_RADIANCE_FORMAT)]] uimage2DArray direct_radiance_imgs;
   /* Optimized out if use_split_indirect is false. */
-  [[image(5, write, RAYTRACE_RADIANCE_FORMAT)]] image2D indirect_radiance_1_img;
-  [[image(6, write, RAYTRACE_RADIANCE_FORMAT)]] image2D indirect_radiance_2_img;
-  [[image(7, write, RAYTRACE_RADIANCE_FORMAT)]] image2D indirect_radiance_3_img;
+  [[image(3, write, RAYTRACE_RADIANCE_FORMAT)]] image2D indirect_radiance_1_img;
+  [[image(4, write, RAYTRACE_RADIANCE_FORMAT)]] image2D indirect_radiance_2_img;
+  [[image(5, write, RAYTRACE_RADIANCE_FORMAT)]] image2D indirect_radiance_3_img;
 
   void write_radiance_direct(uchar layer_index, int2 texel, float3 radiance)
   {
-    /* TODO(fclem): Layered texture. */
     uint data = rgb9e5_encode(radiance);
-    if (layer_index == 0u) {
-      imageStore(direct_radiance_1_img, texel, uint4(data));
-    }
-    else if (layer_index == 1u) {
-      imageStore(direct_radiance_2_img, texel, uint4(data));
-    }
-    else if (layer_index == 2u) {
-      imageStore(direct_radiance_3_img, texel, uint4(data));
-    }
+    imageStore(direct_radiance_imgs, int3(texel, layer_index), uint4(data));
   }
 
   void write_radiance_indirect(uchar layer_index, int2 texel, float3 radiance)
@@ -156,14 +148,13 @@ void light_eval_frag([[resource_table]] LightEval &srt,
   light::EvalCtx<false> ctx;
   /* Unroll light stack array assignments to avoid non-constant indexing. */
   for (uint i = 0u; i < 3; i++) [[unroll]] {
-    if (lrt.light_closure_eval_count_reflect > i) [[static_branch]] {
+    if (lrt.constants.light_closure_eval_count_reflect > i) [[static_branch]] {
       ctx.stack.cl[i] = closure_light_new(util_tx, gbuf.layer[i], V);
     }
   }
 
   ctx.P = P;
   ctx.Ng = Ng;
-  ctx.V = V;
   ctx.texel = frag_co.xy;
   ctx.thickness = thickness;
   ctx.receiver_light_set = 0;
@@ -174,6 +165,8 @@ void light_eval_frag([[resource_table]] LightEval &srt,
    * `environment_exclusion_collection`, suppress its world/light-probe (environment) contribution.
    * The flag is packed into ObjectInfos by `draw_resource` and read back here. */
   bool world_environment_disabled = false;
+  ctx.ray_count = srt.shadow_ray_count;
+  ctx.ray_step_count = srt.shadow_ray_step_count;
   if (gbuf.header.use_object_id()) {
     uint object_id = reader.read_object_id(texel);
     ObjectInfos object_infos = infos.get(object_id);
@@ -215,7 +208,7 @@ void light_eval_frag([[resource_table]] LightEval &srt,
     float3 radiance_shadowed = float3(0);
     float3 radiance_unshadowed = float3(0);
     for (uint i = 0u; i < 3; i++) [[unroll]] {
-      if (lrt.light_closure_eval_count_reflect > i) [[static_branch]] {
+      if (lrt.constants.light_closure_eval_count_reflect > i) [[static_branch]] {
         if (i < closure_count) {
           radiance_shadowed += ctx.stack.cl[i].light_shadowed;
           radiance_unshadowed += ctx.stack.cl[i].light_unshadowed;
@@ -236,7 +229,7 @@ void light_eval_frag([[resource_table]] LightEval &srt,
     uint3 bin_indices = gbuf.header.bin_index_per_layer();
 
     for (uint i = 0u; i < 3; i++) [[unroll]] {
-      if (lrt.light_closure_eval_count_reflect > i) [[static_branch]] {
+      if (lrt.constants.light_closure_eval_count_reflect > i) [[static_branch]] {
         if (i < closure_count) {
           float3 indirect_light = lightprobes.eval(samp, gbuf.layer[i], P, V, thickness);
           float3 direct_light = gbuf.layer[i].npr.enabled ? gbuf.layer[i].npr.multiplier :
@@ -259,7 +252,7 @@ void light_eval_frag([[resource_table]] LightEval &srt,
     uint3 bin_indices = gbuf.header.bin_index_per_layer();
 
     for (uint i = 0u; i < 3; i++) [[unroll]] {
-      if (lrt.light_closure_eval_count_reflect > i) [[static_branch]] {
+      if (lrt.constants.light_closure_eval_count_reflect > i) [[static_branch]] {
         if (i < closure_count) {
           float3 direct_light = gbuf.layer[i].npr.enabled ? gbuf.layer[i].npr.multiplier :
                                                           ctx.stack.cl[i].light_shadowed;
@@ -289,6 +282,7 @@ float3 npr_probe_direct_closure([[resource_table]] LightEvalIterator &lights,
                                 [[resource_table]] const UtilityTexture &util_tx,
                                 light::EvalCtx<false> base_ctx,
                                 ClosureUndetermined cl,
+                                float3 V,
                                 float vPz)
 {
   if (cl.type == CLOSURE_NONE_ID) {
@@ -299,8 +293,8 @@ float3 npr_probe_direct_closure([[resource_table]] LightEvalIterator &lights,
   float3 direct = cl.npr.enabled ? cl.npr.multiplier : float3(0.0f);
   if (!cl.npr.enabled && !closure_has_transmission(cl.type)) {
     for (uint i = 0u; i < 3u; i++) [[unroll]] {
-      if (lrt.light_closure_eval_count_reflect > i) [[static_branch]] {
-        ctx.stack.cl[i] = closure_light_new(util_tx, cl, ctx.V);
+      if (lrt.constants.light_closure_eval_count_reflect > i) [[static_branch]] {
+        ctx.stack.cl[i] = closure_light_new(util_tx, cl, V);
       }
     }
     lights.eval_reflection(ctx, vPz);
@@ -310,8 +304,8 @@ float3 npr_probe_direct_closure([[resource_table]] LightEvalIterator &lights,
   if (closure_has_transmission(cl.type) || cl.type == CLOSURE_BSSRDF_BURLEY_ID) {
     light::EvalCtx<true> ctx_tr = light::init_from_reflect_ctx(ctx);
     for (uint i = 0u; i < 3u; i++) [[unroll]] {
-      if (lrt.light_closure_eval_count_transmit > i) [[static_branch]] {
-        ctx_tr.stack.cl[i] = closure_light_new(util_tx, cl, ctx.V, ctx.thickness);
+      if (lrt.constants.light_closure_eval_count_transmit > i) [[static_branch]] {
+        ctx_tr.stack.cl[i] = closure_light_new(util_tx, cl, V, ctx.thickness);
       }
     }
     lights.eval_transmission(ctx_tr, vPz);
@@ -337,6 +331,7 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
                       [[resource_table]] const Sampling &sampling,
                       [[resource_table]] const LightprobeVolumeRenderData &lightprobes,
                       [[resource_table]] const LightprobeRenderData &probe_render,
+                      [[resource_table]] const Uniform &uni,
                       [[resource_table]] const HiZ &hiz,
                       [[resource_table]] const UtilityTexture &util_tx,
                       [[resource_table]] const gbuffer::Reader &reader,
@@ -410,13 +405,14 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
   light::EvalCtx<false> ctx;
   ctx.P = P;
   ctx.Ng = Ng;
-  ctx.V = V;
   ctx.texel = frag_co.xy;
   ctx.thickness = thickness;
   ctx.receiver_light_set = 0;
   ctx.terminator_normal_offset = 0.0f;
   ctx.receiver_id = gbuf.header.use_object_id() ? reader.read_object_id(texel) : 0u;
   ctx.terminator_geometry_offset = 0.0f;
+  ctx.ray_count = uni.uniform_buf.shadow.ray_count;
+  ctx.ray_step_count = uni.uniform_buf.shadow.step_count;
   if (gbuf.header.use_object_id()) {
     uint object_id = reader.read_object_id(texel);
     ObjectInfos object_infos = infos.get(object_id);
@@ -471,7 +467,7 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
   for (int i = 0; i < min(int(closure_count), 3); i++) {
     if (gbuf.header.has_npr_payload()) {
       ClosureUndetermined indirect_cl = probe_closures[i];
-      frag_out.radiance.xyz += npr_probe_direct_closure(lights, util_tx, ctx, indirect_cl, vPz);
+      frag_out.radiance.xyz += npr_probe_direct_closure(lights, util_tx, ctx, indirect_cl, V, vPz);
       float3 color = indirect_cl.color;
       if ((indirect_cl.type == CLOSURE_BSDF_TRANSLUCENT_ID ||
            indirect_cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&
@@ -498,6 +494,7 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
                       [[resource_table]] const draw::View &views,
                       [[resource_table]] const draw::Infos &infos,
                       [[resource_table]] const LightprobeRenderData &lightprobes,
+                      [[resource_table]] const Uniform &uni,
                       [[resource_table]] const Sampling &sampling,
                       [[resource_table]] const HiZ &hiz,
                       [[resource_table]] const UtilityTexture &util_tx,
@@ -627,13 +624,14 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
   light::EvalCtx<false> ctx;
   ctx.P = P;
   ctx.Ng = Ng;
-  ctx.V = V;
   ctx.texel = frag_co.xy;
   ctx.thickness = thickness;
   ctx.receiver_light_set = 0;
   ctx.terminator_normal_offset = 0.0f;
   ctx.receiver_id = gbuf.header.use_object_id() ? reader.read_object_id(texel) : 0u;
   ctx.terminator_geometry_offset = 0.0f;
+  ctx.ray_count = uni.uniform_buf.shadow.ray_count;
+  ctx.ray_step_count = uni.uniform_buf.shadow.step_count;
   if (gbuf.header.use_object_id()) {
     uint object_id = reader.read_object_id(texel);
     ObjectInfos object_infos = infos.get(object_id);
@@ -688,7 +686,7 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
   for (int i = 0; i < min(int(closure_count), 3); i++) {
     if (gbuf.header.has_npr_payload()) {
       ClosureUndetermined npr_cl = probe_closures[i];
-      frag_out.radiance.xyz += npr_probe_direct_closure(lights, util_tx, ctx, npr_cl, vPz);
+      frag_out.radiance.xyz += npr_probe_direct_closure(lights, util_tx, ctx, npr_cl, V, vPz);
       float3 color = npr_cl.color;
       if ((npr_cl.type == CLOSURE_BSDF_TRANSLUCENT_ID ||
            npr_cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&
@@ -708,61 +706,77 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
 
 PipelineGraphic light_single(fullscreen_vert,
                              light_eval_frag,
-                             LightEvalData{
+                             LightEvalConstants{
                                  .use_light_shader_texture_eval = true,
                                  .use_npr_light_policy = true,
                                  .light_closure_eval_count_reflect = 1,
                                  .light_closure_eval_count_transmit = 1,
+                                 .light_closure_count_reflect = 1,
+                                 .light_closure_count_transmit = 1,
                              },
-                             ShadowRenderData{
+                             ShadowRenderConstants{
                                  .shadow_random = true,
+                                 .shadow_static_noise = false,
                              });
 PipelineGraphic light_double(fullscreen_vert,
                              light_eval_frag,
-                             LightEvalData{
+                             LightEvalConstants{
                                  .use_light_shader_texture_eval = true,
                                  .use_npr_light_policy = true,
                                  .light_closure_eval_count_reflect = 2,
                                  .light_closure_eval_count_transmit = 1,
+                                 .light_closure_count_reflect = 2,
+                                 .light_closure_count_transmit = 1,
                              },
-                             ShadowRenderData{
+                             ShadowRenderConstants{
                                  .shadow_random = true,
+                                 .shadow_static_noise = false,
                              });
 PipelineGraphic light_triple(fullscreen_vert,
                              light_eval_frag,
-                             LightEvalData{
+                             LightEvalConstants{
                                  .use_light_shader_texture_eval = true,
                                  .use_npr_light_policy = true,
                                  .light_closure_eval_count_reflect = 3,
                                  .light_closure_eval_count_transmit = 1,
+                                 .light_closure_count_reflect = 3,
+                                 .light_closure_count_transmit = 1,
                              },
-                             ShadowRenderData{
+                             ShadowRenderConstants{
                                  .shadow_random = true,
+                                 .shadow_static_noise = false,
                              });
 PipelineGraphic sphere_eval(fullscreen_vert,
                             sphere_eval_frag,
-                            LightEvalData{
+                            LightEvalConstants{
                                 .use_light_shader_texture_eval = true,
                                 .use_npr_light_policy = true,
                                 .light_closure_eval_count_reflect = 1,
                                 .light_closure_eval_count_transmit = 1,
+                                .light_closure_count_reflect = 1,
+                                .light_closure_count_transmit = 1,
                             },
-                            ShadowRenderData{
+                            ShadowRenderConstants{
                                 .shadow_random = true,
+                                /* Use static noise pattern to avoid non-deterministic captures. */
+                                .shadow_static_noise = true,
                             });
 PipelineGraphic planar_eval(fullscreen_vert,
                             planar_eval_frag,
                             PlanarProbeEval{
                                 .legacy_sphere_probe_enable = true,
                             },
-                            LightEvalData{
+                            LightEvalConstants{
                                 .use_light_shader_texture_eval = true,
                                 .use_npr_light_policy = true,
                                 .light_closure_eval_count_reflect = 2,
                                 .light_closure_eval_count_transmit = 2,
+                                .light_closure_count_reflect = 2,
+                                .light_closure_count_transmit = 2,
                             },
-                            ShadowRenderData{
+                            ShadowRenderConstants{
                                 .shadow_random = true,
+                                .shadow_static_noise = false,
                             });
 
 }  // namespace eevee::deferred

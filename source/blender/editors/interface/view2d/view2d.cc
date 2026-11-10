@@ -16,12 +16,12 @@
 
 #include "DNA_userdef_types.h"
 
-#include "BLI_link_utils.h"
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_memarena.h"
-#include "BLI_rect.h"
-#include "BLI_utildefines.h"
+#include "BLI_link_utils.hh"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_memarena.hh"
+#include "BLI_rect.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 #include "BKE_global.hh"
@@ -55,10 +55,10 @@ BLI_INLINE int clamp_float_to_int(const float f)
   const float min = float(INT_MIN);
   const float max = float(INT_MAX);
 
-  if (UNLIKELY(f < min)) {
+  if (f < min) [[unlikely]] {
     return min;
   }
-  if (UNLIKELY(f > max)) {
+  if (f > max) [[unlikely]] {
     return int(max);
   }
   return int(f);
@@ -1488,7 +1488,7 @@ void view2d_scrollers_draw(View2D *v2d, const rcti *mask_custom)
 {
   View2DScrollers scrollers;
   view2d_scrollers_calc(v2d, mask_custom, &scrollers);
-  bTheme *btheme = theme::theme_get();
+  const bTheme *btheme = theme::theme_get();
   rcti vert, hor;
   const int scroll = view2d_scroll_mapped(v2d->scroll);
   const char emboss_alpha = btheme->tui.widget_emboss[3];
@@ -1529,7 +1529,7 @@ void view2d_scrollers_draw(View2D *v2d, const rcti *mask_custom)
     }
     wcol.item[3] *= alpha_fac;
     wcol.outline[3] = 0;
-    btheme->tui.widget_emboss[3] = 0; /* will be reset later */
+    const_cast<bTheme *>(btheme)->tui.widget_emboss[3] = 0; /* will be reset later */
 
     /* show zoom handles if:
      * - zooming on x-axis is allowed (no scroll otherwise)
@@ -1573,7 +1573,7 @@ void view2d_scrollers_draw(View2D *v2d, const rcti *mask_custom)
     }
     wcol.item[3] *= alpha_fac;
     wcol.outline[3] = 0;
-    btheme->tui.widget_emboss[3] = 0; /* will be reset later */
+    const_cast<bTheme *>(btheme)->tui.widget_emboss[3] = 0; /* will be reset later */
 
     /* show zoom handles if:
      * - zooming on y-axis is allowed (no scroll otherwise)
@@ -1592,7 +1592,7 @@ void view2d_scrollers_draw(View2D *v2d, const rcti *mask_custom)
   }
 
   /* Was changed above, so reset. */
-  btheme->tui.widget_emboss[3] = emboss_alpha;
+  const_cast<bTheme *>(btheme)->tui.widget_emboss[3] = emboss_alpha;
 }
 
 /** \} */
@@ -1907,14 +1907,23 @@ float view2d_scale_get_y(const View2D *v2d)
 {
   return BLI_rcti_size_y(&v2d->mask) / BLI_rctf_size_y(&v2d->cur);
 }
-void view2d_scale_get_inverse(const View2D *v2d, float *r_x, float *r_y)
+
+void view2d_pixel_size_get(const View2D *v2d, float *r_x, float *r_y)
 {
   if (r_x) {
-    *r_x = BLI_rctf_size_x(&v2d->cur) / BLI_rcti_size_x(&v2d->mask);
+    *r_x = view2d_pixel_size_get_x(v2d);
   }
   if (r_y) {
-    *r_y = BLI_rctf_size_y(&v2d->cur) / BLI_rcti_size_y(&v2d->mask);
+    *r_y = view2d_pixel_size_get_y(v2d);
   }
+}
+float view2d_pixel_size_get_x(const View2D *v2d)
+{
+  return BLI_rctf_size_x(&v2d->cur) / (BLI_rcti_size_x(&v2d->mask) + 1);
+}
+float view2d_pixel_size_get_y(const View2D *v2d)
+{
+  return BLI_rctf_size_y(&v2d->cur) / (BLI_rcti_size_y(&v2d->mask) + 1);
 }
 
 void view2d_center_get(const View2D *v2d, float *r_x, float *r_y)

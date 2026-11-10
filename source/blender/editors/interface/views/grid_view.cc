@@ -226,6 +226,47 @@ AbstractViewItem *AbstractGridView::navigate_down(AbstractViewItem *from)
   return next_item ? next_item : from;
 }
 
+void AbstractGridView::page_scroll(bContext *C, PageScrollDirection direction)
+{
+  ARegion *region = CTX_wm_region(C);
+  View2D &v2d = region->v2d;
+
+  const IndexRange &visible_range = this->get_visible_range(v2d, nullptr);
+  const int first_idx_in_view = visible_range.first();
+
+  const int cur_height = BLI_rctf_size_y(&v2d.cur);
+  const int view_height = BLI_rcti_size_y(&v2d.mask);
+  const int tot_height = BLI_rctf_size_y(&v2d.tot);
+  const int count_rows_in_view = std::max(view_height / style_.tile_height, 1);
+  const int tot_rows = std::max(tot_height / style_.tile_height, 1);
+
+  switch (direction) {
+    case PageScrollDirection::Up: {
+      const int target_row = std::max(0, (first_idx_in_view / cols_per_row_) - count_rows_in_view);
+      v2d.cur.ymax = v2d.tot.ymax - target_row * style_.tile_height;
+      v2d.cur.ymin = v2d.cur.ymax - cur_height;
+      break;
+    }
+    case PageScrollDirection::Down: {
+      const int target_row = std::min(tot_rows,
+                                      (first_idx_in_view / cols_per_row_) + count_rows_in_view);
+      v2d.cur.ymax = v2d.tot.ymax - target_row * style_.tile_height;
+      v2d.cur.ymin = v2d.cur.ymax - cur_height;
+      break;
+    }
+    case PageScrollDirection::Top: {
+      v2d.cur.ymax = v2d.tot.ymax;
+      v2d.cur.ymin = v2d.cur.ymax - cur_height;
+      break;
+    }
+    case PageScrollDirection::Bottom: {
+      v2d.cur.ymin = v2d.tot.ymin;
+      v2d.cur.ymax = v2d.cur.ymin + cur_height;
+      break;
+    }
+  }
+}
+
 IndexRange AbstractGridView::get_visible_range(
     const View2D &v2d, const AbstractGridViewItem *force_visible_item) const
 {
@@ -280,9 +321,12 @@ void AbstractGridView::scroll_active_into_view(bContext *C, bool scroll_active_t
       int first_idx_in_view = visible_range.first();
       int last_idx_in_view = visible_range.last();
 
-      /* When button is slightly outside the view, clamp region to button's height, see: !159566 */
-      first_idx_in_view += rect.ymax > v2d.cur.ymax ? cols_per_row_ : 0;
-      last_idx_in_view -= rect.ymin < v2d.cur.ymin ? cols_per_row_ : 0;
+      if (but) {
+        /* When button is slightly outside the view, clamp region to button's height, see: !159566
+         */
+        first_idx_in_view += rect.ymax > v2d.cur.ymax ? cols_per_row_ : 0;
+        last_idx_in_view -= rect.ymin < v2d.cur.ymin ? cols_per_row_ : 0;
+      }
 
       const int view_height = BLI_rcti_size_y(&v2d.mask);
       const int count_rows_in_view = std::max(view_height / style_.tile_height, 1);
@@ -343,7 +387,7 @@ std::optional<std::string> AbstractGridViewItem::debug_name() const
 
 AbstractGridView &AbstractGridViewItem::get_view() const
 {
-  if (UNLIKELY(!view_)) {
+  if (!view_) [[unlikely]] {
     throw std::runtime_error(
         "Invalid state, item must be added through AbstractGridView::add_item()");
   }
@@ -579,6 +623,10 @@ void GridViewBuilder::build_grid_view(const bContext &C,
   grid_view.update_from_old(block);
   grid_view.change_state_delayed();
   grid_view.filter(search_string);
+
+  if (grid_view.get_item_count_filtered() == 0) {
+    return;
+  }
 
   /* Ensure the given layout is actually active. */
   block_layout_set_current(&block, &layout);

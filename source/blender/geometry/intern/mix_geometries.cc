@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup geo
+ */
+
 #include "GEO_mix_geometries.hh"
 
 #include "BKE_attribute.hh"
@@ -163,10 +167,10 @@ static void mix_socket_values_same_type(bke::SocketValueVariant &a,
                                         const bke::SocketValueVariant &b,
                                         const float factor)
 {
-  BLI_assert(a.socket_type() == b.socket_type());
+  BLI_assert(a.get().type() == b.get().type());
   if (a.is_single() && b.is_single()) {
-    GMutablePointer a_ptr = a.get_single_ptr();
-    const GPointer b_ptr = b.get_single_ptr();
+    GMutablePointer a_ptr = a.get();
+    const GPointer b_ptr = b.get();
     if (!a_ptr || !b_ptr) {
       return;
     }
@@ -188,13 +192,17 @@ static void mix_socket_values_same_type(bke::SocketValueVariant &a,
     }
   }
   else if (a.is_list() && b.is_list()) {
-    nodes::GListPtr a_list_ptr = a.extract<nodes::GListPtr>();
-    const nodes::GListPtr b_list = b.get<nodes::GListPtr>();
-    if (a_list_ptr->cpp_type() != b_list->cpp_type()) {
+    const nodes::GListPtr &a_list_ref = *a.get_if<nodes::GListPtr>();
+    const nodes::GListPtr b_list = *b.get_if<nodes::GListPtr>();
+    if (!a_list_ref || !b_list) {
+      return;
+    }
+    if (a_list_ref->cpp_type() != b_list->cpp_type()) {
       /* Lists with the same socket type can still have different CPPTypes, e.g. for fields and
        * grids and single values. For now just don't try to support those combinations. */
       return;
     }
+    nodes::GListPtr a_list_ptr = a.extract<nodes::GListPtr>();
     nodes::GList &a_list = a_list_ptr.get_for_write();
     std::variant<GMutableSpan, GMutablePointer> a_values = a_list.values_for_write();
     if (auto *a_span = std::get_if<GMutableSpan>(&a_values)) {
@@ -208,7 +216,7 @@ static void mix_socket_values_same_type(bke::SocketValueVariant &a,
           factor);
     }
     /* Ideally the API would not require extracting the list and storing it again. */
-    a = bke::SocketValueVariant::From(std::move(a_list_ptr));
+    a = bke::SocketValueVariant::from(std::move(a_list_ptr));
   }
 }
 
@@ -216,17 +224,19 @@ void mix_socket_values(bke::SocketValueVariant &a,
                        const bke::SocketValueVariant &b,
                        const float factor)
 {
-  if (a.socket_type() == SOCK_STRING) {
+  if (a.is_list()) {
+    if (const nodes::GListPtr &a_list = *a.get_if<nodes::GListPtr>()) {
+      if (a_list->cpp_type().is<std::string>()) {
+        return;
+      }
+    }
+  }
+  else if (a.get().is_type<std::string>()) {
     return;
   }
-  std::optional<bke::SocketValueVariant> b_converted = nodes::implicitly_convert_socket_value(
-      *bke::node_socket_type_find_static(b.socket_type(), 0),
-      b,
-      *bke::node_socket_type_find_static(a.socket_type(), 0));
-  if (!b_converted) {
-    return;
-  }
-  mix_socket_values_same_type(a, *b_converted, factor);
+  bke::SocketValueVariant b_converted = b;
+  b_converted.ensure_type(*a.get().type());
+  mix_socket_values_same_type(a, b_converted, factor);
 }
 
 static void mix_bundle_items(nodes::BundleItemValue &a,

@@ -7,9 +7,9 @@
  */
 
 #include "BLI_colorspace.hh"
-#include "BLI_math_matrix.h"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_matrix_types.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "CLG_log.h"
 
@@ -203,7 +203,7 @@ bool GPU_shader_create_info_check_error(const GPUShaderCreateInfo *_info, char r
   using namespace blender::gpu::shader;
   const ShaderCreateInfo &info = *reinterpret_cast<const ShaderCreateInfo *>(_info);
   std::string error = info.check_error();
-  if (error.length() == 0) {
+  if (error.empty()) {
     return true;
   }
 
@@ -237,19 +237,20 @@ std::string GPU_shader_preprocess_source(StringRefNull original,
   if (original.is_empty()) {
     return original;
   }
-  gpu::shader::SourceProcessor processor(original, "python_shader.glsl", shader::Language::GLSL);
+  gpu::shader::SourceProcessor processor(
+      original, "python_shader.glsl", shader::Language::GLSL, {});
   auto [processed_str, metadata, error] = processor.convert();
 
   if (error.has_value()) {
     std::cerr << error->full_report << std::endl;
-    return "\n#error conversion failled\n";
+    return "\n#error conversion failed\n";
   }
 
   for (auto builtin : metadata.builtins) {
     info.builtins(gpu::shader::convert_builtin_bit(builtin));
   }
   /* WORKAROUND: We have an extra check in place on Metal for clip distances (see #160847). */
-  if (bool(info.builtins_ & shader::BuiltinBits::CLIP_DISTANCES)) {
+  if (flag_is_set(info.builtins_combined(), shader::BuiltinBits::CLIP_DISTANCES)) {
     info.define("USE_WORLD_CLIP_PLANES");
   }
   return processed_str;
@@ -264,7 +265,7 @@ gpu::Shader *GPU_shader_create_from_info_python(const GPUShaderCreateInfo *_info
   const bool is_compute = !info.compute_source_generated.empty();
 
   std::array<StringRefNull, 2> includes = {
-      "draw_colormanagement_lib.glsl",
+      "gpu_shader_python_base.glsl",
       "gpu_shader_python_typedef_lib.glsl",
   };
 
@@ -282,8 +283,8 @@ gpu::Shader *GPU_shader_create_from_info_python(const GPUShaderCreateInfo *_info
   info.define("WITH_MATRIX_EQ_OPERATORS");
 #endif
 
-  info.builtins_ |= BuiltinBits::NO_BUFFER_TYPE_LINTING;
-  info.builtins_ |= BuiltinBits::NO_PREPROCESSOR;
+  info.builtins(BuiltinBits::NO_BUFFER_TYPE_LINTING);
+  info.builtins(BuiltinBits::NO_PREPROCESSOR);
 
   auto preprocess_source = [&](const std::string &input_src) {
     std::string processed_str;
@@ -338,7 +339,7 @@ gpu::Shader *GPU_shader_async_compilation_finalize(AsyncCompilationHandle &handl
 
 void GPU_shader_async_compilation_cancel(AsyncCompilationHandle &handle)
 {
-  GPUBackend::get()->get_compiler()->asyc_compilation_cancel(handle);
+  GPUBackend::get()->get_compiler()->async_compilation_cancel(handle);
 }
 
 bool GPU_shader_compiler_has_pending_work()
@@ -506,7 +507,7 @@ bool GPU_shader_async_specialization_is_ready(AsyncSpecializationHandle &handle)
 
 void GPU_shader_async_specialization_cancel(AsyncSpecializationHandle &handle)
 {
-  GPUBackend::get()->get_compiler()->asyc_compilation_cancel(handle);
+  GPUBackend::get()->get_compiler()->async_compilation_cancel(handle);
 }
 
 /** \} */
@@ -561,6 +562,13 @@ int GPU_shader_get_sampler_binding(gpu::Shader *shader, const char *name)
   const ShaderInterface *interface = shader->interface;
   const ShaderInput *tex = interface->uniform_get(name);
   return tex ? tex->binding : -1;
+}
+
+int GPU_shader_get_tlas_binding(gpu::Shader *shader, const char *name)
+{
+  const ShaderInterface *interface = shader->interface;
+  const ShaderInput *tlas = interface->tlas_get(name);
+  return tlas ? tlas->location : -1;
 }
 
 uint GPU_shader_get_attribute_len(const gpu::Shader *shader)
@@ -811,11 +819,6 @@ Shader *ShaderCompiler::compile(const shader::ShaderCreateInfo &orig_info, bool 
 
   ShaderCreateInfo specialized_info = orig_info;
 
-  /* WORKAROUND: For BSL shaders, allow to disable costly builtins programatically. */
-  if (bool(specialized_info.builtins_ & BuiltinBits::NO_VIEWPORT_INDEX)) {
-    specialized_info.builtins_ &= ~BuiltinBits::VIEWPORT_INDEX;
-  }
-
   if (!specialized_info.compilation_constants_.is_empty()) {
     auto predicate = [&](const ShaderCreateInfo::Resource &res) {
       return !res.conditions.evaluate(specialized_info.compilation_constants_);
@@ -825,16 +828,52 @@ Shader *ShaderCompiler::compile(const shader::ShaderCreateInfo &orig_info, bool 
     specialized_info.geometry_resources_.remove_if(predicate);
   }
 
+  if (!specialized_info.vertex_inputs_.is_empty()) {
+    auto predicate = [&](const ShaderCreateInfo::VertIn &res) {
+      return !res.conditions.evaluate(specialized_info.compilation_constants_);
+    };
+    specialized_info.vertex_inputs_.remove_if(predicate);
+  }
+
+  if (!specialized_info.vertex_out_interfaces_.is_empty()) {
+    auto predicate = [&](const ShaderCreateInfo::StageInterfaceInfoHandle &res) {
+      return !res.conditions.evaluate(specialized_info.compilation_constants_);
+    };
+    specialized_info.vertex_out_interfaces_.remove_if(predicate);
+  }
+
+  if (!specialized_info.push_constants_.is_empty()) {
+    auto predicate = [&](const ShaderCreateInfo::PushConst &res) {
+      return !res.conditions.evaluate(specialized_info.compilation_constants_);
+    };
+    specialized_info.push_constants_.remove_if(predicate);
+  }
+
+  if (!specialized_info.builtins_.is_empty()) {
+    auto predicate = [&](const ShaderCreateInfo::BuiltinBit &res) {
+      return !res.conditions.evaluate(specialized_info.compilation_constants_);
+    };
+    specialized_info.builtins_.remove_if(predicate);
+  }
+  /* Flatten builtins into a single entry to speedup comparisons later on. */
+  BuiltinBits builtin_combined = BuiltinBits::NONE;
+  for (auto value : specialized_info.builtins_) {
+    builtin_combined = builtin_combined | value.bit;
+  }
+  specialized_info.builtins_.clear();
+  specialized_info.builtins(builtin_combined);
+
   /* We merged infos keeping duplicates because of possible different condition per definitions.
    * Deduplicate remaining ones to avoid errors. */
-  auto cleanup_duplicates = [&](Vector<ShaderCreateInfo::Resource, 0> &resources) {
-    Vector<ShaderCreateInfo::Resource, 0> tmp = resources;
+  auto cleanup_duplicates = [&](auto &resources) {
+    auto tmp = resources;
     resources.clear();
     resources.extend_non_duplicates(tmp);
   };
   cleanup_duplicates(specialized_info.pass_resources_);
   cleanup_duplicates(specialized_info.batch_resources_);
   cleanup_duplicates(specialized_info.geometry_resources_);
+  cleanup_duplicates(specialized_info.push_constants_);
 
   const std::string error = specialized_info.check_error();
   if (!error.empty()) {
@@ -855,12 +894,14 @@ Shader *ShaderCompiler::compile(const shader::ShaderCreateInfo &orig_info, bool 
     shader->fragment_output_bits |= 1u << frag_out.index;
   }
 
-  shader->skip_preprocessor = bool(specialized_info.builtins_ & BuiltinBits::NO_PREPROCESSOR);
+  shader->skip_preprocessor = bool(specialized_info.builtins_combined() &
+                                   BuiltinBits::NO_PREPROCESSOR);
 
   std::string defines = shader->defines_declare(info);
   std::string resources = shader->resources_declare(info);
 
   defines += info.resource_guard_defines(info.compilation_constants_);
+  defines += info.iface_guard_defines();
 
   if (!info.compute_entry_fn_.is_empty()) {
     defines += "#define ENTRY_POINT_" + info.compute_entry_fn_ + "\n";
@@ -1062,7 +1103,7 @@ AsyncCompilationHandle ShaderCompiler::async_compilation(const shader::ShaderCre
   return handle;
 }
 
-void ShaderCompiler::asyc_compilation_cancel(AsyncCompilationHandle &handle)
+void ShaderCompiler::async_compilation_cancel(AsyncCompilationHandle &handle)
 {
   {
     std::unique_lock lock(mutex_);
@@ -1207,7 +1248,7 @@ bool ShaderCompiler::is_compiling()
 
 void ShaderCompiler::wait_for_all()
 {
-  /** NOTE: We can't rely on BLI_thread_queue_wait_finish, since that only waits until the queue is
+  /* NOTE: We can't rely on BLI_thread_queue_wait_finish, since that only waits until the queue is
    * empty, but the works might still being processed. */
   std::unique_lock lock(mutex_);
   BLI_assert(!is_paused_);

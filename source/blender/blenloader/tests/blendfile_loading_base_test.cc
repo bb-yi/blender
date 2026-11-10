@@ -24,16 +24,16 @@
 
 #include "BLF_api.hh"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_threads.h"
+#include "BLI_threads.hh"
 
 #include "BLO_readfile.hh"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
 
-#include "DNA_genfile.h" /* for DNA_sdna_current_init() */
+#include "DNA_genfile.h"
 #include "DNA_windowmanager_types.h"
 
 #include "IMB_imbuf.hh"
@@ -60,7 +60,6 @@ void BlendfileLoadingBaseTest::SetUpTestCase()
   CLG_init();
   BLI_threadapi_init();
 
-  DNA_sdna_current_init();
   BKE_blender_globals_init();
 
   BKE_idtype_init();
@@ -83,7 +82,7 @@ void BlendfileLoadingBaseTest::SetUpTestCase()
 
   /* Allocate a dummy window manager. The real window manager will try and load Python scripts from
    * the release directory, which it won't be able to find. */
-  ASSERT_EQ(G.main->wm.first, nullptr);
+  ASSERT_EQ(G.main->wm.first_, nullptr);
   wmWindowManager *wm = BKE_id_new<wmWindowManager>(G.main, "WMdummy");
   wm->runtime = MEM_new<bke::WindowManagerRuntime>(__func__);
 }
@@ -97,7 +96,6 @@ void BlendfileLoadingBaseTest::TearDownTestCase()
 
   BLF_exit();
   DEG_free_node_types();
-  DNA_sdna_current_free();
   BLI_threadapi_exit();
 
   BKE_blender_atexit();

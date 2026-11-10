@@ -22,12 +22,13 @@
 
 #include "BLI_array.hh"
 #include "BLI_bounds_types.hh"
-#include "BLI_compiler_attrs.h"
+#include "BLI_compiler_attrs.hh"
 #include "BLI_enum_flags.hh"
 #include "BLI_function_ref.hh"
+#include "BLI_index_range.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_set.hh"
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 #include "WM_keymap.hh"
 #include "WM_types.hh"
@@ -46,6 +47,7 @@ struct Main;
 struct MenuType;
 struct PointerRNA;
 struct PropertyRNA;
+struct ARegionIMECursor;
 struct ScrArea;
 struct View3D;
 struct ViewLayer;
@@ -64,6 +66,7 @@ struct wmEventHandler_Op;
 struct wmEventHandler_UI;
 struct wmGenericUserData;
 struct wmGesture;
+struct wmIMEData;
 struct wmJob;
 struct wmJobWorkerStatus;
 struct wmOperator;
@@ -80,6 +83,10 @@ struct wmXrRuntimeData;
 struct wmXrSessionState;
 struct wmXrViewfinderState;
 #endif
+
+namespace bke {
+enum class wmIMEOwnerType : int8_t;
+}
 
 namespace bke::id {
 class IDRemapper;
@@ -168,8 +175,26 @@ void WM_init_splash_on_startup(bContext *C);
  * Show the splash screen.
  */
 void WM_init_splash(bContext *C);
+/**
+ * Absolute file path of the active project splash image, or empty if there is none.
+ */
+std::string WM_project_splash_image_filepath(const Main *bmain);
+/**
+ * Load the splash image from the given filepath, scaled to the specified width
+ * and with the Blender logo optionally composited in.
+ */
+ImBuf *WM_project_splash_image_load(StringRefNull filepath,
+                                    int width = 1000,
+                                    bool add_logo = false);
 
-void WM_init_gpu();
+/**
+ * Initialization for GPU backend,
+ */
+void WM_init_gpu_backend();
+/**
+ * Create the draw manager offscreen GPU context and initialize the GPU module.
+ */
+void WM_init_gpu_offscreen();
 
 /**
  * Return an identifier for the underlying GHOST implementation.
@@ -202,6 +227,8 @@ enum eWM_CapabilitiesFlag {
   WM_CAPABILITY_CLIPBOARD_PRIMARY = (1 << 2),
   /**
    * Reading from the back-buffer is supported.
+   *
+   * \note The GPU may not support this, also check #GPU_frontbuffer_read_workaround.
    */
   WM_CAPABILITY_GPU_FRONT_BUFFER_READ = (1 << 3),
   /** Ability to copy/paste system clipboard images. */
@@ -326,6 +353,11 @@ int2 WM_window_native_pixel_size(const wmWindow *win);
 
 void WM_window_native_pixel_coords(const wmWindow *win, int *x, int *y);
 /**
+ * Return true when this session draws its own window decorations, whether or not any particular
+ * window currently shows them (see #WM_window_is_csd).
+ */
+bool WM_window_csd_is_active();
+/**
  * Return non-nil if the CSD is used.
  */
 bool WM_window_is_csd(const wmWindow *win);
@@ -348,9 +380,17 @@ bool WM_window_is_maximized(const wmWindow *win);
 
 #ifdef WITH_INPUT_IME
 /**
- * Start and end an IME composition session for a window.
+ * Start an IME session, placing the candidate window a `x`, `y` (window coordinates).
+ * A zero size is fine when only the corner is meaningful.
+ *
+ * \param owner: Stored as #bke::WindowRuntime::ime_owner.
  */
-void WM_window_IME_begin(wmWindow *win, int x, int y, int w, int h, bool complete);
+void WM_window_IME_begin(wmWindow *win, int x, int y, int w, int h, bke::wmIMEOwnerType owner);
+/**
+ * Move the candidate window, keeping the session, its owner and any composition.
+ * Callers must only use this on a session they know exists.
+ */
+void WM_window_IME_reposition(wmWindow *win, int x, int y, int w, int h);
 void WM_window_IME_end(wmWindow *win);
 
 /**
@@ -358,8 +398,34 @@ void WM_window_IME_end(wmWindow *win);
  * Ensures:
  * - IME is enabled for regions that accept it.
  * - IME is disabled if the region no longer accepts it.
+ *
+ * \param keep_composing: Reposition instead of restarting the session, as restarting cancels
+ * the composition. Only true for the draw-time refresh of the region which owns it,
+ * elsewhere canceling is intended, e.g. when the active region changes.
+ * \param r_cursor: Optionally receives the cursor evaluated here, so a caller which needs it too
+ * doesn't run `cursor_ime` twice.
+ * \return true when `r_cursor` was assigned, false when no position was reported.
  */
-void WM_window_IME_region_refresh(wmWindow *win, const ScrArea *area, const ARegion *region);
+bool WM_window_IME_region_refresh(wmWindow *win,
+                                  const ScrArea *area,
+                                  const ARegion *region,
+                                  bool keep_composing = false,
+                                  ARegionIMECursor *r_cursor = nullptr);
+
+/**
+ * Return the IME data `region` should preview, null when there is nothing to draw:
+ * - Nothing is being composed (or the composite string is empty).
+ * - A text button owns the session, which may be in a popup over this region.
+ * - `region` isn't active, else every editor showing the same data would draw a preview.
+ */
+const wmIMEData *WM_window_IME_data_get(const wmWindow *win, const ARegion *region);
+
+/**
+ * Return #wmIMEData::sel_start to #wmIMEData::sel_end as a byte range in the composite string,
+ * clamped to it, drawn with a thick underline. None when the input method doesn't report a
+ * selection, in practice only Windows does.
+ */
+std::optional<IndexRange> WM_window_IME_composite_select_range(const wmIMEData *ime_data);
 #endif
 
 /**
@@ -521,6 +587,7 @@ bool WM_file_read(bContext *C,
                   const char *filepath,
                   const bool use_scripts_autoexec_check,
                   ReportList *reports);
+bool WM_file_read_project(bContext *C, const char *filepath, ReportList *reports);
 void WM_file_autosave_init(wmWindowManager *wm);
 bool WM_file_recover_last_session(bContext *C,
                                   const bool use_scripts_autoexec_check,
@@ -602,12 +669,14 @@ void WM_cursor_progress(wmWindow *win, float progress_factor);
 
 wmPaintCursor *WM_paint_cursor_activate(short space_type,
                                         short region_type,
-                                        bool (*poll)(bContext *C),
+                                        wmPaintCursorPoll poll,
                                         wmPaintCursorDraw draw,
                                         void *customdata);
 
 bool WM_paint_cursor_end(wmPaintCursor *handle);
-void WM_paint_cursor_remove_by_type(wmWindowManager *wm, void *draw_fn, void (*free)(void *));
+void WM_paint_cursor_remove_by_type(wmWindowManager *wm,
+                                    wmPaintCursorDraw draw_fn,
+                                    void (*free)(void *));
 void WM_paint_cursor_tag_redraw(wmWindow *win, ARegion *region);
 
 /**
@@ -741,6 +810,15 @@ wmKeyMapItem *WM_event_match_keymap_item_from_handlers(bContext *C,
                                                        const wmEvent *event);
 
 bool WM_event_match(const wmEvent *winevent, const wmKeyMapItem *kmi);
+
+/**
+ * Check if `event_modifier` matches a modifier key press bound to `kmi`.
+ *
+ * Used to detect a modifier already held when a modal operator starts,
+ * since the initial event won't generate a #KM_PRESS event for the modifier itself.
+ */
+bool WM_event_modifier_flag_match_kmi_press(wmEventModifierFlag event_modifier,
+                                            const wmKeyMapItem *kmi);
 
 using wmUIHandlerFunc = int (*)(bContext *C, const wmEvent *event, void *userdata);
 using wmUIHandlerRemoveFunc = void (*)(bContext *C, void *userdata);
@@ -976,6 +1054,9 @@ wmOperatorStatus WM_operator_confirm_or_exec(bContext *C, wmOperator *op, const 
  *   (set as the operators string property \a prop_id).
  * - #OPERATOR_CANCELLED for other IME events while composing,
  *   see #bke::WindowRuntime::ime_data_is_composing for details.
+ *
+ * The region is tagged for redraw on every IME event so the editor's composition preview
+ * stays current (including erasing it when composition ends).
  */
 std::optional<wmOperatorStatus> WM_operator_IME_insert_maybe(bContext *C,
                                                              wmOperator *op,
@@ -1137,23 +1218,35 @@ bool WM_operator_name_poll(bContext *C, const char *opstring);
 /**
  * Invokes operator in context.
  *
+ * \param reports: If not null, use the given ReportList to be used by the called operator,
+ * instead of creating a new one. Code will then assume that the reports are managed by the caller.
+ * Useful for operators called from within another operator e.g.
+ *
  * \param event: Optionally pass in an event to use when context uses one of the
  * `WM_OP_INVOKE_*` values. When left unset the #wmWindow.eventstate will be used,
  * this can cause problems for operators that read the events type - for example,
  * storing the key that was pressed so as to be able to detect its release.
  * In these cases it's necessary to forward the current event being handled.
  */
+wmOperatorStatus WM_operator_type_call_ptr_with_reports(bContext *C,
+                                                        wmOperatorType *ot,
+                                                        wm::OpCallContext context,
+                                                        PointerRNA *properties,
+                                                        ReportList *reports,
+                                                        const wmEvent *event);
+/** See #WM_operator_type_call_ptr_with_reports. */
 wmOperatorStatus WM_operator_name_call_ptr(bContext *C,
                                            wmOperatorType *ot,
                                            wm::OpCallContext context,
                                            PointerRNA *properties,
                                            const wmEvent *event);
-/** See #WM_operator_name_call_ptr. */
+/** See #WM_operator_type_call_ptr_with_reports. */
 wmOperatorStatus WM_operator_name_call(bContext *C,
                                        const char *opstring,
                                        wm::OpCallContext context,
                                        PointerRNA *properties,
                                        const wmEvent *event);
+/** See #WM_operator_type_call_ptr_with_reports. */
 wmOperatorStatus WM_operator_name_call_with_properties(bContext *C,
                                                        const char *opstring,
                                                        wm::OpCallContext context,
@@ -1900,7 +1993,10 @@ enum eWM_JobFlag {
    * wait on previous ones to finish then.
    */
   WM_JOB_EXCL_RENDER = (1 << 1),
+  /* The job reports a progress. */
   WM_JOB_PROGRESS = (1 << 2),
+  /* The job runs in the background and does not block operators undo/redo. */
+  WM_JOB_BACKGROUND = (1 << 3),
 };
 ENUM_OPERATORS(eWM_JobFlag);
 
@@ -1922,10 +2018,12 @@ enum eWM_JobType {
   WM_JOB_TYPE_OBJECT_BAKE,
   WM_JOB_TYPE_FILESEL_READDIR,
   WM_JOB_TYPE_ASSET_LIBRARY_LOAD,
-  /** For the global asset list storage (#ED_asset_list.hh). Use a different job type from
+  /**
+   * For the global asset list storage (#ED_asset_list.hh). Use a different job type from
    * #WM_JOB_TYPE_ASSET_LIBRARY_LOAD (used by the asset browser) so the global storage loading can
    * happen independently of the asset browser loading. They would block each other if the type was
-   * the same. */
+   * the same.
+   */
   WM_JOB_TYPE_ASSET_LIBRARY_GLOBAL_LISTING_LOAD,
   WM_JOB_TYPE_CLIP_BUILD_PROXY,
   WM_JOB_TYPE_CLIP_TRACK_MARKERS,
@@ -1973,7 +2071,7 @@ wmJob *WM_jobs_get(wmWindowManager *wm,
 /**
  * Returns true if job runs, for UI (progress) indicators.
  */
-bool WM_jobs_test(const wmWindowManager *wm, const void *owner, int job_type);
+bool WM_jobs_progress_test(const wmWindowManager *wm, const void *owner, int job_type);
 float WM_jobs_progress(const wmWindowManager *wm, const void *owner);
 const char *WM_jobs_name(const wmWindowManager *wm, const void *owner);
 /**
@@ -2059,8 +2157,15 @@ void WM_jobs_kill_type(wmWindowManager *wm, const void *owner, int job_type);
  */
 void WM_jobs_kill_all_from_owner(wmWindowManager *wm, const void *owner) ATTR_NONNULL();
 
-bool WM_jobs_has_running(const wmWindowManager *wm);
-bool WM_jobs_has_running_type(const wmWindowManager *wm, int job_type);
+/**
+ * Checks if the given window manager has any running or suspended jobs of the given type and
+ * owner. If the given owner is nullptr, any owner can be matched. Additionally, jobs with a flag
+ * in the given exclude_flags will be ignored.
+ */
+bool WM_jobs_has_running(const wmWindowManager *window_manager,
+                         const void *owner,
+                         const eWM_JobType type,
+                         const eWM_JobFlag exclude_flags = {});
 
 void WM_job_main_thread_lock_acquire(wmJob *wm_job);
 void WM_job_main_thread_lock_release(wmJob *wm_job);
@@ -2332,6 +2437,8 @@ bContext *WM_xr_session_context_ensure(wmXrData *xr, const wmWindowManager *wm);
 
 void WM_xr_session_base_pose_reset(wmXrData *xr);
 void WM_xr_session_state_navigation_reset(wmXrSessionState *state);
+
+void WM_xr_session_state_viewfinder_init(wmXrSessionState *state);
 void WM_xr_session_state_viewfinder_reset(wmXrSessionState *state);
 
 void WM_xr_session_state_vignette_activate(wmXrData *xr);

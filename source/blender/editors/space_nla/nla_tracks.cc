@@ -14,7 +14,7 @@
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "BKE_anim_data.hh"
 #include "BKE_context.hh"
@@ -380,7 +380,7 @@ static wmOperatorStatus nlatracks_pushdown_exec(bContext *C, wmOperator *op)
     PointerRNA adt_ptr = {};
 
     /* active animdata block */
-    if (nla_panel_context(C, &adt_ptr, nullptr, nullptr) == 0 || (adt_ptr.data == nullptr)) {
+    if (nla_panel_context(C, &adt_ptr, nullptr, nullptr) == 0 || !adt_ptr) {
       BKE_report(op->reports,
                  RPT_ERROR,
                  "No active AnimData block to use "
@@ -491,7 +491,7 @@ static bool nla_action_unlink_poll(bContext *C)
 {
   if (ED_operator_nla_active(C)) {
     PointerRNA adt_ptr;
-    return (nla_panel_context(C, &adt_ptr, nullptr, nullptr) && (adt_ptr.data != nullptr));
+    return (nla_panel_context(C, &adt_ptr, nullptr, nullptr) && adt_ptr);
   }
 
   /* something failed... */

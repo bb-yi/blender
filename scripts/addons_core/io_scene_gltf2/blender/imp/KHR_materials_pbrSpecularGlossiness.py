@@ -62,7 +62,7 @@ def pbr_specular_glossiness(mh):
     pbr_node.inputs['IOR'].default_value = 1000
 
     # Specular
-    new_tex_info = color_factor_and_texture(
+    new_tex_info, factor_socket, texture_socket = color_factor_and_texture(
         mh,
         location=locs['specular'],
         label='Specular Color',
@@ -108,7 +108,7 @@ def glossiness(mh, ext, location, roughness_socket):
     if roughness_img is None:
         return
 
-    texture(
+    socket = texture(
         mh,
         tex_info,
         location=location,
@@ -118,6 +118,7 @@ def glossiness(mh, ext, location, roughness_socket):
         is_data=False,
         forced_image=roughness_img,
     )
+    mh.gltf.socket_infos[mh.material_idx]['Roughness Texture'] = socket
 
 
 def make_roughness_image(mh, glossiness_factor, tex_info):
@@ -126,13 +127,13 @@ def make_roughness_image(mh, glossiness_factor, tex_info):
     roughness is in the alpha channel.
     """
     pytexture = mh.gltf.data.textures[tex_info.index]
-    source = get_source(mh, pytexture)
+    source, use_ktx_loader = get_source(mh, pytexture)
 
     if source is None:
         return None
 
     pyimg = mh.gltf.data.images[source]
-    BlenderImage.create(mh.gltf, source)
+    BlenderImage.create(mh.gltf, source, use_ktx_loader)
 
     # See if cached roughness texture already exists
     if hasattr(pyimg, 'blender_roughness_image_name'):

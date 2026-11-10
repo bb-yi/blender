@@ -25,7 +25,7 @@ void SubsurfaceModule::end_sync()
     return;
   }
 
-  /* Process direct / indirect radiance separately for correct ligthpath intensity. */
+  /* Process direct / indirect radiance separately for correct light-path intensity. */
   /* Note that we do not branch on clamp.surface_indirect since it is applied on the spherical
    * harmonics or rays before SSS evaluation. */
   use_npr_radiance_ = inst_.pipelines.deferred.header_layer_count() >= GBUF_NPR_HEADER_LAYER_COUNT;

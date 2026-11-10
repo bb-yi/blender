@@ -2,12 +2,12 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_assert.h"
-#include "BLI_listbase.h"
+#include "BLI_assert.hh"
+#include "BLI_listbase.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_memory_utils.hh"
 #include "BLI_set.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_string_ref.hh"
 
 #include "DNA_layer_types.h"
@@ -41,12 +41,15 @@
 
 namespace blender::nodes::node_composite_render_layer_cc {
 
-static void node_init(const bContext *context, PointerRNA *node_pointer)
+static void node_init(bNodeTree * /*node_tree*/, bNode *node)
 {
-  Scene *scene = CTX_data_scene(context);
-  bNode *node = node_pointer->data_as<bNode>();
   node->flag |= NODE_PREVIEW;
+}
 
+static void node_init_api(const bContext *C, PointerRNA *node_ptr)
+{
+  Scene *scene = CTX_data_scene(C);
+  bNode *node = node_ptr->data_as<bNode>();
   node->id = &scene->id;
   id_us_plus(node->id);
 }
@@ -100,7 +103,7 @@ static void declare_pass_callback(void *user_data,
   UString name = StringRef(pass_name) == RE_PASSNAME_COMBINED ? "Image"_ustr : UString(pass_name);
   if (StringRef(scene->r.engine) == RE_engine_id_BLENDER_EEVEE) {
     for (const SceneRenderTexture *render_texture =
-             static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first);
+             static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first_);
          render_texture;
          render_texture = render_texture->next)
     {
@@ -268,7 +271,7 @@ static void node_extra_info(NodeExtraInfoParams &parameters)
     NodeExtraInfoRow row;
     row.text = RPT_("Node Unsupported");
     row.tooltip = TIP_("The Render Layers node is only supported for scene compositing");
-    row.icon = ICON_ERROR;
+    row.icon = ICON_STATUS_ERROR;
     parameters.rows.append(std::move(row));
   }
 
@@ -301,7 +304,7 @@ static void node_extra_info(NodeExtraInfoParams &parameters)
   NodeExtraInfoRow row;
   row.text = RPT_("Passes Not Supported");
   row.tooltip = TIP_("Render passes in the Viewport compositor are only supported in EEVEE");
-  row.icon = ICON_ERROR;
+  row.icon = ICON_STATUS_ERROR;
   parameters.rows.append(std::move(row));
 }
 
@@ -367,7 +370,8 @@ static void node_register()
   ntype.enum_name_legacy = "R_LAYERS";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.flag |= NODE_PREVIEW;
-  ntype.initfunc_api = node_init;
+  ntype.initfunc = node_init;
+  ntype.initfunc_api = node_init_api;
   ntype.declare = node_declare;
   ntype.draw_buttons = node_draw_buttons;
   ntype.get_compositor_operation = get_compositor_operation;

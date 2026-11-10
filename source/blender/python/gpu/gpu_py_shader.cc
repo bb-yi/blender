@@ -11,10 +11,11 @@
 
 #include <Python.h>
 
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "GPU_context.hh"
 #include "GPU_shader.hh"
+#include "GPU_storage_buffer.hh"
 #include "GPU_texture.hh"
 #include "GPU_uniform_buffer.hh"
 
@@ -25,6 +26,7 @@
 #include "../mathutils/mathutils.hh"
 
 #include "gpu_py.hh"
+#include "gpu_py_storagebuffer.hh"
 #include "gpu_py_texture.hh"
 #include "gpu_py_uniformbuffer.hh"
 #include "gpu_py_vertex_format.hh"
@@ -197,8 +199,17 @@ static bool pygpu_shader_uniform_vector_impl(PyObject *args,
   PyObject *buffer;
 
   *r_count = 1;
-  if (!PyArg_ParseTuple(
-          args, "iOi|i:GPUShader.uniform_vector_*", r_location, &buffer, r_length, r_count))
+  if (!PyArg_ParseTuple(args,
+                        "i" /* `location` */
+                        "O" /* `buffer` */
+                        "i" /* `length` */
+                        "|" /* Optional arguments. */
+                        "i" /* `count` */
+                        ":GPUShader.uniform_vector_*",
+                        r_location,
+                        &buffer,
+                        r_length,
+                        r_count))
   {
     return false;
   }
@@ -211,6 +222,7 @@ static bool pygpu_shader_uniform_vector_impl(PyObject *args,
   if (r_pybuffer->len < (*r_length * *r_count * elem_size)) {
     PyErr_SetString(PyExc_OverflowError,
                     "GPUShader.uniform_vector_*: buffer size smaller than required.");
+    PyBuffer_Release(r_pybuffer);
     return false;
   }
 
@@ -316,7 +328,13 @@ static PyObject *pygpu_shader_uniform_bool(BPyGPUShader *self, PyObject *args)
     PyObject *seq;
   } params;
 
-  if (!PyArg_ParseTuple(args, "sO:GPUShader.uniform_bool", &params.id, &params.seq)) {
+  if (!PyArg_ParseTuple(args,
+                        "s" /* `name` */
+                        "O" /* `value` */
+                        ":GPUShader.uniform_bool",
+                        &params.id,
+                        &params.seq))
+  {
     return nullptr;
   }
 
@@ -391,7 +409,13 @@ static PyObject *pygpu_shader_uniform_float(BPyGPUShader *self, PyObject *args)
     PyObject *seq;
   } params;
 
-  if (!PyArg_ParseTuple(args, "sO:GPUShader.uniform_float", &params.id, &params.seq)) {
+  if (!PyArg_ParseTuple(args,
+                        "s" /* `name` */
+                        "O" /* `value` */
+                        ":GPUShader.uniform_float",
+                        &params.id,
+                        &params.seq))
+  {
     return nullptr;
   }
 
@@ -463,7 +487,13 @@ static PyObject *pygpu_shader_uniform_int(BPyGPUShader *self, PyObject *args)
     PyObject *seq;
   } params;
 
-  if (!PyArg_ParseTuple(args, "sO:GPUShader.uniform_int", &params.id, &params.seq)) {
+  if (!PyArg_ParseTuple(args,
+                        "s" /* `name` */
+                        "O" /* `seq` */
+                        ":GPUShader.uniform_int",
+                        &params.id,
+                        &params.seq))
+  {
     return nullptr;
   }
 
@@ -532,8 +562,13 @@ static PyObject *pygpu_shader_uniform_sampler(BPyGPUShader *self, PyObject *args
 {
   const char *name;
   BPyGPUTexture *py_texture;
-  if (!PyArg_ParseTuple(
-          args, "sO!:GPUShader.uniform_sampler", &name, &BPyGPUTexture_Type, &py_texture))
+  if (!PyArg_ParseTuple(args,
+                        "s"  /* `name` */
+                        "O!" /* `texture` */
+                        ":GPUShader.uniform_sampler",
+                        &name,
+                        &BPyGPUTexture_Type,
+                        &py_texture))
   {
     return nullptr;
   }
@@ -561,7 +596,14 @@ static PyObject *pygpu_shader_image(BPyGPUShader *self, PyObject *args)
 {
   const char *name;
   BPyGPUTexture *py_texture;
-  if (!PyArg_ParseTuple(args, "sO!:GPUShader.image", &name, &BPyGPUTexture_Type, &py_texture)) {
+  if (!PyArg_ParseTuple(args,
+                        "s"  /* `name` */
+                        "O!" /* `texture` */
+                        ":GPUShader.image",
+                        &name,
+                        &BPyGPUTexture_Type,
+                        &py_texture))
+  {
     return nullptr;
   }
 
@@ -592,8 +634,13 @@ static PyObject *pygpu_shader_uniform_block(BPyGPUShader *self, PyObject *args)
 {
   const char *name;
   BPyGPUUniformBuf *py_ubo;
-  if (!PyArg_ParseTuple(
-          args, "sO!:GPUShader.uniform_block", &name, &BPyGPUUniformBuf_Type, &py_ubo))
+  if (!PyArg_ParseTuple(args,
+                        "s"  /* `name` */
+                        "O!" /* `ubo` */
+                        ":GPUShader.uniform_block",
+                        &name,
+                        &BPyGPUUniformBuf_Type,
+                        &py_ubo))
   {
     return nullptr;
   }
@@ -608,6 +655,41 @@ static PyObject *pygpu_shader_uniform_block(BPyGPUShader *self, PyObject *args)
 
   GPU_shader_bind(self->shader);
   GPU_uniformbuf_bind(py_ubo->ubo, binding);
+
+  Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(
+    /* Wrap. */
+    pygpu_shader_storage_block_doc,
+    ".. method:: storage_block(name, ssbo)\n"
+    "\n"
+    "   Specify the value of a storage buffer object variable for the current GPUShader.\n"
+    "\n"
+    "   :param name: Name of the storage block variable whose SSBO is to be specified.\n"
+    "   :type name: str\n"
+    "   :param ssbo: Storage Buffer to attach.\n"
+    "   :type ssbo: :class:`gpu.types.GPUStorageBuf`\n");
+static PyObject *pygpu_shader_storage_block(BPyGPUShader *self, PyObject *args)
+{
+  const char *name;
+  BPyGPUStorageBuf *py_ssbo;
+  if (!PyArg_ParseTuple(
+          args, "sO!:GPUShader.storage_block", &name, &BPyGPUStorageBuf_Type, &py_ssbo))
+  {
+    return nullptr;
+  }
+
+  int binding = GPU_shader_get_ssbo_binding(self->shader, name);
+  if (binding == -1) {
+    PyErr_SetString(
+        PyExc_BufferError,
+        "GPUShader.storage_block: storage block not found, make sure the name is correct");
+    return nullptr;
+  }
+
+  GPU_shader_bind(self->shader);
+  GPU_storagebuf_bind(py_ssbo->ssbo, binding);
 
   Py_RETURN_NONE;
 }
@@ -800,6 +882,10 @@ static PyMethodDef pygpu_shader__tp_methods[] = {
      reinterpret_cast<PyCFunction>(pygpu_shader_uniform_block),
      METH_VARARGS,
      pygpu_shader_uniform_block_doc},
+    {"storage_block",
+     reinterpret_cast<PyCFunction>(pygpu_shader_storage_block),
+     METH_VARARGS,
+     pygpu_shader_storage_block_doc},
     {"attr_from_name",
      reinterpret_cast<PyCFunction>(pygpu_shader_attr_from_name),
      METH_O,
@@ -934,7 +1020,7 @@ PyDoc_STRVAR(
     ".. function:: unbind()\n"
     "\n"
     "   Unbind the bound shader object.\n");
-static PyObject *pygpu_shader_unbind(BPyGPUShader * /*self*/)
+static PyObject *pygpu_shader_unbind(PyObject * /*self*/)
 {
   GPU_shader_unbind();
   Py_RETURN_NONE;
@@ -972,7 +1058,7 @@ static PyObject *pygpu_shader_from_builtin(PyObject * /*self*/, PyObject *args, 
   static const char *_keywords[] = {"shader_name", "config", nullptr};
   static _PyArg_Parser _parser = {
       "O&" /* `shader_name` */
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "O&" /* `config` */
       ":from_builtin",
       _keywords,

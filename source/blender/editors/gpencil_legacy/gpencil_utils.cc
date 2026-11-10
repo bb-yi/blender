@@ -11,8 +11,8 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_math_matrix.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_gpencil_legacy_types.h"
 #include "DNA_material_types.h"
@@ -54,7 +54,7 @@ bGPdata **ED_annotation_data_get_pointers_direct(ID *screen_id,
   /* If there's an active area, check if the particular editor may
    * have defined any special Grease Pencil context for editing. */
   if (area) {
-    SpaceLink *sl = static_cast<SpaceLink *>(area->spacedata.first);
+    SpaceLink *sl = area->spacedata.first_as<SpaceLink>();
 
     switch (area->spacetype) {
       case SPACE_INFO: /* header info */

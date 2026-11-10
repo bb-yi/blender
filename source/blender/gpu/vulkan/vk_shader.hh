@@ -51,6 +51,7 @@ class VKShader : public Shader {
    * using `context.debug_pipeline_creation == true`.
    */
   bool has_precompiled_pipelines_ = false;
+  bool use_ray_query_ = false;
 
   /**
    * Maximum input attachment index used by this shader's subpass inputs.
@@ -130,6 +131,11 @@ class VKShader : public Shader {
   VkDescriptorSetLayout vk_descriptor_set_layout_get() const
   {
     return vk_descriptor_set_layout_;
+  }
+
+  bool use_ray_query_get() const
+  {
+    return use_ray_query_;
   }
 
  private:

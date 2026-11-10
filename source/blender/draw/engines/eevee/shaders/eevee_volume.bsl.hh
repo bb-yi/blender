@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/* Based on Frosbite Unified Volumetric.
+/* Based on Frostbite Unified Volumetric.
  * https://www.ea.com/frostbite/news/physically-based-unified-volumetric-rendering-in-frostbite */
 
 #pragma once
@@ -17,7 +17,7 @@
 #include "eevee_shadow.bsl.hh"
 #include "eevee_volume_lib.bsl.hh"
 #include "eevee_volume_shared.hh"
-#include "gpu_shader_fullscreen_lib.glsl"
+#include "gpu_shader_fullscreen.bsl.hh"
 
 namespace eevee::volume {
 
@@ -25,7 +25,7 @@ float3 volume_light(LightData light, const bool is_directional, LightVector lv)
 {
   float power = 1.0f;
   if (!is_directional) {
-    float light_radius = light.local().local.shape_radius;
+    float light_radius = light.local.local.shape_radius;
     /**
      * Using "Point Light Attenuation Without Singularity" from Cem Yuksel
      * http://www.cemyuksel.com/research/pointlightattenuation/pointlightattenuation.pdf
@@ -43,12 +43,12 @@ float3 volume_light(LightData light, const bool is_directional, LightVector lv)
       power *= saturate(dot(light.z_axis(), lv.L));
     }
   }
-  return light.color * light.power[LIGHT_VOLUME] * power;
+  return light.color * eevee::light::power_get(light, LIGHT_VOLUME) * power;
 }
 
 #define VOLUMETRIC_SHADOW_MAX_STEP 128.0f
 
-float3 volume_shadow([[resource_table]] const Uniform &uni,
+float3 volume_shadow(const Uniform &uni,
                      const ViewMatrices &view,
                      LightData /*ld*/,
                      const bool is_directional,
@@ -56,7 +56,7 @@ float3 volume_shadow([[resource_table]] const Uniform &uni,
                      LightVector lv,
                      sampler3D extinction_tx)
 {
-  if (uni.uniform_buf.volumes.shadow_steps == 0) {
+  if (uni.uniform_buf.volumes.shadow_steps == 0.0f) {
     return float3(1.0f);
   }
 
@@ -65,15 +65,25 @@ float3 volume_shadow([[resource_table]] const Uniform &uni,
   float3 L = lv.L * lv.dist / uni.uniform_buf.volumes.shadow_steps;
 
   if (is_directional) {
-    /* For sun light we scan the whole frustum. So we need to get the correct endpoints. */
-    float3 ndcP = view.point_world_to_ndc(P);
-    float3 ndcL = view.point_world_to_ndc(P + lv.L * lv.dist) - ndcP;
+    if (is_panoramic(uni.uniform_buf.camera.type)) {
+      /* Panoramic cameras render 6 identical but differently oriented frustums, so we can't use
+       * NDC box to bound the ray like below. Use distance to the camera instead because it's
+       * view-independent. */
+      float3 L_world = lv.L * distance(P, view.position());
+      L = L_world / uni.uniform_buf.volumes.shadow_steps;
+      dd = length(L);
+    }
+    else {
+      /* For sun light we scan the whole frustum. So we need to get the correct endpoints. */
+      float3 ndcP = view.point_world_to_ndc(P);
+      float3 ndcL = view.point_world_to_ndc(P + lv.L * lv.dist) - ndcP;
 
-    float3 ndc_frustum_isect = ndcP + ndcL * line_unit_box_intersect_dist_safe(ndcP, ndcL);
+      float3 ndc_frustum_isect = ndcP + ndcL * line_unit_box_intersect_dist_safe(ndcP, ndcL);
 
-    L = view.point_ndc_to_world(ndc_frustum_isect) - P;
-    L /= uni.uniform_buf.volumes.shadow_steps;
-    dd = length(L);
+      L = view.point_ndc_to_world(ndc_frustum_isect) - P;
+      L /= uni.uniform_buf.volumes.shadow_steps;
+      dd = length(L);
+    }
   }
 
   /* TODO use shadow maps instead. */
@@ -93,15 +103,19 @@ float3 volume_shadow([[resource_table]] const Uniform &uni,
   return shadow;
 }
 
-struct Scatter {
+struct ScatterConstants {
   [[compilation_constant]] const bool use_volume_light;
+};
 
-  [[resource_table]] srt_t<Uniform> uniforms;
-  [[resource_table]] srt_t<draw::View> views_;
-  [[resource_table]] srt_t<LightRenderData> light_data;
-  [[resource_table]] srt_t<ShadowRenderData> shadow_data;
-  [[resource_table, condition(use_volume_light)]] srt_t<LightShaderEvalData> light_shader_data;
-  [[resource_table]] srt_t<LightprobeVolumeRenderData> lightprobe_volume_data;
+struct Scatter {
+  [[resource_table]] ScatterConstants constants;
+
+  [[resource_table]] Uniform uniforms;
+  [[resource_table]] draw::View views_;
+  [[resource_table]] LightRenderData light_data;
+  [[resource_table]] ShadowRenderData shadow_data;
+  [[resource_table, condition(use_volume_light)]] LightShaderEvalData light_shader_data;
+  [[resource_table]] LightprobeVolumeRenderData lightprobe_volume_data;
 
   [[sampler(0)]] sampler3D scattering_history_tx;
   [[sampler(1)]] sampler3D extinction_history_tx;
@@ -111,13 +125,10 @@ struct Scatter {
   [[image(5, write, UFLOAT_11_11_10)]] image3D out_scattering_img;
   [[image(6, write, UFLOAT_11_11_10)]] image3D out_extinction_img;
 
-  float3 volume_lightprobe_eval([[resource_table]] const Sampling &sampling,
-                                float3 P,
-                                float3 V,
-                                float s_anisotropy)
+  float3 volume_lightprobe_eval(const Sampling &sampling, float3 P, float3 V, float s_anisotropy)
   {
-    [[resource_table]] const LightprobeVolumeRenderData &volume_data = lightprobe_volume_data;
-    [[resource_table]] const Uniform &uni = uniforms;
+    const LightprobeVolumeRenderData &volume_data = lightprobe_volume_data;
+    const Uniform &uni = uniforms;
 
     SphericalHarmonicL1<float4> phase_sh = volume_phase_function_as_sh_L1(V, s_anisotropy);
     SphericalHarmonicL1<float4> volume_radiance_sh = volume_data.sample_probe_no_bias(sampling, P);
@@ -136,25 +147,23 @@ struct LightEvalCtx {
   int3 froxel;
   float anisotropy;
 
-  float3 light_eval_single([[resource_table]] Scatter &srt,
-                           uint l_idx,
-                           LightData light,
-                           const bool is_directional)
+  float3 light_eval_single(Scatter &srt, uint l_idx,
+                           LightData light, const bool is_directional)
   {
-    [[resource_table]] ShadowRenderData &srd = srt.shadow_data;
-    [[resource_table]] const Uniform &uni = srt.uniforms;
-    [[resource_table]] const draw::View &views = srt.views_;
+    ShadowRenderData &srd = srt.shadow_data;
+    const Uniform &uni = srt.uniforms;
+    const draw::View &views = srt.views_;
 
     /* TODO(fclem): Own light list for volume without lights that have 0 volume influence. */
-    if (light.power[LIGHT_VOLUME] == 0.0f) {
+    if (eevee::light::power_get(light, LIGHT_VOLUME) == 0.0f) {
       return float3(0);
     }
 
-    LightVector lv = light_shape_vector_get(light, is_directional, P);
+    LightVector lv = LightVector::get_shape_closest(light, is_directional, P);
 
     float attenuation = light_attenuation_volume(light, is_directional, lv);
     bool use_light_shader_no_distance = false;
-    if (srt.use_volume_light) [[static_branch]] {
+    if (srt.constants.use_volume_light) [[static_branch]] {
       [[resource_table]] const LightShaderEvalData &light_shader_data = srt.light_shader_data;
       int light_shader_index = light_shader_data.light_shader_index_buf[l_idx];
       int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
@@ -165,7 +174,7 @@ struct LightEvalCtx {
         use_light_shader_no_distance = true;
         if (!is_directional) {
           attenuation *= light_influence_cutoff(lv.dist,
-                                                light.local().local.influence_radius_invsqr_volume);
+                                                light.local.local.influence_radius_invsqr_volume);
         }
       }
       else if (light_shader_index >= 0) {
@@ -178,7 +187,7 @@ struct LightEvalCtx {
         use_light_shader_no_distance = true;
         if (!is_directional) {
           attenuation *= light_influence_cutoff(lv.dist,
-                                                light.local().local.influence_radius_invsqr_volume);
+                                                light.local.local.influence_radius_invsqr_volume);
         }
       }
     }
@@ -199,22 +208,24 @@ struct LightEvalCtx {
     }
 
     float3 Li = use_light_shader_no_distance ?
-                    (light.color * light.power[LIGHT_VOLUME] * visibility) :
+                    (light.color * eevee::light::power_get(light, LIGHT_VOLUME) * visibility) :
                     (volume_light(light, is_directional, lv) * visibility);
 
-    if (light.tilemap_index != LIGHT_NO_SHADOW) {
-      Li *= volume_shadow(uni, views.get(0), light, is_directional, P, lv, srt.extinction_tx);
+    if (srt.constants.use_volume_light) [[static_branch]] {
+      if (light.tilemap_index != LIGHT_NO_SHADOW) {
+        Li *= volume_shadow(uni, views.get(0), light, is_directional, P, lv, srt.extinction_tx);
+      }
     }
 
     return Li;
   }
 
-  void eval_directional([[resource_table]] Scatter &srd, uint l_idx, LightData light)
+  void eval_directional(Scatter &srd, uint l_idx, LightData light)
   {
     radiance += light_eval_single(srd, l_idx, light, true);
   }
 
-  void eval_local([[resource_table]] Scatter &srd, uint l_idx, LightData light)
+  void eval_local(Scatter &srd, uint l_idx, LightData light)
   {
     radiance += light_eval_single(srd, l_idx, light, false);
   }
@@ -269,7 +280,7 @@ void scatter_main([[resource_table]] Scatter &srt,
 
   float3 direct_radiance = float3(0.0f);
 
-  if (srt.use_volume_light) [[static_branch]] {
+  if (srt.constants.use_volume_light) [[static_branch]] {
     if (reduce_max(s_scattering) > 0.0f) {
       volume::LightEvalCtx ctx = {
           .radiance = float3(0.0f),
@@ -356,15 +367,21 @@ void integration_main([[resource_table]] Integrate &srt,
                uni.uniform_buf.volumes.inv_tex_size;
   float3 view_cell = volume_jitter_to_view(uni, view, uvw);
 
+  const bool uses_radial_depth = volume_uses_radial_depth(uni);
+
   float prev_ray_len;
-  float orig_ray_len;
-  if (view.is_perspective()) {
+  float orig_ray_len = 1.0f;
+  if (uses_radial_depth) {
+    /* Camera distance at froxel Z = 0, negated: `volume_z_to_view_z` returns a view-space Z
+     * (negative, forward is -Z), but the per-step diff below expects a positive distance. */
+    prev_ray_len = -volume_z_to_view_z(uni, view, 0.0f);
+  }
+  else if (view.is_perspective()) {
     prev_ray_len = length(view_cell);
     orig_ray_len = prev_ray_len / view_cell.z;
   }
   else {
     prev_ray_len = view_cell.z;
-    orig_ray_len = 1.0f;
   }
 
   for (int i = 0; i <= uni.uniform_buf.volumes.tex_size.z; i++) {
@@ -373,15 +390,24 @@ void integration_main([[resource_table]] Integrate &srt,
     float3 froxel_scattering = texelFetch(srt.in_scattering_tx, froxel, 0).rgb;
     float3 extinction = texelFetch(srt.in_extinction_tx, froxel, 0).rgb;
 
-    float cell_depth = volume_z_to_view_z(
-        uni, view, (float(i) + 1.0f) * uni.uniform_buf.volumes.inv_tex_size.z);
-    float ray_len = orig_ray_len * cell_depth;
+    float step_len;
+    if (uses_radial_depth) {
+      float ray_len = -volume_z_to_view_z(
+          uni, view, (float(i) + 1.0f) * uni.uniform_buf.volumes.inv_tex_size.z);
+      step_len = abs(ray_len - prev_ray_len);
+      prev_ray_len = ray_len;
+    }
+    else {
+      float cell_depth = volume_z_to_view_z(
+          uni, view, (float(i) + 1.0f) * uni.uniform_buf.volumes.inv_tex_size.z);
+      float ray_len = orig_ray_len * cell_depth;
 
-    /* Evaluate Scattering. */
-    float step_len = abs(ray_len - prev_ray_len);
-    prev_ray_len = ray_len;
+      /* Evaluate Scattering. */
+      step_len = abs(ray_len - prev_ray_len);
+      prev_ray_len = ray_len;
+    }
     float3 froxel_transmittance = exp(-extinction * step_len);
-    /** NOTE: Original calculation carries precision issues when compiling for AMD GPUs
+    /* NOTE: Original calculation carries precision issues when compiling for AMD GPUs
      * and running Metal. This version of the equation retains precision well for all
      * macOS HW configurations.
      * Here is the original for reference:
@@ -420,7 +446,10 @@ void resolve_vert([[vertex_id]] const int vert_id, [[position]] float4 &out_posi
 }
 
 /* Step 4 : Apply final integration on top of the scene color.
- * This is only for opaque geometry. */
+ * This is only for opaque geometry.
+ *
+ * Panoramic: each cubemap face resolves its own volumetric contribution independently. No
+ * blending across face edges/corners, so results can disagree right at a face seam. */
 [[fragment]]
 void resolve_frag([[resource_table]] const Uniform &uni,
                   [[resource_table]] const UnifiedVolumeData &volumes,
@@ -481,10 +510,23 @@ void layer_resolve_frag([[resource_table]] const LayerResolve &srt,
   }
   result.color = color;
 }
-PipelineGraphic layer_resolve(resolve_vert, layer_resolve_frag);
+PipelineGraphic layer_resolve(resolve_vert, layer_resolve_frag,
+                             LightEvalConstants{.light_closure_count_reflect = 1,
+                                                .light_closure_count_transmit = 1});
 
-PipelineCompute scatter(scatter_main, Scatter{.use_volume_light = false});
-PipelineCompute scatter_with_lights(scatter_main, Scatter{.use_volume_light = true});
-PipelineCompute integration(integration_main);
-PipelineGraphic resolve(resolve_vert, resolve_frag);
+PipelineCompute scatter(scatter_main,
+                        ScatterConstants{.use_volume_light = false},
+                        LightEvalConstants{.light_closure_count_reflect = 1,
+                                           .light_closure_count_transmit = 1});
+PipelineCompute scatter_with_lights(scatter_main,
+                                    ScatterConstants{.use_volume_light = true},
+                                    LightEvalConstants{.light_closure_count_reflect = 1,
+                                                       .light_closure_count_transmit = 1});
+PipelineCompute integration(integration_main,
+                            LightEvalConstants{.light_closure_count_reflect = 1,
+                                               .light_closure_count_transmit = 1});
+PipelineGraphic resolve(resolve_vert,
+                        resolve_frag,
+                        LightEvalConstants{.light_closure_count_reflect = 1,
+                                           .light_closure_count_transmit = 1});
 }  // namespace eevee::volume

@@ -11,8 +11,8 @@
 
 #include "DNA_windowmanager_types.h"
 
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_task.hh"
 
 #include "BKE_context.hh"
@@ -121,7 +121,7 @@ static bool clip_uv_transform_resize(TransInfo *t, float vec[2])
   float base_offset[2] = {0.0f, 0.0f};
 
   /* If tiled image then constrain to correct/closest UDIM tile, else 0-1 UV space. */
-  const SpaceImage *sima = static_cast<const SpaceImage *>(t->area->spacedata.first);
+  const SpaceImage *sima = t->area->spacedata.first_as<SpaceImage>();
   BKE_image_find_nearest_tile_with_offset(sima->image, t->center_global, base_offset);
 
   /* Assume no change is required. */
@@ -278,7 +278,7 @@ static void initResize(TransInfo *t, wmOperator *op)
   const bool only_location = transform_mode_affect_only_locations(t);
   if (only_location) {
     WorkspaceStatus status(t->context);
-    status.item(TIP_("Transform is set to only affect location"), ICON_ERROR);
+    status.item(TIP_("Transform is set to only affect location"), ICON_STATUS_WARNING_FILLED);
   }
 
   if (is_zero_v3(mouse_dir_constraint)) {
@@ -350,6 +350,7 @@ TransModeInfo TransMode_resize = {
     /*snap_distance_fn*/ ResizeBetween,
     /*snap_apply_fn*/ ApplySnapResize,
     /*draw_fn*/ nullptr,
+    /*status_fn*/ nullptr,
 };
 
 }  // namespace blender::ed::transform

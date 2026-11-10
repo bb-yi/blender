@@ -2,7 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/**
+/** \file
+ * \ingroup eevee
+ *
  * Shared code between host and client code-bases.
  */
 
@@ -26,7 +28,7 @@ struct [[host_shared]] ReflectionProbeLowFreqLight {
 };
 
 enum [[host_shared]] LightProbeShape : uint32_t {
-  SHAPE_ELIPSOID,
+  SHAPE_ELLIPSOID,
   SHAPE_CUBOID,
 };
 

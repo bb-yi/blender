@@ -18,19 +18,12 @@
 
 namespace blender::nodes::node_geo_set_grease_pencil_color_cc {
 
-enum class Mode : int8_t {
-  Stroke = 0,
-  Fill = 1,
-};
-
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_default_layout();
   b.add_input<decl::Geometry>("Grease Pencil"_ustr)
       .supported_type(GeometryComponent::Type::GreasePencil)
-      .align_with_previous()
       .description("Grease Pencil to change the color of");
   b.add_output<decl::Geometry>("Grease Pencil"_ustr)
       .propagate_all_geometry()
@@ -39,6 +32,9 @@ static void node_declare(NodeDeclarationBuilder &b)
       .default_value(true)
       .hide_value()
       .evaluated_geometry_field();
+  b.add_input<decl::Menu>("Mode"_ustr)
+      .static_items(rna_enum_node_grease_pencil_stroke_type_items)
+      .optional_label();
   b.add_input<decl::Color>("Color"_ustr)
       .default_value(ColorGeometry4f(1.0f, 1.0f, 1.0f, 1.0f))
       .evaluated_geometry_field()
@@ -50,20 +46,58 @@ static void node_declare(NodeDeclarationBuilder &b)
       .evaluated_geometry_field();
 }
 
-static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
-{
-  layout.prop(ptr, "mode", UI_ITEM_NONE, "", ICON_NONE);
-}
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  node->custom1 = int(Mode::Stroke);
+  node->custom1 = int(GEO_NODE_GREASE_PENCIL_STROKE);
+}
+
+static void set_grease_pencil_color(GeometrySet &geometry_set,
+                                    const AttrDomain domain,
+                                    const StringRef color_attr,
+                                    const StringRef opacity_attr,
+                                    const Field<bool> &selection,
+                                    const Field<ColorGeometry4f> &color_field,
+                                    const Field<float> &opacity_field)
+{
+  using namespace bke::greasepencil;
+
+  geometry::foreach_real_geometry(geometry_set, [&](GeometrySet &geometry) {
+    GreasePencil *grease_pencil = geometry.get_grease_pencil_for_write();
+    if (!grease_pencil) {
+      return;
+    }
+
+    for (const int layer_index : grease_pencil->layers().index_range()) {
+      Drawing *drawing = grease_pencil->get_eval_drawing(grease_pencil->layer(layer_index));
+      if (!drawing) {
+        continue;
+      }
+
+      bke::CurvesGeometry &curves = drawing->strokes_for_write();
+      bke::MutableAttributeAccessor attributes = curves.attributes_for_write();
+
+      /* FIXME: The default float value is 0, while the default opacity should be 1. So we have
+       * to initialize the attribute manually.
+       * TODO: Avoid doing this if the selection is false. */
+      if (!attributes.contains(opacity_attr)) {
+        attributes.add<float>(opacity_attr, domain, bke::AttributeInitValue(1.0f));
+      }
+
+      const bke::GreasePencilLayerFieldContext field_context(*grease_pencil, domain, layer_index);
+
+      bke::try_capture_fields_on_geometry(attributes,
+                                          field_context,
+                                          {color_attr, opacity_attr},
+                                          domain,
+                                          selection,
+                                          {color_field, opacity_field});
+    }
+  });
 }
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  const bNode &node = params.node();
-  const AttrDomain domain = Mode(node.custom1) == Mode::Stroke ? AttrDomain::Point :
-                                                                 AttrDomain::Curve;
+  const auto mode = params.get_input<NodeGeometryGreasePencilStrokeType>("Mode"_ustr);
 
   GeometrySet geometry_set = params.extract_input<GeometrySet>("Grease Pencil"_ustr);
   const Field<bool> selection = params.extract_input<Field<bool>>("Selection"_ustr);
@@ -71,59 +105,26 @@ static void node_geo_exec(GeoNodeExecParams params)
       "Color"_ustr);
   const Field<float> opacity_field = params.extract_input<Field<float>>("Opacity"_ustr);
 
-  const StringRef color_attr_name = domain == AttrDomain::Point ? "vertex_color" : "fill_color";
-  const StringRef opacity_attr_name = domain == AttrDomain::Point ? "opacity" : "fill_opacity";
-
-  geometry::foreach_real_geometry(geometry_set, [&](GeometrySet &geometry) {
-    if (GreasePencil *grease_pencil = geometry.get_grease_pencil_for_write()) {
-      using namespace bke::greasepencil;
-      for (const int layer_index : grease_pencil->layers().index_range()) {
-        Drawing *drawing = grease_pencil->get_eval_drawing(grease_pencil->layer(layer_index));
-        if (drawing == nullptr) {
-          continue;
-        }
-        bke::CurvesGeometry &curves = drawing->strokes_for_write();
-        bke::MutableAttributeAccessor attributes = curves.attributes_for_write();
-
-        const bke::GreasePencilLayerFieldContext layer_field_context(
-            *grease_pencil, domain, layer_index);
-
-        /* FIXME: The default float value is 0, while the default opacity should be 1. So we have
-         * to initialize the attribute manually.
-         * TODO: Avoid doing this if the selection is false. */
-        if (!curves.attributes().contains(opacity_attr_name)) {
-          attributes.add<float>(opacity_attr_name, domain, bke::AttributeInitValue(1.0f));
-        }
-        bke::try_capture_fields_on_geometry(attributes,
-                                            layer_field_context,
-                                            {color_attr_name, opacity_attr_name},
-                                            domain,
-                                            selection,
-                                            {color_field, opacity_field});
-      }
-    }
-  });
+  if (ELEM(mode, GEO_NODE_GREASE_PENCIL_STROKE, GEO_NODE_GREASE_PENCIL_BOTH)) {
+    set_grease_pencil_color(geometry_set,
+                            AttrDomain::Point,
+                            "vertex_color",
+                            "opacity",
+                            selection,
+                            color_field,
+                            opacity_field);
+  }
+  if (ELEM(mode, GEO_NODE_GREASE_PENCIL_FILL, GEO_NODE_GREASE_PENCIL_BOTH)) {
+    set_grease_pencil_color(geometry_set,
+                            AttrDomain::Curve,
+                            "fill_color",
+                            "fill_opacity",
+                            selection,
+                            color_field,
+                            opacity_field);
+  }
 
   params.set_output("Grease Pencil"_ustr, std::move(geometry_set));
-}
-
-static void node_rna(StructRNA *srna)
-{
-  static const EnumPropertyItem mode_items[] = {
-      {int(Mode::Stroke),
-       "STROKE",
-       ICON_NONE,
-       "Stroke",
-       "Set the color and opacity for the points of the stroke"},
-      {int(Mode::Fill),
-       "FILL",
-       ICON_NONE,
-       "Fill",
-       "Set the color and opacity for the stroke fills"},
-      {0, nullptr, 0, nullptr, nullptr},
-  };
-
-  RNA_def_node_enum(srna, "mode", "Mode", "", mode_items, NOD_inline_enum_accessors(custom1));
 }
 
 static void node_register()
@@ -137,11 +138,8 @@ static void node_register()
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
   ntype.initfunc = node_init;
-  ntype.draw_buttons = node_layout;
   ntype.default_width = bke::NodeWidth::_180;
   bke::node_register_type(ntype);
-
-  node_rna(ntype.rna_ext.srna);
 }
 NOD_REGISTER_NODE(node_register)
 

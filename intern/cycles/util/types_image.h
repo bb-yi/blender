@@ -16,6 +16,7 @@ CCL_NAMESPACE_BEGIN
 
 /* Color to use when images are not found. */
 #define IMAGE_MISSING_RGBA make_float4(1, 0, 1, 1)
+#define IMAGE_MISSING_RGB make_float3(1, 0, 1)
 
 #define KERNEL_IMAGE_NONE INT_MAX
 
@@ -73,7 +74,7 @@ enum ImageFormatType {
   IMAGE_FORMAT_EQUIANGULAR,
 };
 
-/* Extension types for image.
+/* Extension types for images.
  *
  * Defines how the image is extrapolated past its original bounds. */
 enum ExtensionType {

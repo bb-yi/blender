@@ -2,7 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/**
+/** \file
+ * \ingroup eevee
+ *
  * Shared code between host and client code-bases.
  */
 
@@ -21,7 +23,7 @@ namespace blender::eevee {
 #endif
 
 /* This should be inside "eevee_light_shared.hh" but it would pull a huge header that is not
- * essential for most shaders. This could be moved back if including "eevee_bxdf_lib.glsl" is used
+ * essential for most shaders. This could be moved back if including "eevee_bxdf.bsl.hh" is used
  * only for shading shaders. */
 enum [[host_shared]] LightingType : uint32_t {
   LIGHT_DIFFUSE = 0u,
@@ -124,7 +126,8 @@ struct [[host_shared]] UniformData {
 
 /**
  * World space clip plane equation. Used to render planar light-probes.
- * Moved here to avoid dependencies to light-probe just for this. */
+ * Moved here to avoid dependencies to light-probe just for this.
+ */
 struct [[host_shared]] ClipPlaneData {
   float4 plane;
 };

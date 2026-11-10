@@ -10,7 +10,7 @@
  * using the main camera to choose the subdivision levels.
  */
 
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 
 #include "DNA_material_types.h"
 
@@ -213,7 +213,7 @@ static const bNode *tessellation_source_node(const bNodeSocket *socket)
       return nullptr;
     }
     if (from_node->is_reroute()) {
-      link = static_cast<const bNodeSocket *>(from_node->inputs.first)->link;
+      link = from_node->inputs.first()->link;
       continue;
     }
     if (from_node->type_legacy == SH_NODE_TESSELLATION_CONTROL) {

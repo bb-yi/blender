@@ -15,10 +15,10 @@
 
 #include "BLI_function_ref.hh"
 #include "BLI_lasso_2d.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_vector.h"
-#include "BLI_rect.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_rect.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_anim_types.h"
 #include "DNA_layer_types.h"
@@ -529,8 +529,8 @@ static short keyframe_ok_checks(
   if (check(ked, bezt, 1)) {
     ok |= KEYFRAME_OK_KEY;
   }
-  if (ked && (ked->iterflags & KEYFRAME_ITER_INCL_HANDLES))
-  { /* Only act on visible items, so check handle visibility state. */
+  /* Only act on visible items, so check handle visibility state. */
+  if (ked && (ked->iterflags & KEYFRAME_ITER_INCL_HANDLES)) {
     if (handles_visible(ked, bezt)) {
       if (check(ked, bezt, 0)) {
         ok |= KEYFRAME_OK_H1;
@@ -1130,9 +1130,18 @@ static short bezier_isfree(KeyframeEditData * /*ked*/, BezTriple *bezt)
 /* Sets selected bezier handles to type 'align' */
 static short set_bezier_align(KeyframeEditData * /*ked*/, BezTriple *bezt)
 {
-  if (BEZT_ISSEL_ANY(bezt)) {
-    /* Setting one handle to `HD_ALIGN` is not a valid state. Both need to be the same. */
+  if (bezt->f2 & SELECT) {
     bezt->h1 = bezt->h2 = HD_ALIGN;
+  }
+  else {
+    if (bezt->f1 & SELECT) {
+      bezt->h1 = HD_ALIGN;
+      BKE_fcurve_update_handle_flag_from_opposite(*bezt, HandleSide::LEFT);
+    }
+    if (bezt->f3 & SELECT) {
+      bezt->h2 = HD_ALIGN;
+      BKE_fcurve_update_handle_flag_from_opposite(*bezt, HandleSide::RIGHT);
+    }
   }
   return 0;
 }

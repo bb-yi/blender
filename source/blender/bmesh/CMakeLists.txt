@@ -23,6 +23,7 @@ set(SRC
   operators/bmo_connect_nonplanar.cc
   operators/bmo_connect_pair.cc
   operators/bmo_create.cc
+  operators/bmo_curve_edge_loops_between_selected.cc
   operators/bmo_dissolve.cc
   operators/bmo_dupe.cc
   operators/bmo_edgenet.cc
@@ -42,6 +43,7 @@ set(SRC
   operators/bmo_planar_faces.cc
   operators/bmo_poke.cc
   operators/bmo_primitive.cc
+  operators/bmo_relax_edge_loops.cc
   operators/bmo_removedoubles.cc
   operators/bmo_rotate_edges.cc
   operators/bmo_smooth_laplacian.cc
@@ -50,6 +52,7 @@ set(SRC
   operators/bmo_subdivide.cc
   operators/bmo_subdivide_edgering.cc
   operators/bmo_symmetrize.cc
+  operators/bmo_fit_edge_loops_to_annotation.cc
   operators/bmo_triangulate.cc
   operators/bmo_unsubdivide.cc
   operators/bmo_utils.cc
@@ -71,6 +74,7 @@ set(SRC
   intern/bmesh_iterators.cc
   intern/bmesh_iterators.hh
   intern/bmesh_iterators_inline.hh
+  intern/bmesh_iterators_parallel.hh
   intern/bmesh_log.cc
   intern/bmesh_log.hh
   intern/bmesh_marking.cc

@@ -9,8 +9,8 @@
 #include <cstdio>
 #include <cstring>
 
-#include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_string_utf8.hh"
 
 #include "DNA_sequence_types.h"
 
@@ -125,7 +125,7 @@ bool ED_scene_replace_active_for_deletion(bContext &C, Main &bmain, Scene &scene
   }
 
   /* Kill running jobs. */
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain.wm.first);
+  wmWindowManager *wm = bmain.wm.first();
   WM_jobs_kill_all_from_owner(wm, &scene);
 
   for (wmWindow &win : wm->windows) {
@@ -201,7 +201,8 @@ static bool view_layer_remove_poll(const Scene *scene, const ViewLayer *layer)
   if (act == -1) {
     return false;
   }
-  if ((scene->view_layers.first == scene->view_layers.last) && (scene->view_layers.first == layer))
+  if ((scene->view_layers.first_ == scene->view_layers.last()) &&
+      (scene->view_layers.first_ == layer))
   {
     /* ensure 1 layer is kept */
     return false;
@@ -214,11 +215,12 @@ static void view_layer_remove_unset_nodetrees(const Main *bmain, Scene *scene, V
 {
   int act_layer_index = BLI_findindex(&scene->view_layers, layer);
 
-  for (Scene *sce = static_cast<Scene *>(bmain->scenes.first); sce;
-       sce = static_cast<Scene *>(sce->id.next))
-  {
-    if (sce->compositing_node_group) {
-      bke::node_tree_remove_layer_n(sce->compositing_node_group, scene, act_layer_index);
+  for (Scene *sce = bmain->scenes.first(); sce; sce = static_cast<Scene *>(sce->id.next)) {
+    for (SceneCompositorEffect &effect : sce->compositor_effects) {
+      if (!effect.node_group || ID_MISSING(effect.node_group)) {
+        continue;
+      }
+      bke::node_tree_remove_layer_n(effect.node_group, scene, act_layer_index);
     }
   }
 }
@@ -248,8 +250,11 @@ bool ED_scene_view_layer_delete(Main *bmain, Scene *scene, ViewLayer *layer, Rep
 
   /* Stop animation playback of this layer before removing it, as the ScreenAnimData struct
    * has a pointer to it. */
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
   ED_screen_animation_stop(bmain, wm, is_using_view_layer);
+
+  /* Kill the compositor job since it might be referencing the viewer layer to be removed. */
+  WM_jobs_kill_type(wm, scene, WM_JOB_TYPE_COMPOSITE);
 
   BLI_remlink(&scene->view_layers, layer);
   BLI_assert(scene->view_layers.is_empty() == false);

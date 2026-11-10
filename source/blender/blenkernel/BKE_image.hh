@@ -9,7 +9,7 @@
 
 #include "DNA_listBase.h"
 
-#include "BLI_compiler_attrs.h"
+#include "BLI_compiler_attrs.hh"
 #include "BLI_function_ref.hh"
 #include "BLI_mutex.hh"
 #include "BLI_string_ref.hh"
@@ -31,6 +31,7 @@ class ColorSpace;
 using ColorSpace = ocio::ColorSpace;
 
 struct rcti;
+struct ColorManagedColorspaceSettings;
 struct Depsgraph;
 struct ID;
 struct ImBuf;
@@ -44,8 +45,6 @@ struct ImbFormatOptions;
 struct Library;
 struct Main;
 struct Object;
-struct PartialUpdateRegister;
-struct PartialUpdateUser;
 struct RenderResult;
 struct RenderSlot;
 struct ReportList;
@@ -56,21 +55,19 @@ enum eImbFileType : int8_t;
 #define IMA_MAX_SPACE 64
 #define IMA_UDIM_MAX 2000
 
-/* Image gpu runtime defaults */
-constexpr int IMAGE_GPU_FRAME_NONE = std::numeric_limits<int>::max();
-constexpr int IMAGE_GPU_PASS_NONE = std::numeric_limits<short>::max();
-constexpr int IMAGE_GPU_LAYER_NONE = std::numeric_limits<short>::max();
-constexpr int IMAGE_GPU_VIEW_NONE = std::numeric_limits<short>::max();
-
 namespace bke {
 
 struct ImageRuntimeGPUTexture3DLutStrip {
   ImageRuntimeGPUTexture3DLutStrip *next = nullptr;
   ImageRuntimeGPUTexture3DLutStrip *prev = nullptr;
   gpu::Texture *texture = nullptr;
+  /* Hold the source to distinguish new frames/buffers from reused addresses. */
+  ImBuf *source = nullptr;
+  int64_t changeset_id = -1;
   int width = 0;
   int height = 0;
   int depth = 0;
+  bool is_cube = false;
 };
 
 struct ImageRuntime {
@@ -80,26 +77,12 @@ struct ImageRuntime {
 
   ImBufCache *cache = nullptr;
 
-  /* The 2 is for the left/right stereo eyes. */
-  gpu::Texture *gputexture[/*TEXTARGET_COUNT*/ 4][2] = {};
   ListBaseT<ImageRuntimeGPUTexture3DLutStrip> gputextures_3d_lut_strip = {nullptr, nullptr};
-
-  /* GPU texture flag. */
-  int gpuframenr = IMAGE_GPU_FRAME_NONE;
-  short gpuflag = 0;
-  short gpu_pass = IMAGE_GPU_PASS_NONE;
-  short gpu_layer = IMAGE_GPU_LAYER_NONE;
-  short gpu_view = IMAGE_GPU_VIEW_NONE;
-
-  int64_t lastused = 0;
-
-  /** Register containing partial updates. */
-  PartialUpdateRegister *partial_update_register = nullptr;
-  /** Partial update user for gpu::Textures stored inside the Image. */
-  PartialUpdateUser *partial_update_user = nullptr;
-
   /* The image's current update count. See deg::set_id_update_count for more information. */
   uint64_t update_count = 0;
+
+  /* Log GPU load errors once per image. */
+  bool gpu_load_error_logged = false;
 
   float view_offset[2] = {};
   float view_zoom = 1.0f;
@@ -121,7 +104,6 @@ void BKE_image_free_buffers(Image *image);
  * on display the image can load again (except for render buffers).
  */
 void BKE_image_free_buffers_ex(Image *image, bool do_lock);
-void BKE_image_free_gputextures(Image *ima);
 /**
  * Free (or release) any data used by this image (does not free the image itself).
  * \note Call from library.
@@ -189,14 +171,12 @@ MovieReader *openanim(const char *filepath,
                       ImBufFlags ibuf_flags,
                       int streamindex,
                       bool keep_original_colorspace,
-                      char colorspace[IMA_MAX_SPACE]);
+                      ColorManagedColorspaceSettings *colorspace_settings);
 MovieReader *openanim_noload(const char *filepath,
                              ImBufFlags flags,
                              int streamindex,
                              bool keep_original_colorspace,
-                             char colorspace[IMA_MAX_SPACE]);
-
-void BKE_image_tag_time(Image *ima);
+                             ColorManagedColorspaceSettings *colorspace_settings);
 
 /* ********************************** NEW IMAGE API *********************** */
 
@@ -235,8 +215,17 @@ ImBuf *BKE_image_acquire_ibuf(Image *ima, ImageUser *iuser, void **r_lock);
  * Identical to BKE_image_acquire_ibuf but assumes the caller will use the GPU data of the image
  * buffer if it exists without the need to make it available on the host. This essentially skips
  * GPU data reading to the host and is thus more performant.
+ *
+ * If #r_load_failed is provided, it is set to true when the image is known to have failed
+ * loading when the #ImBuf is null, as opposed to not having been loaded yet.
+ *
+ * If #cached_only is true, image buffers are not loaded from files.
  */
-ImBuf *BKE_image_acquire_ibuf_gpu(Image *ima, ImageUser *iuser, void **r_lock);
+ImBuf *BKE_image_acquire_ibuf_gpu(Image *ima,
+                                  ImageUser *iuser,
+                                  void **r_lock,
+                                  bool *r_load_failed = nullptr,
+                                  bool cached_only = false);
 
 /**
  * Return image buffer for given image, user, pass, and view.
@@ -278,28 +267,41 @@ void BKE_image_alpha_mode_from_extension(Image *image);
 /**
  * Returns a new image or NULL if it can't load.
  *
+ * \param check_open: Whether to check if the file can be opened. If false, the function will
+ * not attempt to open the file specified by the filepath.
+ *
  * \note: The `_in_lib` version allows to add a new image in a given library. It also affects the
  * root path used for relative filepaths. See also #BKE_id_new and #BKE_id_new_in_lib
  * documentation for more details.
  */
-Image *BKE_image_load(Main *bmain, const char *filepath);
+Image *BKE_image_load(Main *bmain, const char *filepath, bool check_open = true);
 Image *BKE_image_load_in_lib(Main *bmain,
                              std::optional<Library *> owner_library,
-                             const char *filepath);
+                             const char *filepath,
+                             bool check_open = true);
 /**
  * Returns existing Image when filename/type is same.
  *
  * Checks if image was already loaded, then returns same image otherwise creates new
  * (does not load ibuf itself).
  *
+ * \param check_open: Whether to check if the file can be opened. If false, the function will
+ * not attempt to open the file specified by the filepath.
+ * \param r_exists: Optional output parameter that will be set to true if an image data-block
+ * already exists for this filepath.
+ *
  * \note: The `_in_lib` version allows to find an existing (or add a new) image in a given library.
  * It also affects the root path used for relative filepaths. See also #BKE_id_new and
  * #BKE_id_new_in_lib documentation for more details.
  */
-Image *BKE_image_load_exists(Main *bmain, const char *filepath, bool *r_exists = nullptr);
+Image *BKE_image_load_exists(Main *bmain,
+                             const char *filepath,
+                             bool check_open = true,
+                             bool *r_exists = nullptr);
 Image *BKE_image_load_exists_in_lib(Main *bmain,
                                     std::optional<Library *> owner_library,
                                     const char *filepath,
+                                    bool check_open = true,
                                     bool *r_exists = nullptr);
 
 /**
@@ -360,6 +362,10 @@ void BKE_image_ensure_viewer_views(const RenderData *rd, Image *ima, ImageUser *
  */
 void BKE_image_user_frame_calc(Image *ima, ImageUser *iuser, int cfra);
 int BKE_image_user_frame_get(const ImageUser *iuser, int cfra, bool *r_is_in_range);
+/**
+ * Test if two image users resolve to the same image buffer.
+ */
+bool BKE_image_user_match(const ImageUser &a, const ImageUser &b);
 void BKE_image_user_file_path(const ImageUser *iuser, const Image *ima, char *filepath);
 void BKE_image_user_file_path_ex(const Main *bmain,
                                  const ImageUser *iuser,
@@ -424,22 +430,15 @@ void BKE_image_backup_render(Scene *scene, Image *ima, bool free_current_slot);
 void BKE_image_free_all_textures(Main *bmain);
 
 /**
- * Operates on one image only!
+ * Free cached frame buffers of all images with type MOVIE or SEQUENCE.
  * \param except_frame: This is weak, only works for sequences without offset.
  */
-void BKE_image_free_anim_ibufs(Image *ima, int except_frame);
+void BKE_image_all_free_anim_ibufs(Main *bmain, int except_frame);
 
 /**
- * Does all images with type MOVIE or SEQUENCE.
+ * Time-based garbage collection for CPU and GPU image caches.
  */
-void BKE_image_all_free_anim_ibufs(Main *bmain, int cfra);
-
-void BKE_image_free_all_gputextures(Main *bmain);
-/**
- * Same as #BKE_image_free_all_gputextures but only free animated images.
- */
-void BKE_image_free_anim_gputextures(Main *bmain);
-void BKE_image_free_old_gputextures(Main *bmain);
+void BKE_image_free_old_buffers(Main *bmain);
 
 /**
  * Pack image to memory.
@@ -488,11 +487,6 @@ bool BKE_image_scale(Image *image, int width, int height, ImageUser *iuser);
  * Check if image might contain alpha.
  */
 bool BKE_image_has_alpha(Image *image);
-
-/**
- * Check if image has an associated GPU texture.
- */
-bool BKE_image_has_gpu_texture(Image *ima);
 
 /**
  * Get tile index for tiled images.
@@ -609,7 +603,9 @@ float *BKE_image_get_float_pixels_for_frame(Image *image, int frame, int tile);
 /* Image modifications */
 
 bool BKE_image_is_dirty(Image *image);
-void BKE_image_mark_dirty(Image *image, ImBuf *ibuf);
+
+/** Content revision of cached buffers without loading pixels or consuming changes. */
+uint64_t BKE_image_partial_update_revision(Image *image);
 bool BKE_image_buffer_format_writable(ImBuf *ibuf);
 
 bool BKE_image_is_dirty_writable(Image *image, bool *r_is_writable);
@@ -621,6 +617,10 @@ int BKE_image_sequence_guess_offset(Image *image);
 bool BKE_image_has_anim(Image *image);
 bool BKE_image_has_packedfile(const Image *image);
 bool BKE_image_has_filepath(const Image *ima);
+/**
+ * Checks if the image is loaded from a file, on disk or packed.
+ */
+bool BKE_image_source_is_file(const Image *ima);
 /**
  * Checks the image buffer changes with time (not keyframed values).
  */
@@ -647,148 +647,9 @@ ImBuf *BKE_image_get_ibuf_with_name(Image *image, const char *filepath);
  */
 ImBuf *BKE_image_get_first_ibuf(Image *image);
 
-/**
- * Not to be use directly.
- */
-gpu::Texture *BKE_image_create_gpu_texture_from_ibuf(Image *image, ImBuf *ibuf);
-
-/**
- * Ensure that the cached GPU texture inside the image matches the pass, layer, and view of the
- * given image user, if not, invalidate the cache such that the next call to the GPU texture
- * retrieval functions such as BKE_image_get_gpu_texture updates the cache with an image that
- * matches the give image user.
- *
- * This is provided as a separate function and not implemented as part of the GPU texture retrieval
- * functions because the current cache system only allows a single pass, layer, and stereo view to
- * be cached, so possible frequent cache invalidation can have performance implications,
- * and making invalidation explicit by calling this function will help make that clear and pave the
- * way for a more complete cache system in the future.
- */
-void BKE_image_ensure_gpu_texture(Image *image, ImageUser *iuser);
-
-/**
- * Get the #gpu::Texture for a given `Image`.
- *
- *
- *
- * The requested GPU texture will be cached for subsequent calls, but only a single layer, pass,
- * and view can be cached at a time, so the cache should be invalidated in operators and RNA
- * callbacks that change the layer, pass, or view of the image to maintain a correct cache state.
- * However, in some cases, multiple layers, passes, or views might be needed at the same time, like
- * is the case for the compositor. This is currently not supported, so the caller should
- * ensure that the requested layer is indeed the cached one and invalidated the cached otherwise by
- * calling BKE_image_ensure_gpu_texture. This is a workaround until image can support a more
- * complete caching system.
- */
-gpu::Texture *BKE_image_get_gpu_texture(Image *image, ImageUser *iuser);
-
-/*
- * Like BKE_image_get_gpu_texture, but can also get render or compositing result.
- */
-gpu::Texture *BKE_image_get_gpu_viewer_texture(Image *image, ImageUser *iuser);
-
-/*
- * Like BKE_image_get_gpu_viewer_texture, but the image buffer is provided explicitly.
- */
-gpu::Texture *BKE_image_get_gpu_viewer_texture(Image *image,
-                                               ImageUser *iuser,
-                                               ImBuf *image_buffer);
-
-/*
- * Like BKE_image_get_gpu_texture, but can also return array and tile mapping texture for UDIM
- * tiles as used in material shaders.
- */
-struct ImageGPUTextures {
-  gpu::Texture **texture;
-  gpu::Texture **tile_mapping;
-};
-
-ImageGPUTextures BKE_image_get_gpu_material_texture(Image *image,
-                                                    ImageUser *iuser,
-                                                    const bool use_tile_mapping);
-
-/* Same as BKE_image_get_gpu_material_texture but will not load the texture if it isn't already. */
-ImageGPUTextures BKE_image_get_gpu_material_texture_try(Image *image,
-                                                        ImageUser *iuser,
-                                                        const bool use_tile_mapping);
-
-ImageGPUTextures BKE_image_get_gpu_material_cube_texture(Image *image,
-                                                         ImageUser *iuser,
-                                                         bool try_only = false);
-ImageGPUTextures BKE_image_get_gpu_material_3d_lut_texture(Image *image,
-                                                           ImageUser *iuser,
-                                                           int width,
-                                                           int height,
-                                                           int depth);
-
-/* Same as BKE_image_get_gpu_material_3d_lut_texture but will not load the texture if it isn't
- * already. */
-ImageGPUTextures BKE_image_get_gpu_material_3d_lut_texture_try(Image *image,
-                                                               ImageUser *iuser,
-                                                               int width,
-                                                               int height,
-                                                               int depth);
-
-void BKE_image_free_gpu_3d_lut_textures(Image *ima);
-
-/**
- * Is the alpha of the `gpu::Texture` for a given image/ibuf premultiplied.
- */
-bool BKE_image_has_gpu_texture_premultiplied_alpha(Image *image, ImBuf *ibuf);
-
-/**
- * Partial update of texture for texture painting.
- * This is often much quicker than fully updating the texture for high resolution images.
- */
-void BKE_image_update_gputexture(Image *ima, ImageUser *iuser, int x, int y, int w, int h);
-
-/**
- * Mark areas on the #gpu::Texture that needs to be updated. The areas are marked in
- * chunks. The next time the #gpu::Texture is used these tiles will be refreshes. This
- * saves time when writing to the same place multiple times This happens for during foreground
- * rendering.
- */
-void BKE_image_update_gputexture_delayed(
-    Image *ima, ImageTile *image_tile, ImBuf *ibuf, int x, int y, int w, int h);
-
-/**
- * Called on entering and exiting texture paint mode,
- * temporary disabling/enabling mipmapping on all images for quick texture
- * updates with glTexSubImage2D. images that didn't change don't have to be re-uploaded to OpenGL.
- */
-void BKE_image_paint_set_mipmap(Main *bmain, bool mipmap);
-
-/**
- * Delayed free of OpenGL buffers by main thread.
- */
-void BKE_image_free_unused_gpu_textures();
-
 RenderSlot *BKE_image_add_renderslot(Image *ima, const char *name);
 bool BKE_image_remove_renderslot(Image *ima, ImageUser *iuser, int slot);
 RenderSlot *BKE_image_get_renderslot(Image *ima, int index);
 bool BKE_image_clear_renderslot(Image *ima, ImageUser *iuser, int slot);
-
-/* --- image_partial_update.cc --- */
-/** Image partial updates. */
-/**
- * \brief Create a new PartialUpdateUser. An Object that contains data to use partial updates.
- */
-PartialUpdateUser *BKE_image_partial_update_create(const Image *image);
-
-/**
- * \brief free a partial update user.
- */
-void BKE_image_partial_update_free(PartialUpdateUser *user);
-
-/* --- partial updater (image side) --- */
-
-void BKE_image_partial_update_register_free(Image *image);
-/** \brief Mark a region of the image to update. */
-void BKE_image_partial_update_mark_region(Image *image,
-                                          const ImageTile *image_tile,
-                                          const ImBuf *image_buffer,
-                                          const rcti *updated_region);
-/** \brief Mark the whole image to be updated. */
-void BKE_image_partial_update_mark_full_update(Image *image);
 
 }  // namespace blender

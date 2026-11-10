@@ -13,12 +13,12 @@
 #include "DNA_space_types.h"
 #include "DNA_windowmanager_types.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_base.hh"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_string_utf8.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string_utf8.hh"
 
 #include "BKE_constraint.h"
 #include "BKE_context.hh"
@@ -271,16 +271,12 @@ void constraintTransLim(const TransInfo *t, const TransDataContainer *tc, TransD
 
     /* Evaluate valid constraints. */
     for (con = td->con; con; con = con->next) {
+      if (!BKE_constraint_has_influence(con)) {
+        continue;
+      }
+
       const bConstraintTypeInfo *cti = nullptr;
       ListBaseT<bConstraintTarget> targets = {nullptr, nullptr};
-
-      /* Only consider constraint if enabled. */
-      if (con->flag & (CONSTRAINT_DISABLE | CONSTRAINT_OFF)) {
-        continue;
-      }
-      if (con->enforce == 0.0f) {
-        continue;
-      }
 
       /* Only use it if it's tagged for this purpose (and the right type). */
       if (con->type == CONSTRAINT_TYPE_LOCLIMIT) {
@@ -388,11 +384,7 @@ static void constraintRotLim(const TransInfo * /*t*/, TransData *td, TransDataEx
 
     /* Evaluate valid constraints. */
     for (con = td->con; con; con = con->next) {
-      /* Only consider constraint if enabled. */
-      if (con->flag & (CONSTRAINT_DISABLE | CONSTRAINT_OFF)) {
-        continue;
-      }
-      if (con->enforce == 0.0f) {
+      if (!BKE_constraint_has_influence(con)) {
         continue;
       }
 
@@ -494,11 +486,7 @@ void constraintScaleLim(const TransInfo *t, const TransDataContainer *tc, int td
 
   /* Evaluate valid constraints. */
   for (con = td->con; con; con = con->next) {
-    /* Only consider constraint if enabled. */
-    if (con->flag & (CONSTRAINT_DISABLE | CONSTRAINT_OFF)) {
-      continue;
-    }
-    if (con->enforce == 0.0f) {
+    if (!BKE_constraint_has_influence(con)) {
       continue;
     }
 
@@ -563,7 +551,7 @@ void constraintScaleLim(const TransInfo *t, const TransDataContainer *tc, int td
 /** \name Transform (Rotation Utils)
  * \{ */
 
-void headerRotation(TransInfo *t, char *str, const int str_size, float final)
+void headerRotation(TransInfo *t, char *str, const int str_maxncpy, float final)
 {
   size_t ofs = 0;
 
@@ -572,12 +560,16 @@ void headerRotation(TransInfo *t, char *str, const int str_size, float final)
 
     outputNumInput(&(t->num), c, t->scene->unit);
 
-    ofs += BLI_snprintf_utf8_rlen(
-        str + ofs, str_size - ofs, IFACE_("Rotation: %s %s %s"), &c[0], t->con.text, t->proptext);
+    ofs += BLI_snprintf_utf8_rlen(str + ofs,
+                                  str_maxncpy - ofs,
+                                  IFACE_("Rotation: %s %s %s"),
+                                  &c[0],
+                                  t->con.text,
+                                  t->proptext);
   }
   else {
     ofs += BLI_snprintf_utf8_rlen(str + ofs,
-                                  str_size - ofs,
+                                  str_maxncpy - ofs,
                                   IFACE_("Rotation: %.2f%s %s"),
                                   RAD2DEGF(final),
                                   t->con.text,
@@ -586,7 +578,7 @@ void headerRotation(TransInfo *t, char *str, const int str_size, float final)
 
   if (t->flag & T_PROP_EDIT_ALL) {
     ofs += BLI_snprintf_utf8_rlen(
-        str + ofs, str_size - ofs, IFACE_(" Proportional size: %.2f"), t->prop_size);
+        str + ofs, str_maxncpy - ofs, IFACE_(" Proportional size: %.2f"), t->prop_size);
   }
 }
 
@@ -869,7 +861,7 @@ void ElementRotation(const TransInfo *t,
 /** \name Transform (Resize Utils)
  * \{ */
 
-void headerResize(TransInfo *t, const float vec[3], char *str, const int str_size)
+void headerResize(TransInfo *t, const float vec[3], char *str, const int str_maxncpy)
 {
   char tvec[NUM_STR_REP_LEN * 3];
   size_t ofs = 0;
@@ -886,7 +878,7 @@ void headerResize(TransInfo *t, const float vec[3], char *str, const int str_siz
     switch (t->num.idx_max) {
       case 0:
         ofs += BLI_snprintf_utf8_rlen(str + ofs,
-                                      str_size - ofs,
+                                      str_maxncpy - ofs,
                                       IFACE_("Scale: %s%s %s"),
                                       &tvec[0],
                                       t->con.text,
@@ -894,7 +886,7 @@ void headerResize(TransInfo *t, const float vec[3], char *str, const int str_siz
         break;
       case 1:
         ofs += BLI_snprintf_utf8_rlen(str + ofs,
-                                      str_size - ofs,
+                                      str_maxncpy - ofs,
                                       IFACE_("Scale: %s : %s%s %s"),
                                       &tvec[0],
                                       &tvec[NUM_STR_REP_LEN],
@@ -903,7 +895,7 @@ void headerResize(TransInfo *t, const float vec[3], char *str, const int str_siz
         break;
       case 2:
         ofs += BLI_snprintf_utf8_rlen(str + ofs,
-                                      str_size - ofs,
+                                      str_maxncpy - ofs,
                                       IFACE_("Scale: %s : %s : %s%s %s"),
                                       &tvec[0],
                                       &tvec[NUM_STR_REP_LEN],
@@ -916,7 +908,7 @@ void headerResize(TransInfo *t, const float vec[3], char *str, const int str_siz
   else {
     if (t->flag & T_2D_EDIT) {
       ofs += BLI_snprintf_utf8_rlen(str + ofs,
-                                    str_size - ofs,
+                                    str_maxncpy - ofs,
                                     IFACE_("Scale X: %s   Y: %s%s %s"),
                                     &tvec[0],
                                     &tvec[NUM_STR_REP_LEN],
@@ -925,7 +917,7 @@ void headerResize(TransInfo *t, const float vec[3], char *str, const int str_siz
     }
     else {
       ofs += BLI_snprintf_utf8_rlen(str + ofs,
-                                    str_size - ofs,
+                                    str_maxncpy - ofs,
                                     IFACE_("Scale X: %s   Y: %s  Z: %s%s %s"),
                                     &tvec[0],
                                     &tvec[NUM_STR_REP_LEN],
@@ -937,7 +929,7 @@ void headerResize(TransInfo *t, const float vec[3], char *str, const int str_siz
 
   if (t->flag & T_PROP_EDIT_ALL) {
     ofs += BLI_snprintf_utf8_rlen(
-        str + ofs, str_size - ofs, IFACE_(" Proportional size: %.2f"), t->prop_size);
+        str + ofs, str_maxncpy - ofs, IFACE_(" Proportional size: %.2f"), t->prop_size);
   }
 }
 
@@ -1186,8 +1178,6 @@ static TransModeInfo *mode_info_get(TransInfo *t, const int mode)
         return &TransMode_translate;
       }
       return &TransMode_timetranslate;
-    case TFM_BAKE_TIME:
-      return &TransMode_baketime;
     case TFM_MIRROR:
       return &TransMode_mirror;
     case TFM_BWEIGHT:
@@ -1292,6 +1282,17 @@ bool transform_mode_is_axis_pointing_to_screen(const TransInfo *t, const float3 
   float view_vector[3];
   view_vector_calc(t, t->center_global, view_vector);
   return dot_v3v3(axis, view_vector) > 0.0f;
+}
+
+TransDataContainer *transform_mode_container_first_ok(TransInfo *t)
+{
+  FOREACH_TRANS_DATA_CONTAINER (t, tc) {
+    if (tc->custom.mode.data) {
+      return tc;
+    }
+  }
+  BLI_assert_msg(0, "Should never happen, at least one container must have valid data");
+  return nullptr;
 }
 
 /** \} */

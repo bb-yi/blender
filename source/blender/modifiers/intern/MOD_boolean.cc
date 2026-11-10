@@ -6,11 +6,13 @@
  * \ingroup modifiers
  */
 
-#include "BLI_utildefines.h"
+#include <fmt/format.h>
+
+#include "BLI_utildefines.hh"
 
 #include "BLI_array.hh"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_vector.hh"
 #include "BLI_vector_set.hh"
@@ -234,7 +236,7 @@ static BMesh *BMD_mesh_bm_create(
   bmesh_from_mesh_params.calc_vert_normal = true;
   BM_mesh_bm_from_me(bm, mesh_operand_ob, &bmesh_from_mesh_params);
 
-  if (UNLIKELY(*r_is_flip)) {
+  if (*r_is_flip) [[unlikely]] {
     const int cd_loop_mdisp_offset = CustomData_get_offset(&bm->ldata, CD_MDISPS);
     BMIter iter;
     BMFace *efa;
@@ -296,7 +298,7 @@ static void BMD_mesh_intersection(BMesh *bm,
     copy_m3_m4(nmat, omat);
     invert_m3(nmat);
 
-    if (UNLIKELY(is_flip)) {
+    if (is_flip) [[unlikely]] {
       negate_m3(nmat);
     }
 
@@ -316,7 +318,7 @@ static void BMD_mesh_intersection(BMesh *bm,
       BM_elem_flag_enable(efa, BM_FACE_TAG);
 
       /* remap material */
-      if (LIKELY(efa->mat_nr < operand_ob->totcol)) {
+      if (efa->mat_nr < operand_ob->totcol) [[likely]] {
         efa->mat_nr = material_remap[efa->mat_nr];
       }
       else {

@@ -273,7 +273,7 @@ void BKE_defvert_normalize_lock_map(MDeformVert &dvert,
  *
  * \param dvert: the vertex weights to be normalized.
  *
- * \param vgroup_subset: span of bools indicating which vertex groups are
+ * \param subset_flags: span of bools indicating which vertex groups are
  * included vs ignored in this function. True means included, false means
  * ignored. Note that this is different than locking: locked groups are not
  * *modified*, but their weights are still accounted for in the normalization
@@ -298,7 +298,7 @@ void BKE_defvert_normalize_lock_map(MDeformVert &dvert,
  * number of vertex groups in the source data (e.g. the mesh).
  */
 void BKE_defvert_normalize_ex(MDeformVert &dvert,
-                              Span<bool> vgroup_subset,
+                              Span<bool> subset_flags,
                               Span<bool> lock_flags,
                               Span<bool> soft_lock_flags);
 
@@ -347,6 +347,10 @@ VMutableArray<float> varray_for_mutable_deform_verts(MutableSpan<MDeformVert> dv
 void remove_defgroup_index(MutableSpan<MDeformVert> dverts, int defgroup_index);
 
 void gather_deform_verts(Span<MDeformVert> src, Span<int> indices, MutableSpan<MDeformVert> dst);
+void gather_deform_verts(Span<MDeformVert> src,
+                         Span<int> indices,
+                         const IndexMask &dst_mask,
+                         MutableSpan<MDeformVert> dst);
 void gather_deform_verts(Span<MDeformVert> src,
                          const IndexMask &indices,
                          MutableSpan<MDeformVert> dst);

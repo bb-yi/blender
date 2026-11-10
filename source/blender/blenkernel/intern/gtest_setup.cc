@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include "BKE_appdir.hh"
 #include "BKE_brush.hh"
 #include "BKE_callbacks.hh"
@@ -18,8 +22,8 @@
 #include "BKE_volume.hh"
 
 #include "BLI_fftw.hh"
-#include "BLI_task.h"
-#include "BLI_threads.h"
+#include "BLI_task_c.hh"
+#include "BLI_threads.hh"
 
 #include "CLG_log.h"
 
@@ -47,7 +51,6 @@ void gtest_setup()
 {
   CLG_init();
   BLI_threadapi_init();
-  DNA_sdna_current_init();
   BKE_cpp_types_init();
   fn::multi_function::register_common_functions();
   BKE_idtype_init();
@@ -82,7 +85,6 @@ void gtest_teardown()
   BKE_materials_exit();
   bke::node_system_exit();
   RNA_exit();
-  DNA_sdna_current_free();
   BLI_threadapi_exit();
   RE_texture_rng_exit();
   RE_engines_exit();

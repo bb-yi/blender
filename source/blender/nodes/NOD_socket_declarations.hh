@@ -2,9 +2,14 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #pragma once
 
 #include <cfloat>
+#include <climits>
 
 #include "NOD_bundle_type.hh"
 #include "NOD_menu_value.hh"

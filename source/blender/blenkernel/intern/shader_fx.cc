@@ -10,8 +10,8 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
 
 #include "BLT_translation.hh"
@@ -218,18 +218,14 @@ void BKE_shaderfx_copy(ListBaseT<ShaderFxData> *dst, const ListBaseT<ShaderFxDat
   dst->clear_no_delete();
   BLI_duplicatelist(dst, src);
 
-  for (srcfx = static_cast<ShaderFxData *>(src->first),
-      fx = static_cast<ShaderFxData *>(dst->first);
-       srcfx && fx;
-       srcfx = srcfx->next, fx = fx->next)
-  {
+  for (srcfx = src->first(), fx = dst->first(); srcfx && fx; srcfx = srcfx->next, fx = fx->next) {
     BKE_shaderfx_copydata(srcfx, fx);
   }
 }
 
 ShaderFxData *BKE_shaderfx_findby_type(Object *ob, ShaderFxType type)
 {
-  ShaderFxData *fx = static_cast<ShaderFxData *>(ob->shader_fx.first);
+  ShaderFxData *fx = ob->shader_fx.first();
 
   for (; fx; fx = fx->next) {
     if (fx->type == type) {
@@ -242,7 +238,7 @@ ShaderFxData *BKE_shaderfx_findby_type(Object *ob, ShaderFxType type)
 
 void BKE_shaderfx_foreach_ID_link(Object *ob, ShaderFxIDWalkFunc walk, void *user_data)
 {
-  ShaderFxData *fx = static_cast<ShaderFxData *>(ob->shader_fx.first);
+  ShaderFxData *fx = ob->shader_fx.first();
 
   for (; fx; fx = fx->next) {
     const ShaderFxTypeInfo *fxi = BKE_shaderfx_get_info(ShaderFxType(fx->type));
@@ -277,19 +273,24 @@ void BKE_shaderfx_blend_write(BlendWriter *writer, ListBaseT<ShaderFxData> *fxba
 
 void BKE_shaderfx_blend_read_data(BlendDataReader *reader, ListBaseT<ShaderFxData> *lb, Object *ob)
 {
-  BLO_read_struct_list(reader, ShaderFxData, lb);
+  BLO_read_struct_list_with_type_size<ShaderFxData>(reader, lb, [](const ShaderFxData &fx) {
+    const ShaderFxTypeInfo *fxi = BKE_shaderfx_get_info(ShaderFxType(fx.type));
+    return fxi ? size_t(fxi->struct_size) : sizeof(ShaderFxData);
+  });
 
-  for (ShaderFxData &fx : *lb) {
+  for (ShaderFxData &fx : lb->items_mutable()) {
     fx.error = nullptr;
+
+    /* Remove if shader disappeared, for upward compatibility. There is no type info for the None
+     * type, so this can't be used. */
+    if (BKE_shaderfx_get_info(ShaderFxType(fx.type)) == nullptr) {
+      BLI_freelinkN(lb, &fx);
+      continue;
+    }
 
     /* If linking from a library, clear 'local' library override flag. */
     if (ID_IS_LINKED(ob)) {
       fx.flag &= ~eShaderFxFlag_OverrideLibrary_Local;
-    }
-
-    /* if shader disappear, or for upward compatibility */
-    if (nullptr == BKE_shaderfx_get_info(ShaderFxType(fx.type))) {
-      fx.type = eShaderFxType_None;
     }
   }
 }

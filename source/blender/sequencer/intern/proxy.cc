@@ -8,18 +8,21 @@
  * \ingroup sequencer
  */
 
+#include <algorithm>
+#include <utility>
+
 #include "MEM_guardedalloc.h"
 
 #include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
 
-#include "BLI_fileops.h"
-#include "BLI_math_base.h"
+#include "BLI_fileops.hh"
+#include "BLI_math_base_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #ifdef WIN32
-#  include "BLI_winstuff.h"
+#  include "BLI_winstuff.hh"
 #else
 #  include <unistd.h>
 #endif
@@ -37,7 +40,6 @@
 #include "MOV_read.hh"
 
 #include "SEQ_proxy.hh"
-#include "SEQ_relations.hh"
 #include "SEQ_render.hh"
 #include "SEQ_sequencer.hh"
 #include "SEQ_time.hh"
@@ -53,16 +55,84 @@ namespace blender::seq {
 
 struct ProxyBuildContext {
   MovieProxyBuilder *movie_proxy_builder = nullptr;
+  MovieReaderPtr movie_reader;
 
   int size_flags = 0;
   int quality = 0;
   bool overwrite = false;
   int view_id = 0;
 
-  Main *bmain = nullptr;
   Scene *scene = nullptr;
   Strip *strip = nullptr;
 };
+
+static MovieReader *movie_reader_open(Strip &strip, const char *filepath, const bool open_file)
+{
+  /* Sequencer performs colorspace conversion, so keep the decoded input unchanged. */
+  const ImBufFlags flags = (strip.flag & SEQ_DEINTERLACE) ? ImBufFlags::Deinterlace :
+                                                            ImBufFlags::Zero;
+  if (open_file) {
+    return openanim(filepath, flags, strip.streamindex, true, &strip.data->colorspace_settings);
+  }
+  return openanim_noload(
+      filepath, flags, strip.streamindex, true, &strip.data->colorspace_settings);
+}
+
+static void movie_reader_proxy_dir_set(const Editing &ed, const Strip &strip, MovieReader *reader)
+{
+  if (reader == nullptr) {
+    return;
+  }
+
+  char proxy_dirpath[FILE_MAX];
+  if (seq_proxy_get_custom_dir(ed, strip, proxy_dirpath)) {
+    seq_proxy_index_dir_set(reader, proxy_dirpath);
+  }
+}
+
+/** Open temporary readers for proxy building, falling back to the base filepath. */
+static Vector<MovieReaderPtr> movie_readers_open(Scene &scene, Strip &strip, const bool open_file)
+{
+  Vector<MovieReaderPtr> readers;
+  Editing &ed = *scene.ed;
+  char filepath[FILE_MAX];
+  BLI_path_join(filepath, sizeof(filepath), strip.data->dirpath, strip.data->stripdata->filename);
+  BLI_path_abs(filepath, ID_BLEND_PATH_FROM_GLOBAL(&scene.id));
+
+  const bool use_multiview = (strip.flag & SEQ_USE_VIEWS) != 0 &&
+                             (scene.r.scemode & R_MULTIVIEW) != 0;
+  if (use_multiview && strip.views_format == R_IMF_VIEWS_INDIVIDUAL) {
+    const int files_num = seq_multiview_num_files_get(&scene, strip.views_format);
+    for (int view_id = 0; view_id < files_num; view_id++) {
+      char filepath_view[FILE_MAX];
+      const char *suffix = nullptr;
+      if (!seq_multiview_view_filepath_get(
+              scene, filepath, view_id, filepath_view, sizeof(filepath_view), &suffix))
+      {
+        readers.clear();
+        break;
+      }
+
+      /* Multiview files must be loaded, otherwise it is not possible to detect failure. */
+      MovieReaderPtr reader(movie_reader_open(strip, filepath_view, true));
+      if (reader == nullptr) {
+        readers.clear();
+        break;
+      }
+
+      movie_reader_proxy_dir_set(ed, strip, reader.get());
+      MOV_set_multiview_suffix(reader.get(), suffix);
+      readers.append(std::move(reader));
+    }
+  }
+
+  if (readers.is_empty()) {
+    MovieReaderPtr reader(movie_reader_open(strip, filepath, open_file));
+    movie_reader_proxy_dir_set(ed, strip, reader.get());
+    readers.append(std::move(reader));
+  }
+  return readers;
+}
 
 IMB_Proxy_Size rendersize_to_proxysize(eSpaceSeq_Proxy_RenderSize render_size)
 {
@@ -121,6 +191,25 @@ bool seq_proxy_get_custom_file_filepath(const Strip *strip, char *filepath, cons
   return true;
 }
 
+bool seq_proxy_get_custom_dir(const Editing &ed, const Strip &strip, char r_dirpath[FILE_MAX])
+{
+  const StripProxy *proxy = strip.data->proxy;
+  if (proxy == nullptr || ((proxy->storage & SEQ_STORAGE_PROXY_CUSTOM_DIR) == 0 &&
+                           ed.proxy_storage != SEQ_EDIT_PROXY_DIR_STORAGE))
+  {
+    return false;
+  }
+
+  if (ed.proxy_storage == SEQ_EDIT_PROXY_DIR_STORAGE) {
+    BLI_strncpy(r_dirpath, ed.proxy_dir[0] ? ed.proxy_dir : "//BL_proxy", FILE_MAX);
+  }
+  else {
+    BLI_strncpy(r_dirpath, proxy->dirpath, FILE_MAX);
+  }
+  BLI_path_abs(r_dirpath, BKE_main_blendfile_path_from_global());
+  return true;
+}
+
 static bool seq_proxy_get_filepath_for_elem(const Scene *scene,
                                             const Strip &strip,
                                             const StripElem &strip_elem,
@@ -151,24 +240,9 @@ static bool seq_proxy_get_filepath_for_elem(const Scene *scene,
     }
   }
 
-  if (ed->proxy_storage == SEQ_EDIT_PROXY_DIR_STORAGE) {
-    /* Per project default. */
-    if (ed->proxy_dir[0] == 0) {
-      STRNCPY(dirpath, "//BL_proxy");
-    }
-    else { /* Per project with custom dirpath. */
-      STRNCPY(dirpath, ed->proxy_dir);
-    }
-    BLI_path_abs(filepath, BKE_main_blendfile_path_from_global());
-  }
-  else {
-    /* Pre strip with custom dir. */
-    if (proxy->storage & SEQ_STORAGE_PROXY_CUSTOM_DIR) {
-      STRNCPY(dirpath, strip.data->proxy->dirpath);
-    }
-    else { /* Per strip default. */
-      SNPRINTF(dirpath, "%s" SEP_STR "BL_proxy", strip.data->dirpath);
-    }
+  if (!seq_proxy_get_custom_dir(*ed, strip, dirpath)) {
+    /* Per strip default. */
+    SNPRINTF(dirpath, "%s" SEP_STR "BL_proxy", strip.data->dirpath);
   }
 
   /* Proxy size number to be used in path. */
@@ -239,13 +313,12 @@ ImBuf *seq_proxy_fetch(const RenderData *context, Strip *strip, int timeline_fra
       /* Sequencer takes care of colorspace conversion of the result. The input is the best to be
        * kept unchanged for the performance reasons. */
       proxy->anim = openanim(
-          filepath, ImBufFlags::Zero, 0, true, strip->data->colorspace_settings.name);
+          filepath, ImBufFlags::Zero, 0, true, &strip->data->colorspace_settings);
     }
     if (proxy->anim == nullptr) {
       return nullptr;
     }
 
-    strip_open_anim_file(context->scene, strip, true);
     return MOV_decode_frame(proxy->anim, frameno, IMB_PROXY_NONE);
   }
 
@@ -258,12 +331,12 @@ ImBuf *seq_proxy_fetch(const RenderData *context, Strip *strip, int timeline_fra
   if (BLI_exists(filepath)) {
     /* Proxies are already be in the sequencer colorspace for fast loading, don't perform
      * conversion of float to scene linear that would usually be done. */
-    char colorspace[IMA_MAX_SPACE];
-    STRNCPY(colorspace, context->scene->sequencer_colorspace_settings.name);
+    ColorManagedColorspaceSettings colorspace_settings =
+        context->scene->sequencer_colorspace_settings;
     return IMB_load_image_from_filepath(filepath,
                                         ImBufFlags::ByteData | ImBufFlags::Metadata |
                                             ImBufFlags::NoColorspaceConvert,
-                                        colorspace);
+                                        &colorspace_settings);
   }
 
   return nullptr;
@@ -278,14 +351,14 @@ struct MultiViewPrefixVars {
 };
 
 /**
- * Returns whether the file this context would read from even exist,
- * if not, don't create the context.
+ * Returns true if the file this context would read from doesn't exist,
+ * in which case the context shouldn't be created.
  *
- * \param prefix_vars: Stores prefix variables for reuse,
- * these variables are for internal use, the caller must not depend on them.
+ * \param prefix_vars: Stores prefix variables for reuse.
+ * These are for internal use, the caller must not depend on them.
  *
- * \note This function must first a `view_id` of zero, to initialize `prefix_vars`
- * for use with other views.
+ * \note This function must first be called with a `view_id` of zero, to initialize
+ * `prefix_vars` for use with other views.
  */
 static bool seq_proxy_multiview_context_invalid(Strip *strip,
                                                 Scene *scene,
@@ -341,7 +414,8 @@ static int seq_proxy_context_count(Strip *strip, Scene *scene)
 
   switch (strip->type) {
     case STRIP_TYPE_MOVIE: {
-      num_views = int(strip->runtime->movie_readers.size());
+      const bool use_multiview = (strip->flag & SEQ_USE_VIEWS) != 0;
+      num_views = use_multiview ? seq_multiview_num_files_get(scene, strip->views_format) : 1;
       break;
     }
     case STRIP_TYPE_IMAGE: {
@@ -394,6 +468,13 @@ bool proxy_build_start(Main *bmain,
   }
 
   int num_files = seq_proxy_context_count(strip, scene);
+  Vector<MovieReaderPtr> probe_readers;
+  Vector<MovieReaderPtr> build_readers;
+  bool build_readers_opened = false;
+  if (strip->type == STRIP_TYPE_MOVIE) {
+    probe_readers = movie_readers_open(*scene, *strip, false);
+    num_files = std::min(num_files, int(probe_readers.size()));
+  }
 
   MultiViewPrefixVars prefix_vars; /* Initialized by #seq_proxy_multiview_context_invalid. */
   for (int i = 0; i < num_files; i++) {
@@ -401,15 +482,12 @@ bool proxy_build_start(Main *bmain,
       continue;
     }
 
-    /* Check if proxies are already built here, because actually opening anims takes a lot of
-     * time. */
-    strip_open_anim_file(scene, strip, false);
-    MovieReader *anim = strip->runtime->movie_reader_get(i);
+    /* Check if proxies are already built here, because fully opening readers takes a lot of time.
+     */
+    MovieReader *anim = probe_readers.index_range().contains(i) ? probe_readers[i].get() : nullptr;
     if (anim && !seq_proxy_need_rebuild(strip, anim)) {
       continue;
     }
-
-    strip_free_movie_readers(strip);
 
     ProxyBuildContext *context = MEM_new<ProxyBuildContext>("strip proxy rebuild context");
 
@@ -420,15 +498,20 @@ bool proxy_build_start(Main *bmain,
     context->quality = strip_new->data->proxy->quality;
     context->overwrite = (strip_new->data->proxy->build_flags & SEQ_PROXY_SKIP_EXISTING) == 0;
 
-    context->bmain = bmain;
     context->scene = scene;
     context->strip = strip_new;
 
     context->view_id = i; /* only for images */
 
     if (strip_new->type == STRIP_TYPE_MOVIE) {
-      strip_open_anim_file(scene, strip_new, true);
-      anim = strip_new->runtime->movie_reader_get(i);
+      if (!build_readers_opened) {
+        build_readers = movie_readers_open(*scene, *strip_new, true);
+        build_readers_opened = true;
+      }
+      if (build_readers.index_range().contains(i)) {
+        context->movie_reader = std::move(build_readers[i]);
+      }
+      anim = context->movie_reader.get();
       if (anim) {
         context->movie_proxy_builder = MOV_proxy_builder_start(anim,
                                                                context->size_flags,
@@ -438,6 +521,7 @@ bool proxy_build_start(Main *bmain,
                                                                build_only_on_bad_performance);
       }
       if (!context->movie_proxy_builder) {
+        seq_free_strip_recurse(nullptr, context->strip, true);
         MEM_delete(context);
         return false;
       }
@@ -511,32 +595,34 @@ static void seq_proxy_build_frame(const Scene *scene,
 
 static ImBuf *render_image_strip_frame(const ProxyBuildContext &context,
                                        const Strip &strip,
-                                       char *filepath,
-                                       char *prefix,
-                                       const char *ext,
+                                       const char *filepath,
+                                       const char *prefix,
                                        int view_id)
 {
   ImBuf *ibuf = nullptr;
 
-  ImBufFlags flag = ImBufFlags::ByteData | ImBufFlags::Metadata | ImBufFlags::MultiLayer;
+  ImBufFlags flag = ImBufFlags::ByteData | ImBufFlags::Metadata;
   if (strip.alpha_mode == SEQ_ALPHA_PREMUL) {
     flag |= ImBufFlags::AlphaPremul;
   }
 
   if (prefix[0] == '\0') {
-    ibuf = IMB_load_image_from_filepath(filepath, flag, strip.data->colorspace_settings.name);
+    ibuf = IMB_load_image_from_filepath(filepath, flag, &strip.data->colorspace_settings);
   }
   else {
     char filepath_view[FILE_MAX];
-    BKE_scene_multiview_view_prefix_get(context.scene, filepath, prefix, &ext);
-    seq_multiview_name(context.scene, view_id, prefix, ext, filepath_view, FILE_MAX);
-    ibuf = IMB_load_image_from_filepath(filepath_view, flag, strip.data->colorspace_settings.name);
+    if (!seq_multiview_view_filepath_get(
+            *context.scene, filepath, view_id, filepath_view, sizeof(filepath_view), nullptr))
+    {
+      return nullptr;
+    }
+    ibuf = IMB_load_image_from_filepath(filepath_view, flag, &strip.data->colorspace_settings);
   }
   if (ibuf == nullptr) {
     return nullptr;
   }
 
-  convert_multilayer_ibuf(ibuf);
+  ensure_ibuf_is_rgba(ibuf);
   if (ibuf->float_data() != nullptr && ibuf->byte_data() != nullptr) {
     IMB_free_byte_pixels(ibuf); /* If both float & byte exist, free byte buffer. */
   }
@@ -566,11 +652,10 @@ static void image_proxy_builder_process(ProxyBuildContext &context,
   const char *base_path = ID_BLEND_PATH_FROM_GLOBAL(&context.scene->id);
   const int tot_views = BKE_scene_multiview_num_views_get(&context.scene->r);
 
-  for (int elem_index = 0; elem_index < strip.len; elem_index++) {
+  for (int elem_index = 0; elem_index < strip.content_length(); elem_index++) {
     const StripElem &s_elem = strip.data->stripdata[elem_index];
 
     char filepath[FILE_MAX];
-    const char *ext = nullptr;
     char prefix[FILE_MAX];
 
     ImBuf *ibuf = nullptr;
@@ -578,21 +663,23 @@ static void image_proxy_builder_process(ProxyBuildContext &context,
     BLI_path_join(filepath, sizeof(filepath), strip.data->dirpath, s_elem.filename);
     BLI_path_abs(filepath, base_path);
 
-    const int totfiles = seq_num_files(context.scene, strip.views_format, true);
-    bool is_multiview_render = seq_image_strip_is_multiview_render(
-        context.scene, &strip, totfiles, filepath, prefix, ext);
+    const bool do_multiview_render = seq_strip_do_multiview_render(
+        context.scene, &strip, filepath, prefix);
 
-    if (is_multiview_render) {
+    if (do_multiview_render) {
+      const int totfiles = seq_multiview_num_files_get(context.scene, strip.views_format);
       Array<ImBuf *> ibufs_arr(tot_views, nullptr);
 
       for (int view_id = 0; view_id < totfiles; view_id++) {
-        ibufs_arr[view_id] = render_image_strip_frame(
-            context, strip, filepath, prefix, ext, view_id);
+        ibufs_arr[view_id] = render_image_strip_frame(context, strip, filepath, prefix, view_id);
       }
 
       if (ibufs_arr[0] != nullptr) {
         if (strip.views_format == R_IMF_VIEWS_STEREO_3D) {
-          IMB_ImBufFromStereo3d(strip.stereo3d_format, ibufs_arr[0], &ibufs_arr[0], &ibufs_arr[1]);
+          IMB_ImBufFromStereo3d(strip.stereo3d_format,
+                                ibufs_arr[0],
+                                &ibufs_arr[0],  // NOLINT(readability-container-data-pointer)
+                                &ibufs_arr[1]);
         }
 
         /* Return the requested image; release the others. */
@@ -602,13 +689,10 @@ static void image_proxy_builder_process(ProxyBuildContext &context,
             IMB_freeImBuf(ib);
           }
         }
-        if (ibuf) {
-          seq_imbuf_assign_spaces(context.scene, ibuf);
-        }
       }
     }
     else {
-      ibuf = render_image_strip_frame(context, strip, filepath, prefix, ext, context.view_id);
+      ibuf = render_image_strip_frame(context, strip, filepath, prefix, context.view_id);
     }
 
     if (ibuf != nullptr) {
@@ -630,7 +714,7 @@ static void image_proxy_builder_process(ProxyBuildContext &context,
       }
 
       if (set_progress_fn) {
-        float progress = float(elem_index) / float(strip.len);
+        float progress = float(elem_index) / float(strip.content_length());
         set_progress_fn(progress);
       }
 
@@ -650,11 +734,10 @@ static void close_movie_proxy_builder(ProxyBuildContext *context, bool stop)
   if (context->movie_proxy_builder == nullptr) {
     return;
   }
-  for (MovieReader *movie : context->strip->runtime->movie_readers) {
-    MOV_close_proxies(movie);
-  }
+  MOV_close_proxies(context->movie_reader.get());
   MOV_proxy_builder_finish(context->movie_proxy_builder, stop);
   context->movie_proxy_builder = nullptr;
+  context->movie_reader.reset();
 }
 
 void proxy_build_process(ProxyBuildContext *context,

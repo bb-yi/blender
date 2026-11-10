@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "node_shader_util.hh"
 
 namespace blender {
@@ -21,7 +25,7 @@ static int node_shader_gpu_point_info(GPUMaterial *mat,
                                       GPUNodeStack *in,
                                       GPUNodeStack *out)
 {
-  return GPU_stack_link(mat, node, "node_point_info", in, out);
+  return GPU_stack_link(mat, node, "node_point_info", in, out, GPU_shading_data());
 }
 
 NODE_SHADER_MATERIALX_BEGIN

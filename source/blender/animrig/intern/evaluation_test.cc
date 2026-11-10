@@ -7,19 +7,21 @@
 #include "evaluation_internal.hh"
 
 #include "BKE_action.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_gtest_base.hh"
 #include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
+#include "BKE_mesh.hh"
 #include "BKE_object.hh"
 
+#include "DNA_mesh_types.h"
 #include "DNA_object_types.h"
 
 #include "RNA_access.hh"
 #include "RNA_prototypes.hh"
 
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 
 #include <optional>
 
@@ -74,7 +76,13 @@ class AnimationEvaluationTest : public bke::BlenderGTestBase {
     EvaluationResult result = evaluate_layer(
         cube_rna_ptr, *action, *layer, slot->handle, anim_eval_context);
 
-    const AnimatedProperty *loc0_result = result.lookup_ptr(PropIdentifier(rna_path, array_index));
+    std::optional<ParsedRNAPath<>> parsed_rna_path = ParsedRNAPath<>::from_string(rna_path);
+    if (!parsed_rna_path) {
+      return {};
+    }
+
+    const AnimatedProperty *loc0_result = result.lookup_ptr(
+        PropIdentifier(*parsed_rna_path, array_index));
     if (!loc0_result) {
       return {};
     }
@@ -154,9 +162,12 @@ TEST_F(AnimationEvaluationTest, evaluate_layer__keyframes)
   EvaluationResult result = evaluate_layer(
       cube_rna_ptr, *action, *layer, slot->handle, anim_eval_context);
 
+  std::optional<ParsedRNAPath<>> parsed_rna_path = ParsedRNAPath<>::from_string("location");
+  EXPECT_TRUE(parsed_rna_path.has_value());
+
   /* Check the result. */
   ASSERT_FALSE(result.is_empty());
-  AnimatedProperty *loc0_result = result.lookup_ptr(PropIdentifier("location", 0));
+  AnimatedProperty *loc0_result = result.lookup_ptr(PropIdentifier(*parsed_rna_path, 0));
   ASSERT_NE(nullptr, loc0_result) << "location[0] should have been animated";
   EXPECT_EQ(47.3f, loc0_result->value);
 
@@ -166,6 +177,52 @@ TEST_F(AnimationEvaluationTest, evaluate_layer__keyframes)
   EXPECT_EQ(3.0f, cube->rot[0]) << "Evaluation should not modify the animated ID";
   EXPECT_EQ(2.0f, cube->rot[1]) << "Evaluation should not modify the animated ID";
   EXPECT_EQ(7.0f, cube->rot[2]) << "Evaluation should not modify the animated ID";
+}
+
+TEST_F(AnimationEvaluationTest, evaluate_layer__mesh_vertices)
+{
+  Mesh *mesh = BKE_mesh_add(bmain, "Mesh");
+  constexpr int vertex_count = 200;
+  mesh->verts_num = vertex_count;
+  bke::mesh_ensure_required_data_layers(*mesh);
+
+  Action *mesh_action = BKE_id_new<Action>(bmain, "MeshAction");
+  Slot &mesh_slot = mesh_action->slot_add();
+  ASSERT_EQ(assign_action_and_slot(mesh_action, &mesh_slot, mesh->id),
+            ActionSlotAssignmentResult::OK);
+
+  Layer &mesh_layer = mesh_action->layer_add("Mesh layer");
+  Strip &strip = mesh_layer.strip_add(*mesh_action, Strip::Type::Keyframe);
+  StripKeyframeData &strip_data = strip.data<StripKeyframeData>(*mesh_action);
+
+  for (const int vertex_index : IndexRange(vertex_count)) {
+    const std::string rna_path = "vertices[" + std::to_string(vertex_index) + "].co";
+    for (const int component : IndexRange(3)) {
+      strip_data.keyframe_insert(
+          bmain, mesh_slot, {rna_path, component}, {1.0f, float(vertex_index)}, settings);
+    }
+  }
+
+  PointerRNA mesh_rna_ptr = RNA_id_pointer_create(&mesh->id);
+  anim_eval_context.eval_time = 1.0f;
+
+  EvaluationResult result = evaluate_layer(
+      mesh_rna_ptr, *mesh_action, mesh_layer, mesh_slot.handle, anim_eval_context);
+
+  ASSERT_FALSE(result.is_empty());
+
+  for (const int vertex_index : IndexRange(vertex_count)) {
+    const std::string rna_path = "vertices[" + std::to_string(vertex_index) + "].co";
+    const std::optional<ParsedRNAPath<>> parsed_rna_path = ParsedRNAPath<>::from_string(rna_path);
+    ASSERT_TRUE(parsed_rna_path.has_value());
+
+    for (const int component : IndexRange(3)) {
+      const AnimatedProperty *property = result.lookup_ptr(
+          PropIdentifier(*parsed_rna_path, component));
+      ASSERT_NE(nullptr, property);
+      EXPECT_EQ(float(vertex_index), property->value);
+    }
+  }
 }
 
 TEST_F(AnimationEvaluationTest, strip_boundaries__single_strip)
@@ -284,24 +341,27 @@ TEST_F(AnimationEvaluationResultTest, prop_identifier_hashing)
 
   /* Test storing the same result twice, with different memory locations of the RNA paths. This
    * tests that the mapping uses the actual string, and not just pointer comparison. */
-  const char *rna_path_1 = "pose.bones['Root'].location";
+  const char *rna_path_1 = "pose.bones[\"Root\"].location";
   const std::string rna_path_2(rna_path_1);
   ASSERT_NE(rna_path_1, rna_path_2.c_str())
       << "This test requires different addresses for the RNA path strings";
 
+  std::optional<ParsedRNAPath<>> parsed_rna_path_1 = ParsedRNAPath<>::from_string(rna_path_1);
+  std::optional<ParsedRNAPath<>> parsed_rna_path_2 = ParsedRNAPath<>::from_string(rna_path_2);
+
   PathResolvedRNA fake_resolved_rna;
-  result.store(rna_path_1, 0, 1.0f, fake_resolved_rna);
-  result.store(rna_path_2, 0, 2.0f, fake_resolved_rna);
+  result.store(*parsed_rna_path_1, 0, 1.0f, fake_resolved_rna);
+  result.store(*parsed_rna_path_2, 0, 2.0f, fake_resolved_rna);
   EXPECT_EQ(1, result.get_map().size())
       << "Storing a result for the same property twice should just overwrite the previous value";
 
   {
-    PropIdentifier key(rna_path_1, 0);
+    PropIdentifier key(*parsed_rna_path_1, 0);
     AnimatedProperty *anim_prop = result.lookup_ptr(key);
     EXPECT_EQ(2.0f, anim_prop->value) << "The last-stored result should survive.";
   }
   {
-    PropIdentifier key(rna_path_2, 0);
+    PropIdentifier key(*parsed_rna_path_2, 0);
     AnimatedProperty *anim_prop = result.lookup_ptr(key);
     EXPECT_EQ(2.0f, anim_prop->value) << "The last-stored result should survive.";
   }

@@ -34,15 +34,15 @@
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 
-#include "BLI_linklist.h"
-#include "BLI_listbase.h"
+#include "BLI_linklist.hh"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
 #include "BLI_rand.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
-#include "BLI_threads.h"
-#include "BLI_utildefines.h"
+#include "BLI_threads.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -119,8 +119,9 @@ void BKE_modifier_init()
 
 const ModifierTypeInfo *BKE_modifier_get_info(ModifierType type)
 {
-  /* type unsigned, no need to check < 0 */
-  if (type < NUM_MODIFIER_TYPES && modifier_types[type] && modifier_types[type]->name[0] != '\0') {
+  if (type >= 0 && type < NUM_MODIFIER_TYPES && modifier_types[type] &&
+      modifier_types[type]->name[0] != '\0')
+  {
     return modifier_types[type];
   }
 
@@ -479,7 +480,7 @@ int BKE_modifiers_get_cage_index(const Scene *scene,
   VirtualModifierData virtual_modifier_data;
   ModifierData *md = (is_virtual) ?
                          BKE_modifiers_get_virtual_modifierlist(ob, &virtual_modifier_data) :
-                         static_cast<ModifierData *>(ob->modifiers.first);
+                         ob->modifiers.first();
 
   if (r_lastPossibleCageIndex) {
     /* ensure the value is initialized */
@@ -620,7 +621,7 @@ CDMaskLink *BKE_modifier_calc_data_masks(const Scene *scene,
 ModifierData *BKE_modifiers_get_virtual_modifierlist(const Object *ob,
                                                      VirtualModifierData *virtual_modifier_data)
 {
-  ModifierData *md = static_cast<ModifierData *>(ob->modifiers.first);
+  ModifierData *md = ob->modifiers.first();
 
   *virtual_modifier_data = virtualModifierCommonData;
 
@@ -873,7 +874,7 @@ void BKE_modifiers_add_at_end_if_possible(Object *ob, ModifierData *new_md)
   const bool check_deform_only = (mti->flags & eModifierTypeFlag_RequiresOriginalData) ||
                                  (mt == eModifierType_Hook);
   if (check_deform_only) {
-    next_md = static_cast<ModifierData *>(ob->modifiers.first);
+    next_md = ob->modifiers.first();
 
     while (next_md && BKE_modifier_get_info(next_md->type)->type == ModifierTypeType::OnlyDeform) {
       if (next_md->next && (next_md->next->flag & eModifierFlag_PinLast) != 0) {
@@ -942,10 +943,11 @@ static void ensure_non_lazy_normals(Mesh *mesh)
       if (!edit_data.vert_positions.is_empty()) {
         /* Note that 'ensure' is acceptable here since these values aren't modified in-place.
          * If that changes we'll need to recalculate. */
-        BKE_editmesh_cache_ensure_vert_normals(*mesh->runtime->edit_mesh, edit_data);
+        BKE_editmesh_cache_ensure_vert_normals(*BKE_editmesh_bmesh_get_for_write(mesh), edit_data);
       }
       else {
-        BM_mesh_normals_update(mesh->runtime->edit_mesh->bm);
+        BMesh *bm = BKE_editmesh_bmesh_get_for_write(mesh);
+        BM_mesh_normals_update(bm);
       }
       break;
     }
@@ -1024,7 +1026,6 @@ bool BKE_modifier_deform_verts(ModifierData *md,
 
 void BKE_modifier_deform_vertsEM(ModifierData *md,
                                  const ModifierEvalContext *ctx,
-                                 const BMEditMesh *em,
                                  Mesh *mesh,
                                  MutableSpan<float3> positions)
 {
@@ -1032,7 +1033,7 @@ void BKE_modifier_deform_vertsEM(ModifierData *md,
   if (mesh && mti->depends_on_normals && mti->depends_on_normals(md)) {
     ensure_non_lazy_normals(mesh);
   }
-  mti->deform_verts_EM(md, ctx, em, mesh, positions);
+  mti->deform_verts_EM(md, ctx, mesh, positions);
 }
 
 /* end modifier callback wrappers */
@@ -1339,11 +1340,11 @@ static ModifierData *modifier_replace_with_fluid(BlendDataReader *reader,
   if (new_modifier_data->next != nullptr) {
     new_modifier_data->next->prev = new_modifier_data;
   }
-  if (modifiers->first == old_modifier_data) {
-    modifiers->first = new_modifier_data;
+  if (modifiers->first() == old_modifier_data) {
+    modifiers->first_ = new_modifier_data;
   }
-  if (modifiers->last == old_modifier_data) {
-    modifiers->last = new_modifier_data;
+  if (modifiers->last_ == old_modifier_data) {
+    modifiers->last_ = new_modifier_data;
   }
 
   /* Free old modifier data. */
@@ -1352,9 +1353,25 @@ static ModifierData *modifier_replace_with_fluid(BlendDataReader *reader,
   return new_modifier_data;
 }
 
+static size_t modifier_struct_size(const ModifierType type)
+{
+  switch (type) {
+    /* Deprecated modifier types without typeinfo, still needed for versioning. */
+    case eModifierType_Fluidsim:
+      return sizeof(FluidsimModifierData);
+    case eModifierType_Smoke:
+      return sizeof(SmokeModifierData);
+    default: {
+      const ModifierTypeInfo *mti = BKE_modifier_get_info(type);
+      return mti ? size_t(mti->struct_size) : sizeof(ModifierData);
+    }
+  }
+}
+
 void BKE_modifier_blend_read_data(BlendDataReader *reader, ListBaseT<ModifierData> *lb, Object *ob)
 {
-  BLO_read_struct_list(reader, ModifierData, lb);
+  BLO_read_struct_list_with_type_size<ModifierData>(
+      reader, lb, [](const ModifierData &md) { return modifier_struct_size(md.type); });
 
   for (ModifierData &md_iter : lb->items_mutable()) {
     ModifierData *md = &md_iter;
@@ -1465,7 +1482,7 @@ void BKE_modifier_blend_read_data(BlendDataReader *reader, ListBaseT<ModifierDat
               reader, &(fmd->domain->ptcaches[0]), &(fmd->domain->point_cache[0]), 1);
 
           /* Manta sim uses only one cache from now on, so store pointer convert */
-          if (fmd->domain->ptcaches[1].first || fmd->domain->point_cache[1]) {
+          if (fmd->domain->ptcaches[1].first() || fmd->domain->point_cache[1]) {
             PointCache *cache = fmd->domain->point_cache[1];
             if (BLO_read_struct_no_us_nonnull(reader, PointCache, &cache)) {
               if (cache->flag & PTCACHE_FAKE_SMOKE) {
@@ -1524,7 +1541,7 @@ void BKE_modifier_blend_read_data(BlendDataReader *reader, ListBaseT<ModifierDat
         pmd->canvas->pmd = pmd;
         pmd->canvas->flags &= ~MOD_DPAINT_BAKING; /* just in case */
 
-        if (pmd->canvas->surfaces.first) {
+        if (pmd->canvas->surfaces.first()) {
           BLO_read_struct_list(reader, DynamicPaintSurface, &pmd->canvas->surfaces);
 
           for (DynamicPaintSurface &surface : pmd->canvas->surfaces) {

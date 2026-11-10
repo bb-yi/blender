@@ -27,6 +27,9 @@ void VolumeModule::init()
 
   const Scene *scene_eval = inst_.scene;
 
+  /* The froxel grid's aspect ratio must match the view it will be sampled against in
+   * `VolumeModule::set_view`, otherwise `coord_scale` ends up sampling outside the valid tile
+   * range. */
   const int2 extent = inst_.film.render_extent_get();
   int tile_size = clamp_i(scene_eval->eevee.volumetric_tile_size, 1, 16);
 
@@ -54,9 +57,6 @@ void VolumeModule::init()
 
   data_.tile_size = tile_size;
   data_.tile_size_lod = int(log2(tile_size));
-  data_.coord_scale = float2(extent) / float2(tile_size * tex_size);
-  data_.main_view_extent = float2(extent);
-  data_.main_view_extent_inv = 1.0f / float2(extent);
   data_.tex_size = tex_size;
   data_.inv_tex_size = 1.0f / float3(tex_size);
 
@@ -155,8 +155,11 @@ void VolumeModule::end_sync()
   }
 
   std::optional<Bounds<float>> volume_bounds = inst_.pipelines.volume.object_integration_range();
-  if (volume_bounds && !inst_.world.has_volume()) {
-    /* Restrict integration range to the object volume range. This increases precision. */
+  if (volume_bounds && !inst_.world.has_volume() && !inst_.camera.is_panoramic()) {
+    /* Restrict integration range to the object volume range. This increases precision.
+     * Panoramic cameras render several views and `volume_bounds` is currently derived from only
+     * the main camera transform, therefore is not a valid shared range for their radial froxels.
+     */
     integration_start = math::max(integration_start, -volume_bounds.value().max);
     integration_end = math::min(integration_end, -volume_bounds.value().min);
   }
@@ -182,7 +185,8 @@ void VolumeModule::end_sync()
     valid_history_ = false;
   }
 
-  if (inst_.camera.is_perspective()) {
+  if (!inst_.camera.is_orthographic()) {
+    /* Must match GPU's `ViewMatrices::is_perspective()`, true for panoramic subviews too. */
     float sample_distribution = scene_eval->eevee.volumetric_sample_distribution;
     sample_distribution = 4.0f * math::max(1.0f - sample_distribution, 1e-2f);
 
@@ -389,9 +393,9 @@ void VolumeModule::end_sync()
   resolve_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
 }
 
-void VolumeModule::set_view(View &main_view)
+void VolumeModule::set_view(View &main_view, int2 render_extent)
 {
-  this->set_view(main_view, inst_.film.render_extent_get(), true);
+  this->set_view(main_view, render_extent, true);
 }
 
 void VolumeModule::set_view(View &main_view, const int2 extent, const bool use_history)
@@ -409,7 +413,7 @@ void VolumeModule::set_view(View &main_view, const int2 extent, const bool use_h
       /* Disable reprojection for rendering. */
       exponential_frame_count = 0;
     }
-    else if (!use_reprojection_) {
+    else if (!use_reprojection_ || inst_.camera.is_panoramic()) {
       /* No re-projection if TAA is disabled. */
       exponential_frame_count = 0;
     }

@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup draw
+ */
+
 #include "draw_context_private.hh"
 #include "draw_subdivision.hh"
 
@@ -20,7 +24,7 @@
 #include "BKE_subdiv_mesh.hh"
 #include "BKE_subdiv_modifier.hh"
 
-#include "BLI_linklist.h"
+#include "BLI_linklist.hh"
 #include "BLI_mutex.hh"
 #include "BLI_virtual_array.hh"
 
@@ -1614,7 +1618,7 @@ static bool draw_subdiv_create_requested_buffers(Object &ob,
   BMesh *bm = nullptr;
   if (mesh.runtime->edit_mesh) {
     mesh_eval = BKE_object_get_editmesh_eval_final(&ob);
-    bm = mesh.runtime->edit_mesh->bm;
+    bm = BKE_editmesh_bmesh_get_for_write(&mesh);
   }
 
 #ifdef WITH_OPENSUBDIV

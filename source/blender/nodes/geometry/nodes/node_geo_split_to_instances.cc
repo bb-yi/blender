@@ -63,7 +63,7 @@ struct SplitGroups {
   std::optional<bke::GeometryFieldContext> field_context;
   std::optional<FieldEvaluator> field_evaluator;
 
-  VectorSet<int> group_ids;
+  Array<int> group_ids;
 
   IndexMaskMemory memory;
   Vector<IndexMask> group_masks;
@@ -94,8 +94,12 @@ struct SplitGroups {
     return true;
   }
 
-  r_groups.group_masks = IndexMask::from_group_ids(
-      selection, field_evaluator.get_evaluated<int>(0), r_groups.memory, r_groups.group_ids);
+  const VArray<int> group_ids = field_evaluator.get_evaluated<int>(0);
+  r_groups.group_masks = IndexMask::from_group_ids(selection, group_ids, r_groups.memory);
+  r_groups.group_ids.reinitialize(r_groups.group_masks.size());
+  for (const int group : r_groups.group_masks.index_range()) {
+    r_groups.group_ids[group] = group_ids[r_groups.group_masks[group].first()];
+  }
 
   ensure_group_geometries(geometry_by_group_id, r_groups.group_ids);
   return false;
@@ -175,7 +179,7 @@ static void split_pointcloud_groups(const PointCloudComponent &component,
       const IndexMask &mask = split_groups.group_masks[group_index];
       const int group_id = split_groups.group_ids[group_index];
 
-      PointCloud *group_pointcloud = BKE_pointcloud_new_nomain(mask.size());
+      PointCloud *group_pointcloud = BKE_pointcloud_new_nomain(src_pointcloud.type, mask.size());
 
       const AttributeAccessor src_attributes = src_pointcloud.attributes();
       MutableAttributeAccessor dst_attributes = group_pointcloud->attributes_for_write();

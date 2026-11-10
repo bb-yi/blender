@@ -15,6 +15,7 @@
 
 #include "BLF_api.hh"
 
+#include "BLI_enum_flags.hh"
 #include "BLI_map.hh"
 #include "BLI_mutex.hh"
 #include "BLI_vector.hh"
@@ -177,6 +178,16 @@ struct GlyphCacheBLF {
   ~GlyphCacheBLF();
 };
 
+enum class GlyphFlagBLF : uint8_t {
+  None = 0,
+  /**
+   * Drawn over the previous base glyph, see #blf_glyph_is_combining.
+   * Independent of the font size, so this is the same for a glyph at every size.
+   */
+  Combining = (1 << 0),
+};
+ENUM_OPERATORS(GlyphFlagBLF);
+
 struct GlyphBLF {
   /** The character, as UTF32. */
   unsigned int c;
@@ -192,6 +203,7 @@ struct GlyphBLF {
 
   ft_pix advance_x;
   uint8_t subpixel;
+  GlyphFlagBLF flags;
 
   /** The difference in bearings when hinting is active, zero otherwise. */
   ft_pix lsb_delta;
@@ -233,15 +245,19 @@ struct FontBufInfoBLF {
   /** Buffer size, keep signed so comparisons with negative values work. */
   int dims[2];
 
-  /** The number of channels in the buffer. Can be either 1 or 4 for grayscale and color buffers
-   * respectively. The red channel of the color is used in case of a grayscale buffer. */
+  /**
+   * The number of channels in the buffer. Can be either 1 or 4 for grayscale and color buffers
+   * respectively. The red channel of the color is used in case of a grayscale buffer.
+   */
   int channel_count;
 
   /** Color-space of the byte buffer (float is scene linear). */
   const ColorSpace *colorspace;
 
-  /** The color, the alphas is get from the glyph! (color is sRGB space). The red channel of the
-   * color is used in case of a grayscale buffer. */
+  /**
+   * The color, the alphas is get from the glyph! (color is sRGB space). The red channel of the
+   * color is used in case of a grayscale buffer.
+   */
   float col_init[4];
   /** Cached conversion from 'col_init'. */
   unsigned char col_char[4];
@@ -275,7 +291,8 @@ struct FontMetrics {
 
   /**
    * Positive number of font units from baseline to top of typical capitals. Can be slightly more
-   * than cap height when head serifs, terminals, or apexes extend above cap line. */
+   * than cap height when head serifs, terminals, or apexes extend above cap line.
+   */
   short ascender;
   /** Negative (!) number of font units from baseline to bottom of letters like `gjpqy`. */
   short descender;

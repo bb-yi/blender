@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup geo
+ */
+
 #include "BKE_attribute.hh"
 #include "BKE_attribute_filters.hh"
 #include "BKE_attribute_math.hh"
@@ -355,7 +359,8 @@ PointCloud *reorder_points(const PointCloud &src_pointcloud,
                            Span<int> old_by_new_map,
                            const bke::AttributeFilter &attribute_filter)
 {
-  PointCloud *dst_pointcloud = bke::pointcloud_new_no_attributes(src_pointcloud.totpoint);
+  PointCloud *dst_pointcloud = bke::pointcloud_new_no_attributes(src_pointcloud.type,
+                                                                 src_pointcloud.totpoint);
   copy_and_reorder_points(src_pointcloud, old_by_new_map, attribute_filter, *dst_pointcloud);
   return dst_pointcloud;
 }
@@ -447,7 +452,7 @@ static void grouped_sort(const OffsetIndices<int> offsets,
   const auto comparator = [&](const int index_a, const int index_b) {
     const float weight_a = weights[index_a];
     const float weight_b = weights[index_b];
-    if (UNLIKELY(weight_a == weight_b)) {
+    if (weight_a == weight_b) [[unlikely]] {
       return index_a < index_b;
     }
     return weight_a < weight_b;

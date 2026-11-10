@@ -14,8 +14,8 @@
 #include <cstdlib>
 #include <cstring> /* required for STREQ later on. */
 
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_action_types.h"
 #include "DNA_armature_types.h"
@@ -404,7 +404,7 @@ void DepsgraphRelationBuilder::build_rig(Object *object)
       add_relation(parent_key, bone_pose_key, "Parent Bone -> Child Bone");
     }
     /* Build constraints. */
-    if (pchan.constraints.first != nullptr) {
+    if (pchan.constraints.first() != nullptr) {
       /* Build relations for indirectly linked objects. */
       BuilderWalkUserData data;
       data.builder = this;

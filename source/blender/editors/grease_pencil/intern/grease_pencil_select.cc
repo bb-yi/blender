@@ -15,6 +15,8 @@
 #include "BKE_object.hh"
 
 #include "BLI_enumerable_thread_specific.hh"
+#include "BLI_generic_array.hh"
+#include "BLI_implicit_sharing.hh"
 #include "BLI_index_mask.hh"
 #include "BLI_offset_indices.hh"
 #include "BLI_task.hh"
@@ -122,16 +124,34 @@ bool apply_mask_as_selection(bke::CurvesGeometry &curves,
     return false;
   }
 
-  bke::GSpanAttributeWriter writer = ed::curves::ensure_selection_attribute(
-      curves, selection_domain, bke::AttrType::Bool, attribute_name);
+  if (selection_domain == bke::AttrDomain::Curve) {
+    const Span<StringRef> selection_attribute_names =
+        ed::curves::get_curves_selection_attribute_names(curves);
+    for (const StringRef selection_attribute_name : selection_attribute_names) {
+      bke::GSpanAttributeWriter writer = ed::curves::ensure_selection_attribute(
+          curves, selection_domain, bke::AttrType::Bool, selection_attribute_name);
 
-  selection_mask.foreach_index(
-      [&](const int64_t element_i) {
-        ed::curves::apply_selection_operation_at_index(writer.span, element_i, sel_op);
-      },
-      exec_mode::grain_size(4096));
+      selection_mask.foreach_index(
+          [&](const int64_t element_i) {
+            ed::curves::apply_selection_operation_at_index(writer.span, element_i, sel_op);
+          },
+          exec_mode::grain_size(4096));
 
-  writer.finish();
+      writer.finish();
+    }
+  }
+  else {
+    bke::GSpanAttributeWriter writer = ed::curves::ensure_selection_attribute(
+        curves, selection_domain, bke::AttrType::Bool, attribute_name);
+
+    selection_mask.foreach_index(
+        [&](const int64_t element_i) {
+          ed::curves::apply_selection_operation_at_index(writer.span, element_i, sel_op);
+        },
+        exec_mode::grain_size(4096));
+
+    writer.finish();
+  }
 
   return true;
 }
@@ -260,6 +280,20 @@ bool selection_update(const ViewContext *vc,
         continue;
       }
 
+      /* Modes that un-set all elements not in the mask. */
+      if (ELEM(sel_op, SEL_OP_SET, SEL_OP_AND)) {
+        for (const StringRef attribute_name : selection_attribute_names) {
+          if (bke::SpanAttributeWriter<bool> selection =
+                  curves.attributes_for_write().lookup_or_add_for_write_span<bool>(
+                      attribute_name, selection_domain))
+          {
+            ed::curves::fill_selection_false(selection.span);
+            changed = true;
+            selection.finish();
+          }
+        }
+      }
+
       for (const StringRef attribute_name : selection_attribute_names) {
         IndexMask changed_element_mask = select_operation(info, elements, attribute_name, memory);
 
@@ -267,20 +301,6 @@ bool selection_update(const ViewContext *vc,
         if (selection_domain == bke::AttrDomain::Curve) {
           changed_element_mask = bke::greasepencil::selected_mask_to_fills(
               changed_element_mask, curves, selection_domain, memory);
-        }
-
-        /* Modes that un-set all elements not in the mask. */
-        if (ELEM(sel_op, SEL_OP_SET, SEL_OP_AND)) {
-          if (bke::SpanAttributeWriter<bool> selection =
-                  curves.attributes_for_write().lookup_or_add_for_write_span<bool>(
-                      attribute_name, selection_domain))
-          {
-            const IndexMask not_in_mask = changed_element_mask.complement(
-                selection.span.index_range(), memory);
-            ed::curves::fill_selection_false(selection.span, not_in_mask);
-            changed = true;
-            selection.finish();
-          }
         }
 
         if (use_segment_selection) {
@@ -1021,7 +1041,7 @@ bool ensure_selection_domain(ToolSettings *ts, Object *object)
         }
       }
       else {
-        BLI_assert(ELEM(meta_data->domain, bke::AttrDomain::Auto, bke::AttrDomain::Curve));
+        BLI_assert(meta_data->domain == bke::AttrDomain::Curve);
 
         const IndexMask selected_curves = ed::curves::retrieve_selected_curves(curves, memory);
         const IndexMask selected_mask = bke::greasepencil::selected_mask_to_fills(
@@ -1041,25 +1061,26 @@ bool ensure_selection_domain(ToolSettings *ts, Object *object)
       changed |= true;
     }
 
-    /* Convert selection domain. */
-    const GVArray src = *attributes.lookup(".selection", domain);
-    if (src) {
-      const CPPType &type = src.type();
-      void *dst = MEM_new_array_uninitialized(attributes.domain_size(domain), type.size, __func__);
-      src.materialize(dst);
+    for (const StringRef selection_attribute_name :
+         ed::curves::get_curves_selection_attribute_names(curves))
+    {
+      /* Convert selection domain. */
+      const GVArray src = *attributes.lookup(selection_attribute_name, domain);
+      if (src) {
+        auto *dst = new ImplicitSharedValue<GArray<>>(src.type(), src.size(), NoInitialization());
+        src.materialize_to_uninitialized(dst->data.data());
 
-      attributes.remove(".selection");
-      if (!attributes.add(".selection",
-                          domain,
-                          bke::cpp_type_to_attribute_type(type),
-                          bke::AttributeInitMoveArray(dst)))
-      {
-        MEM_delete_void(dst);
+        attributes.remove(selection_attribute_name);
+        attributes.add(selection_attribute_name,
+                       domain,
+                       bke::cpp_type_to_attribute_type(dst->data.type()),
+                       bke::AttributeInitShared(dst->data.data(), *dst));
+        dst->remove_user_and_delete_if_last();
+
+        changed = true;
+
+        /* TODO: expand point selection to segments when in 'segment' mode. */
       }
-
-      changed = true;
-
-      /* TODO: expand point selection to segments when in 'segment' mode. */
     }
   }
 
@@ -1198,7 +1219,9 @@ static void GREASE_PENCIL_OT_material_select(wmOperatorType *ot)
   RNA_def_property_flag(ot->prop, PROP_HIDDEN | PROP_SKIP_SAVE);
 }
 
+namespace {
 enum class StrokeType : int8_t { Stroke, Fill };
+}
 
 static wmOperatorStatus grease_pencil_select_by_stroke_type_exec(bContext *C, wmOperator *op)
 {
@@ -1340,6 +1363,10 @@ bke::AttrDomain ED_grease_pencil_selection_domain_get(const ToolSettings *tool_s
   }
   if (object->mode & OB_MODE_VERTEX_GREASE_PENCIL) {
     return ED_grease_pencil_vertex_selection_domain_get(tool_settings);
+  }
+  if (object->mode & OB_MODE_PAINT_GREASE_PENCIL) {
+    /* Always use curve selection in Draw Mode. */
+    return bke::AttrDomain::Curve;
   }
   return bke::AttrDomain::Point;
 }

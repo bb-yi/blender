@@ -15,7 +15,7 @@
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BKE_context.hh"
 #include "BKE_main.hh"
@@ -68,7 +68,7 @@ static bNode *filter_graph_find_pass_input_node(Material &material)
   if (material.nodetree == nullptr) {
     return nullptr;
   }
-  for (bNode *node = static_cast<bNode *>(material.nodetree->nodes.first); node != nullptr;
+  for (bNode *node = static_cast<bNode *>(material.nodetree->nodes.first()); node != nullptr;
        node = node->next)
   {
     if (STREQ(node->idname, ShaderFilterGraphInputItemsAccessor::node_idname.c_str()) &&
@@ -86,7 +86,7 @@ static bNode *filter_graph_find_filter_output_node(Material &material)
     return nullptr;
   }
   bNode *output = nullptr;
-  for (bNode *node = static_cast<bNode *>(material.nodetree->nodes.first); node != nullptr;
+  for (bNode *node = static_cast<bNode *>(material.nodetree->nodes.first()); node != nullptr;
        node = node->next)
   {
     if (node->type_legacy != SH_NODE_OUTPUT_FILTER) {
@@ -275,7 +275,7 @@ static bool filter_graph_sync_material_to_all_filter_passes(Main &bmain,
     {
       continue;
     }
-    for (bNode *node = static_cast<bNode *>(filter_graph->nodes.first); node != nullptr;
+    for (bNode *node = static_cast<bNode *>(filter_graph->nodes.first()); node != nullptr;
          node = node->next)
     {
       if (filter_graph == skip_tree && node == skip_node) {
@@ -397,7 +397,7 @@ bool filter_graph_sync_filter_pass_interface_from_material_storage(bNodeTree &nt
 
 void filter_graph_sync_filter_pass_interfaces_from_materials(bNodeTree &ntree)
 {
-  for (bNode *node = static_cast<bNode *>(ntree.nodes.first); node != nullptr; node = node->next) {
+  for (bNode *node = static_cast<bNode *>(ntree.nodes.first()); node != nullptr; node = node->next) {
     filter_graph_sync_filter_pass_interface_from_material_storage(ntree, *node);
   }
 }

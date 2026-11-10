@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include <algorithm>
 
 #include "BLI_array_utils.hh"
@@ -287,12 +291,13 @@ template<typename T>
 void mix_groups(const Span<T> src,
                 const OffsetIndices<int> groups,
                 const Span<int> all_indices,
+                const IndexMask &dst_mask,
                 MutableSpan<T> dst)
 {
   PRF_scope_with_name("attribute_math::mix_groups", ProfileCategory::Default);
-  for (const int dst_i : dst.index_range()) {
-    dst[dst_i] = mix_indices(src, all_indices.slice(groups[dst_i]));
-  }
+  dst_mask.foreach_index([&](const int dst_i, const int group_i) {
+    dst[dst_i] = mix_indices(src, all_indices.slice(groups[group_i]));
+  });
 }
 
 float4x4 mix_indices(const Span<float4x4> src, const Span<int> indices, const Span<float> weights)
@@ -324,13 +329,14 @@ void mix_groups(const Span<T> src,
                 const OffsetIndices<int> groups,
                 const Span<int> all_indices,
                 const Span<float> all_weights,
+                const IndexMask &dst_mask,
                 MutableSpan<T> dst)
 {
   PRF_scope_with_name("attribute_math::mix_groups", ProfileCategory::Default);
-  for (const int dst_i : groups.index_range()) {
+  dst_mask.foreach_index([&](const int dst_i, const int group_i) {
     dst[dst_i] = mix_indices(
-        src, all_indices.slice(groups[dst_i]), all_weights.slice(groups[dst_i]));
-  }
+        src, all_indices.slice(groups[group_i]), all_weights.slice(groups[group_i]));
+  });
 }
 
 void mix_groups(const GSpan src,
@@ -340,6 +346,17 @@ void mix_groups(const GSpan src,
                 GMutableSpan dst)
 {
   BLI_assert(groups.size() == dst.size());
+  mix_groups(src, groups, all_indices, all_weights, IndexMask(dst.size()), dst);
+}
+
+void mix_groups(const GSpan src,
+                const OffsetIndices<int> groups,
+                const Span<int> all_indices,
+                const std::optional<Span<float>> all_weights,
+                const IndexMask &dst_mask,
+                GMutableSpan dst)
+{
+  BLI_assert(groups.size() == dst_mask.size());
   BLI_assert(groups.total_size() == all_indices.size());
   BLI_assert(!all_weights || groups.total_size() == all_weights->size());
 
@@ -349,16 +366,21 @@ void mix_groups(const GSpan src,
           groups.index_range(),
           2048,
           [&](const IndexRange range) {
+            const IndexMask dst_mask_slice = dst_mask.slice(range);
             if (all_weights) {
               mix_groups(src.typed<T>(),
                          groups.slice(range),
                          all_indices,
                          *all_weights,
-                         dst.typed<T>().slice(range));
+                         dst_mask_slice,
+                         dst.typed<T>());
             }
             else {
-              mix_groups(
-                  src.typed<T>(), groups.slice(range), all_indices, dst.typed<T>().slice(range));
+              mix_groups(src.typed<T>(),
+                         groups.slice(range),
+                         all_indices,
+                         dst_mask_slice,
+                         dst.typed<T>());
             }
           },
           threading::accumulated_task_sizes(
@@ -385,7 +407,7 @@ void shift_left(GMutableSpan data, int src_begin, int src_end, int dst_begin)
 
 template<typename T> void shift_right(MutableSpan<T> data, int src_begin, int src_end, int dst_end)
 {
-  if (src_end == dst_end || src_begin == src_end) {
+  if (ELEM(src_end, dst_end, src_begin)) {
     return;
   }
   std::move_backward(data.data() + src_begin, data.data() + src_end, data.data() + dst_end);

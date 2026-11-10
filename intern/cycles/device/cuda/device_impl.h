@@ -28,16 +28,19 @@ class CUDADevice : public GPUDevice {
   CUdevice cuDevice;
   CUcontext cuContext;
   CUmodule cuModule;
+  bool integrated_gpu = false;
   int pitch_alignment;
+  int max_shared_mem_bytes = 0;
   int cuDevId;
   int cuDevArchitecture;
   bool first_error;
+  int scene_max_shaders_ = 0;
 
   CUDADeviceKernels kernels;
 
   static bool have_precompiled_kernels();
 
-  BVHLayoutMask get_bvh_layout_mask(uint /*kernel_features*/) const override;
+  BVHLayoutMask get_bvh_layout_mask(uint64_t kernel_features) const override;
 
   void set_error(const string &error) override;
 
@@ -45,18 +48,18 @@ class CUDADevice : public GPUDevice {
 
   ~CUDADevice() override;
 
-  bool support_device(const uint /*kernel_features*/);
+  bool support_device(const uint64_t kernel_features);
 
   bool check_peer_access(Device *peer_device) override;
 
   bool use_adaptive_compilation();
 
-  string compile_kernel_get_common_cflags(const uint kernel_features);
+  string compile_kernel_get_common_cflags(uint64_t kernel_features);
 
   string compile_kernel(const string &cflags, const char *name, bool optix = false);
 
-  bool load_kernels(const uint kernel_features) override;
-  void reserve_local_memory(const uint kernel_features);
+  bool load_kernels(uint64_t kernel_features) override;
+  void reserve_local_memory(uint64_t kernel_features);
 
   /* All memory types. */
   void mem_alloc(device_memory &mem) override;
@@ -80,13 +83,14 @@ class CUDADevice : public GPUDevice {
   void image_free(device_image &mem);
 
   /* Device side memory. */
+  GPUDevice::Mem *generic_alloc(device_memory &mem, const size_t pitch_padding = 0) override;
   void get_device_memory_info(size_t &total, size_t &free) override;
   bool alloc_device(void *&device_pointer, const size_t size) override;
   void free_device(void *device_pointer) override;
 
   /* Shared memory. */
   bool shared_alloc(void *&shared_pointer, const size_t size) override;
-  void shared_free(void *shared_pointer) override;
+  void shared_free(void *shared_pointer, const size_t size) override;
   void *shared_to_device_pointer(const void *shared_pointer) override;
 
   /* Memory copy. */

@@ -10,8 +10,9 @@
 
 #include "BKE_nla.hh"
 
+#include "BKE_action.hh"
 #include "BLI_enum_flags.hh"
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 #include "DNA_listBase.h"
 #include "DNA_screen_types.h"
@@ -49,9 +50,15 @@ struct bDopeSheet;
 struct FCurve;
 struct FModifier;
 struct bAction;
+struct AnimKeylist;
+struct bMotionPath;
 
 namespace ui {
 struct Block;
+}
+
+namespace ed {
+class AnimTransformable;
 }
 
 struct PointerRNA;
@@ -62,14 +69,24 @@ struct MPathTarget;
 namespace animrig {
 class Action;
 class Slot;
+class Channelbag;
 }  // namespace animrig
 
-/* ************************************************ */
-/* ANIMATION CHANNEL FILTERING */
-/* `anim_filter.cc` */
+/* Motion path needing to be baked (target). */
+struct MPathTarget {
+  bMotionPath *mpath = nullptr; /* Motion path in question. */
+
+  AnimKeylist *keylist = nullptr; /* Temp, to know where the keyframes are. */
+
+  /* Original (Source Objects) */
+  Object *ob = nullptr;          /* Source Object */
+  bPoseChannel *pchan = nullptr; /* Source pose-channel (if applicable). */
+};
 
 /* -------------------------------------------------------------------- */
 /** \name Context
+ *
+ * Animation channel filtering, implemented in `anim_filter.cc`.
  * \{ */
 
 /** Main Data container types. */
@@ -629,14 +646,12 @@ bAction *ANIM_active_action_from_area(const Main &bmain,
                                       const ScrArea *area,
                                       ID **r_action_user = nullptr);
 
-/* ************************************************ */
-/* ANIMATION CHANNELS LIST */
-/* anim_channels_*.cc */
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Drawing TypeInfo
+ *
+ * Animation channels list, implemented in `anim_channels_*.cc`.
  * \{ */
 
 /** Role or level of anim-channel in the hierarchy. */
@@ -858,16 +873,14 @@ bool ANIM_is_active_channel(bAnimListElem *ale);
  */
 void ANIM_deselect_keys_in_animation_editors(bContext *C);
 
-/* ************************************************ */
-/* DRAWING API */
-/* `anim_draw.cc` */
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Current Frame Drawing
  *
  * Main call to draw current-frame indicator in an Animation Editor.
+ *
+ * Implemented in `anim_draw.cc`.
  * \{ */
 
 /* flags for Current Frame Drawing */
@@ -923,13 +936,12 @@ void ANIM_draw_framerange(Scene *scene, View2D *v2d);
 void ANIM_draw_action_framerange(
     AnimData *adt, bAction *action, View2D *v2d, float ymin, float ymax);
 
-/* ************************************************* */
-/* F-MODIFIER TOOLS */
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name UI Panel Drawing
+ *
+ * F-Modifier tools.
  * \{ */
 
 bool ANIM_nla_context_track_ptr(const bContext *C, PointerRNA *r_ptr);
@@ -983,13 +995,12 @@ bool ANIM_fmodifiers_copy_to_buf(ListBaseT<FModifier> *modifiers, bool active);
  */
 bool ANIM_fmodifiers_paste_from_buf(ListBaseT<FModifier> *modifiers, bool replace, FCurve *curve);
 
-/* ************************************************* */
-/* ASSORTED TOOLS */
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Animation F-Curves <-> Icons/Names Mapping
+ *
+ * Assorted tools.
  * \{ */
 
 /* `anim_ipo_utils.cc` */
@@ -1174,10 +1185,10 @@ float ANIM_unit_mapping_get_factor(Scene *scene, ID *id, FCurve *fcu, short flag
 
 /** \} */
 
-/* `anim_deps.cc` */
-
 /* -------------------------------------------------------------------- */
 /** \name Animation Updates
+ *
+ * Implemented in `anim_deps.cc`.
  * \{ */
 
 /**
@@ -1259,15 +1270,19 @@ void ED_drivers_editor_init(bContext *C, ScrArea *area);
  */
 void ED_anim_ale_fcurve_delete(bAnimContext &ac, bAnimListElem &ale);
 
-/* ************************************************ */
+/** \} */
 
-enum eAnimvizCalcRange : uint8_t {
-  /** Try to limit updates to a close neighborhood of the current frame. */
-  ANIMVIZ_CALC_RANGE_CHANGED,
+/* -------------------------------------------------------------------- */
+/** \name Motion Paths
+ * \{ */
 
-  /** Update an entire range of the motion paths. */
-  ANIMVIZ_CALC_RANGE_FULL,
-};
+namespace ed::motionpath {
+/**
+ * Tag the motion path for a complete re-evaluation on the next call to `animviz_calc_motionpaths`.
+ * This is cheap to call since it only sets a flag.
+ */
+void tag_for_recalc(bMotionPath &motion_path);
+}  // namespace ed::motionpath
 
 /**
  * Build a partial depsgraph with only the IDs of the given `targets`.
@@ -1275,18 +1290,30 @@ enum eAnimvizCalcRange : uint8_t {
 Depsgraph *animviz_depsgraph_build(Main *bmain,
                                    Scene *scene,
                                    ViewLayer *view_layer,
-                                   Span<MPathTarget *> targets);
+                                   Span<MPathTarget> targets);
+
+/**
+ * Sets the preview location to be the evaluated world space position on each target.
+ * See motionpath::Runtime::preview_location for more info on the preview location.
+ */
+void animviz_update_motionpath_preview(Depsgraph &depsgraph, Span<MPathTarget> targets);
+/**
+ * Clears the preview location on all targets.
+ * See motionpath::Runtime::preview_location for more info on the preview location.
+ */
+void animviz_clear_motionpath_preview(Span<MPathTarget> targets);
 
 /**
  * Evaluated the given `depsgraph` for all targets.
  *
- * \param range: determines which frames the Depsgraph is evaluated for.
- * This can have big performance implications.
+ * \param modified_frame: Determines around which the calculation should be run. It will stop
+ * automatically if it hits an area where the evaluation returns the same result as is already
+ * stored in the motion path. This is to minimize the calculations done.
  */
 void animviz_calc_motionpaths(Depsgraph *depsgraph,
                               Scene *scene,
-                              MutableSpan<MPathTarget *> targets,
-                              eAnimvizCalcRange range);
+                              MutableSpan<MPathTarget> targets,
+                              int modified_frame);
 
 /**
  * Update motion path computation range (in `ob.avs` or `armature.avs`) from user choice in
@@ -1299,16 +1326,70 @@ void animviz_motionpath_compute_range(Object *ob, Scene *scene);
 
 /**
  * Populate the given vector with MPathTarget elements for the given object.
- * Will look for pose bones as well. `animviz_free_motionpath_targets` needs to be called
- * to free the memory allocated in this function.
+ * Will look for pose bones as well.
  */
-void animviz_build_motionpath_targets(Object *ob, Vector<MPathTarget *> &r_targets);
+void animviz_build_motionpath_targets(Object *ob, Vector<MPathTarget> &r_targets);
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name F-Curve Buffers & Rotation Conversion
+ * \{ */
 
 /**
- * Free the elements of the vector populated with `animviz_build_motionpath_targets`.
- * After this function the Vector will have a length of 0.
+ * A non owning storage buffer for FCurves where they are sorted by `FCurve.array_index`.
  */
-void animviz_free_motionpath_targets(Vector<MPathTarget *> &targets);
+class SortedFCurveBuffer {
+  Vector<FCurve *> fcurves_;
+
+ public:
+  void insert_fcurve(FCurve &fcurve);
+  void clear();
+  Span<FCurve *> fcurves() const;
+  /**
+   * Returns the first FCurve with the given array index from the buffer or a nullptr if that index
+   * does not exist.
+   */
+  FCurve *get_fcurve_by_array_index(int array_index) const;
+};
+
+/* FCurves grouped by their RNA path. */
+using RNAFCurveMap = Map<std::string, SortedFCurveBuffer>;
+/* For each Channelbag FCurves grouped by their RNA path. */
+using ChannelbagFCurveMap = Map<animrig::Channelbag *, RNAFCurveMap>;
+
+/**
+ * Convert any keyframe data for the given transformable to the given rotation mode.
+ * This will correctly react to an animated rotation mode.
+ *
+ * \returns true if any animation data was modified.
+ */
+bool convert_rotation_keys(const ed::AnimTransformable &transformable,
+                           ChannelbagFCurveMap &channelbag_fcurve_map,
+                           eRotationModes to_mode);
+
+/**
+ * Creates a map of RNA paths and the rotation FCurves associated with that rna path.
+ * That means `rotation_euler` and `rotation_quaternion` will have different entries in the map.
+ */
+ChannelbagFCurveMap build_rotation_fcurve_map(animrig::Action &action,
+                                              animrig::slot_handle_t slot_handle);
+
+/**
+ * Bake all existing rotation fcurves for the given `transformable`.
+ */
+void bake_rotation_fcurves(const ChannelbagFCurveMap &channelbag_fcurve_map,
+                           const ed::AnimTransformable &transformable);
+
+/**
+ * A high level function that converts the given transformable and the animation on its rotation
+ * channels into a different rotation mode. In contrast to the lower level functions like
+ * `convert_rotation_keys`, this tags the dependency graph for updates and sends WM notifiers.
+ */
+void convert_to_rotation_mode(bContext &C,
+                              ed::AnimTransformable &transformable,
+                              eRotationModes to_mode,
+                              bool bake);
 
 /** \} */
 

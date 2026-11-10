@@ -15,10 +15,10 @@
 #include "DNA_screen_types.h"
 #include "DNA_userdef_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_rect.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_rect.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 #include "BKE_screen.hh"
@@ -238,7 +238,7 @@ static void hud_region_layout(const bContext *C, ARegion *region)
 
   ED_region_panels_layout(C, region);
 
-  if (region->panels.first &&
+  if (region->panels.first() &&
       ((area->flag & AREA_FLAG_REGION_SIZE_UPDATE) || (region->sizey != size_y)))
   {
     int winx_new = UI_SCALE_FAC * (region->sizex + 0.5f);

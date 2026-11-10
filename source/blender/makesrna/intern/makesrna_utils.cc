@@ -2,12 +2,16 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup RNA
+ */
+
 #include <sstream>
 #include <utility>
 
 #include "makesrna_utils.hh"
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_string_ref.hh"
 
 namespace blender {

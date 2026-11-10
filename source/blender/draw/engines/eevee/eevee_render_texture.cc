@@ -6,10 +6,11 @@
  * \ingroup eevee
  */
 
+#include "BLI_listbase.hh"
 #include "BKE_compositor.hh"
 #include "BKE_mesh.hh"
 #include "BKE_scene.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include <cmath>
 
 #include "DEG_depsgraph_query.hh"
@@ -147,7 +148,7 @@ void RenderTextureModule::begin_sync()
 
   Vector<SceneRenderTexture *, RENDER_TEXTURE_SLOT_MAX> enabled;
   for (SceneRenderTexture *render_texture = static_cast<SceneRenderTexture *>(
-           inst_.scene->eevee.render_textures.first);
+           inst_.scene->eevee.render_textures.first_);
        render_texture != nullptr;
        render_texture = render_texture->next)
   {
@@ -827,9 +828,10 @@ void RenderTextureModule::write_viewport_compositor_passes()
   {
     return;
   }
-  const Set<std::string> needed = bke::compositor::get_used_passes(*inst_.scene, inst_.view_layer);
+  const Set<std::string> needed = bke::compositor::get_used_passes(
+      *inst_.scene, inst_.view_layer, bke::compositor::ExecutionMode::Preview);
   for (const SceneRenderTexture *render_texture =
-           static_cast<const SceneRenderTexture *>(inst_.scene->eevee.render_textures.first);
+           static_cast<const SceneRenderTexture *>(inst_.scene->eevee.render_textures.first_);
        render_texture;
        render_texture = render_texture->next)
   {

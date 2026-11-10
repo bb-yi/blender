@@ -13,7 +13,7 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_vector_types.hh"
 
 #include "BLT_translation.hh"
@@ -276,7 +276,7 @@ static void eyedropper_set_brush_color(bContext *C, const float3 &color)
     return;
   }
 
-  copy_v3_v3(brush->color, color);
+  BKE_brush_color_set(paint, brush, color);
   BKE_brush_color_sync_legacy(brush);
   BKE_brush_tag_unsaved_changes(brush);
 }

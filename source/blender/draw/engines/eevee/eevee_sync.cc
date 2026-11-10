@@ -391,6 +391,7 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
   bool has_time_dependent_shadows = false;
   bool has_view_dependent_shadows = false;
   bool has_position_dependent_shadows = false;
+  bool has_shadow_offset = false;
   float inflate_bounds = 0.0f;
 
   for (const Material *material : materials) {
@@ -410,12 +411,15 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
     const bool has_displacement = GPU_material_has_displacement_output(gpu_material) &&
                                   (bl_material->displacement_method != MA_DISPLACEMENT_BUMP);
     const bool has_time_node = GPU_material_is_time_dependent(gpu_material);
+    const bool mat_has_shadow_offset = GPU_material_flag_get(gpu_material,
+                                                             GPU_MATFLAG_SHADOW_OFFSET);
 
     is_alpha_blend |= material->is_alpha_blend_transparent || material->is_outline_shell_blended;
     has_transparent_shadows |= material->has_transparent_shadows ||
                                material->has_outline_shell_transparent_shadows;
-    has_time_dependent_shadows |= has_time_node &&
-                                  (material->has_transparent_shadows || has_displacement);
+    has_shadow_offset |= mat_has_shadow_offset;
+    has_time_dependent_shadows |= has_time_node && (material->has_transparent_shadows ||
+                                                    has_displacement || mat_has_shadow_offset);
     /* View dependent tessellation changes the shadow caster geometry with the camera. */
     has_view_dependent_shadows |= material->tessellation_view_dependent;
     has_position_dependent_shadows |= material->tessellation_position_dependent;
@@ -423,7 +427,7 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
                                   GPU_material_is_time_dependent(
                                       material->outline_shell_shadow.gpumat);
 
-    if (has_displacement) {
+    if (has_displacement || mat_has_shadow_offset) {
       inflate_bounds = math::max(inflate_bounds, bl_material->inflate_bounds);
     }
     if (material->outline_shell_shading.gpumat != nullptr ||
@@ -444,7 +448,8 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
                             has_transparent_shadows,
                             has_time_dependent_shadows,
                             has_view_dependent_shadows,
-                            has_position_dependent_shadows);
+                            has_position_dependent_shadows,
+                            has_shadow_offset);
 
   if (has_volume) {
     inst_.volume.object_sync(ob_handle);
@@ -713,17 +718,20 @@ void SyncModule::sync_pointcloud(const ObjectRef &ob_ref)
   ObjectHandle ob_handle = sync_object(ob_ref, inst_.manager->unique_handle(ob_ref));
 
   bool has_motion = inst_.velocity.step_object_sync(ob_handle);
+  eMaterialGeometry mat_geom_type = to_pointcloud_material_geometry(ob_ref.object);
 
   Material material = inst_.materials.material_get(
-      ob_handle, has_motion, material_slot - 1, MAT_GEOM_POINTCLOUD);
+      ob_handle, has_motion, material_slot - 1, mat_geom_type);
 
   auto drawcall_add = [&](const MaterialPass &matpass, bool dual_sided = false) {
     if (matpass.sub_pass == nullptr) {
       return;
     }
+
     PassMain::Sub &object_pass = matpass.sub_pass->sub("Point Cloud Sub Pass");
     gpu::Batch *geometry = pointcloud_sub_pass_setup(
-        object_pass, ob_handle.object, matpass.gpumat);
+        object_pass, ob_ref, ob_handle.res_handle, matpass.gpumat);
+
     if (dual_sided) {
       /* WORKAROUND: Hack to generate backfaces. Should also be baked into the Index Buf too at
        * some point in the future. */

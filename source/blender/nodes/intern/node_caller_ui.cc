@@ -2,6 +2,12 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
+#include <fmt/format.h>
+
 #include "DNA_node_tree_interface_types.h"
 
 #include "NOD_caller_ui.hh"
@@ -92,7 +98,7 @@ void draw_interface_panel_as_panel(
   bool skip_first = false;
   /* Check if the panel should have a toggle in the header. */
   const bNodeTreeInterfaceSocket *toggle_socket = interface_panel.header_toggle_socket();
-  const StringRef panel_name = interface_panel.name;
+  const StringRef panel_name = interface_panel.name();
   if (toggle_socket && !(toggle_socket->flag & NODE_INTERFACE_SOCKET_HIDE_IN_MODIFIER)) {
     PointerRNA inputs_ptr = RNA_pointer_get(properties_ptr, "inputs");
     PointerRNA toggle_ptr = RNA_pointer_get(&inputs_ptr, toggle_socket->identifier);
@@ -102,7 +108,12 @@ void draw_interface_panel_as_panel(
   }
   else {
     panel_layout = layout.panel_prop(&C, &panels_ptr, panel_open_name);
-    panel_layout.header->label(IFACE_(panel_name), ICON_NONE);
+    if (panel_layout.header) {
+      panel_layout.header->label(IFACE_(panel_name), ICON_NONE);
+    }
+  }
+  if (!panel_layout.header) {
+    return;
   }
   if (!interface_panel_affects_output(interface_panel, fn_input_is_active)) {
     panel_layout.header->active_set(false);
@@ -111,7 +122,7 @@ void draw_interface_panel_as_panel(
       panel_layout.header,
       [](bContext * /*C*/, void *panel_arg, const StringRef /*tip*/) -> std::string {
         const auto *panel = static_cast<bNodeTreeInterfacePanel *>(panel_arg);
-        return StringRef(panel->description);
+        return panel->description();
       },
       const_cast<bNodeTreeInterfacePanel *>(&interface_panel),
       nullptr,

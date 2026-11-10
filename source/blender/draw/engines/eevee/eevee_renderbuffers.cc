@@ -38,10 +38,16 @@ void RenderBuffers::init()
 
   data.normal_id = pass_index_get(EEVEE_RENDER_PASS_NORMAL, EEVEE_RENDER_PASS_AO);
   data.position_id = pass_index_get(EEVEE_RENDER_PASS_POSITION);
-  data.diffuse_light_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_LIGHT);
-  data.diffuse_color_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_COLOR);
-  data.specular_light_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_LIGHT);
-  data.specular_color_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_COLOR);
+  /* Custom lighting in the hybrid pipeline requires both passes, so the combine pass can
+   * reconstruct the radiance. */
+  data.diffuse_light_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_LIGHT,
+                                         EEVEE_RENDER_PASS_DIFFUSE_COLOR);
+  data.diffuse_color_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_COLOR,
+                                         EEVEE_RENDER_PASS_DIFFUSE_LIGHT);
+  data.specular_light_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_LIGHT,
+                                          EEVEE_RENDER_PASS_SPECULAR_COLOR);
+  data.specular_color_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_COLOR,
+                                          EEVEE_RENDER_PASS_SPECULAR_LIGHT);
   data.volume_light_id = pass_index_get(EEVEE_RENDER_PASS_VOLUME_LIGHT);
   data.emission_id = pass_index_get(EEVEE_RENDER_PASS_EMIT);
   data.environment_id = pass_index_get(EEVEE_RENDER_PASS_ENVIRONMENT);
@@ -49,6 +55,11 @@ void RenderBuffers::init()
   data.ambient_occlusion_id = pass_index_get(EEVEE_RENDER_PASS_AO);
   data.transparent_id = pass_index_get(EEVEE_RENDER_PASS_TRANSPARENT);
   data.outline_id = pass_index_get(EEVEE_RENDER_PASS_OUTLINE);
+  data.denoising_depth_id = (enabled_passes & EEVEE_RENDER_PASS_DENOISING_DEPTH) ? 0 : -1;
+  data.denoising_normal_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_NORMAL);
+  data.denoising_roughness_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_ROUGHNESS);
+  data.denoising_diffuse_albedo_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_DIFFUSE_ALBEDO);
+  data.denoising_specular_albedo_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_SPECULAR_ALBEDO);
 
   data.aovs = inst_.film.aovs_info;
   data.line_aov_marker_info = int4(-1, 0, 0, 0);
@@ -117,7 +128,8 @@ int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
     int &marker = data.line_aov_marker_layers[i / 4][i % 4];
     marker = -1;
     if (i < data.aovs.color_len + data.aovs.value_len &&
-        inst_.geometry_lines.uses_aov(data.aovs.hash[i / 4][i % 4], i >= data.aovs.color_len)) {
+        inst_.geometry_lines.uses_aov(data.aovs.hash[i / 4][i % 4], i >= data.aovs.color_len))
+    {
       marker = color_len;
       color_len += 2;
     }
@@ -167,9 +179,7 @@ int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
 
 void RenderBuffers::release()
 {
-  /* TODO(fclem): depth_tx should ideally be a texture from pool but we need stencil_view
-   * which is currently unsupported by pool textures. */
-  // depth_tx.release();
+  /* Persistent depth owns stencil views and is reused by the next acquire(). */
   combined_tx.release();
   stencil_value_tx.release();
   stencil_surface_value_tx.release();

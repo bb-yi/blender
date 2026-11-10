@@ -18,7 +18,7 @@
 #include "DNA_object_types.h"
 #include "DNA_texture_types.h"
 #include "BLI_listbase_iterator.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BKE_node.hh"
 #include "BKE_colortools.hh"
 #include "BKE_colorband.hh"
@@ -319,7 +319,7 @@ class Compiler {
     }
     const bNode &node = socket->owner_node();
     if (node.type_legacy == NODE_REROUTE) {
-      return resolve(context, static_cast<const bNodeSocket *>(node.inputs.first), depth + 1);
+      return resolve(context, static_cast<const bNodeSocket *>(node.inputs.first_), depth + 1);
     }
     if (node.flag & NODE_MUTED) {
       for (const bNodeLink &link : node.internal_links()) {
@@ -1058,7 +1058,7 @@ class Compiler {
       for (const bNode &node : tree.nodes) {
         if (node.identifier == solo_node_ && ELEM(node.type_legacy, NPR_LINE_NODE_SETTINGS, NPR_LINE_NODE_COMBINE)) {
           /* Compile only the preview branch; offline rendering never supplies a solo ID. */
-          plan_ref = SocketRef{&root_, static_cast<const bNodeSocket *>(node.outputs.first)};
+          plan_ref = SocketRef{&root_, static_cast<const bNodeSocket *>(node.outputs.first_)};
           break;
         }
       }

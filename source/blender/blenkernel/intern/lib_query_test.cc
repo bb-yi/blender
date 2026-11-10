@@ -33,6 +33,7 @@
 
 namespace blender::bke::tests {
 
+namespace {
 class TestData {
  public:
   Main *bmain = nullptr;
@@ -110,7 +111,7 @@ class IDSubDataTestData : public WholeIDTestData {
     BKE_object_material_assign(
         this->bmain, this->object, this->material, this->object->actcol, BKE_MAT_ASSIGN_OBJECT);
 
-    this->node = static_cast<bNode *>(this->material->nodetree->nodes.first);
+    this->node = this->material->nodetree->nodes.first();
 
     this->node->prop = bke::idprop::create_group("Node Custom Properties").release();
     IDP_AddToGroup(this->node->prop,
@@ -125,6 +126,7 @@ class IDSubDataTestData : public WholeIDTestData {
     BKE_id_free(this->bmain, &this->material->id);
   }
 };
+}  // namespace
 
 /* -------------------------------------------------------------------- */
 /** \name Query Tests

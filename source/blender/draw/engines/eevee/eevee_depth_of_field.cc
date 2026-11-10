@@ -50,7 +50,8 @@ void DepthOfField::init()
                                           camera_object_eval->data) :
                                       nullptr;
 
-  enabled_ = !inst_.is_dlss_guide_render && camera && (camera->dof.flag & CAM_DOF_ENABLED) != 0;
+  enabled_ = !inst_.is_dlss_guide_render && camera &&
+             (camera->dof.flag & CAM_DOF_ENABLED) != 0 && camera->type != CAM_PANO;
 
   if (enabled_ == false) {
     /* Set to invalid value for update detection */
@@ -113,11 +114,6 @@ void DepthOfField::sync()
     aperture *= 0.04f;
   }
 
-  if (camera.is_panoramic()) {
-    /* FIXME: Eyeballed. */
-    aperture *= 0.185f;
-  }
-
   if (camera_data->dof.aperture_ratio < 1.0) {
     /* If ratio is scaling the bokeh outwards, we scale the aperture so that
      * the gather kernel size will encompass the maximum axis. */
@@ -156,7 +152,6 @@ void DepthOfField::sync()
     return;
   }
 
-  /* TODO(fclem): Once we render into multiple view, we will need to use the maximum resolution. */
   int2 max_render_res = inst_.film.render_extent_get();
   int2 half_render_res = math::divide_ceil(max_render_res, int2(2));
   int2 reduce_size = math::ceil_to_multiple(half_render_res, int2(DOF_REDUCE_GROUP_SIZE));
@@ -546,8 +541,8 @@ void DepthOfField::render(View &view,
     /* Native outputs can have Film resolution while the main scene is rendered smaller.
      * Use the actual input for reduction coordinates and retain a large enough scatter list. */
     const int2 max_extent = math::max(inst_.film.render_extent_get(), extent_);
-    const int2 reduce_extent = math::ceil_to_multiple(
-        math::divide_ceil(max_extent, int2(2)), int2(DOF_REDUCE_GROUP_SIZE));
+    const int2 reduce_extent = math::ceil_to_multiple(math::divide_ceil(max_extent, int2(2)),
+                                                      int2(DOF_REDUCE_GROUP_SIZE));
     data_.gather_uv_fac = 1.0f / float2(reduce_extent);
     data_.scatter_max_rect = (reduce_extent.x * reduce_extent.y / 4) / 2;
     if (scatter_fg_list_buf_.size() < data_.scatter_max_rect) {
@@ -725,10 +720,10 @@ void DepthOfField::render(View &view,
 
   for (int is_background = 0; is_background < 2; is_background++) {
     GPU_debug_group_begin(is_background ? "Background Convolution" : "Foreground Convolution");
-    ScopedTelemetrySample telemetry_sample(
-        inst_.telemetry,
-        is_background ? TelemetryStageId::DOFBackgroundConvolution :
-                        TelemetryStageId::DOFForegroundConvolution);
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                           is_background ?
+                                               TelemetryStageId::DOFBackgroundConvolution :
+                                               TelemetryStageId::DOFForegroundConvolution);
 
     SwapChain<TextureFromPool, 2> &color_tx = is_background ? color_bg_tx_ : color_fg_tx_;
     SwapChain<TextureFromPool, 2> &weight_tx = is_background ? weight_bg_tx_ : weight_fg_tx_;

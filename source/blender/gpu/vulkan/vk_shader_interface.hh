@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "BLI_array.hh"
 
 #include "gpu_shader_create_info.hh"
@@ -34,6 +36,7 @@ enum VKBindType {
   STORAGE_BUFFER,
   SAMPLER,
   IMAGE,
+  ACCELERATION_STRUCTURE,
   INPUT_ATTACHMENT,
 };
 

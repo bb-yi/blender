@@ -22,8 +22,8 @@
  * #interpolate_nearest_wrapmode_fl).
  */
 
-#include "BLI_math_base.h"
 #include "BLI_math_base.hh"
+#include "BLI_math_base_c.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_simd.hh"
 
@@ -35,7 +35,8 @@ namespace math {
  * Texture coordinate wrapping mode.
  */
 enum class InterpWrapMode {
-  /** Image edges are extended outside the image, i.e. sample coordinates are clamped to the edge.
+  /**
+   * Image edges are extended outside the image, i.e. sample coordinates are clamped to the edge.
    */
   Extend,
   /** Image repeats, i.e. sample coordinates are wrapped around. */

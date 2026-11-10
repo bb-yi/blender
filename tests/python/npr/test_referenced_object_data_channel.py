@@ -93,7 +93,7 @@ def make_light_material(light_object, output_name):
 
     output = nodes.new("ShaderNodeOutputMaterial")
     emission = nodes.new("ShaderNodeEmission")
-    info = nodes.new("ShaderNodeLightInfo")
+    info = nodes.new("ShaderNodeNPRLightInfo")
     info.light_object = light_object
     links.new(info.outputs[output_name], emission.inputs["Color"])
     links.new(emission.outputs["Emission"], output.inputs["Surface"])
@@ -126,7 +126,7 @@ def center_rgb(pixels, x=RESOLUTION // 2, y=RESOLUTION // 2):
 def assert_fixed_socket_abi():
     material = bpy.data.materials.new("ReferencedObjectSocketABI")
     material.use_nodes = True
-    node = material.node_tree.nodes.new("ShaderNodeLightInfo")
+    node = material.node_tree.nodes.new("ShaderNodeNPRLightInfo")
     expected = {
         "Color",
         "Power",
@@ -210,7 +210,7 @@ def assert_attribute_and_reference_coexist():
     attribute = nodes.new("ShaderNodeAttribute")
     attribute.attribute_type = "OBJECT"
     attribute.attribute_name = "TestValue"
-    info = nodes.new("ShaderNodeLightInfo")
+    info = nodes.new("ShaderNodeNPRLightInfo")
     info.light_object = light_object
     multiply = nodes.new("ShaderNodeMath")
     multiply.operation = "MULTIPLY"
@@ -317,7 +317,7 @@ def assert_deleted_target_is_safe():
     light_object = make_light("DeletedReferencedLight")
     material = make_light_material(light_object, "Color")
     make_plane("DeletedReferencedPlane", material)
-    info = next(node for node in material.node_tree.nodes if node.bl_idname == "ShaderNodeLightInfo")
+    info = next(node for node in material.node_tree.nodes if node.bl_idname == "ShaderNodeNPRLightInfo")
     old_uid = light_object.session_uid
     expected_color = tuple(light_object.data.color)
     initial_pixel = center_rgb(render_pixels())

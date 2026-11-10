@@ -46,7 +46,7 @@ static int node_shader_gpu_npr_image_sample(GPUMaterial *mat,
       shader_name = "npr_image_sample_view";
       break;
   }
-  return GPU_stack_link(mat, node, shader_name, in, out);
+  return GPU_stack_link(mat, node, shader_name, in, out, GPU_kernel_globals(), GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_npr_image_sample_cc

@@ -23,12 +23,12 @@
 #include "DNA_scene_types.h"
 #include "DNA_world_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_set.hh"
-#include "BLI_string.h"
-#include "BLI_time.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_time.hh"
+#include "BLI_utildefines.hh"
 #include "BLI_array.hh"
 #include "BLI_map.hh"
 #include "BLI_vector.hh"
@@ -40,6 +40,7 @@
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
+#include "BKE_node_tree_dot_export.hh"
 #include "RNA_access.hh"
 #include "RNA_path.hh"
 #include "GPU_context.hh"
@@ -823,7 +824,8 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
         }
       }
       if (!error.fatal || !gpu_material_bundle_error_record(mat, *error.node, error.message)) {
-        result.errors.append({error.node, std::move(error.message)});
+        result.errors.append({error.node, std::move(error.message),
+                              GPUMaterialFromNodeTreeResult::WarningType(error.type)});
       }
     }
 
@@ -885,7 +887,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   else if (GPUPass *default_pass = pass_replacement_cb ? pass_replacement_cb(thunk, mat) : nullptr) {
     mat->pass = default_pass;
     GPU_pass_acquire(mat->pass);
-    /** WORKAROUND:
+    /* WORKAROUND:
      * The node tree code is never executed in default replaced passes,
      * but the GPU validation will still complain if the node tree UBO is not bound.
      * So we create a dummy UBO with (at least) the size of the default material one (192 bytes).
@@ -906,6 +908,13 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   }
 
   gpu_node_graph_free_nodes(&mat->graph);
+
+#if 0
+  /* Dump localtree to a .dot file */
+  std::cout << ">>>>>>>>>>>>>>>>>" << name << std::endl
+            << blender::bke::node_tree_to_dot(*localtree) << std::endl;
+#endif
+
   mat->uniform_tracking.reset();
   mat->uniform_tracking_tree = nullptr;
   mat->uniform_origins.clear();
@@ -930,13 +939,23 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   return result;
 }
 
+/* Make sure the two enums are actually the same. */
+static_assert(int(GPUMaterialFromNodeTreeResult::WarningType::Error) ==
+              int(nodes::NodeWarningType::Error));
+static_assert(int(GPUMaterialFromNodeTreeResult::WarningType::Warning) ==
+              int(nodes::NodeWarningType::Warning));
+static_assert(int(GPUMaterialFromNodeTreeResult::WarningType::Info) ==
+              int(nodes::NodeWarningType::Info));
+
 GPUMaterial *GPU_material_from_callbacks(eGPUMaterialEngine engine,
                                          ConstructGPUMaterialFn construct_function_cb,
                                          GPUCodegenCallbackFn generate_code_function_cb,
-                                         void *thunk)
+                                         void *thunk,
+                                         const uint64_t uuid)
 {
   /* Allocate a new material and its material graph. */
   GPUMaterial *material = MEM_new<GPUMaterial>(__func__, engine);
+  material->uuid = uuid;
 
   /* Construct the material graph by adding and linking the necessary GPU material nodes. */
   construct_function_cb(thunk, material);
@@ -1198,7 +1217,7 @@ bool GPU_material_animation_uniform_update(Material *material, Span<double> stat
     return false;
   }
   GPUMaterial *first = static_cast<GPUMaterial *>(
-      static_cast<LinkData *>(material->gpumaterial.first)->data);
+      material->gpumaterial.first()->data);
   if (!first->uniform_tracking_supported || !first->animation_state_valid ||
       !first->animation_state)
   {
@@ -2264,7 +2283,7 @@ static void gpu_material_ramp_texture_build(GPUMaterial *mat)
                                               CM_TABLE + 1,
                                               builder->current_layer,
                                               1,
-                                              gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                              gpu::TextureFormat::SFLOAT_32_32_32_32,
                                               GPU_TEXTURE_USAGE_SHADER_READ,
                                               reinterpret_cast<float *>(builder->pixels));
 
@@ -2500,7 +2519,8 @@ static bool gpu_node_link_uses_closure_callback_input(const GPUNodeGraph &graph,
 char *GPU_material_split_sub_function(GPUMaterial *material,
                                       GPUType return_type,
                                       GPUNodeLink **link,
-                                      StringRefNull dependency_name)
+                                      StringRefNull dependency_name,
+                                      const bool preserve_shading_state)
 {
   if (!material->closure_callback_input_frame_stack.is_empty() &&
       gpu_node_link_uses_closure_callback_input(material->graph,
@@ -2532,6 +2552,7 @@ char *GPU_material_split_sub_function(GPUMaterial *material,
   func_link->mode = GPU_NODE_GRAPH_FUNCTION_LEGACY;
   func_link->outlink = *link;
   func_link->return_type = return_type;
+    func_link->preserve_shading_state = preserve_shading_state;
   SNPRINTF(func_link->name, "ntree_fn%d", material->generated_function_len++);
   if (!dependency_name.is_empty()) {
     BLI_strncpy(func_link->dependency_name, dependency_name.c_str(), sizeof(func_link->dependency_name));

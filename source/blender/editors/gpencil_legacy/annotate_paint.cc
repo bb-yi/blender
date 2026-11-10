@@ -14,17 +14,18 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_enum_flags.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_time.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_time.hh"
 
 #include "BLT_translation.hh"
 
+#include "BKE_annotations.h"
+#include "BKE_annotations_geom.h"
 #include "BKE_callbacks.hh"
+#include "BKE_camera.h"
 #include "BKE_context.hh"
-#include "BKE_gpencil_geom_legacy.h"
-#include "BKE_gpencil_legacy.h"
 #include "BKE_report.hh"
 #include "BKE_screen.hh"
 #include "BKE_tracking.hh"
@@ -166,8 +167,10 @@ struct tGPsdata {
   /** Used when converting to path. */
   double ocurtime;
 
-  /** Inverted transformation matrix applying when converting coords from screen-space
-   * to region space. */
+  /**
+   * Inverted transformation matrix applying when converting coords from screen-space
+   * to region space.
+   */
   float imat[4][4];
   float mat[4][4];
 
@@ -194,12 +197,12 @@ struct tGPsdata {
 
 static bool annotation_stroke_added_check(tGPsdata *p)
 {
-  return (p->gpf && p->gpf->strokes.last && p->flags & GP_PAINTFLAG_STROKEADDED);
+  return (p->gpf && p->gpf->strokes.last() && p->flags & GP_PAINTFLAG_STROKEADDED);
 }
 
 static void annotation_stroke_added_enable(tGPsdata *p)
 {
-  BLI_assert(p->gpf->strokes.last != nullptr);
+  BLI_assert(p->gpf->strokes.last() != nullptr);
   p->flags |= GP_PAINTFLAG_STROKEADDED;
 }
 
@@ -219,9 +222,7 @@ static bool annotation_draw_poll(bContext *C)
     if (ED_annotation_data_get_pointers(C, nullptr) != nullptr) {
       return true;
     }
-    else {
-      CTX_wm_operator_poll_msg_set(C, "Failed to find Annotation data to draw into");
-    }
+    CTX_wm_operator_poll_msg_set(C, "Failed to find Annotation data to draw into");
   }
   else {
     CTX_wm_operator_poll_msg_set(C, "Active region not set");
@@ -627,7 +628,7 @@ static short annotation_stroke_addpoint(tGPsdata *p,
      * during mouse slide, e.g.)
      */
     if (annotation_stroke_added_check(p)) {
-      bGPDstroke *gps = static_cast<bGPDstroke *>(p->gpf->strokes.last);
+      bGPDstroke *gps = p->gpf->strokes.last();
       bGPDspoint *pts;
 
       /* first time point is adding to temporary buffer -- need to allocate new point in stroke */
@@ -645,7 +646,7 @@ static short annotation_stroke_addpoint(tGPsdata *p,
        * so initialize depth buffer before converting coordinates
        */
       if (annotation_project_check(p)) {
-        View3D *v3d = static_cast<View3D *>(p->area->spacedata.first);
+        View3D *v3d = p->area->spacedata.first_as<View3D>();
 
         eV3DDepthOverrideMode mode = V3D_DEPTH_GPENCIL_ONLY;
 
@@ -1060,7 +1061,7 @@ static void annotation_free_stroke(bGPDframe *gpf, bGPDstroke *gps)
   }
 
   if (gps->dvert) {
-    BKE_gpencil_free_stroke_weights(gps);
+    BKE_annotations_free_stroke_weights(gps);
     MEM_delete(gps->dvert);
   }
 
@@ -1095,6 +1096,272 @@ static bool annotation_stroke_eraser_is_occluded(tGPsdata *p,
     }
   }
   return false;
+}
+
+/* Temp data for storing information about an "island" of points
+ * that should be kept when splitting up a stroke. Used in:
+ * gpencil_stroke_delete_tagged_points()
+ */
+struct tGPDeleteIsland {
+  int start_idx;
+  int end_idx;
+};
+
+static void stroke_join_islands(bGPdata *gpd,
+                                bGPDframe *gpf,
+                                bGPDstroke *gps_first,
+                                bGPDstroke *gps_last)
+{
+  bGPDspoint *pt = nullptr;
+  bGPDspoint *pt_final = nullptr;
+  const int totpoints = gps_first->totpoints + gps_last->totpoints;
+
+  /* create new stroke */
+  bGPDstroke *join_stroke = BKE_gpencil_stroke_duplicate(gps_first, false, true);
+
+  join_stroke->points = MEM_new_array<bGPDspoint>(totpoints, __func__);
+  join_stroke->totpoints = totpoints;
+  join_stroke->flag &= ~GP_STROKE_CYCLIC;
+
+  /* copy points (last before) */
+  int e1 = 0;
+  int e2 = 0;
+  float delta = 0.0f;
+
+  for (int i = 0; i < totpoints; i++) {
+    pt_final = &join_stroke->points[i];
+    if (i < gps_last->totpoints) {
+      pt = &gps_last->points[e1];
+      e1++;
+    }
+    else {
+      pt = &gps_first->points[e2];
+      e2++;
+    }
+
+    /* copy current point */
+    copy_v3_v3(&pt_final->x, &pt->x);
+    pt_final->pressure = pt->pressure;
+    pt_final->strength = pt->strength;
+    pt_final->time = delta;
+    pt_final->flag = pt->flag;
+    copy_v4_v4(pt_final->vert_color, pt->vert_color);
+
+    /* retiming with fixed time interval (we cannot determine real time) */
+    delta += 0.01f;
+  }
+
+  /* Copy over vertex weight data (if available) */
+  if ((gps_first->dvert != nullptr) || (gps_last->dvert != nullptr)) {
+    join_stroke->dvert = MEM_new_array_zeroed<MDeformVert>(totpoints, __func__);
+    MDeformVert *dvert_src = nullptr;
+    MDeformVert *dvert_dst = nullptr;
+
+    /* Copy weights (last before). */
+    e1 = 0;
+    e2 = 0;
+    for (int i = 0; i < totpoints; i++) {
+      dvert_dst = &join_stroke->dvert[i];
+      dvert_src = nullptr;
+      if (i < gps_last->totpoints) {
+        if (gps_last->dvert) {
+          dvert_src = &gps_last->dvert[e1];
+          e1++;
+        }
+      }
+      else {
+        if (gps_first->dvert) {
+          dvert_src = &gps_first->dvert[e2];
+          e2++;
+        }
+      }
+
+      if ((dvert_src) && (dvert_src->dw)) {
+        dvert_dst->dw = MEM_dupalloc(dvert_src->dw);
+      }
+    }
+  }
+
+  /* add new stroke at head */
+  BLI_addhead(&gpf->strokes, join_stroke);
+  /* Calc geometry data. */
+  BKE_annotation_stroke_geometry_update(gpd, join_stroke);
+
+  /* remove first stroke */
+  BLI_remlink(&gpf->strokes, gps_first);
+  BKE_annotations_free_stroke(gps_first);
+
+  /* remove last stroke */
+  BLI_remlink(&gpf->strokes, gps_last);
+  BKE_annotations_free_stroke(gps_last);
+}
+
+static bGPDstroke *stroke_delete_tagged_points(bGPdata *gpd,
+                                               bGPDframe *gpf,
+                                               bGPDstroke *gps,
+                                               bGPDstroke *next_stroke,
+                                               int tag_flags,
+                                               const bool select,
+                                               const bool flat_cap,
+                                               const int limit)
+{
+  /* The algorithm used here is as follows:
+   * 1) We firstly identify the number of "islands" of non-tagged points
+   *    which will all end up being in new strokes.
+   *    - In the most extreme case (i.e. every other vert is a 1-vert island),
+   *      we have at most `n / 2` islands
+   *    - Once we start having larger islands than that, the number required
+   *      becomes much less
+   * 2) Each island gets converted to a new stroke
+   * If the number of points is <= limit, the stroke is deleted. */
+
+  tGPDeleteIsland *islands = MEM_new_array_zeroed<tGPDeleteIsland>((gps->totpoints + 1) / 2,
+                                                                   "gp_point_islands");
+  bool in_island = false;
+  int num_islands = 0;
+
+  bGPDstroke *new_stroke = nullptr;
+  bGPDstroke *gps_first = nullptr;
+  const bool is_cyclic = bool(gps->flag & GP_STROKE_CYCLIC);
+
+  /* First Pass: Identify start/end of islands */
+  bGPDspoint *pt = gps->points;
+  for (int i = 0; i < gps->totpoints; i++, pt++) {
+    if (pt->flag & tag_flags) {
+      /* selected - stop accumulating to island */
+      in_island = false;
+    }
+    else {
+      /* unselected - start of a new island? */
+      int idx;
+
+      if (in_island) {
+        /* extend existing island */
+        idx = num_islands - 1;
+        islands[idx].end_idx = i;
+      }
+      else {
+        /* start of new island */
+        in_island = true;
+        num_islands++;
+
+        idx = num_islands - 1;
+        islands[idx].start_idx = islands[idx].end_idx = i;
+      }
+    }
+  }
+
+  /* Watch out for special case where No islands = All points selected = Delete Stroke only */
+  if (num_islands) {
+    /* There are islands, so create a series of new strokes,
+     * adding them before the "next" stroke. */
+    int idx;
+
+    /* Create each new stroke... */
+    for (idx = 0; idx < num_islands; idx++) {
+      tGPDeleteIsland *island = &islands[idx];
+      new_stroke = BKE_gpencil_stroke_duplicate(gps, false, true);
+      if (flat_cap) {
+        new_stroke->caps[1 - (idx % 2)] = GP_STROKE_CAP_FLAT;
+      }
+
+      /* if cyclic and first stroke, save to join later */
+      if ((is_cyclic) && (gps_first == nullptr)) {
+        gps_first = new_stroke;
+      }
+
+      new_stroke->flag &= ~GP_STROKE_CYCLIC;
+
+      /* Compute new buffer size (+ 1 needed as the endpoint index is "inclusive") */
+      new_stroke->totpoints = island->end_idx - island->start_idx + 1;
+
+      /* Copy over the relevant point data */
+      new_stroke->points = MEM_new_array<bGPDspoint>(new_stroke->totpoints,
+                                                     "gp delete stroke fragment");
+      memcpy(static_cast<void *>(new_stroke->points),
+             gps->points + island->start_idx,
+             sizeof(bGPDspoint) * new_stroke->totpoints);
+
+      /* Copy over vertex weight data (if available) */
+      if (gps->dvert != nullptr) {
+        /* Copy over the relevant vertex-weight points */
+        new_stroke->dvert = MEM_new_array_zeroed<MDeformVert>(new_stroke->totpoints,
+                                                              "gp delete stroke fragment weight");
+        memcpy(new_stroke->dvert,
+               gps->dvert + island->start_idx,
+               sizeof(MDeformVert) * new_stroke->totpoints);
+
+        /* Copy weights */
+        int e = island->start_idx;
+        for (int i = 0; i < new_stroke->totpoints; i++) {
+          MDeformVert *dvert_src = &gps->dvert[e];
+          MDeformVert *dvert_dst = &new_stroke->dvert[i];
+          if (dvert_src->dw) {
+            dvert_dst->dw = MEM_dupalloc(dvert_src->dw);
+          }
+          e++;
+        }
+      }
+      /* Each island corresponds to a new stroke.
+       * We must adjust the timings of these new strokes:
+       *
+       * Each point's timing data is a delta from stroke's inittime, so as we erase some points
+       * from the start of the stroke, we have to offset this inittime and all remaining points'
+       * delta values. This way we get a new stroke with exactly the same timing as if user had
+       * started drawing from the first non-removed point.
+       */
+      {
+        bGPDspoint *pts;
+        float delta = gps->points[island->start_idx].time;
+        int j;
+
+        new_stroke->inittime += double(delta);
+
+        pts = new_stroke->points;
+        for (j = 0; j < new_stroke->totpoints; j++, pts++) {
+          /* Some points have time = 0, so check to not get negative time values. */
+          pts->time = max_ff(pts->time - delta, 0.0f);
+          /* set flag for select again later */
+          if (select == true) {
+            pts->flag &= ~GP_SPOINT_SELECT;
+            pts->flag |= GP_SPOINT_TAG;
+          }
+        }
+      }
+
+      /* Add new stroke to the frame or delete if below limit */
+      if ((limit > 0) && (new_stroke->totpoints <= limit)) {
+        if (gps_first == new_stroke) {
+          gps_first = nullptr;
+        }
+        BKE_annotations_free_stroke(new_stroke);
+      }
+      else {
+        /* Calc geometry data. */
+        BKE_annotation_stroke_geometry_update(gpd, new_stroke);
+
+        if (next_stroke) {
+          BLI_insertlinkbefore(&gpf->strokes, next_stroke, new_stroke);
+        }
+        else {
+          BLI_addtail(&gpf->strokes, new_stroke);
+        }
+      }
+    }
+    /* if cyclic, need to join last stroke with first stroke */
+    if ((is_cyclic) && (gps_first != nullptr) && (gps_first != new_stroke)) {
+      stroke_join_islands(gpd, gpf, gps_first, new_stroke);
+    }
+  }
+
+  /* free islands */
+  MEM_delete(islands);
+
+  /* Delete the old stroke */
+  BLI_remlink(&gpf->strokes, gps);
+  BKE_annotations_free_stroke(gps);
+
+  return new_stroke;
 }
 
 /* Eraser tool - evaluation per stroke. */
@@ -1188,8 +1455,7 @@ static void annotation_stroke_eraser_dostroke(tGPsdata *p,
 
     /* Second Pass: Remove any points that are tagged */
     if (do_cull) {
-      BKE_gpencil_stroke_delete_tagged_points(
-          p->gpd, gpf, gps, gps->next, GP_SPOINT_TAG, false, false, 0);
+      stroke_delete_tagged_points(p->gpd, gpf, gps, gps->next, GP_SPOINT_TAG, false, false, 0);
     }
   }
 }
@@ -1209,7 +1475,7 @@ static void annotation_stroke_doeraser(tGPsdata *p)
 
   if (p->area->spacetype == SPACE_VIEW3D) {
     if (p->flags & GP_PAINTFLAG_V3D_ERASER_DEPTH) {
-      View3D *v3d = static_cast<View3D *>(p->area->spacedata.first);
+      View3D *v3d = p->area->spacedata.first_as<View3D>();
       view3d_region_operator_needs_gpu(p->region);
       ED_view3d_depth_override(
           p->depsgraph, p->region, v3d, nullptr, V3D_DEPTH_NO_GPENCIL, false, &p->depths);
@@ -1219,7 +1485,7 @@ static void annotation_stroke_doeraser(tGPsdata *p)
   /* loop over strokes of active layer only (session init already took care of ensuring validity),
    * checking segments for intersections to remove
    */
-  for (gps = static_cast<bGPDstroke *>(gpf->strokes.first); gps; gps = gpn) {
+  for (gps = gpf->strokes.first(); gps; gps = gpn) {
     gpn = gps->next;
     /* Not all strokes in the datablock may be valid in the current editor/context
      * (e.g. 2D space strokes in the 3D view, if the same datablock is shared)
@@ -1303,7 +1569,7 @@ static bool annotation_session_initdata(bContext *C, tGPsdata *p)
       break;
     }
     case SPACE_SEQ: {
-      SpaceSeq *sseq = static_cast<SpaceSeq *>(curarea->spacedata.first);
+      SpaceSeq *sseq = curarea->spacedata.first_as<SpaceSeq>();
 
       /* set current area */
       p->area = curarea;
@@ -1329,7 +1595,7 @@ static bool annotation_session_initdata(bContext *C, tGPsdata *p)
       break;
     }
     case SPACE_CLIP: {
-      SpaceClip *sc = static_cast<SpaceClip *>(curarea->spacedata.first);
+      SpaceClip *sc = curarea->spacedata.first_as<SpaceClip>();
       MovieClip *clip = ED_space_clip_get_clip(sc);
 
       if (clip == nullptr) {
@@ -1388,7 +1654,7 @@ static bool annotation_session_initdata(bContext *C, tGPsdata *p)
 
   /* if no existing GPencil block exists, add one */
   if (*gpd_ptr == nullptr) {
-    bGPdata *gpd = BKE_gpencil_data_addnew(bmain, "Annotations");
+    bGPdata *gpd = BKE_annotations_data_addnew(bmain, "Annotations");
     *gpd_ptr = gpd;
 
     /* mark datablock as being used for annotations */
@@ -1408,27 +1674,27 @@ static void annotation_visible_on_space(tGPsdata *p)
   ScrArea *area = p->area;
   switch (area->spacetype) {
     case SPACE_VIEW3D: {
-      View3D *v3d = static_cast<View3D *>(area->spacedata.first);
+      View3D *v3d = area->spacedata.first_as<View3D>();
       v3d->flag2 |= V3D_SHOW_ANNOTATION;
       break;
     }
     case SPACE_SEQ: {
-      SpaceSeq *sseq = static_cast<SpaceSeq *>(area->spacedata.first);
+      SpaceSeq *sseq = area->spacedata.first_as<SpaceSeq>();
       sseq->preview_overlay.flag |= SEQ_PREVIEW_SHOW_GPENCIL;
       break;
     }
     case SPACE_IMAGE: {
-      SpaceImage *sima = static_cast<SpaceImage *>(area->spacedata.first);
+      SpaceImage *sima = area->spacedata.first_as<SpaceImage>();
       sima->flag |= SI_SHOW_GPENCIL;
       break;
     }
     case SPACE_NODE: {
-      SpaceNode *snode = static_cast<SpaceNode *>(area->spacedata.first);
+      SpaceNode *snode = area->spacedata.first_as<SpaceNode>();
       snode->flag |= SNODE_SHOW_GPENCIL;
       break;
     }
     case SPACE_CLIP: {
-      SpaceClip *sclip = static_cast<SpaceClip *>(area->spacedata.first);
+      SpaceClip *sclip = area->spacedata.first_as<SpaceClip>();
       sclip->flag |= SC_SHOW_ANNOTATION;
       break;
     }
@@ -1513,11 +1779,11 @@ static void annotation_paint_initstroke(tGPsdata *p,
   BKE_callback_exec_id_depsgraph(p->bmain, &p->gpd->id, p->depsgraph, BKE_CB_EVT_ANNOTATION_PRE);
 
   /* get active layer (or add a new one if non-existent) */
-  p->gpl = BKE_gpencil_layer_active_get(p->gpd);
+  p->gpl = BKE_annotations_layer_active_get(p->gpd);
   if (p->gpl == nullptr) {
     /* tag for annotations */
     p->gpd->flag |= GP_DATA_ANNOTATIONS;
-    p->gpl = BKE_gpencil_layer_addnew(p->gpd, DATA_("Note"), true, false);
+    p->gpl = BKE_annotations_layer_addnew(p->gpd, DATA_("Note"), true, false);
 
     if (p->custom_color[3]) {
       copy_v3_v3(p->gpl->color, p->custom_color);
@@ -1538,9 +1804,9 @@ static void annotation_paint_initstroke(tGPsdata *p,
      */
     bool has_layer_to_erase = false;
 
-    if (BKE_gpencil_layer_is_editable(p->gpl)) {
+    if (BKE_annotations_layer_is_editable(p->gpl)) {
       /* Ensure that there's stuff to erase here (not including selection mask below)... */
-      if (p->gpl->actframe && p->gpl->actframe->strokes.first) {
+      if (p->gpl->actframe && p->gpl->actframe->strokes.first_) {
         has_layer_to_erase = true;
       }
     }
@@ -1565,7 +1831,8 @@ static void annotation_paint_initstroke(tGPsdata *p,
       add_frame_mode = GP_GETFRAME_ADD_NEW;
     }
 
-    p->gpf = BKE_gpencil_layer_frame_get(p->gpl, scene->r.cfra, eGP_GetFrame_Mode(add_frame_mode));
+    p->gpf = BKE_annotations_layer_frame_get(
+        p->gpl, scene->r.cfra, eGP_GetFrame_Mode(add_frame_mode));
 
     if (p->gpf == nullptr) {
       p->status = GP_STATUS_ERROR;
@@ -1605,14 +1872,14 @@ static void annotation_paint_initstroke(tGPsdata *p,
   p->subrect = nullptr;
   if ((*p->align_flag & GP_PROJECT_VIEWSPACE) == 0) {
     if (p->area->spacetype == SPACE_VIEW3D) {
-      View3D *v3d = static_cast<View3D *>(p->area->spacedata.first);
+      View3D *v3d = p->area->spacedata.first_as<View3D>();
       RegionView3D *rv3d = static_cast<RegionView3D *>(p->region->regiondata);
 
       /* for camera view set the subrect */
       if (rv3d->persp == RV3D_CAMOB) {
         /* no shift */
-        ED_view3d_calc_camera_border(
-            p->scene, depsgraph, p->region, v3d, rv3d, true, &p->subrect_data);
+        p->subrect_data = BKE_camera_view_border(
+            p->scene, depsgraph, v3d, rv3d, p->region->winx, p->region->winy, true, false, true);
         p->subrect = &p->subrect_data;
       }
     }
@@ -1658,7 +1925,7 @@ static void annotation_paint_strokeend(tGPsdata *p)
    * the conversions will project the values correctly...
    */
   if (annotation_project_check(p)) {
-    View3D *v3d = static_cast<View3D *>(p->area->spacedata.first);
+    View3D *v3d = p->area->spacedata.first_as<View3D>();
 
     eV3DDepthOverrideMode mode = V3D_DEPTH_GPENCIL_ONLY;
 

@@ -350,7 +350,7 @@ class DATA_PT_shape_keys(MeshButtonsPanel, Panel):
             sub.operator("object.shape_key_move", icon='TRIA_UP', text="").type = 'UP'
             sub.operator("object.shape_key_move", icon='TRIA_DOWN', text="").type = 'DOWN'
 
-            split = layout.split(factor=0.4)
+            split = layout.split(factor=layout.property_split_factor)
             row = split.row()
             row.enabled = enable_edit
             row.prop(key, "use_relative")
@@ -363,7 +363,8 @@ class DATA_PT_shape_keys(MeshButtonsPanel, Panel):
             subsub = sub.row(align=True)
             subsub.active = enable_pin
             subsub.prop(ob, "show_only_shape_key", text="")
-            sub.prop(ob, "use_shape_key_edit_mode", text="")
+            if ob.type == 'MESH':
+                sub.prop(ob, "use_shape_key_edit_mode", text="")
 
             sub = row.row()
             if key.use_relative:
@@ -608,7 +609,12 @@ def draw_attribute_warnings(context, layout, attributes):
     if not colliding_names:
         return
 
-    layout.label(text=rpt_("Name collisions: ") + ", ".join(set(colliding_names)), icon='ERROR', translate=False)
+    layout.label_multiline(
+        text=rpt_("Name collisions: ") +
+        ", ".join(
+            set(colliding_names)),
+        icon='STATUS_WARNING',
+        translate=False)
 
 
 class ColorAttributesListBase:

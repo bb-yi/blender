@@ -26,14 +26,14 @@
 #include "BLI_bounds.hh"
 #include "BLI_convexhull_2d.hh"
 #include "BLI_function_ref.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
-#include "BLI_math_color.h"
+#include "BLI_math_color_c.hh"
 #include "BLI_set.hh"
 #include "BLI_span.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_string_ref.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 #include "BLI_vector.hh"
 
 #include "BLT_translation.hh"
@@ -44,6 +44,7 @@
 #include "BKE_curves.hh"
 #include "BKE_global.hh"
 #include "BKE_idtype.hh"
+#include "BKE_image.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_library.hh"
 #include "BKE_main.hh"
@@ -107,6 +108,7 @@
 #include "node_intern.hh" /* own include */
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <sstream>
 
 namespace blender {
@@ -166,7 +168,7 @@ struct TreeDrawContext {
    */
   Array<Vector<NodeExtraInfoRow>> extra_info_rows_per_node;
 
-  Map<int32_t, VectorSet<std::string>> shader_node_errors;
+  Map<int32_t, VectorSet<nodes::NodeWarning>> shader_node_errors;
 
   ~TreeDrawContext()
   {
@@ -205,7 +207,7 @@ static bool compare_node_depth(const bNode *a, const bNode *b)
 {
   /* These tell if either the node or any of the parent nodes is selected.
    * A selected parent means an unselected node is also in foreground! */
-  bool a_select = (a->flag & NODE_SELECT) != 0, b_select = (b->flag & NODE_SELECT) != 0;
+  bool a_select = a->is_selected(), b_select = b->is_selected();
   bool a_active = (a->flag & NODE_ACTIVE) != 0, b_active = (b->flag & NODE_ACTIVE) != 0;
 
   /* If one is an ancestor of the other. */
@@ -220,7 +222,7 @@ static bool compare_node_depth(const bNode *a, const bNode *b)
     if (parent->flag & NODE_ACTIVE) {
       a_active = true;
     }
-    if (parent->flag & NODE_SELECT) {
+    if (parent->is_selected()) {
       a_select = true;
     }
   }
@@ -233,16 +235,15 @@ static bool compare_node_depth(const bNode *a, const bNode *b)
     if (parent->flag & NODE_ACTIVE) {
       b_active = true;
     }
-    if (parent->flag & NODE_SELECT) {
+    if (parent->is_selected()) {
       b_select = true;
     }
   }
 
-  /* One of the nodes is in the background and the other not. */
-  if ((a->flag & NODE_BACKGROUND) && !(b->flag & NODE_BACKGROUND)) {
+  if (a->is_frame() && !b->is_frame()) {
     return true;
   }
-  if ((b->flag & NODE_BACKGROUND) && !(a->flag & NODE_BACKGROUND)) {
+  if (b->is_frame() && !a->is_frame()) {
     return false;
   }
 
@@ -1246,7 +1247,7 @@ static void node_update_basis_from_socket_lists(TreeDrawContext &tree_draw_ctx,
                                                 int &locy)
 {
   /* Space at the top. */
-  locy -= NODE_DYS / 2;
+  locy -= NODE_ITEM_SPACING_Y * 2;
 
   /* Output sockets. */
   bool add_output_space = false;
@@ -1255,43 +1256,40 @@ static void node_update_basis_from_socket_lists(TreeDrawContext &tree_draw_ctx,
     /* Clear flag, conventional drawing does not support panels. */
     socket->flag &= ~SOCK_PANEL_COLLAPSED;
 
+    if (socket->is_visible() && add_output_space) {
+      locy -= NODE_ITEM_SPACING_Y;
+    }
     if (node_update_basis_socket(
             tree_draw_ctx, C, ntree, node, nullptr, nullptr, socket, block, locx, locy))
     {
-      if (socket->next && socket->next->is_available()) {
-        locy -= NODE_ITEM_SPACING_Y;
-      }
       add_output_space = true;
     }
-  }
-
-  if (add_output_space) {
-    locy -= NODE_DY / 4;
   }
 
   const bool add_button_space = node_update_basis_buttons(
       C, ntree, node, node.typeinfo->draw_buttons, block, locy);
 
   bool add_input_space = false;
+  const bool add_before_first_input = add_output_space && !add_button_space;
 
   /* Input sockets. */
   for (bNodeSocket *socket : node.input_sockets()) {
     /* Clear flag, conventional drawing does not support panels. */
     socket->flag &= ~SOCK_PANEL_COLLAPSED;
 
+    if (socket->is_visible() && (add_input_space || add_before_first_input)) {
+      locy -= NODE_ITEM_SPACING_Y;
+    }
     if (node_update_basis_socket(
             tree_draw_ctx, C, ntree, node, nullptr, socket, nullptr, block, locx, locy))
     {
-      if (socket->next) {
-        locy -= NODE_ITEM_SPACING_Y;
-      }
       add_input_space = true;
     }
   }
 
   /* Little bit of padding at the bottom. */
-  if (add_input_space || add_button_space) {
-    locy -= NODE_DYS / 2;
+  if (add_output_space || add_input_space || add_button_space) {
+    locy -= NODE_ITEM_SPACING_Y * 2;
   }
 }
 
@@ -1453,7 +1451,21 @@ static void node_draw_mute_line(const bContext &C,
 {
   GPU_blend(GPU_BLEND_ALPHA);
 
-  for (const bNodeLink &link : node.internal_links()) {
+  for (const bNodeInternalLink &internal_link : node.internal_links()) {
+    bNodeLink link{};
+    link.fromnode = const_cast<bNode *>(&node);
+    link.tonode = const_cast<bNode *>(&node);
+    link.fromsock = internal_link.in;
+    link.tosock = internal_link.out;
+    link.flag |= NODE_LINK_VALID;
+    if (internal_link.in->is_multi_input()) {
+      for (const bNodeLink *connected_link : internal_link.in->directly_linked_links()) {
+        if (!connected_link->fromnode->is_dangling_reroute()) {
+          link.multi_input_sort_id = connected_link->multi_input_sort_id;
+          break;
+        }
+      }
+    }
     if (!bke::node_link_is_hidden(link)) {
       node_draw_link_bezier(C, v2d, snode, link, TH_WIRE_INNER, TH_WIRE_INNER, TH_WIRE, false);
     }
@@ -1739,7 +1751,7 @@ static void node_draw_node_group_indicator(const SpaceNode &snode,
   }
 
   /* How far it extends down and narrows. */
-  const bool is_selected = node.flag & NODE_SELECT;
+  const bool is_selected = node.is_selected();
   const bool is_collapsed = node.flag & NODE_COLLAPSED;
   const float offset_x = 3.6f * UI_SCALE_FAC;
   const float offset_y = 2.4f * UI_SCALE_FAC;
@@ -2130,12 +2142,12 @@ static void node_draw_panels(bNodeTree &ntree, const bNode &node, ui::Block &blo
   }
 }
 
-static nodes::NodeWarningType node_error_highest_priority(
-    Span<nodes::eval_log::NodeWarning> warnings)
+template<typename WarningsRange>
+static nodes::NodeWarningType node_error_highest_priority(const WarningsRange &warnings)
 {
   int highest_priority = 0;
   nodes::NodeWarningType highest_priority_type = nodes::NodeWarningType::Info;
-  for (const nodes::eval_log::NodeWarning &warning : warnings) {
+  for (const auto &warning : warnings) {
     const int priority = node_warning_type_severity(warning.type);
     if (priority > highest_priority) {
       highest_priority = priority;
@@ -2145,11 +2157,11 @@ static nodes::NodeWarningType node_error_highest_priority(
   return highest_priority_type;
 }
 
-static std::string node_errors_tooltip_fn(const Span<nodes::eval_log::NodeWarning> warnings)
+static std::string node_errors_tooltip_fn(const Span<nodes::NodeWarning> warnings)
 {
   std::string complete_string;
 
-  for (const nodes::eval_log::NodeWarning &warning : warnings.drop_back(1)) {
+  for (const nodes::NodeWarning &warning : warnings.drop_back(1)) {
     complete_string += warning.message;
     /* Adding the period is not ideal for multi-line messages, but it is consistent
      * with other tooltip implementations in Blender, so it is added here. */
@@ -2208,7 +2220,7 @@ static void node_add_error_message_button(const TreeDrawContext &tree_draw_ctx,
       return tree_draw_ctx.tree_logs.get_main_tree_log(zone);
     }();
 
-    Span<nodes::eval_log::NodeWarning> warnings;
+    Span<nodes::NodeWarning> warnings;
     if (geo_tree_log) {
       nodes::eval_log::NodeLog *node_log = geo_tree_log->find_node_log(node.identifier);
       if (node_log != nullptr) {
@@ -2224,14 +2236,13 @@ static void node_add_error_message_button(const TreeDrawContext &tree_draw_ctx,
     ui::Button *but = add_error_message_button(
         block, rect, nodes::node_warning_type_icon(display_type), icon_offset);
     button_func_quick_tooltip_set(
-        but,
-        [warnings = Array<nodes::eval_log::NodeWarning>(warnings)](const ui::Button * /*but*/) {
+        but, [warnings = Array<nodes::NodeWarning>(warnings)](const ui::Button * /*but*/) {
           return node_errors_tooltip_fn(warnings);
         });
     return;
   }
   if (ntree.type == NTREE_SHADER) {
-    const VectorSet<std::string> *errors = tree_draw_ctx.shader_node_errors.lookup_ptr(
+    const VectorSet<nodes::NodeWarning> *errors = tree_draw_ctx.shader_node_errors.lookup_ptr(
         node.identifier);
     if (!errors) {
       return;
@@ -2239,17 +2250,22 @@ static void node_add_error_message_button(const TreeDrawContext &tree_draw_ctx,
     if (errors->is_empty()) {
       return;
     }
-    ui::Button *but = add_error_message_button(block, rect, ICON_ERROR, icon_offset);
+    const nodes::NodeWarningType display_type = node_error_highest_priority(*errors);
+    ui::Button *but = add_error_message_button(
+        block, rect, nodes::node_warning_type_icon(display_type), icon_offset);
     button_func_quick_tooltip_set(but, [errors = *errors](const ui::Button * /*but*/) {
-      std::string tooltip;
-      for (const int i : errors.index_range()) {
-        const StringRefNull error = errors[i];
-        tooltip += error.c_str();
-        if (i + 1 < errors.size()) {
-          tooltip += ".\n";
+      Vector<std::string> tooltip_lines;
+      for (const nodes::NodeWarning &error : errors) {
+        std::string message = error.message;
+        if (message.empty()) {
+          continue;
         }
+        if (!message.ends_with(".")) {
+          message += ".";
+        }
+        tooltip_lines.append(std::move(message));
       }
-      return tooltip;
+      return fmt::format("{}", fmt::join(tooltip_lines, "\n"));
     });
   }
 }
@@ -2503,7 +2519,7 @@ static Vector<NodeExtraInfoRow> node_get_extra_info(const bContext &C,
   if (node.typeinfo->deprecation_notice) {
     NodeExtraInfoRow row;
     row.text = IFACE_("Deprecated");
-    row.icon = ICON_INFO;
+    row.icon = ICON_STATUS_INFO;
     row.tooltip = TIP_(node.typeinfo->deprecation_notice);
     rows.append(std::move(row));
   }
@@ -2537,6 +2553,7 @@ static Vector<NodeExtraInfoRow> node_get_extra_info(const bContext &C,
             NODE_EVALUATE_CLOSURE) ||
        StringRef(node.idname).startswith("GeometryNodeImport") ||
        node.is_type("GeometryNodeClosureToList"_ustr) ||
+       node.is_type("GeometryNodeCombineList"_ustr) ||
        node.is_type("GeometryNodeFilterList"_ustr) ||
        node.is_type("GeometryNodeListGetItem"_ustr) ||
        node.is_type("GeometryNodeFieldToList"_ustr) ||
@@ -2558,7 +2575,7 @@ static Vector<NodeExtraInfoRow> node_get_extra_info(const bContext &C,
       for (const StringRef message : node_log->debug_messages) {
         NodeExtraInfoRow row;
         row.text = message;
-        row.icon = ICON_INFO;
+        row.icon = ICON_STATUS_INFO;
         rows.append(std::move(row));
       }
     }
@@ -2811,7 +2828,11 @@ static ColorTheme4f node_header_color_get(const bNodeTree &ntree,
   /* The base color of the node header. */
   if (node_undefined_or_unsupported(ntree, node)) {
     /* Use warning color to indicate undefined types. */
-    ui::theme::get_color_blend_shade_4fv(TH_REDALERT, color_id, 0.1f, -40, color_header);
+    ColorTheme4f color_alert;
+    ui::theme::get_color_4fv(TH_REDALERT, color_alert);
+    ui::theme::get_color_blend_shade_3fv(
+        TH_REDALERT, color_id, 1.0f - color_alert.a, -60, color_header);
+    color_header.a = alpha;
   }
   else if ((node.flag & NODE_COLLAPSED) && (node.flag & NODE_CUSTOM_COLOR)) {
     rgba_float_args_set(color_header, node.color[0], node.color[1], node.color[2], alpha);
@@ -2822,7 +2843,7 @@ static ColorTheme4f node_header_color_get(const bNodeTree &ntree,
   }
 
   /* Draw selected nodes fully opaque. */
-  if (node.flag & SELECT) {
+  if (node.is_selected()) {
     color_header.a = 1.0f;
   }
 
@@ -2903,7 +2924,8 @@ static void node_draw_basis(const bContext &C,
   }
 
   const rctf &rct = node.runtime->draw_bounds;
-  float color[4];
+  float color[4], color_alert[4];
+  ui::theme::get_color_4fv(TH_REDALERT, color_alert);
   int color_id = node_get_colorid(tree_draw_ctx, node);
 
   GPU_line_width(1.0f);
@@ -3102,7 +3124,7 @@ static void node_draw_basis(const bContext &C,
   node_add_error_message_button(tree_draw_ctx, ntree, node, block, rct, iconofs);
 
   /* Title. */
-  if (node.flag & SELECT) {
+  if (node.is_selected()) {
     ui::theme::get_color_4fv(TH_SELECT, color);
   }
   else {
@@ -3163,7 +3185,8 @@ static void node_draw_basis(const bContext &C,
   {
     /* Use warning color to indicate undefined types. */
     if (node_undefined_or_unsupported(ntree, node)) {
-      ui::theme::get_color_shade_4fv(TH_REDALERT, -40, color);
+      ui::theme::get_color_blend_shade_3fv(
+          TH_REDALERT, color_id, 1.0f - color_alert[3], -80, color);
     }
     else if (node.flag & NODE_CUSTOM_COLOR) {
       rgba_float_args_set(color, node.color[0], node.color[1], node.color[2], 1.0f);
@@ -3173,7 +3196,7 @@ static void node_draw_basis(const bContext &C,
     }
 
     /* Draw selected nodes fully opaque. */
-    if (node.flag & SELECT) {
+    if (node.is_selected()) {
       color[3] = 1.0f;
     }
 
@@ -3216,11 +3239,12 @@ static void node_draw_basis(const bContext &C,
         rct.ymax + outline_width,
     };
     float color_outline[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-    if (node.flag & SELECT) {
+    if (node.is_selected()) {
       ui::theme::get_color_4fv((node.flag & NODE_ACTIVE) ? TH_ACTIVE : TH_SELECT, color_outline);
     }
     else if (node_undefined_or_unsupported(ntree, node)) {
       ui::theme::get_color_4fv(TH_REDALERT, color_outline);
+      color_outline[3] = 1.0f;
     }
     else if (const bke::bNodeZoneType *zone_type = bke::zone_type_by_node_type(node.type_legacy)) {
       ui::theme::get_color_4fv(zone_type->theme_id, color_outline);
@@ -3300,12 +3324,22 @@ static void node_draw_collapsed(const bContext &C,
   }
 
   /* Title. */
-  if (node.flag & SELECT) {
+  if (node.is_selected()) {
     ui::theme::get_color_4fv(TH_SELECT, color);
   }
   else {
     ui::theme::get_color_blend_shade_4fv(TH_SELECT, color_id, 0.4f, 10, color);
   }
+
+  const rctf header_rect = {
+      rct.xmin,
+      rct.xmax,
+      centy - NODE_DY * 0.5f,
+      centy + NODE_DY * 0.5f,
+  };
+
+  float iconofs = rct.xmax - 0.35f * U.widget_unit;
+  node_add_error_message_button(tree_draw_ctx, ntree, node, block, header_rect, iconofs);
 
   /* Collapse/expand icon. */
   {
@@ -3340,7 +3374,7 @@ static void node_draw_collapsed(const bContext &C,
                              showname,
                              round_fl_to_int(rct.xmin + NODE_MARGIN_X),
                              round_fl_to_int(centy - NODE_DY * 0.5f),
-                             short(BLI_rctf_size_x(&rct) - (2 * U.widget_unit)),
+                             short(iconofs - rct.xmin - NODE_MARGIN_X),
                              NODE_DY,
                              nullptr,
                              0,
@@ -3361,11 +3395,12 @@ static void node_draw_collapsed(const bContext &C,
     /* Color the outline according to active, selected, or undefined status. */
     float color_outline[4];
 
-    if (node.flag & SELECT) {
+    if (node.is_selected()) {
       ui::theme::get_color_4fv((node.flag & NODE_ACTIVE) ? TH_ACTIVE : TH_SELECT, color_outline);
     }
     else if (node_undefined_or_unsupported(ntree, node)) {
       ui::theme::get_color_4fv(TH_REDALERT, color_outline);
+      color_outline[3] = 1.0f;
     }
     else if (node.is_muted()) {
       /* Muted nodes get a mix of the background with the node color. */
@@ -3615,6 +3650,103 @@ static void reroute_node_prepare_for_draw(bNode &node)
   node.runtime->draw_bounds.ymin = loc.y - radius;
 }
 
+static void node_comment_edit_button_cb(bContext *C, void *node_argv, void * /*arg*/)
+{
+  SpaceNode &snode = *CTX_wm_space_node(C);
+  bNodeTree &node_tree = *snode.edittree;
+  bNode &node = *node_tree.node_by_id(POINTER_AS_INT(node_argv));
+
+  node_select_single(*C, node);
+
+  PointerRNA props_ptr = WM_operator_properties_create("NODE_OT_comment_edit");
+  RNA_boolean_set(&props_ptr, "use_active", true);
+  WM_operator_name_call(
+      C, "NODE_OT_comment_edit", wm::OpCallContext::InvokeDefault, &props_ptr, nullptr);
+  WM_operator_properties_free(&props_ptr);
+}
+
+static void comment_node_prepare_for_draw(const bContext &C,
+                                          bNodeTree &ntree,
+                                          bNode &node,
+                                          ui::Block &block)
+{
+  NodeComment &storage = *static_cast<NodeComment *>(node.storage);
+  const bool is_edit = bool(storage.flag & NodeCommentFlag::Edit);
+  const StringRef text = storage.text;
+
+  const float2 loc = node_to_view(node.location);
+  PointerRNA node_ptr = RNA_pointer_create_discrete(&ntree.id, RNA_Node, &node);
+
+  float bottom_y;
+  if (is_edit) {
+    const int but_h = ui::textbox_but_height(storage.textbox_state_node);
+    ui::Button *but = uiDefButTextBoxR(&block,
+                                       &node_ptr,
+                                       "text",
+                                       &storage.textbox_state_node,
+                                       loc.x,
+                                       loc.y - but_h,
+                                       int(node.width * UI_SCALE_FAC));
+    /* Same approach to detecting when a text property is not active anymore is used elsewhere
+     * (e.g. #outliner_buttons) */
+    if (!ui::button_active_only(&C, CTX_wm_region(&C), &block, but)) {
+      storage.flag &= ~NodeCommentFlag::Edit;
+      WM_event_add_notifier(&C, NC_NODE | ND_DISPLAY, nullptr);
+    }
+    bottom_y = loc.y - but_h;
+  }
+  else {
+    /* Different paddings are used here to compensate for padding applied elsewhere. */
+    const int pad_left = 0.4 * UI_UNIT_X;
+    const int pad_right = 0.45 * UI_UNIT_X;
+    const int pad_top = 0.4 * UI_UNIT_Y;
+    const int pad_bottom = 0.4 * UI_UNIT_Y;
+
+    ui::Layout &layout = ui::block_layout(&block,
+                                          ui::LayoutDirection::Vertical,
+                                          ui::LayoutType::Panel,
+                                          loc.x + pad_left,
+                                          loc.y - pad_top,
+                                          node.width * UI_SCALE_FAC - pad_left - pad_right,
+                                          0,
+                                          0,
+                                          ui::style_get_dpi());
+    layout.label_markdown(text);
+    block_align_end(&block);
+    bottom_y = ui::block_layout_resolve(&block).y - pad_bottom;
+  }
+
+  const float icon_pad = 0.15f * U.widget_unit;
+  float height = std::max<float>(is_edit || !text.trim().is_empty() ? loc.y - bottom_y : 0,
+                                 NODE_HEADER_ICON_SIZE + 2 * icon_pad + 0.1 * U.widget_unit);
+
+  node.runtime->draw_bounds.xmin = loc.x;
+  node.runtime->draw_bounds.xmax = loc.x + node.width * UI_SCALE_FAC;
+  node.runtime->draw_bounds.ymin = loc.y - height;
+  node.runtime->draw_bounds.ymax = loc.y;
+
+  if (!is_edit && node.is_selected()) {
+    block_emboss_set(&block, ui::EmbossType::None);
+    const int but_x = node.runtime->draw_bounds.xmax - icon_pad - NODE_HEADER_ICON_SIZE;
+    const int but_y = node.runtime->draw_bounds.ymax - icon_pad - NODE_HEADER_ICON_SIZE;
+    ui::Button *but = uiDefIconBut(&block,
+                                   ui::ButtonType::But,
+                                   ICON_GREASEPENCIL,
+                                   but_x,
+                                   but_y,
+                                   NODE_HEADER_ICON_SIZE,
+                                   NODE_HEADER_ICON_SIZE,
+                                   nullptr,
+                                   0,
+                                   0,
+                                   "");
+    /* The operator already adds an undo step, so no need for the button to also add one. */
+    button_flag_disable(but, ui::BUT_UNDO);
+    button_func_set(but, node_comment_edit_button_cb, POINTER_FROM_INT(node.identifier), nullptr);
+    block_emboss_set(&block, ui::EmbossType::Emboss);
+  }
+}
+
 static void node_update_nodetree(const bContext &C,
                                  TreeDrawContext &tree_draw_ctx,
                                  bNodeTree &ntree,
@@ -3636,6 +3768,9 @@ static void node_update_nodetree(const bContext &C,
 
     if (node.is_reroute()) {
       reroute_node_prepare_for_draw(node);
+    }
+    else if (node.is_type("NodeComment"_ustr)) {
+      comment_node_prepare_for_draw(C, ntree, node, block);
     }
     else {
       if (node.flag & NODE_COLLAPSED) {
@@ -3811,7 +3946,7 @@ static void frame_node_draw_outline(const ARegion &region,
     draw_outline = true;
     ui::theme::get_color_shade_alpha_4fv(TH_ACTIVE, 0, -100, outline_color);
   }
-  else if (node.flag & SELECT) {
+  else if (node.is_selected()) {
     draw_outline = true;
     if (node.flag & NODE_ACTIVE) {
       ui::theme::get_color_shade_alpha_4fv(TH_ACTIVE, 0, -40, outline_color);
@@ -3864,7 +3999,7 @@ static Set<const bNodeSocket *> find_sockets_on_active_gizmo_paths(
     const bContext &C, const SpaceNode &snode, bke::ComputeContextCache &compute_context_cache)
 {
   const std::optional<ed::space_node::ObjectAndModifier> object_and_modifier =
-      ed::space_node::get_modifier_for_node_editor(snode);
+      ed::space_node::get_geometry_nodes_modifier_for_node_editor(snode);
   if (!object_and_modifier) {
     return {};
   }
@@ -3976,7 +4111,7 @@ static void reroute_node_draw_body(const bContext &C,
 {
   BLI_assert(node.is_reroute());
 
-  bNodeSocket &sock = *static_cast<bNodeSocket *>(node.inputs.first);
+  bNodeSocket &sock = *node.inputs.first();
 
   PointerRNA nodeptr = RNA_pointer_create_discrete(
       const_cast<ID *>(&ntree.id), RNA_Node, const_cast<bNode *>(&node));
@@ -4033,7 +4168,7 @@ static void reroute_node_draw_label(TreeDrawContext &tree_draw_ctx,
 
   button_drawflag_disable(label_but, ui::BUT_TEXT_LEFT);
 
-  if (use_auto_label && !(node.flag & NODE_SELECT)) {
+  if (use_auto_label && !node.is_selected()) {
     button_flag_enable(label_but, ui::BUT_INACTIVE);
   }
 }
@@ -4068,7 +4203,7 @@ static void reroute_node_draw(const bContext &C,
   }
 
   /* Only draw the input socket, since all sockets are at the same location. */
-  const bool selected = node.flag & NODE_SELECT;
+  const bool selected = node.is_selected();
   reroute_node_draw_body(C, snode, ntree, node, block, selected);
 
   block_end_ex(&C,
@@ -4079,6 +4214,63 @@ static void reroute_node_draw(const bContext &C,
                tree_draw_ctx.depsgraph,
                &block);
   block_draw(&C, &block);
+}
+
+static void node_draw_comment(const bContext &C,
+                              TreeDrawContext &tree_draw_ctx,
+                              ARegion &region,
+                              bNode &node,
+                              ui::Block &block)
+{
+  const SpaceNode &snode = *CTX_wm_space_node(&C);
+  const rctf &rct = node.runtime->draw_bounds;
+  const View2D &v2d = region.v2d;
+
+  /* Skip if out of view. */
+  if (rct.xmax < v2d.cur.xmin || rct.xmin > v2d.cur.xmax || rct.ymax < v2d.cur.ymin ||
+      node.runtime->draw_bounds.ymin > v2d.cur.ymax)
+  {
+    block_end_ex(&C,
+                 tree_draw_ctx.bmain,
+                 tree_draw_ctx.window,
+                 tree_draw_ctx.scene,
+                 tree_draw_ctx.region,
+                 tree_draw_ctx.depsgraph,
+                 &block);
+    return;
+  }
+
+  node_draw_shadow(snode, node, BASIS_RAD, 1.0f);
+
+  const NodeComment &storage = *static_cast<const NodeComment *>(node.storage);
+  const bool is_edit = bool(storage.flag & NodeCommentFlag::Edit);
+
+  if (!is_edit) {
+    ColorTheme4f color;
+    node_frame_get_color(node, color);
+    ui::draw_roundbox_corner_set(ui::CNR_ALL);
+    ui::draw_roundbox_4fv(&rct, true, BASIS_RAD, color);
+  }
+
+  block_end_ex(&C,
+               tree_draw_ctx.bmain,
+               tree_draw_ctx.window,
+               tree_draw_ctx.scene,
+               tree_draw_ctx.region,
+               tree_draw_ctx.depsgraph,
+               &block);
+  block_draw(&C, &block);
+
+  if (node.flag & SELECT && !is_edit) {
+    ColorTheme4f outline_color;
+    if (node.flag & NODE_ACTIVE) {
+      ui::theme::get_color_shade_alpha_4fv(TH_ACTIVE, 0, -40, outline_color);
+    }
+    else {
+      ui::theme::get_color_shade_alpha_4fv(TH_SELECT, 0, -40, outline_color);
+    }
+    ui::draw_roundbox_4fv(&rct, false, BASIS_RAD, outline_color);
+  }
 }
 
 static void node_draw(const bContext &C,
@@ -4092,6 +4284,9 @@ static void node_draw(const bContext &C,
   if (node.is_frame()) {
     /* Should have been drawn before already. */
     BLI_assert_unreachable();
+  }
+  else if (node.is_type("NodeComment"_ustr)) {
+    node_draw_comment(C, tree_draw_ctx, region, node, block);
   }
   else if (node.is_reroute()) {
     reroute_node_draw(C, tree_draw_ctx, region, snode, ntree, node, block);
@@ -4261,7 +4456,7 @@ static void node_draw_zones_and_frames(const ARegion &region,
     draw_order.append(zones->zones[zone_i]);
   }
   for (const bNode *node : ntree.all_nodes()) {
-    if (node->flag & NODE_BACKGROUND) {
+    if (node->is_frame()) {
       draw_order.append(node);
     }
   }
@@ -4498,8 +4693,12 @@ static void draw_link_errors(const bContext &C,
   /* Draw a background for the error icon. */
   rctf bg_rect;
   BLI_rctf_init_pt_radius(&bg_rect, float2(draw_position), bg_radius);
-  ColorTheme4f bg_color;
+  ColorTheme4f bg_color, alert_color;
   ui::theme::get_color_4fv(TH_REDALERT, bg_color);
+  ui::theme::get_color_4fv(TH_REDALERT, alert_color);
+  alert_color.a = std::min(alert_color.a + 0.4f, 0.8f);
+  ui::theme::get_color_blend_3f(TH_REDALERT, TH_NODE, 1.0f - alert_color.a, bg_color);
+  bg_color.a = 1.0f;
   draw_roundbox_corner_set(ui::CNR_ALL);
   ui::draw_dropshadow(&bg_rect, bg_corner_radius, UI_UNIT_X * 0.2f, snode.runtime->aspect, 0.5f);
   ui::draw_roundbox_4fv(&bg_rect, true, bg_corner_radius, bg_color);
@@ -4508,7 +4707,7 @@ static void draw_link_errors(const bContext &C,
   block_emboss_set(&invalid_links_block, ui::EmbossType::None);
   ui::Button *but = uiDefIconBut(&invalid_links_block,
                                  ui::ButtonType::But,
-                                 ICON_ERROR,
+                                 ICON_STATUS_WARNING_FILLED,
                                  draw_position.x - icon_size / 2,
                                  draw_position.y - icon_size / 2,
                                  icon_size,
@@ -4577,8 +4776,8 @@ static void node_draw_nodetree(const bContext &C,
   /* Draw foreground nodes, last nodes in front. */
   for (const int i : nodes.index_range()) {
     bNode &node = *nodes[i];
-    if (node.flag & NODE_BACKGROUND) {
-      /* Background nodes are drawn before mixed with zones already. */
+    if (node.is_frame()) {
+      /* Those nodes are drawn before already. */
       continue;
     }
 
@@ -4725,14 +4924,16 @@ static void draw_nodetree(const bContext &C, ARegion &region, bNodeTree &ntree)
       {
         const std::string error = nodes::shader_glsl_bundle_error_get(*node);
         if (!error.empty()) {
-          tree_draw_ctx.shader_node_errors.lookup_or_add_default(node->identifier).add(error);
+          tree_draw_ctx.shader_node_errors.lookup_or_add_default(node->identifier).add(
+              {nodes::NodeWarningType::Error, error});
         }
       }
       if (node->is_type("ShaderNodeScriptExpression"_ustr)) {
         const std::string error = nodes::script_expression_error_get(*node);
         tree_draw_ctx.shader_node_errors.remove(node->identifier);
         if (!error.empty()) {
-          tree_draw_ctx.shader_node_errors.lookup_or_add_default(node->identifier).add(error);
+          tree_draw_ctx.shader_node_errors.lookup_or_add_default(node->identifier).add(
+              {nodes::NodeWarningType::Error, error});
         }
       }
     }
@@ -4762,6 +4963,7 @@ void node_draw_space(const bContext &C, ARegion &region)
   SpaceNode &snode = *CTX_wm_space_node(&C);
   View2D &v2d = region.v2d;
   Scene &scene = *CTX_data_scene(&C);
+  Main &bmain = *CTX_data_main(&C);
 
   /* Setup off-screen buffers. */
   GPUViewport *viewport = WM_draw_region_get_viewport(&region);
@@ -4795,8 +4997,8 @@ void node_draw_space(const bContext &C, ARegion &region)
   ui::view2d_dot_grid_draw(&v2d, TH_GRID, NODE_GRID_STEP_SIZE, grid_levels);
 
   /* Draw parent node trees. */
-  if (snode.treepath.last) {
-    bNodeTreePath *path = static_cast<bNodeTreePath *>(snode.treepath.last);
+  if (snode.treepath.last()) {
+    bNodeTreePath *path = snode.treepath.last();
 
     /* Update tree path name (drawn in the bottom left). */
     ID *name_id = (path->nodetree && path->nodetree != snode.nodetree) ? &path->nodetree->id :
@@ -4896,16 +5098,48 @@ void node_draw_space(const bContext &C, ARegion &region)
   /* Reset view matrix. */
   ui::view2d_view_restore(&C);
 
+  int text_info_y_offset = 0;
   if (snode.overlay.flag & SN_OVERLAY_SHOW_OVERLAYS) {
-    if (snode.flag & SNODE_SHOW_GPENCIL && snode.treepath.last) {
+    if (snode.flag & SNODE_SHOW_GPENCIL && snode.treepath.last()) {
       /* Draw grease-pencil (screen strokes, and also paint-buffer). */
       ED_annotation_draw_view2d(&C, false);
     }
 
     /* Draw context path. */
     if (snode.overlay.flag & SN_OVERLAY_SHOW_PATH) {
+      text_info_y_offset += UI_UNIT_Y;
       draw_tree_path(C, region);
     }
+  }
+
+  const bool show_text_info = ED_node_is_compositor(&snode) &&
+                              (snode.overlay.flag & SN_OVERLAY_SHOW_OVERLAYS &&
+                               snode.overlay.flag & SN_OVERLAY_SHOW_TEXT_INFO &&
+                               snode.flag & SNODE_BACKDRAW);
+
+  if (show_text_info) {
+    int render_size_x, render_size_y;
+    BKE_render_resolution(&scene.r, true, &render_size_x, &render_size_y);
+
+    /* Use same padding as path tree. */
+    const rcti *rect = ED_region_visible_rect(&region);
+    int xoffset = rect->xmin + 16 * UI_SCALE_FAC;
+    int yoffset = rect->ymax - (0.4f * UI_UNIT_Y) - text_info_y_offset;
+
+    int viewer_size_x = 0;
+    int viewer_size_y = 0;
+    void *lock;
+
+    Image *ima = BKE_image_ensure_viewer(&bmain, IMA_TYPE_COMPOSITE, "Viewer Node");
+    ImBuf *ibuf = BKE_image_acquire_ibuf(ima, nullptr, &lock);
+    if (ibuf) {
+      viewer_size_x = ibuf->x;
+      viewer_size_y = ibuf->y;
+    }
+    BKE_image_release_ibuf(ima, ibuf, lock);
+
+    ED_region_overlay_info_text_draw(
+        render_size_x, render_size_y, viewer_size_x, viewer_size_y, xoffset, yoffset);
   }
 
   /* Scrollers. */

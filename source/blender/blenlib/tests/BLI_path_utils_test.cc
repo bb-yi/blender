@@ -6,9 +6,9 @@
 
 #include "IMB_imbuf.hh"
 
-#include "BLI_fileops.h"
+#include "BLI_fileops.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_string_utils.hh"
 
 namespace blender {
@@ -18,6 +18,12 @@ namespace blender {
 /* -------------------------------------------------------------------- */
 /** \name Local Utilities
  * \{ */
+
+#ifdef WIN32
+#  define ABS_PREFIX "C:"
+#else
+#  define ABS_PREFIX ""
+#endif
 
 static void str_replace_char_with_relative_exception(char *str, char src, char dst)
 {
@@ -241,9 +247,52 @@ TEST(path_utils, ParentDir_Complex)
   PARENT_DIR("./a", "./");
   PARENT_DIR("../a/", "../");
   PARENT_DIR("../a", "../");
+
+  /* Test unexpanded template variables. */
+  PARENT_DIR("{test_variable}/a", "{test_variable}/");
+  PARENT_DIR("/a/{test_variable}", "/a/");
+  /* While this is not correct in that the template variable could contain a path string,
+   * We just check that the code doesn't error out when it encounters a template variable.
+   */
+  PARENT_DIR("{test_variable}/a/{test_variable}", "{test_variable}/a/");
 }
 
 #undef PARENT_DIR
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Tests for: #BLI_path_parent_dir_end
+ * \{ */
+
+#define PARENT_DIR_END(input, offset_expect) \
+  { \
+    const char *path = input; \
+    const char *path_end = BLI_path_parent_dir_end(path, strlen(path)); \
+    EXPECT_EQ(path_end ? int(path_end - path) : -1, offset_expect) << "path: " << path; \
+  } \
+  ((void)0)
+
+TEST(path_utils, ParentDirEnd_Simple)
+{
+  PARENT_DIR_END("/a/b", 2);
+  PARENT_DIR_END("/a/b/c", 4);
+  PARENT_DIR_END("/a", -1);
+  PARENT_DIR_END("a", -1);
+}
+
+TEST(path_utils, ParentDirEnd_Redundant)
+{
+  /* Examples from the doc-string. */
+  PARENT_DIR_END("/test///dir/./file", 11);
+  PARENT_DIR_END("/test/dir/subdir//file", 16);
+
+  PARENT_DIR_END("/a/./b", 2);
+  PARENT_DIR_END("a/./b", 1);
+  PARENT_DIR_END("./x", 1);
+}
+
+#undef PARENT_DIR_END
 
 /** \} */
 
@@ -465,6 +514,40 @@ TEST(path_utils, IsUnc)
 }
 
 /** \} */
+
+#ifdef WIN32
+
+/* -------------------------------------------------------------------- */
+/** \name Tests for: #BLI_path_normalize_unc
+ * \{ */
+
+#  define PATH_NORMALIZE_UNC(input, output_expect) \
+    { \
+      char path[FILE_MAX]; \
+      STRNCPY(path, input); \
+      BLI_path_normalize_unc(path, sizeof(path)); \
+      EXPECT_STREQ(path, output_expect); \
+    } \
+    ((void)0)
+
+TEST(path_utils, NormalizeUNC)
+{
+  /* Long paths with a drive. */
+  PATH_NORMALIZE_UNC("\\\\?\\C:\\dir\\file", "C:\\dir\\file");
+  /* Long UNC paths. */
+  PATH_NORMALIZE_UNC("\\\\?\\UNC\\server\\share\\dir", "\\\\server\\share\\dir");
+  /* A slash is added after the share. */
+  PATH_NORMALIZE_UNC("\\\\?\\UNC\\server\\share", "\\\\server\\share\\");
+  /* Other paths are left as-is. */
+  PATH_NORMALIZE_UNC("C:\\dir\\file", "C:\\dir\\file");
+  PATH_NORMALIZE_UNC("\\\\server\\share\\dir", "\\\\server\\share\\dir");
+}
+
+#  undef PATH_NORMALIZE_UNC
+
+/** \} */
+
+#endif /* WIN32 */
 
 /* -------------------------------------------------------------------- */
 /** \name Tests for: #BLI_path_is_win32_drive
@@ -814,6 +897,18 @@ TEST(path_utils, Frame)
     path[sizeof(path) - 1] = '\0';
     ret = BLI_path_frame(path, sizeof(path), 123456789, 0);
     EXPECT_TRUE(BLI_str_endswith(path, "0123456789"));
+  }
+
+  /* No room to add the digits, the path is left unchanged. */
+  {
+    char path[8 + 5];
+    memset(path, 0xff, sizeof(path));
+    path[sizeof(path) - 1] = '\0';
+    BLI_strncpy(path, "test_ab", 8);
+    ret = BLI_path_frame(path, 8, 123, 4);
+    EXPECT_FALSE(ret);
+    EXPECT_STREQ(path, "test_ab");
+    EXPECT_STREQ(path + 8, "\xff\xff\xff\xff");
   }
 }
 
@@ -1191,6 +1286,17 @@ TEST(path_utils, FrameRange)
   PATH_FRAME_RANGE("", 100, 200, 1, "100-200");
   PATH_FRAME_RANGE("", 123, 321, 4, "0123-0321");
   PATH_FRAME_RANGE("", 1, 0, 20, "00000000000000000001-00000000000000000000");
+
+  /* No room to add the digits, the path is left unchanged. */
+  {
+    char path[8 + 5];
+    memset(path, 0xff, sizeof(path));
+    path[sizeof(path) - 1] = '\0';
+    BLI_strncpy(path, "test_ab", 8);
+    EXPECT_FALSE(BLI_path_frame_range(path, 8, 1, 2, 4));
+    EXPECT_STREQ(path, "test_ab");
+    EXPECT_STREQ(path + 8, "\xff\xff\xff\xff");
+  }
 }
 #undef PATH_FRAME_RANGE
 
@@ -1576,12 +1682,6 @@ TEST(path_util, SlashNative)
   } \
   void(0)
 
-#ifdef WIN32
-#  define ABS_PREFIX "C:"
-#else
-#  define ABS_PREFIX ""
-#endif
-
 TEST(path_utils, RelPath_Simple)
 {
   PATH_REL(ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/foo/bar/", "//blender.blend");
@@ -1590,6 +1690,26 @@ TEST(path_utils, RelPath_Simple)
 TEST(path_utils, RelPath_SimpleSubdir)
 {
   PATH_REL(ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/foo/bar", "//bar/blender.blend");
+}
+
+TEST(path_utils, RelPath_SameDir)
+{
+  PATH_REL(ABS_PREFIX "/foo/bar", ABS_PREFIX "/foo/bar/", "//");
+  PATH_REL(ABS_PREFIX "/foo/bar/", ABS_PREFIX "/foo/bar/", "//");
+}
+
+TEST(path_utils, RelPath_ParentDir)
+{
+  /* Only entire directory names match, not any prefix. */
+  PATH_REL(ABS_PREFIX "/foo/baz/blender.blend", ABS_PREFIX "/foo/bar/", "//../baz/blender.blend");
+  PATH_REL(
+      ABS_PREFIX "/foo/barz/blender.blend", ABS_PREFIX "/foo/bar/", "//../barz/blender.blend");
+}
+
+TEST(path_utils, RelPath_NoCommonRoot)
+{
+  /* Relative paths are left unchanged, there is no common root to be relative to. */
+  PATH_REL("blender.blend", ABS_PREFIX "/foo/bar/", "blender.blend");
 }
 
 TEST(path_utils, RelPath_BufferOverflowRoot)
@@ -1626,7 +1746,117 @@ TEST(path_utils, RelPath_BufferOverflowSubdir)
 }
 
 #undef PATH_REL
-#undef ABS_PREFIX
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Tests for: #BLI_path_abs
+ * \{ */
+
+#define PATH_ABS(rel_path, base_path, abs_path_expect, result_expect) \
+  { \
+    char path[FILE_MAX]; \
+    const char *base_path_test = base_path; \
+    STRNCPY(path, rel_path); \
+    if (SEP == '\\') { \
+      base_path_test = str_replace_char_strdup(base_path_test, '/', '\\'); \
+    } \
+    const bool result_test = BLI_path_abs(path, base_path_test); \
+    if (SEP == '\\') { \
+      BLI_string_replace_char(path, '\\', '/'); \
+      free((void *)base_path_test); \
+    } \
+    EXPECT_STREQ(path, abs_path_expect); \
+    EXPECT_EQ(result_test, result_expect); \
+  } \
+  void(0)
+
+TEST(path_utils, AbsPath_Simple)
+{
+  PATH_ABS("//a.png", ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/foo/bar/a.png", true);
+  PATH_ABS("//a/b.png", ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/foo/bar/a/b.png", true);
+}
+
+TEST(path_utils, AbsPath_BaseDir)
+{
+  /* The last component of the base is ignored. */
+  PATH_ABS("//a.png", ABS_PREFIX "/foo/bar/", ABS_PREFIX "/foo/bar/a.png", true);
+  PATH_ABS("//a.png", ABS_PREFIX "/foo/bar", ABS_PREFIX "/foo/a.png", true);
+  PATH_ABS("//a.png", ABS_PREFIX "/blender.blend", ABS_PREFIX "/a.png", true);
+}
+
+TEST(path_utils, AbsPath_PrefixOnly)
+{
+  PATH_ABS("//", ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/foo/bar/", true);
+  PATH_ABS("///", ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/foo/bar/", true);
+  PATH_ABS("//", "", "", true);
+}
+
+TEST(path_utils, AbsPath_ParentDir)
+{
+  PATH_ABS("//../a.png", ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/foo/a.png", true);
+  PATH_ABS("//../../../a.png", ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/a.png", true);
+}
+
+TEST(path_utils, AbsPath_BackSlash)
+{
+  PATH_ABS("//a\\b.png", ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/foo/bar/a/b.png", true);
+}
+
+TEST(path_utils, AbsPath_NotRelative)
+{
+  /* Absolute paths are returned unchanged. */
+  PATH_ABS(
+      ABS_PREFIX "/a/b.png", ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/a/b.png", false);
+}
+
+#ifndef WIN32
+TEST(path_utils, AbsPath_Win32DriveOnPosix)
+{
+  PATH_ABS("C:\\foo.JPG", "/foo/bar/blender.blend", "/c/foo.JPG", false);
+}
+#endif
+
+TEST(path_utils, AbsPath_ExtraSlashes)
+{
+  PATH_ABS("///a.png", ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/foo/bar/a.png", true);
+  PATH_ABS("////a.png", ABS_PREFIX "/foo/bar/blender.blend", ABS_PREFIX "/foo/bar/a.png", true);
+}
+
+TEST(path_utils, AbsPath_NoBaseDir)
+{
+  PATH_ABS("//a.png", "", "a.png", true);
+  PATH_ABS("//a/b.png", "", "a/b.png", true);
+  PATH_ABS("//a.png", "blender.blend", "a.png", true);
+  PATH_ABS("//../a.png", "", "../a.png", true);
+}
+
+TEST(path_utils, AbsPath_NoBaseDirExtraSlashes)
+{
+  /* Must not become an absolute path. */
+  PATH_ABS("///a.png", "", "a.png", true);
+  PATH_ABS("////a.png", "", "a.png", true);
+  PATH_ABS("///a.png", "blender.blend", "a.png", true);
+  PATH_ABS("///", "", "", true);
+}
+
+TEST(path_utils, AbsPath_BufferOverflow)
+{
+  const char *base_dir = ABS_PREFIX "/foo/bar/";
+  char rel_path_in[FILE_MAX];
+  for (int i = STRNCPY_RLEN(rel_path_in, "//"); i < FILE_MAX - 1; i++) {
+    rel_path_in[i] = 'A';
+  }
+  rel_path_in[FILE_MAX - 1] = '\0';
+  char abs_path_out[FILE_MAX];
+  for (int i = STRNCPY_RLEN(abs_path_out, base_dir); i < FILE_MAX - 1; i++) {
+    abs_path_out[i] = 'A';
+  }
+  abs_path_out[FILE_MAX - 1] = '\0';
+  PATH_ABS(rel_path_in, ABS_PREFIX "/foo/bar/blender.blend", abs_path_out, true);
+}
+
+#undef PATH_ABS
 
 /** \} */
 
@@ -1694,6 +1924,10 @@ TEST(path_utils, PathIsAbsFromCwd)
 TEST(path_utils, Contains)
 {
   EXPECT_TRUE(BLI_path_contains("/some/path", "/some/path")) << "A path contains itself";
+  EXPECT_TRUE(BLI_path_contains("/some/path/", "/some/path"))
+      << "A trailing slash on the container makes no difference";
+  EXPECT_TRUE(BLI_path_contains("/some/path", "/some/path/"))
+      << "A trailing slash on the containee makes no difference";
   EXPECT_TRUE(BLI_path_contains("/some/path", "/some/path/inside"))
       << "A path contains its subdirectory";
   EXPECT_TRUE(BLI_path_contains("/some/path", "/some/path/../path/inside"))
@@ -1711,6 +1945,7 @@ TEST(path_utils, Contains)
       << "Just sharing a suffix is not enough, path semantics should be followed";
   EXPECT_FALSE(BLI_path_contains("/some/path", "./contents"))
       << "Relative paths are not supported";
+  EXPECT_FALSE(BLI_path_contains("", "/some/path")) << "Empty container path contains nothing";
 }
 
 #ifdef WIN32
@@ -1718,8 +1953,98 @@ TEST(path_utils, Contains_Windows_case_insensitive)
 {
   EXPECT_TRUE(BLI_path_contains("C:\\some\\path", "c:\\SOME\\path\\inside"))
       << "On Windows path comparison should ignore case";
+  EXPECT_TRUE(BLI_path_contains("\\\\Server\\Share", "\\\\server/SHARE\\inside"))
+      << "On Windows UNC server and share should ignore case and slash direction";
+  EXPECT_TRUE(BLI_path_contains("\\\\server\\share", "\\\\server\\share"))
+      << "A UNC share contains itself";
+  EXPECT_FALSE(BLI_path_contains("\\\\server\\share", "\\\\server\\other\\inside"))
+      << "Different UNC shares";
+  EXPECT_FALSE(BLI_path_relative_to("\\\\server", "\\\\server\\share\\", true, nullptr, 0))
+      << "A UNC server is not a parent of its shares";
 }
 #endif /* WIN32 */
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Tests for: #BLI_path_relative_to
+ * \{ */
+
+TEST(path_utils, RelativeTo)
+{
+  char relative[FILE_MAX];
+
+  EXPECT_TRUE(BLI_path_relative_to("/some/path", "/some/path", false, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, "") << "Path is relative to itself";
+
+  EXPECT_TRUE(
+      BLI_path_relative_to("/some/path", "/some/path/", false, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, "") << "Trailing slash makes no difference";
+
+  EXPECT_TRUE(
+      BLI_path_relative_to("/some/path/inside", "/some/path", false, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, "inside");
+
+  EXPECT_TRUE(
+      BLI_path_relative_to("/some/path/in/side", "/some/path/", false, relative, sizeof(relative)))
+      << "Trailing slash on base makes no difference";
+  EXPECT_STREQ(relative, "in" SEP_STR "side");
+
+  EXPECT_TRUE(BLI_path_relative_to(
+      "/some/path/../path/inside", "/some/path", false, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, "inside") << "Relative path is normalized";
+
+  STRNCPY(relative, "uninitialized");
+  EXPECT_FALSE(
+      BLI_path_relative_to("/some/path_library", "/some/path", false, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, "");
+
+  STRNCPY(relative, "uninitialized");
+  EXPECT_FALSE(
+      BLI_path_relative_to("/some/outside", "/some/path", false, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, "");
+
+  EXPECT_FALSE(BLI_path_relative_to("//inside", "/some/path", true, relative, sizeof(relative)))
+      << "Blend file relative paths are not supported";
+
+#ifdef WIN32
+  /* Case insensitive on Windows only. */
+  EXPECT_TRUE(BLI_path_relative_to(
+      "c:\\SOME\\path\\InSide", "C:\\some\\path", false, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, "InSide") << "Case insensitive on Windows";
+
+  EXPECT_FALSE(BLI_path_relative_to(
+      "D:\\some\\path\\inside", "C:\\some\\path", true, relative, sizeof(relative)))
+      << "Another drive has no common root";
+#endif
+}
+
+TEST(path_utils, RelativeTo_walk_up)
+{
+  char relative[FILE_MAX];
+
+  EXPECT_TRUE(
+      BLI_path_relative_to("/some/path/inside", "/some/path", true, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, "inside");
+
+  EXPECT_TRUE(BLI_path_relative_to("/some/path", "/some/path", true, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, "") << "Equal paths";
+
+  EXPECT_TRUE(
+      BLI_path_relative_to("/some/outside", "/some/path", true, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, ".." SEP_STR "outside");
+
+  EXPECT_TRUE(
+      BLI_path_relative_to("/some/path_library", "/some/path", true, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, ".." SEP_STR "path_library") << "Sibling path";
+
+  EXPECT_TRUE(BLI_path_relative_to("/a/b/c/d", "/a/x/y", true, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, ".." SEP_STR ".." SEP_STR "b" SEP_STR "c" SEP_STR "d");
+
+  EXPECT_TRUE(
+      BLI_path_relative_to("/some", "/some/path/inside", true, relative, sizeof(relative)));
+  EXPECT_STREQ(relative, ".." SEP_STR ".." SEP_STR) << "Parent of the base directory";
+}
 
 /** \} */
 
@@ -1814,5 +2139,7 @@ TEST(path_utils, HasHiddenComponents_Performance)
 #endif
 
 /** \} */
+
+#undef ABS_PREFIX
 
 }  // namespace blender

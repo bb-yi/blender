@@ -12,8 +12,8 @@ VERTEX_SHADER_CREATE_INFO(overlay_outline_prepass_wire)
 #include "draw_view_lib.glsl"
 #include "gpu_shader_attribute_load_lib.glsl"
 #include "gpu_shader_index_load_lib.glsl"
-#include "gpu_shader_math_safe_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_safe.bsl.hh"
+#include "gpu_shader_utildefines.bsl.hh"
 
 uint outline_colorid_get()
 {
@@ -23,14 +23,10 @@ uint outline_colorid_get()
   if (is_transform) {
     return 0u; /* theme.colors.transform */
   }
-  else if (is_active) {
+  if (is_active) {
     return 3u; /* theme.colors.active */
   }
-  else {
-    return 1u; /* theme.colors.object_select */
-  }
-
-  return 0u;
+  return 1u; /* theme.colors.object_select */
 }
 
 struct VertIn {

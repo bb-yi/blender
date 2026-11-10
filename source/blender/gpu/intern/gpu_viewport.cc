@@ -10,9 +10,9 @@
 
 #include <cstring>
 
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_c.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_rect.h"
+#include "BLI_rect.hh"
 
 #include "BKE_colortools.hh"
 
@@ -69,11 +69,13 @@ struct GPUViewport {
   gpu::Texture *depth_tx = nullptr;
   /** Compositing framebuffer for stereo viewport. */
   gpu::FrameBuffer *stereo_comp_fb = nullptr;
-  /** Color render and overlay frame-buffers for drawing outside of DRW module.
+  /**
+   * Color render and overlay frame-buffers for drawing outside of DRW module.
    * The render framebuffer is expected to be in the linear space and viewport will perform color
    * management on it to bring it to the display space.
    * The overlay frame-buffer is expected to be in the display space and viewport does not do any
-   * color management on it. */
+   * color management on it.
+   */
   gpu::FrameBuffer *render_fb = nullptr;
   gpu::FrameBuffer *overlay_fb = nullptr;
 
@@ -284,6 +286,11 @@ void GPU_viewport_colorspace_set(GPUViewport *viewport,
       &viewport->display_settings, viewport->view_settings.view_transform);
 }
 
+void GPU_viewport_colorspace_clear(GPUViewport *viewport)
+{
+  viewport->do_color_management = false;
+}
+
 void GPU_viewport_stereo_composite(GPUViewport *viewport, Stereo3dFormat *stereo_format)
 {
   if (!ELEM(stereo_format->display_mode, S3D_DISPLAY_ANAGLYPH, S3D_DISPLAY_INTERLACE)) {
@@ -304,6 +311,8 @@ void GPU_viewport_stereo_composite(GPUViewport *viewport, Stereo3dFormat *stereo
 
   GPUVertFormat *vert_format = immVertexFormat();
   uint pos = GPU_vertformat_attr_add(vert_format, "pos", gpu::VertAttrType::SFLOAT_32_32);
+  uint tex_coord = GPU_vertformat_attr_add(
+      vert_format, "texCoord", gpu::VertAttrType::SFLOAT_32_32);
   GPU_framebuffer_bind(viewport->stereo_comp_fb);
   GPU_matrix_push();
   GPU_matrix_push_projection();
@@ -335,9 +344,13 @@ void GPU_viewport_stereo_composite(GPUViewport *viewport, Stereo3dFormat *stereo
 
   immBegin(GPU_PRIM_TRI_STRIP, 4);
 
+  immAttr2f(tex_coord, 0.0f, 0.0f);
   immVertex2f(pos, -1.0f, -1.0f);
+  immAttr2f(tex_coord, 1.0f, 0.0f);
   immVertex2f(pos, 1.0f, -1.0f);
+  immAttr2f(tex_coord, 0.0f, 1.0f);
   immVertex2f(pos, -1.0f, 1.0f);
+  immAttr2f(tex_coord, 1.0f, 1.0f);
   immVertex2f(pos, 1.0f, 1.0f);
 
   immEnd();

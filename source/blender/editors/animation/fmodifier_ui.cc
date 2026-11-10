@@ -23,9 +23,9 @@
 
 #include "BLT_translation.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 #include "BKE_fcurve.hh"
@@ -215,9 +215,6 @@ static PanelType *fmodifier_subpanel_register(ARegionType *region_type,
 /** \name General UI Callbacks and Drawing
  * \{ */
 
-#define B_REDR 1
-#define B_FMODIFIER_REDRAW 20
-
 /* Callback to remove the given modifier. */
 struct FModifierDeleteContext {
   ID *owner_id;
@@ -328,7 +325,6 @@ static void fmodifier_panel_header(const bContext *C, Panel *panel)
                                  0.0,
                                  0.0,
                                  TIP_("Delete Modifier"));
-  button_retval_set(but, B_REDR);
   FModifierDeleteContext *ctx = MEM_new_uninitialized<FModifierDeleteContext>(__func__);
   ctx->owner_id = owner_id;
   ctx->modifiers = fmodifier_list_space_specific(C);
@@ -485,7 +481,7 @@ static void cycles_panel_draw(const bContext *C, Panel *panel)
   layout.use_property_decorate_set(false);
 
   if (fcm->flag & FMODIFIER_FLAG_DISABLED) {
-    layout.label("Modifier must be first in the stack.", ICON_ERROR);
+    layout.label("Modifier must be first in the stack.", ICON_STATUS_ERROR);
   }
 
   /* Before. */
@@ -623,11 +619,12 @@ static void fmod_envelope_addpoint_cb(bContext *C, void *fcm_dv, void * /*arg*/)
 
     env->totvert = 1;
   }
+  WM_event_add_notifier(C, NC_ANIMATION, nullptr);
 }
 
 /* callback to remove envelope data point */
 /* TODO: should we have a separate file for things like this? */
-static void fmod_envelope_deletepoint_cb(bContext * /*C*/, void *fcm_dv, void *ind_v)
+static void fmod_envelope_deletepoint_cb(bContext *C, void *fcm_dv, void *ind_v)
 {
   FMod_Envelope *env = static_cast<FMod_Envelope *>(fcm_dv);
   FCM_EnvelopeData *fedn;
@@ -653,6 +650,7 @@ static void fmod_envelope_deletepoint_cb(bContext * /*C*/, void *fcm_dv, void *i
     MEM_SAFE_DELETE(env->data);
     env->totvert = 0;
   }
+  WM_event_add_notifier(C, NC_ANIMATION, nullptr);
 }
 
 /* draw settings for envelope modifier */
@@ -690,7 +688,6 @@ static void envelope_panel_draw(const bContext *C, Panel *panel)
                              0,
                              0,
                              TIP_("Add a new control-point to the envelope on the current frame"));
-  button_retval_set(but, B_FMODIFIER_REDRAW);
   button_func_set(but, fmod_envelope_addpoint_cb, env, nullptr);
 
   col = &layout.column(false);
@@ -720,7 +717,6 @@ static void envelope_panel_draw(const bContext *C, Panel *panel)
                        0.0,
                        0.0,
                        TIP_("Delete envelope control point"));
-    button_retval_set(but, B_FMODIFIER_REDRAW);
     button_func_set(but, fmod_envelope_deletepoint_cb, env, POINTER_FROM_INT(i));
     block_align_begin(block);
   }
@@ -873,7 +869,7 @@ static void smooth_panel_draw(const bContext *C, Panel *panel)
   layout.use_property_decorate_set(false);
 
   if (fcm->flag & FMODIFIER_FLAG_DISABLED) {
-    layout.label("Modifier must be first in the stack.", ICON_ERROR);
+    layout.label_multiline("Modifier must be first in the stack.", ICON_STATUS_ERROR);
   }
 
   ui::Layout &col = layout.column(false);
@@ -927,7 +923,7 @@ void ANIM_fmodifier_panels(const bContext *C,
   }
   else {
     /* Assuming there's only one group of instanced panels, update the custom data pointers. */
-    Panel *panel = static_cast<Panel *>(region->panels.first);
+    Panel *panel = region->panels.first();
     for (FModifier &fcm : *fmodifiers) {
 
       /* Move to the next instanced panel corresponding to the next modifier. */
@@ -991,7 +987,7 @@ bool ANIM_fmodifiers_copy_to_buf(ListBaseT<FModifier> *modifiers, bool active)
   bool ok = true;
 
   /* sanity checks */
-  if (ELEM(nullptr, modifiers, modifiers->first)) {
+  if (ELEM(nullptr, modifiers, modifiers->first())) {
     return false;
   }
 

@@ -6,7 +6,7 @@
  * \ingroup edanimation
  */
 
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 #include "DNA_anim_types.h"
 #include "DNA_gpencil_legacy_types.h"
@@ -19,11 +19,11 @@
 #include "DNA_userdef_types.h"
 #include "DNA_workspace_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_rect.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_rect.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 #include "BKE_curve.hh"
@@ -31,6 +31,8 @@
 #include "BKE_global.hh"
 #include "BKE_mask.hh"
 #include "BKE_nla.hh"
+#include "BKE_scene_context.hh"
+#include "BKE_unit.hh"
 
 #include "ED_anim_api.hh"
 #include "ED_keyframes_edit.hh"
@@ -644,38 +646,59 @@ float ANIM_unit_mapping_get_factor(Scene *scene, ID *id, FCurve *fcu, short flag
   /* TODO: change the pointer parameters to references, as this function should not be called
    * without an animated ID or a scene (to get the preferred units). */
 
-  if (!id || !fcu || !fcu->rna_path || !scene) {
+  if (!id || !fcu || !scene) {
     /* Not enough information to do the remapping, so just show the data as-is. */
+    return 1.0f;
+  }
+
+  const ParsedRNAPathRef rna_path = fcu->rna_path_parsed();
+  if (rna_path.is_empty()) {
     return 1.0f;
   }
 
   PointerRNA ptr;
   PropertyRNA *prop;
   PointerRNA id_ptr = RNA_id_pointer_create(id);
-  if (!RNA_path_resolve_property(&id_ptr, fcu->rna_path, &ptr, &prop)) {
+  if (!RNA_path_resolve_property(&id_ptr, rna_path, &ptr, &prop)) {
     /* Without resolving the property, its type & subtype are unknown; remapping is impossible. */
     return 1.0f;
   }
 
   const PropertyUnit prop_unit = PropertyUnit(RNA_SUBTYPE_UNIT(RNA_property_subtype(prop)));
 
+  UnitConversion unit_conversion;
+  const int b_unit = RNA_SUBTYPE_UNIT_VALUE(prop_unit);
+
   switch (prop_unit) {
+    /* Units not affected by the scene's unit scale. */
     case PROP_UNIT_ROTATION:
-      if (scene->unit.system_rotation == USER_UNIT_ROT_RADIANS) {
-        return 1.0f;
+    case PROP_UNIT_TIME:
+      unit_conversion = BKE_unit_preferred_conversion_get(scene->unit, b_unit);
+      break;
+    /* Units that BKE_unit_value_scale() also scales by the scene's unit scale.
+     * Assumption: BKE_unit_value_scale() is linear and zero maps to zero for these
+     * unit types, so the scaled value can be used as a scaler factor. */
+    case PROP_UNIT_LENGTH:
+    case PROP_UNIT_MASS: {
+      unit_conversion = BKE_unit_preferred_conversion_get(scene->unit, b_unit);
+      const double scene_scale = BKE_unit_value_scale(scene->unit, b_unit, 1.0);
+      if (scene_scale != 0.0) {
+        unit_conversion.scalar /= scene_scale;
       }
-
-      if (flag & ANIM_UNITCONV_RESTORE) {
-        return DEG2RADF(1.0f);
-      }
-      return RAD2DEGF(1.0f);
-
+      break;
+    }
     default:
-      /* TODO: other rotation types here as necessary */
+      /* Other units are not scaled. */
       break;
   }
+  BLI_assert_msg(unit_conversion.bias == 0.0,
+                 "Only linear units (without bias) are supported for now.");
+  BLI_assert(unit_conversion.scalar != 0.0);
 
-  return 1.0f;
+  if (flag & ANIM_UNITCONV_RESTORE) {
+    return float(unit_conversion.scalar);
+  }
+  return float(1.0 / unit_conversion.scalar);
 }
 
 static bool find_prev_next_keyframes(bContext *C, int *r_nextfra, int *r_prevfra)
@@ -777,8 +800,7 @@ static bool find_prev_next_keyframes(bContext *C, int *r_nextfra, int *r_prevfra
 
 void ANIM_center_frame(bContext *C, int smooth_viewtx)
 {
-  const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
-  Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  Scene *scene = bke::scene_or_sequencer_scene_from_context(*C);
   if (!scene) {
     return;
   }

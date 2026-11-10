@@ -4,7 +4,7 @@
 
 #ifdef GPU_SHADER
 #  pragma once
-#  include "BLI_utildefines_variadic.h"
+#  include "BLI_utildefines_variadic.hh"
 
 #  include "gpu_shader_compat.hh"
 
@@ -53,25 +53,6 @@ GPU_SHADER_NAMED_INTERFACE_INFO(eevee_bake_geom_iface, bake_interp)
 FLAT(float3, Ng)
 FLAT(int, primitive_id)
 GPU_SHADER_NAMED_INTERFACE_END(bake_interp)
-
-GPU_SHADER_CREATE_INFO(eevee_geom_bake_mesh)
-TYPEDEF_SOURCE("eevee_defines.hh")
-DEFINE("MAT_GEOM_MESH")
-VERTEX_IN(0, float3, pos)
-VERTEX_IN(1, float3, nor)
-VERTEX_IN(2, float2, bake_uv)
-VERTEX_IN(3, float3, geom_nor)
-VERTEX_IN(4, int, primitive_id)
-VERTEX_SOURCE("eevee_geom_bake_mesh_vert.glsl")
-VERTEX_OUT(eevee_surf_iface)
-VERTEX_OUT(eevee_surf_flat_iface)
-VERTEX_OUT(eevee_bake_geom_iface)
-VERTEX_OUT(eevee_surf_disp_iface)
-ADDITIONAL_INFO(draw_modelmat)
-ADDITIONAL_INFO(draw_object_infos)
-ADDITIONAL_INFO(draw_resource_id_varying)
-ADDITIONAL_INFO(draw_view)
-GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_geom_bake_mesh_basic)
 TYPEDEF_SOURCE("eevee_defines.hh")

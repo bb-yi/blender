@@ -256,7 +256,17 @@ static PyObject *pygpu_state_viewport_set(PyObject * /*self*/, PyObject *args)
   BPYGPU_IS_INIT_OR_ERROR_OBJ;
 
   int x, y, xsize, ysize;
-  if (!PyArg_ParseTuple(args, "iiii:viewport_set", &x, &y, &xsize, &ysize)) {
+  if (!PyArg_ParseTuple(args,
+                        "i" /* `x` */
+                        "i" /* `y` */
+                        "i" /* `xsize` */
+                        "i" /* `ysize` */
+                        ":viewport_set",
+                        &x,
+                        &y,
+                        &xsize,
+                        &ysize))
+  {
     return nullptr;
   }
 
@@ -310,7 +320,17 @@ static PyObject *pygpu_state_scissor_set(PyObject * /*self*/, PyObject *args)
   BPYGPU_IS_INIT_OR_ERROR_OBJ;
 
   int x, y, xsize, ysize;
-  if (!PyArg_ParseTuple(args, "iiii:scissor_set", &x, &y, &xsize, &ysize)) {
+  if (!PyArg_ParseTuple(args,
+                        "i" /* `x` */
+                        "i" /* `y` */
+                        "i" /* `xsize` */
+                        "i" /* `ysize` */
+                        ":scissor_set",
+                        &x,
+                        &y,
+                        &xsize,
+                        &ysize))
+  {
     return nullptr;
   }
 
@@ -458,7 +478,17 @@ static PyObject *pygpu_state_color_mask_set(PyObject * /*self*/, PyObject *args)
   BPYGPU_IS_INIT_OR_ERROR_OBJ;
 
   int r, g, b, a;
-  if (!PyArg_ParseTuple(args, "pppp:color_mask_set", &r, &g, &b, &a)) {
+  if (!PyArg_ParseTuple(args,
+                        "p" /* `r` */
+                        "p" /* `g` */
+                        "p" /* `b` */
+                        "p" /* `a` */
+                        ":color_mask_set",
+                        &r,
+                        &g,
+                        &b,
+                        &a))
+  {
     return nullptr;
   }
 

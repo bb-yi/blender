@@ -10,7 +10,7 @@
 #pragma once
 
 #include "BLI_enum_flags.hh"
-#include "BLI_math_constants.h"
+#include "BLI_math_constants.hh"
 #include "BLI_math_matrix_types.hh"
 
 #include "DNA_object_enums.h"
@@ -567,7 +567,7 @@ struct Object {
   /** Transformation settings and transform locks. */
   eObject_TransFlag transflag = {};
   eObject_ProtectFlag protectflag = OB_LOCK_ROT4D;
-  eObject_Axis trackflag = OB_POSX, upflag = OB_POSY;
+  eObject_Axis trackflag = OB_POSY, upflag = OB_POSZ;
   /** Used for DopeSheet filtering settings (expanded/collapsed). */
   eObject_NlaFlag nlaflag = {};
 

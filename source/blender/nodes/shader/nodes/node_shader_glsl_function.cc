@@ -39,15 +39,15 @@
 #include "DNA_material_types.h"
 #include "DNA_text_types.h"
 
-#include "BLI_fileops.h"
-#include "BLI_ghash.h"
+#include "BLI_fileops.hh"
+#include "BLI_ghash.hh"
 #include "BLI_hash.hh"
 #include "BLI_map.hh"
 #include "BLI_memory_utils.hh"
 #include "BLI_path_utils.hh"
 #include "BLI_set.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 #include "CLG_log.h"
 
 #include "GPU_capabilities.hh"
@@ -11543,7 +11543,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       editor.enabled_set(is_internal && has_script && ID_IS_EDITABLE(node.id));
       if (C != nullptr)
       {
-        editor.textbox(C, ptr, "source_code", std::nullopt, 10);
+        editor.textbox(C, ptr, "source_code", std::nullopt, std::nullopt, 10);
       }
       else
       {
@@ -11727,7 +11727,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
             /* Let graph linking create the placeholder only when it is consumed. Helper
              * specialization can fail before the wrapper is linked. */
             stack->link = nullptr;
-            std::fill_n(stack->vec, 4, 0.0f);
+            stack->value = GPU_node_stack_default_value(stack->type);
             continue;
           }
 
@@ -11856,6 +11856,169 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
 
       sync_sockets_closure(*snode, *closure_input_node, closure_output_node, nullptr, params.link.fromsock);
       return true;
+    }
+
+    /* Only transform the material's generated copy. The accepted Text, Meta, socket defaults and
+     * standalone validation source retain the public GLSL API. In 5.3, node-tree state is passed
+     * explicitly, including through user helper functions and captured closure callbacks. */
+    static std::string glsl_material_context_source(
+      const StringRef source,
+      Set<std::string>& context_functions,
+      const StringRef wrapper_name,
+      const std::string& kg_name,
+      const std::string& sd_name)
+    {
+      const Vector<GLSLToken> tokens = tokenize_glsl_source(source);
+      Set<int64_t> declarations;
+      Set<std::string> definitions;
+      int brace_depth = 0;
+      for (int i = 0; i < tokens.size(); i++) {
+        const GLSLToken& token = tokens[i];
+        if (token.kind != GLSLToken::Kind::Punctuation) {
+          continue;
+        }
+        if (token.punctuation == '{') {
+          brace_depth++;
+        }
+        else if (token.punctuation == '}') {
+          brace_depth--;
+        }
+        else if (token.punctuation == '(' && brace_depth == 0 && i >= 2 &&
+                 tokens[i - 1].kind == GLSLToken::Kind::Identifier &&
+                 tokens[i - 2].kind == GLSLToken::Kind::Identifier)
+        {
+          int depth = 1;
+          int j = i + 1;
+          for (; j < tokens.size() && depth != 0; j++) {
+            if (tokens[j].kind == GLSLToken::Kind::Punctuation) {
+              depth += tokens[j].punctuation == '(';
+              depth -= tokens[j].punctuation == ')';
+            }
+          }
+          if (depth == 0 && j < tokens.size() &&
+              tokens[j].kind == GLSLToken::Kind::Punctuation &&
+              ELEM(tokens[j].punctuation, '{', ';'))
+          {
+            declarations.add(token.source_start);
+            context_functions.add(tokens[i - 1].text);
+            if (tokens[j].punctuation == '{') {
+              definitions.add(tokens[i - 1].text);
+            }
+          }
+        }
+      }
+
+      struct Edit {
+        int64_t start;
+        int64_t length;
+        std::string text;
+      };
+      Vector<Edit> edits;
+      /* Include macro bodies: a call inside a user macro needs the enclosing function's context
+       * as well. Object-like namespace aliases have no opening parenthesis and stay unchanged. */
+      const Vector<GLSLToken> call_tokens = tokenize_glsl_source(source, true);
+      for (int i = 1; i + 1 < call_tokens.size(); i++) {
+        const GLSLToken& token = call_tokens[i];
+        const GLSLToken& name = call_tokens[i - 1];
+        if (token.kind != GLSLToken::Kind::Punctuation || token.punctuation != '(' ||
+            name.kind != GLSLToken::Kind::Identifier || !context_functions.contains(name.text))
+        {
+          continue;
+        }
+        const bool declaration = declarations.contains(token.source_start);
+        /* This tokenizer omits numeric literals. Inspect the source so f(0) is not mistaken
+         * for f(), while still accepting comment-only empty argument lists. */
+        int64_t argument_start = token.source_end;
+        while (argument_start < source.size()) {
+          const char c = source[argument_start];
+          if (std::isspace(static_cast<unsigned char>(c))) {
+            argument_start++;
+          }
+          else if (c == '/' && argument_start + 1 < source.size() &&
+                   source[argument_start + 1] == '*')
+          {
+            argument_start += 2;
+            while (argument_start + 1 < source.size() &&
+                   !(source[argument_start] == '*' && source[argument_start + 1] == '/'))
+            {
+              argument_start++;
+            }
+            argument_start = std::min(argument_start + 2, source.size());
+          }
+          else if (c == '/' && argument_start + 1 < source.size() &&
+                   source[argument_start + 1] == '/')
+          {
+            while (argument_start < source.size() && source[argument_start] != '\n') {
+              argument_start++;
+            }
+          }
+          else {
+            break;
+          }
+        }
+        const bool empty = argument_start < source.size() && source[argument_start] == ')';
+        const bool void_parameter = declaration && call_tokens[i + 1].text == "void" &&
+                                    i + 2 < call_tokens.size() &&
+                                    call_tokens[i + 2].punctuation == ')';
+        const std::string parameters = declaration ?
+          "KernelGlobals " + kg_name +
+            (definitions.contains(name.text) ? ", inout ShadingData " : ", ShadingData ") + sd_name :
+          kg_name + ", " + sd_name;
+        if (declaration && name.text == wrapper_name) {
+          /* GPU_stack_link_custom appends hidden inputs before the output sockets. */
+          int depth = 0;
+          for (int j = i + 1; j < call_tokens.size(); j++) {
+            const GLSLToken& arg = call_tokens[j];
+            if (depth == 0 && arg.kind == GLSLToken::Kind::Identifier && arg.text == "out") {
+              edits.append({arg.source_start, 0, parameters + ", "});
+              break;
+            }
+            if (arg.kind == GLSLToken::Kind::Punctuation) {
+              if (arg.punctuation == ')' && depth == 0) {
+                edits.append({arg.source_start, 0, (empty ? "" : ", ") + parameters});
+                break;
+              }
+              depth += arg.punctuation == '(';
+              depth -= arg.punctuation == ')';
+            }
+          }
+        }
+        else {
+          edits.append({token.source_end,
+                        void_parameter ? call_tokens[i + 1].source_end - token.source_end : 0,
+                        parameters + (empty || void_parameter ? "" : ", ")});
+        }
+      }
+      std::string result(source);
+      for (int i = edits.size() - 1; i >= 0; i--) {
+        result.replace(edits[i].start, edits[i].length, edits[i].text);
+      }
+      return result;
+    }
+
+    static std::string glsl_material_builtin_context_source(
+      const StringRef source,
+      Set<std::string>& context_functions,
+      const std::string& kg_name,
+      const std::string& sd_name)
+    {
+      std::string result = glsl_material_context_source(
+        source, context_functions, {}, kg_name, sd_name);
+      const auto replace_all = [&](const StringRef from, const std::string& to) {
+        size_t offset = 0;
+        while ((offset = result.find(std::string(from), offset)) != std::string::npos) {
+          result.replace(offset, from.size(), to);
+          offset += to.size();
+        }
+      };
+      replace_all("g_data.", sd_name + ".");
+      replace_all("coordinate_incoming(", "coordinate_incoming(" + kg_name + ", " + sd_name + ", ");
+      replace_all("view_matrices_get()", kg_name + ".view_matrices_get(" + sd_name + ")");
+      replace_all("object_matrices_get()", kg_name + ".object_matrices_get(" + sd_name + ")");
+      replace_all("node_light_probe_color(vec3(0.0), 1.0,",
+                  "node_light_probe_color(vec3(0.0), 1.0, " + kg_name + ", " + sd_name + ",");
+      replace_all("#if defined(CREATE_INFO_eevee_LightprobeRenderData)", "#if 1");
+      return result;
     }
 
     static int gpu_shader_glsl_function(GPUMaterial* mat,
@@ -12008,21 +12171,44 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         }
         return 1;
       }
+      /* Pick hidden identifiers absent from this user's source, including locals and macros. */
+      std::string context_prefix = "npr_material_context_";
+      while (library_source.find(context_prefix) != std::string::npos ||
+             wrapper_source.find(context_prefix) != std::string::npos)
+      {
+        context_prefix += "x";
+      }
+      const std::string kg_name = context_prefix + "kg";
+      const std::string sd_name = context_prefix + "sd";
+      Set<std::string> context_functions;
+      for (const char* name : {"glsl_light_count", "glsl_light_iterator_next", "glsl_light_get",
+                               "glsl_light_shadow", "glsl_light_shadow_raw",
+                               "glsl_light_cast_shadow_raw"})
+      {
+        context_functions.add(name);
+      }
+      for (const std::string& name : parse_result.analysis->function_names) {
+        context_functions.add(name);
+        context_functions.add(parse_result.source_prefix + name);
+      }
       if (parse_result.analysis->uses_geometry_access)
       {
-        const std::string geometry_helper_source = build_glsl_geometry_helper_block();
+        const std::string geometry_helper_source = glsl_material_builtin_context_source(
+          build_glsl_geometry_helper_block(), context_functions, kg_name, sd_name);
         GPU_material_generated_source_add(
           mat, GPU_GLSL_FUNCTION_GEOMETRY_HELPER_FILENAME, {}, geometry_helper_source.c_str());
       }
       if (parse_result.analysis->uses_matrix_access)
       {
-        const std::string matrix_helper_source = build_glsl_matrix_helper_block();
+        const std::string matrix_helper_source = glsl_material_builtin_context_source(
+          build_glsl_matrix_helper_block(), context_functions, kg_name, sd_name);
         GPU_material_generated_source_add(
           mat, GPU_GLSL_FUNCTION_MATRIX_HELPER_FILENAME, {}, matrix_helper_source.c_str());
       }
       if (parse_result.analysis->uses_lightprobe_access)
       {
-        const std::string lightprobe_helper_source = build_glsl_lightprobe_helper_block();
+        const std::string lightprobe_helper_source = glsl_material_builtin_context_source(
+          build_glsl_lightprobe_helper_block(), context_functions, kg_name, sd_name);
         Vector<StringRefNull> lightprobe_helper_dependencies;
         lightprobe_helper_dependencies.append(glsl_light_probe_color_helper_filename);
         GPU_material_generated_source_add(
@@ -12054,6 +12240,10 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
           register_bundle_defaults(*param.bundle, param.name);
         }
       }
+      library_source = glsl_material_context_source(
+        library_source, context_functions, {}, kg_name, sd_name);
+      wrapper_source = glsl_material_context_source(
+        wrapper_source, context_functions, parse_result.wrapper_name, kg_name, sd_name);
       GPU_material_generated_source_add(
         mat,
         parse_result.source_filename.c_str(),
@@ -12068,7 +12258,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         dependencies.append(glsl_light_access_helper_filename);
       }
       dependencies.append(parse_result.source_filename.c_str());
-      eGPUCustomNodeDependencyFlag dependency_flags = GPU_CUSTOM_NODE_DEPENDENCY_NONE;
+      eGPUCustomNodeDependencyFlag dependency_flags = GPU_CUSTOM_NODE_DEPENDENCY_SHADING_CONTEXT;
       if (parse_result.analysis->uses_geometry_access)
       {
         dependency_flags = eGPUCustomNodeDependencyFlag(
@@ -12090,6 +12280,28 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         dependencies,
         wrapper_source.c_str());
 
+      /* The public GLSL boundary keeps its float transport (including integer clamping).
+       * Blender 5.3 sockets are natively typed: retain typed default uniforms, then let
+       * codegen convert their links to the wrapper's transport type. */
+      Vector<std::pair<GPUNodeStack *, GPUType>> transport_stacks;
+      for (GPUNodeStack *stack = in; stack != nullptr && !stack->end; stack++) {
+        if (ELEM(stack->type, GPU_INT, GPU_BOOL)) {
+          if (stack->link == nullptr) {
+            GPU_link(mat,
+                     stack->type == GPU_INT ? "set_int" : "set_bool",
+                     GPU_uniform(*stack),
+                     &stack->link);
+          }
+          transport_stacks.append({stack, stack->type});
+          stack->type = GPU_FLOAT;
+        }
+      }
+      for (GPUNodeStack *stack = out; stack != nullptr && !stack->end; stack++) {
+        if (ELEM(stack->type, GPU_INT, GPU_BOOL)) {
+          transport_stacks.append({stack, stack->type});
+          stack->type = GPU_FLOAT;
+        }
+      }
       const int link_result = GPU_stack_link_custom(mat,
                                                     node,
                                                     parse_result.wrapper_name.c_str(),
@@ -12097,6 +12309,9 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
                                                     dependency_flags,
                                                     in,
                                                     out);
+      for (const auto &[stack, type] : transport_stacks) {
+        stack->type = type;
+      }
       if (link_result == 0)
       {
         if (const std::optional<std::string> helper_name =

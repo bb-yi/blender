@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "node_shader_util.hh"
 
 namespace blender {
@@ -23,7 +27,8 @@ static int node_shader_gpu_shadertorgb(GPUMaterial *mat,
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_SHADER_TO_RGBA);
 
-  return GPU_stack_link(mat, node, "node_shader_to_rgba", in, out);
+  return GPU_stack_link(
+      mat, node, "node_shader_to_rgba", in, out, GPU_kernel_globals(), GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_shader_to_rgb_cc

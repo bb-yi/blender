@@ -15,15 +15,15 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_fileops.h"
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_fileops.hh"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_string_cursor_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_string_cursor_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_curve_types.h"
 #include "DNA_object_types.h"
@@ -42,7 +42,7 @@
 #include "BKE_report.hh"
 #include "BKE_vfont.hh"
 
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "BLT_translation.hh"
 
@@ -572,7 +572,7 @@ static char *font_select_to_buffer(Object *obedit)
 
   const size_t len_utf8 = BLI_str_utf32_as_utf8_len_ex(text_buf, text_buf_len + 1);
   char *buf = MEM_new_array_uninitialized<char>(len_utf8 + 1, __func__);
-  BLI_str_utf32_as_utf8(buf, text_buf, len_utf8);
+  BLI_str_utf32_as_utf8(buf, text_buf, len_utf8 + 1);
   return buf;
 }
 
@@ -913,7 +913,7 @@ void ED_text_to_object(bContext *C, const Text *text, const bool split_lines)
   float offset[3];
   int linenum = 0;
 
-  if (!text || !text->lines.first) {
+  if (!text || !text->lines.first_) {
     return;
   }
 
@@ -944,8 +944,7 @@ void ED_text_to_object(bContext *C, const Text *text, const bool split_lines)
     offset[1] = 0.0f;
     offset[2] = 0.0f;
 
-    txt_add_object(
-        C, static_cast<const TextLine *>(text->lines.first), text->lines.count(), offset);
+    txt_add_object(C, text->lines.first(), text->lines.count(), offset);
   }
 
   DEG_relations_tag_update(bmain);
@@ -1639,7 +1638,7 @@ static wmOperatorStatus change_character_exec(bContext *C, wmOperator *op)
   character += delta;
   CLAMP(character, 0, 255);
 
-  if (character == ef->textbuf[ef->pos - 1]) {
+  if (ELEM(character, 0, ef->textbuf[ef->pos - 1])) {
     return OPERATOR_CANCELLED;
   }
 
@@ -1892,15 +1891,16 @@ static wmOperatorStatus insert_text_exec(bContext *C, wmOperator *op)
   len = BLI_strlen_utf8(inserted_utf8.c_str());
 
   inserted_text = MEM_new_array_zeroed<char32_t>((len + 1), "FONT_insert_text");
-  len = BLI_str_utf8_as_utf32(inserted_text, inserted_utf8.c_str(), MAXTEXT);
+  len = BLI_str_utf8_as_utf32(inserted_text, inserted_utf8.c_str(), len + 1);
 
+  int inserted_len = 0;
   for (a = 0; a < len; a++) {
-    insert_into_textbuf(obedit, inserted_text[a]);
+    inserted_len += insert_into_textbuf(obedit, inserted_text[a]);
   }
 
   MEM_delete(inserted_text);
 
-  kill_selection(obedit, len);
+  kill_selection(obedit, inserted_len);
   text_update_edited(C, obedit, FO_EDIT);
 
   return OPERATOR_FINISHED;
@@ -1961,6 +1961,7 @@ static wmOperatorStatus insert_text_invoke(bContext *C, wmOperator *op, const wm
     }
     else {
       BLI_assert(event->utf8_buf[0]);
+      int inserted_len = 0;
       if (accentcode) {
         if (ef->pos > 0) {
           inserted_text[0] = findaccent(ef->textbuf[ef->pos - 1],
@@ -1971,14 +1972,14 @@ static wmOperatorStatus insert_text_invoke(bContext *C, wmOperator *op, const wm
       }
       else if (event->utf8_buf[0]) {
         inserted_text[0] = BLI_str_utf8_as_unicode_or_error(event->utf8_buf);
-        insert_into_textbuf(obedit, inserted_text[0]);
+        inserted_len = insert_into_textbuf(obedit, inserted_text[0]);
         accentcode = false;
       }
       else {
         BLI_assert(0);
       }
 
-      kill_selection(obedit, 1);
+      kill_selection(obedit, inserted_len);
       text_update_edited(C, obedit, FO_EDIT);
     }
   }
@@ -2438,7 +2439,11 @@ void FONT_OT_case_toggle(wmOperatorType *ot)
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
-/* **************** Open Font ************** */
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Open Font
+ * \{ */
 
 static void font_ui_template_init(bContext *C, wmOperator *op)
 {
@@ -2560,7 +2565,7 @@ void FONT_OT_open(wmOperatorType *ot)
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name Delete Operator
+/** \name Unlink Font Operator
  * \{ */
 
 static wmOperatorStatus font_unlink_exec(bContext *C, wmOperator *op)
@@ -2595,6 +2600,11 @@ void FONT_OT_unlink(wmOperatorType *ot)
   /* API callbacks. */
   ot->exec = font_unlink_exec;
 }
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Select Pick
+ * \{ */
 
 bool ED_curve_editfont_select_pick(
     bContext *C,

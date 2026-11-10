@@ -6,17 +6,17 @@
  * \ingroup spview3d
  */
 
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_matrix_types.hh"
-#include "BLI_math_rotation.h"
+#include "BLI_math_rotation_c.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
+#include "BKE_annotations.h"
 #include "BKE_context.hh"
-#include "BKE_gpencil_legacy.h"
 #include "BKE_layer.hh"
 #include "BKE_report.hh"
 #include "BKE_scene.hh"
@@ -190,7 +190,7 @@ static void ruler_item_remove(bContext *C, wmGizmoGroup *gzgroup, RulerItem *rul
 }
 
 static void ruler_item_as_string(
-    RulerItem *ruler_item, const UnitSettings &unit, char *numstr, size_t numstr_size, int prec)
+    RulerItem *ruler_item, const UnitSettings &unit, char *numstr, size_t numstr_maxncpy, int prec)
 {
   if (ruler_item->flag & RULERITEM_USE_ANGLE) {
     const float ruler_angle = angle_v3v3v3(
@@ -198,22 +198,22 @@ static void ruler_item_as_string(
 
     if (unit.system == USER_UNIT_NONE) {
       BLI_snprintf_utf8(
-          numstr, numstr_size, "%.*f" BLI_STR_UTF8_DEGREE_SIGN, prec, RAD2DEGF(ruler_angle));
+          numstr, numstr_maxncpy, "%.*f" BLI_STR_UTF8_DEGREE_SIGN, prec, RAD2DEGF(ruler_angle));
     }
     else {
       BKE_unit_value_as_string(
-          numstr, numstr_size, double(ruler_angle), prec, B_UNIT_ROTATION, unit, false, true);
+          numstr, numstr_maxncpy, double(ruler_angle), prec, B_UNIT_ROTATION, unit, false, true);
     }
   }
   else {
     const float ruler_len = len_v3v3(ruler_item->co[0], ruler_item->co[2]);
 
     if (unit.system == USER_UNIT_NONE) {
-      BLI_snprintf_utf8(numstr, numstr_size, "%.*f", prec, ruler_len);
+      BLI_snprintf_utf8(numstr, numstr_maxncpy, "%.*f", prec, ruler_len);
     }
     else {
       BKE_unit_value_as_string_scaled(
-          numstr, numstr_size, ruler_len, prec, B_UNIT_LENGTH, unit, false, true);
+          numstr, numstr_maxncpy, ruler_len, prec, B_UNIT_LENGTH, unit, false, true);
     }
   }
 }
@@ -319,11 +319,8 @@ static void ruler_state_set(RulerInfo *ruler_info, int state)
 
 static void view3d_ruler_item_project(RulerInfo *ruler_info, float3 &r_co, const int xy[2])
 {
-  ED_view3d_win_to_3d_int(static_cast<const View3D *>(ruler_info->area->spacedata.first),
-                          ruler_info->region,
-                          r_co,
-                          xy,
-                          r_co);
+  ED_view3d_win_to_3d_int(
+      ruler_info->area->spacedata.first_as<View3D>(), ruler_info->region, r_co, xy, r_co);
 }
 
 /**
@@ -350,7 +347,7 @@ static bool view3d_ruler_item_mousemove(const bContext *C,
     view3d_ruler_item_project(ruler_info, co, mval);
     if (do_thickness && inter->co_index != 1) {
       Scene *scene = DEG_get_input_scene(depsgraph);
-      View3D *v3d = static_cast<View3D *>(ruler_info->area->spacedata.first);
+      View3D *v3d = ruler_info->area->spacedata.first_as<View3D>();
       ed::transform::SnapObjectContext *snap_context = ED_gizmotypes_snap_3d_context_ensure(
           scene, snap_gizmo);
       const float2 mval_fl = {float(mval[0]), float(mval[1])};
@@ -389,7 +386,7 @@ static bool view3d_ruler_item_mousemove(const bContext *C,
       }
     }
     else {
-      View3D *v3d = static_cast<View3D *>(ruler_info->area->spacedata.first);
+      View3D *v3d = ruler_info->area->spacedata.first_as<View3D>();
       if (do_snap) {
         float3 *prev_point = nullptr;
         eSnapMode snap_type;
@@ -505,9 +502,9 @@ static RulerItem *gzgroup_ruler_item_first_get(wmGizmoGroup *gzgroup)
 {
 #ifndef NDEBUG
   RulerInfo *ruler_info = static_cast<RulerInfo *>(gzgroup->customdata);
-  BLI_assert(gzgroup->gizmos.first == ruler_info->snap_data.gizmo);
+  BLI_assert(gzgroup->gizmos.first_ == ruler_info->snap_data.gizmo);
 #endif
-  return reinterpret_cast<RulerItem *>((static_cast<wmGizmo *>(gzgroup->gizmos.first))->next);
+  return reinterpret_cast<RulerItem *>((gzgroup->gizmos.first())->next);
 }
 
 #define RULER_ID "RulerData3D"
@@ -520,7 +517,7 @@ static void view3d_ruler_gpencil_ensure(bContext *C)
   Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   if (scene->gpd == nullptr) {
-    scene->gpd = BKE_gpencil_data_addnew(bmain, "Annotations");
+    scene->gpd = BKE_annotations_data_addnew(bmain, "Annotations");
     DEG_id_tag_update_ex(bmain, &scene->id, ID_RECALC_SYNC_TO_EVAL);
     DEG_relations_tag_update(bmain);
   }
@@ -544,14 +541,14 @@ static bool view3d_ruler_to_gpencil(bContext *C, wmGizmoGroup *gzgroup)
 
   gpl = view3d_ruler_layer_get(gpd);
   if (gpl == nullptr) {
-    gpl = BKE_gpencil_layer_addnew(gpd, ruler_name, false, false);
+    gpl = BKE_annotations_layer_addnew(gpd, ruler_name, false, false);
     copy_v4_v4(gpl->color, U.gpencil_new_layer_col);
     gpl->thickness = 1;
     gpl->flag |= GP_LAYER_HIDE | GP_LAYER_IS_RULER;
   }
 
-  gpf = BKE_gpencil_layer_frame_get(gpl, scene->r.cfra, GP_GETFRAME_ADD_NEW);
-  BKE_gpencil_free_strokes(gpf);
+  gpf = BKE_annotations_layer_frame_get(gpl, scene->r.cfra, GP_GETFRAME_ADD_NEW);
+  BKE_annotations_free_strokes(gpf);
 
   for (ruler_item = gzgroup_ruler_item_first_get(gzgroup); ruler_item;
        ruler_item = reinterpret_cast<RulerItem *>(ruler_item->gz.next))
@@ -605,7 +602,7 @@ static bool view3d_ruler_from_gpencil(const bContext *C, wmGizmoGroup *gzgroup)
     gpl = view3d_ruler_layer_get(scene->gpd);
     if (gpl) {
       bGPDframe *gpf;
-      gpf = BKE_gpencil_layer_frame_get(gpl, scene->r.cfra, GP_GETFRAME_USE_PREV);
+      gpf = BKE_annotations_layer_frame_get(gpl, scene->r.cfra, GP_GETFRAME_USE_PREV);
       if (gpf) {
         for (bGPDstroke &gps : gpf->strokes) {
           bGPDspoint *pt = gps.points;

@@ -6,7 +6,6 @@
 
 #include "usd_armature_utils.hh"
 #include "usd_blend_shape_utils.hh"
-#include "usd_hash_types.hh"
 
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdSkel/animation.h>
@@ -33,11 +32,12 @@
 #include "BKE_report.hh"
 
 #include "BLI_linear_allocator.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_c.hh"
 #include "BLI_set.hh"
 #include "BLI_span.hh"
+#include "BLI_string.hh"
 #include "BLI_vector.hh"
 
 #include "ED_armature.hh"
@@ -639,7 +639,8 @@ void import_blendshapes(Main *bmain,
     }
 
     /* Create the curve for this shape key. */
-    const std::string rna_path = "key_blocks[\"" + blendshape_name.GetString() + "\"].value";
+    const std::string rna_path = "key_blocks[\"" + BLI_str_escape(blendshape_name.GetString()) +
+                                 "\"].value";
     FCurve *fcu = create_fcurve(channelbag, {rna_path, 0}, times.size());
     curves.append(fcu);
   }

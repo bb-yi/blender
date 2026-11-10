@@ -127,23 +127,6 @@ class NodeOperator:
         options={'SKIP_SAVE'},
     )
 
-    @classmethod
-    def description(cls, _context, properties):
-        from nodeitems_builtins import node_tree_group_type
-
-        nodetype = properties["type"]
-        if nodetype in node_tree_group_type.values():
-            for setting in properties.settings:
-                if setting.name == "node_tree":
-                    node_group = eval(setting.value)
-                    if node_group.description:
-                        return node_group.description
-        bl_rna = bpy.types.Node.bl_rna_get_subclass(nodetype)
-        if bl_rna is not None:
-            return tip_(bl_rna.description)
-        else:
-            return ""
-
     # Deselect all nodes in the tree.
     @staticmethod
     def deselect_nodes(context):
@@ -544,8 +527,27 @@ class NodeSwapOperator(NodeOperator):
             new_node.inputs[0].default_value = int(old_selector_value)
 
 
+class SingleNodeOperator:
+    @classmethod
+    def description(cls, _context, properties):
+        from nodeitems_builtins import node_tree_group_type
+
+        nodetype = properties["type"]
+        if nodetype in node_tree_group_type.values():
+            for setting in properties.settings:
+                if setting.name == "node_tree":
+                    node_group = eval(setting.value)
+                    if node_group.description:
+                        return node_group.description
+        bl_rna = bpy.types.Node.bl_rna_get_subclass(nodetype)
+        if bl_rna is not None:
+            return tip_(bl_rna.description)
+        else:
+            return ""
+
+
 # Simple basic operator for adding a node.
-class NODE_OT_add_node(NodeAddOperator, Operator):
+class NODE_OT_add_node(NodeAddOperator, SingleNodeOperator, Operator):
     """Add a node to the active tree"""
     bl_idname = "node.add_node"
     bl_label = "Add Node"
@@ -711,7 +713,7 @@ class NODE_OT_filter_pass_clear_material(Operator):
         return {'FINISHED'}
 
 
-class NODE_OT_swap_node(NodeSwapOperator, Operator):
+class NODE_OT_swap_node(NodeSwapOperator, SingleNodeOperator, Operator):
     """Replace the selected nodes with the specified type"""
     bl_idname = "node.swap_node"
     bl_label = "Swap Node"
@@ -1310,6 +1312,18 @@ class NodeInterfaceOperator():
             return False
         return True
 
+    @staticmethod
+    def clear_interface_selection(interface, keep_active=False):
+        for item in interface.items_tree:
+            item.select = False
+
+        if keep_active:
+            if active := interface.active:
+                active.select = True
+        else:
+            # Have no active item if `keep_active` is False.
+            interface.active_index = -1
+
 
 class NODE_OT_interface_item_new(NodeInterfaceOperator, Operator):
     """Add a new item to the interface"""
@@ -1370,12 +1384,14 @@ class NODE_OT_interface_item_new(NodeInterfaceOperator, Operator):
                 interface.move_to_parent(item, active_item, len(active_item.interface_items))
             else:
                 interface.move_to_parent(item, active_item.parent, active_pos + 1)
+
+        self.clear_interface_selection(interface, keep_active=True)
         interface.active = item
 
         return {'FINISHED'}
 
 
-class NODE_OT_interface_item_new_panel_toggle(Operator):
+class NODE_OT_interface_item_new_panel_toggle(NodeInterfaceOperator, Operator):
     '''Add a checkbox to the currently selected panel'''
     bl_idname = "node.interface_item_new_panel_toggle"
     bl_label = "New Panel Toggle"
@@ -1424,6 +1440,7 @@ class NODE_OT_interface_item_new_panel_toggle(Operator):
         interface.move_to_parent(item, active_panel, 0)
         item.is_panel_toggle = True
 
+        self.clear_interface_selection(interface, keep_active=True)
         return {'FINISHED'}
 
 
@@ -1453,6 +1470,7 @@ class NODE_OT_interface_item_duplicate(NodeInterfaceOperator, Operator):
             item_copy = interface.copy(item)
             interface.active = item_copy
 
+        self.clear_interface_selection(interface, keep_active=True)
         return {'FINISHED'}
 
 
@@ -1542,6 +1560,7 @@ class NODE_OT_interface_item_make_panel_toggle(NodeInterfaceOperator, Operator):
         # Make the panel active.
         interface.active = parent_panel
 
+        self.clear_interface_selection(interface, keep_active=True)
         return {'FINISHED'}
 
 
@@ -1590,6 +1609,7 @@ class NODE_OT_interface_item_unlink_panel_toggle(NodeInterfaceOperator, Operator
         # Make the socket active.
         interface.active = first_item
 
+        self.clear_interface_selection(interface, keep_active=True)
         return {'FINISHED'}
 
 

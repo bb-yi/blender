@@ -7,9 +7,10 @@
 #include "testing/testing.h"
 #include <forward_list>
 
-#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
+#include "BLI_strict_flags.hh" /* IWYU pragma: keep. Keep last. */
 
 namespace blender::tests {
+namespace {
 
 TEST(vector, DefaultConstructor)
 {
@@ -30,7 +31,7 @@ TEST(vector, SizeConstructor)
 TEST(vector, TrivialTypeSizeConstructor)
 {
   Vector<char, 1> *vec = new Vector<char, 1>(1);
-  char *ptr = &(*vec)[0];
+  char *ptr = vec->data();
   vec->~Vector();
 
   const char magic = 42;
@@ -1020,4 +1021,5 @@ TEST(vector, ReleaseAllocated)
   MEM_delete(data.data);
 }
 
+}  // namespace
 }  // namespace blender::tests

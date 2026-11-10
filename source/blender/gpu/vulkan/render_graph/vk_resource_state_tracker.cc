@@ -25,19 +25,22 @@ ResourceHandle VKResourceStateTracker::create_resource_slot()
   static Resource new_resource = {};
   if (unused_handles_.is_empty()) {
     handle = resources_.append_and_get_index(new_resource);
+    allocations_.append(VK_NULL_HANDLE);
   }
   else {
     handle = unused_handles_.pop_last();
     resources_[handle] = new_resource;
+    allocations_[handle] = VK_NULL_HANDLE;
   }
 
   return handle;
 }
 
-void VKResourceStateTracker::add_image(VkImage vk_image,
-                                       bool use_subresource_tracking,
-                                       VKResourceBarrierState barrier_state,
-                                       const char *name)
+ResourceHandle VKResourceStateTracker::add_image(VkImage vk_image,
+                                                 bool use_subresource_tracking,
+                                                 VKResourceBarrierState barrier_state,
+                                                 VmaAllocation allocation,
+                                                 const char *name)
 {
   UNUSED_VARS_NDEBUG(name);
   std::scoped_lock lock(mutex);
@@ -50,67 +53,71 @@ void VKResourceStateTracker::add_image(VkImage vk_image,
   resource = {
       .type = VKResourceType::IMAGE,
       .image = {.vk_image = vk_image, .use_subresource_tracking = use_subresource_tracking},
+      .ref_count = 1,
       .stamp = 0,
       .barrier_state = barrier_state,
   };
+  allocations_[handle] = allocation;
 
 #ifndef NDEBUG
   if (name) {
     resource.name = name;
   }
 #endif
-
-#ifdef VK_RESOURCE_STATE_TRACKER_VALIDATION
-  validate();
-#endif
+  return handle;
 }
 
-void VKResourceStateTracker::add_image(VkImage vk_image,
-                                       bool use_subresource_tracking,
-                                       const char *name)
+ResourceHandle VKResourceStateTracker::add_image(VkImage vk_image,
+                                                 bool use_subresource_tracking,
+                                                 VmaAllocation allocation,
+                                                 const char *name)
 {
-  add_image(vk_image, use_subresource_tracking, {}, name);
+  return add_image(vk_image, use_subresource_tracking, {}, allocation, name);
 }
 
-void VKResourceStateTracker::add_aliased_image(VkImage vk_image,
-                                               bool use_subresource_tracking,
-                                               const char *name)
+ResourceHandle VKResourceStateTracker::add_aliased_image(VkImage vk_image,
+                                                         bool use_subresource_tracking,
+                                                         VmaAllocation allocation,
+                                                         const char *name)
 {
-  add_image(vk_image,
-            use_subresource_tracking,
-            {VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
-             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-             VK_IMAGE_LAYOUT_UNDEFINED},
-            name);
+  return add_image(vk_image,
+                   use_subresource_tracking,
+                   {VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                    VK_IMAGE_LAYOUT_UNDEFINED},
+                   allocation,
+                   name);
 }
 
-void VKResourceStateTracker::add_swapchain_image(VkImage vk_image, const char *name)
+ResourceHandle VKResourceStateTracker::add_swapchain_image(VkImage vk_image, const char *name)
 {
-  add_image(vk_image,
-            false,
-            {
-                VK_ACCESS_NONE,
-                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            },
-            name);
+  return add_image(vk_image,
+                   false,
+                   {
+                       VK_ACCESS_NONE,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                   },
+                   VK_NULL_HANDLE,
+                   name);
 }
 
-void VKResourceStateTracker::add_buffer(VkBuffer vk_buffer, const char *name)
+ResourceHandle VKResourceStateTracker::add_buffer(VkBuffer vk_buffer,
+                                                  VmaAllocation allocation,
+                                                  const char *name)
 {
   UNUSED_VARS_NDEBUG(name);
   std::scoped_lock lock(mutex);
-  BLI_assert_msg(!buffer_resources_.contains(vk_buffer),
-                 "Buffer resource is added twice to the render graph.");
   ResourceHandle handle = create_resource_slot();
   Resource &resource = resources_[handle];
-  buffer_resources_.add_new(vk_buffer, handle);
 
   resource = {
       .type = VKResourceType::BUFFER,
       .buffer = {.vk_buffer = vk_buffer},
+      .ref_count = 1,
       .stamp = 0,
       .barrier_state = {},
   };
+  allocations_[handle] = allocation;
 
 #ifndef NDEBUG
   if (name) {
@@ -118,9 +125,7 @@ void VKResourceStateTracker::add_buffer(VkBuffer vk_buffer, const char *name)
   }
 #endif
 
-#ifdef VK_RESOURCE_STATE_TRACKER_VALIDATION
-  validate();
-#endif
+  return handle;
 }
 
 /** \} */
@@ -129,11 +134,11 @@ void VKResourceStateTracker::add_buffer(VkBuffer vk_buffer, const char *name)
 /** \name Image layout
  * \{ */
 
-void VKResourceStateTracker::update_image_layout(VkImage vk_image, VkImageLayout vk_image_layout)
+void VKResourceStateTracker::update_image_layout(ResourceHandle image_handle,
+                                                 VkImageLayout vk_image_layout)
 {
   std::scoped_lock lock(mutex);
-  ResourceHandle handle = image_resources_.lookup(vk_image);
-  Resource &resource = get_image_resource(handle);
+  Resource &resource = get_image_resource(image_handle);
   resource.barrier_state.image_layout = vk_image_layout;
 }
 
@@ -143,123 +148,135 @@ void VKResourceStateTracker::update_image_layout(VkImage vk_image, VkImageLayout
 /** \name Remove resources
  * \{ */
 
-void VKResourceStateTracker::remove_buffer(VkBuffer vk_buffer)
+void VKResourceStateTracker::deref_resource(ResourceHandle resource_handle)
 {
   std::scoped_lock lock(mutex);
-  ResourceHandle handle = buffer_resources_.pop(vk_buffer);
-  resources_[handle] = {
-      .type = VKResourceType::NONE,
-      .buffer = {.vk_buffer = VK_NULL_HANDLE},
-      .stamp = 0,
-  };
-  unused_handles_.append(handle);
-
-#ifdef VK_RESOURCE_STATE_TRACKER_VALIDATION
-  validate();
-#endif
+  deref_resource_impl(resource_handle);
 }
 
-void VKResourceStateTracker::remove_image(VkImage vk_image)
+void VKResourceStateTracker::deref_resources(const BitVector<> &resource_usages)
 {
   std::scoped_lock lock(mutex);
-  ResourceHandle handle = image_resources_.pop(vk_image);
-  resources_[handle] = {
+  for (ResourceHandle handle : IndexRange(resource_usages.size())) {
+    if (resource_usages[handle]) {
+      deref_resource_impl(handle);
+    }
+  }
+}
+
+void VKResourceStateTracker::ref_resource_impl(ResourceHandle resource_handle)
+{
+  Resource &resource = get_resource(resource_handle);
+  resource.ref_count += 1;
+}
+
+void VKResourceStateTracker::deref_resource_impl(ResourceHandle resource_handle)
+{
+  Resource &resource = get_resource(resource_handle);
+  BLI_assert(resource.ref_count != 0);
+  resource.ref_count -= 1;
+  if (resource.ref_count == 0) {
+    BLI_assert(!discardable_handles_.contains(resource_handle));
+    discardable_handles_.append(resource_handle);
+  }
+}
+
+VkBuffer VKResourceStateTracker::remove_buffer(ResourceHandle buffer_handle)
+{
+  std::scoped_lock lock(mutex);
+  BLI_assert(resources_[buffer_handle].ref_count == 0);
+  BLI_assert(!discardable_handles_.contains(buffer_handle));
+  BLI_assert(resources_[buffer_handle].views.is_empty());
+  VkBuffer vk_buffer = get_buffer_resource(buffer_handle).buffer.vk_buffer;
+  resources_[buffer_handle] = {
       .type = VKResourceType::NONE,
-      .image = {.vk_image = VK_NULL_HANDLE, .use_subresource_tracking = false},
+      .buffer = {.vk_buffer = VK_NULL_HANDLE},
+      .ref_count = 0,
       .stamp = 0,
   };
-  unused_handles_.append(handle);
+  allocations_[buffer_handle] = VK_NULL_HANDLE;
+  unused_handles_.append(buffer_handle);
 
-#ifdef VK_RESOURCE_STATE_TRACKER_VALIDATION
-  validate();
-#endif
+  return vk_buffer;
+}
+
+void VKResourceStateTracker::remove_image(ResourceHandle image_handle)
+{
+  std::scoped_lock lock(mutex);
+  BLI_assert(resources_[image_handle].ref_count == 0);
+  BLI_assert(resources_[image_handle].views.is_empty());
+  VkImage vk_image = get_image_resource(image_handle).image.vk_image;
+  image_resources_.pop(vk_image);
+  resources_[image_handle] = {
+      .type = VKResourceType::NONE,
+      .image = {.vk_image = VK_NULL_HANDLE, .use_subresource_tracking = false},
+      .ref_count = 0,
+      .stamp = 0,
+  };
+  allocations_[image_handle] = VK_NULL_HANDLE;
+  unused_handles_.append(image_handle);
+}
+
+void VKResourceStateTracker::remove_swapchain_image(ResourceHandle image_handle)
+{
+  std::scoped_lock lock(mutex);
+  BLI_assert(resources_[image_handle].ref_count == 1);
+  BLI_assert(resources_[image_handle].views.is_empty());
+  VkImage vk_image = get_image_resource(image_handle).image.vk_image;
+  image_resources_.pop(vk_image);
+  resources_[image_handle] = {
+      .type = VKResourceType::NONE,
+      .image = {.vk_image = VK_NULL_HANDLE, .use_subresource_tracking = false},
+      .ref_count = 0,
+      .stamp = 0,
+  };
+  allocations_[image_handle] = VK_NULL_HANDLE;
+  unused_handles_.append(image_handle);
+}
+
+Vector<VKResourceStateTracker::DiscardableResource> VKResourceStateTracker::
+    pop_discardable_resources()
+{
+  std::scoped_lock lock(mutex);
+  Vector<DiscardableResource> discardable;
+  Vector<ResourceHandle> keep;
+  for (ResourceHandle handle : discardable_handles_) {
+    Resource &resource = resources_[handle];
+    BLI_assert(ELEM(resource.type, VKResourceType::IMAGE, VKResourceType::BUFFER));
+    if (resource.ref_count != 0) {
+      /* A new reference was acquired after the resource was marked discardable, so it stays
+       * registered and is collected by a later pop. */
+      keep.append(handle);
+      continue;
+    }
+    DiscardableResource discardable_resource = {
+        .handle = handle,
+        .type = resource.type,
+        .allocation = allocations_[handle],
+    };
+    if (resource.type == VKResourceType::BUFFER) {
+      discardable_resource.vk_buffer = resource.buffer.vk_buffer;
+    }
+    else {
+      discardable_resource.vk_image = resource.image.vk_image;
+    }
+    discardable_resource.views = std::move(resource.views);
+    discardable.append(std::move(discardable_resource));
+  }
+  discardable_handles_ = std::move(keep);
+  return discardable;
 }
 
 /** \} */
-
-ResourceWithStamp VKResourceStateTracker::get_stamp(ResourceHandle handle,
-                                                    const Resource &resource)
-{
-  ResourceWithStamp result;
-  result.handle = handle;
-  result.stamp = resource.stamp;
-  return result;
-}
-
-ResourceWithStamp VKResourceStateTracker::get_and_increase_stamp(ResourceHandle handle,
-                                                                 Resource &resource)
-{
-  ResourceWithStamp result = get_stamp(handle, resource);
-  resource.stamp += 1;
-  return result;
-}
-
-ResourceWithStamp VKResourceStateTracker::get_image_and_increase_stamp(VkImage vk_image)
-{
-  ResourceHandle handle = image_resources_.lookup(vk_image);
-  Resource &resource = get_image_resource(handle);
-  return get_and_increase_stamp(handle, resource);
-}
-
-ResourceWithStamp VKResourceStateTracker::get_buffer_and_increase_stamp(VkBuffer vk_buffer)
-{
-  ResourceHandle handle = buffer_resources_.lookup(vk_buffer);
-  Resource &resource = get_buffer_resource(handle);
-  return get_and_increase_stamp(handle, resource);
-}
-
-ResourceWithStamp VKResourceStateTracker::get_buffer(VkBuffer vk_buffer) const
-{
-  ResourceHandle handle = buffer_resources_.lookup(vk_buffer);
-  const Resource &resource = get_buffer_resource(handle);
-  return get_stamp(handle, resource);
-}
-
-ResourceWithStamp VKResourceStateTracker::get_image(VkImage vk_image) const
-{
-  ResourceHandle handle = image_resources_.lookup(vk_image);
-  const Resource &resource = get_image_resource(handle);
-  return get_stamp(handle, resource);
-}
-
-#ifdef VK_RESOURCE_STATE_TRACKER_VALIDATION
-void VKResourceStateTracker::validate() const
-{
-  for (const Map<VkImage, ResourceHandle>::Item &item : image_resources_.items()) {
-    for (ResourceHandle buffer_handle : buffer_resources_.values()) {
-      BLI_assert(item.value != buffer_handle);
-    }
-    const Resource &resource = get_image_resource(item.value);
-    BLI_assert(resource.type == VKResourceType::IMAGE);
-  }
-
-  for (const Map<VkBuffer, ResourceHandle>::Item &item : buffer_resources_.items()) {
-    for (ResourceHandle image_handle : image_resources_.values()) {
-      BLI_assert(item.value != image_handle);
-    }
-    const Resource &resource = get_buffer_resource(item.value);
-    BLI_assert(resource.type == VKResourceType::BUFFER);
-  }
-  BLI_assert(
-      image_resources_.size() ==
-      std::ranges::count_if(resources_.begin(), resources_.end(), [](const Resource &resource) {
-        return resource.type == VKResourceType::IMAGE;
-      }));
-  BLI_assert(
-      buffer_resources_.size() ==
-      std::ranges::count_if(resources_.begin(), resources_.end(), [](const Resource &resource) {
-        return resource.type == VKResourceType::BUFFER;
-      }));
-}
-#endif
 
 void VKResourceStateTracker::debug_print() const
 {
   std::ostream &os = std::cout;
   os << "VKResourceStateTracker\n";
   os << " resources=(" << resources_.size() << "/" << resources_.capacity() << ")\n";
-  os << " buffers=(" << buffer_resources_.size() << "/" << buffer_resources_.capacity() << ")\n";
   os << " images=(" << image_resources_.size() << "/" << image_resources_.capacity() << ")\n";
+  os << " discardable=(" << discardable_handles_.size() << "/" << discardable_handles_.capacity()
+     << ")\n";
   os << " unused=(" << unused_handles_.size() << "/" << unused_handles_.capacity() << ")\n";
 }
 

@@ -130,7 +130,6 @@ def node_at_pos(nodes, context, event):
 
 def store_mouse_cursor(context, event):
     space = context.space_data
-    v2d = context.region.view2d
     tree = space.edit_tree
 
     # convert mouse position to the View2D for later node placement
@@ -138,11 +137,6 @@ def store_mouse_cursor(context, event):
         space.cursor_location_from_region(event.mouse_region_x, event.mouse_region_y)
     else:
         space.cursor_location = tree.view_center
-
-
-def get_nodes_links(context):
-    tree = context.space_data.edit_tree
-    return tree.nodes, tree.links
 
 
 def get_internal_socket(socket):
@@ -314,6 +308,26 @@ def transfer_links(tree, old_node, new_node):
                 if is_multi_input:
                     new_link.swap_multi_input_sort_id(link)
                 new_link.is_muted = is_muted
+
+
+def is_valid_socket(socket, socket_types=None):
+    if not socket.enabled or not socket.is_icon_visible:
+        return False
+
+    if (socket_types is None):
+        return True
+
+    return (socket.type in socket_types)
+
+
+def get_input_by_name(node, name, socket_types=None):
+    if (socket := node.inputs.get(name)):
+        if is_valid_socket(socket, socket_types):
+            return socket
+
+    for socket in node.inputs:
+        if (socket.name == name) and is_valid_socket(socket, socket_types):
+            return socket
 
 
 class NWBase:

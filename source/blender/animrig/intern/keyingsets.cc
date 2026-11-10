@@ -9,13 +9,14 @@
 #include "ANIM_keyframing.hh"
 #include "ANIM_keyingsets.hh"
 
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_context.hh"
+#include "BKE_lib_id.hh"
 #include "BKE_main.hh"
 #include "BKE_report.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_string.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
 
 #include "DEG_depsgraph.hh"
 
@@ -65,14 +66,11 @@ void keyingset_info_unregister(Main *bmain, KeyingSetInfo *keyingset_info)
     if (!STREQ(keyingset.typeinfo, keyingset_info->idname)) {
       continue;
     }
-    Scene *scene;
     BKE_keyingset_free_paths(&keyingset);
     BLI_remlink(&builtin_keyingsets, &keyingset);
 
-    for (scene = static_cast<Scene *>(bmain->scenes.first); scene;
-         scene = static_cast<Scene *>(scene->id.next))
-    {
-      BLI_remlink_safe(&scene->keyingsets, &keyingset);
+    for (Scene &scene : bmain->scenes) {
+      BLI_remlink_safe(&scene.keyingsets, &keyingset);
     }
 
     MEM_delete(&keyingset);
@@ -440,6 +438,7 @@ int apply_keyingset(bContext *C,
     }
   }
 
+  Main *bmain = CTX_data_main(C);
   ReportList *reports = CTX_wm_reports(C);
   int keyed_channels = 0;
 
@@ -456,12 +455,14 @@ int apply_keyingset(bContext *C,
       continue;
     }
 
+    if (!BKE_id_is_editable(bmain, keyingset_path.id)) {
+      continue;
+    }
+
     keyed_channels += insert_key_to_keying_set_path(
         C, &keyingset_path, keyingset, kflag, mode, cfra);
   }
 
-  /* Return the number of channels successfully affected. */
-  BLI_assert(keyed_channels >= 0);
   return keyed_channels;
 }
 

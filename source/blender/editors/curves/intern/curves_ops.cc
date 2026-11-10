@@ -7,11 +7,13 @@
  */
 
 #include "BLI_array_utils.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
+#include "BLI_generic_array.hh"
+#include "BLI_implicit_sharing.hh"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
 #include "BLI_math_matrix.hh"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 #include "BLI_vector_set.hh"
 
 #include "BLT_translation.hh"
@@ -26,6 +28,7 @@
 
 #include "BKE_attribute.h"
 #include "BKE_attribute_math.hh"
+#include "BKE_bvh.hh"
 #include "BKE_bvhutils.hh"
 #include "BKE_context.hh"
 #include "BKE_curves.hh"
@@ -275,7 +278,7 @@ static void try_convert_single_object(Object &curves_ob,
   }
   Mesh &surface_me = *id_cast<Mesh *>(surface_ob.data);
 
-  bke::BVHTreeFromMesh surface_bvh = surface_me.bvh_corner_tris();
+  const bke::bvh::Tree &surface_bvh = surface_me.bvh_tris();
 
   const Span<float3> positions_cu = curves.positions();
   const Span<int> tri_faces = surface_me.corner_tri_faces();
@@ -346,13 +349,11 @@ static void try_convert_single_object(Object &curves_ob,
     const float3 &root_pos_cu = positions_cu[points.first()];
     const float3 root_pos_su = math::transform_point(transforms.curves_to_surface, root_pos_cu);
 
-    BVHTreeNearest nearest;
-    nearest.dist_sq = FLT_MAX;
-    BLI_bvhtree_find_nearest(
-        surface_bvh.tree, root_pos_su, &nearest, surface_bvh.nearest_callback, &surface_bvh);
-    BLI_assert(nearest.index >= 0);
+    const std::optional<bke::bvh::ClosestPointResult> nearest = surface_bvh.closest_point(
+        root_pos_su);
+    BLI_assert(nearest.has_value());
 
-    const int tri_i = nearest.index;
+    const int tri_i = nearest->index;
     const int face_i = tri_faces[tri_i];
 
     const int mface_i = find_mface_for_root_position(
@@ -363,7 +364,8 @@ static void try_convert_single_object(Object &curves_ob,
 
     ParticleData &particle = particles[new_hair_i];
     const int num_keys = points.size();
-    MutableSpan<HairKey> hair_keys{MEM_new_array_zeroed<HairKey>(num_keys, __func__), num_keys};
+    MutableSpan<HairKey> hair_keys{
+        MEM_new_array_zeroed<HairKey>(num_keys, "try_convert_single_object hair_keys"), num_keys};
 
     particle.hair = hair_keys.data();
     particle.totkey = hair_keys.size();
@@ -613,7 +615,7 @@ static void snap_curves_to_surface_exec_object(Object &curves_ob,
 
   switch (attach_mode) {
     case AttachMode::Nearest: {
-      bke::BVHTreeFromMesh surface_bvh = surface_mesh.bvh_corner_tris();
+      const bke::bvh::Tree &surface_bvh = surface_mesh.bvh_tris();
 
       threading::parallel_for(curves.curves_range(), 256, [&](const IndexRange curves_range) {
         for (const int curve_i : curves_range) {
@@ -623,20 +625,14 @@ static void snap_curves_to_surface_exec_object(Object &curves_ob,
           const float3 old_first_point_pos_su = math::transform_point(transforms.curves_to_surface,
                                                                       old_first_point_pos_cu);
 
-          BVHTreeNearest nearest;
-          nearest.index = -1;
-          nearest.dist_sq = FLT_MAX;
-          BLI_bvhtree_find_nearest(surface_bvh.tree,
-                                   old_first_point_pos_su,
-                                   &nearest,
-                                   surface_bvh.nearest_callback,
-                                   &surface_bvh);
-          const int tri_index = nearest.index;
-          if (tri_index == -1) {
+          const std::optional<bke::bvh::ClosestPointResult> nearest = surface_bvh.closest_point(
+              old_first_point_pos_su);
+          if (!nearest) {
             continue;
           }
+          const int tri_index = nearest->index;
 
-          const float3 new_first_point_pos_su = nearest.co;
+          const float3 new_first_point_pos_su = nearest->position;
           const float3 new_first_point_pos_cu = math::transform_point(transforms.surface_to_curves,
                                                                       new_first_point_pos_su);
           const float3 pos_diff_cu = new_first_point_pos_cu - old_first_point_pos_cu;
@@ -662,7 +658,7 @@ static void snap_curves_to_surface_exec_object(Object &curves_ob,
         *r_missing_uvs = true;
         break;
       }
-      using geometry::ReverseUVSampler;
+      using blender::geometry::ReverseUVSampler;
       ReverseUVSampler reverse_uv_sampler{surface_uv_map, surface_corner_tris};
 
       threading::parallel_for(curves.curves_range(), 256, [&](const IndexRange curves_range) {
@@ -809,19 +805,15 @@ static wmOperatorStatus curves_set_selection_domain_exec(bContext *C, wmOperator
     const std::string active_attribute = BKE_attributes_active_name_get(owner).value_or("");
     for (const StringRef selection_name : get_curves_selection_attribute_names(curves)) {
       if (const GVArray src = *attributes.lookup(selection_name, domain)) {
-        const CPPType &type = src.type();
-        void *dst = MEM_new_array_uninitialized(
-            attributes.domain_size(domain), type.size, __func__);
-        src.materialize(dst);
+        auto *dst = new ImplicitSharedValue<GArray<>>(src.type(), src.size(), NoInitialization());
+        src.materialize_to_uninitialized(dst->data.data());
 
         attributes.remove(selection_name);
-        if (!attributes.add(selection_name,
-                            domain,
-                            bke::cpp_type_to_attribute_type(type),
-                            bke::AttributeInitMoveArray(dst)))
-        {
-          MEM_delete_void(dst);
-        }
+        attributes.add(selection_name,
+                       domain,
+                       bke::cpp_type_to_attribute_type(dst->data.type()),
+                       bke::AttributeInitShared(dst->data.data(), *dst));
+        dst->remove_user_and_delete_if_last();
       }
     }
     if (!active_attribute.empty()) {
@@ -1434,13 +1426,13 @@ static wmOperatorStatus exec(bContext *C, wmOperator *op)
       continue;
     }
 
-    geometry::ConvertCurvesOptions options;
+    blender::geometry::ConvertCurvesOptions options;
     options.convert_bezier_handles_to_poly_points = use_handles;
     options.convert_bezier_handles_to_catmull_rom_points = use_handles;
     options.keep_bezier_shape_as_nurbs = use_handles;
     options.keep_catmull_rom_shape_as_nurbs = use_handles;
 
-    curves = geometry::convert_curves(curves, selection, dst_type, {}, options);
+    curves = blender::geometry::convert_curves(curves, selection, dst_type, {}, options);
 
     DEG_id_tag_update(&curves_id->id, ID_RECALC_GEOMETRY);
     WM_event_add_notifier(C, NC_GEOM | ND_DATA, curves_id);
@@ -1544,7 +1536,7 @@ static wmOperatorStatus exec(bContext *C, wmOperator *op)
       }
     });
 
-    curves = geometry::subdivide_curves(
+    curves = blender::geometry::subdivide_curves(
         curves, curves.curves_range(), VArray<int>::from_span(segment_cuts), {});
 
     DEG_id_tag_update(&curves_id->id, ID_RECALC_GEOMETRY);
@@ -1594,9 +1586,10 @@ static void append_primitive_curve(bContext *C,
   object::add_generic_get_opts(C, &op, 'Z', location, rotation, scale, nullptr, nullptr, nullptr);
   const float4x4 transform = math::from_loc_rot_scale<float4x4>(
       location, math::EulerXYZ(rotation), scale);
-  geometry::transform_geometry(new_geometry, transform);
+  blender::geometry::transform_geometry(new_geometry, transform);
 
-  bke::GeometrySet joined_geometry = geometry::join_geometries({old_geometry, new_geometry}, {});
+  bke::GeometrySet joined_geometry = blender::geometry::join_geometries(
+      {old_geometry, new_geometry}, {});
   Curves *joined_curves_id = joined_geometry.get_curves_for_write();
   CurvesGeometry &dst_curves = curves_id.geometry.wrap();
   dst_curves = std::move(joined_curves_id->geometry.wrap());

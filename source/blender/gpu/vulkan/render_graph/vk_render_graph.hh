@@ -43,6 +43,7 @@
 
 #include "BKE_global.hh"
 
+#include "BLI_bit_vector.hh"
 #include "BLI_color_types.hh"
 #include "BLI_map.hh"
 #include "BLI_utility_mixins.hh"
@@ -60,6 +61,20 @@
 
 namespace blender::gpu::render_graph {
 class VKScheduler;
+class VKRenderGraph;
+
+/**
+ * Holds a reference to a node data allocated via VKRenderGraph::alloc_node.
+ *
+ * Stores the node handle (for finalization) and a direct reference to the
+ * in-place data stored inside the render graph.
+ */
+template<typename NodeInfo> struct VKNodeData {
+  NodeHandle node_handle;
+  typename NodeInfo::Data &data;
+
+  void finalize(VKRenderGraph &render_graph, const typename NodeInfo::CreateInfo &create_info);
+};
 
 class VKRenderGraph : public NonCopyable {
   friend class VKCommandBuilder;
@@ -85,6 +100,10 @@ class VKRenderGraph : public NonCopyable {
    * device could
    */
   VKResourceStateTracker &resources_;
+  /**
+   * One bit per tracked resource. Set when this render graph holds a reference to the resource
+   */
+  BitVector<> resource_usages_;
 
   struct DebugGroup {
     std::string name;
@@ -133,6 +152,48 @@ class VKRenderGraph : public NonCopyable {
    */
   VKRenderGraph(VKResourceStateTracker &resources);
 
+  /**
+   * Allocate a draw node in the render graph.
+   *
+   * Returns a reference to the in-place storage data that the caller can fill
+   * before calling finalize_node.
+   */
+  template<typename NodeInfo> VKNodeData<NodeInfo> alloc_node()
+  {
+    static VKRenderGraphNode node_template = {};
+    NodeHandle node_handle = nodes_.append_and_get_index(node_template);
+    VKRenderGraphNode &node = nodes_[node_handle];
+    typename NodeInfo::Data &data = node.alloc_node_data<NodeInfo>(storage_);
+    return {node_handle, data};
+  }
+
+  /**
+   * Finalize a draw node that was previously allocated via alloc_node.
+   *
+   * Builds resource links, records debug groups, etc.
+   */
+  template<typename NodeInfo>
+  void finalize_node(NodeHandle node_handle, const typename NodeInfo::CreateInfo &create_info)
+  {
+    std::scoped_lock lock(resources_.mutex);
+    VKRenderGraphNode &node = nodes_[node_handle];
+    BLI_assert(node.type == NodeInfo::node_type);
+
+    if (G.debug & G_DEBUG_GPU) {
+      if (!debug_.group_used) {
+        debug_.group_used = true;
+        debug_.used_groups.append(debug_.group_stack);
+      }
+      if (nodes_.size() > debug_.node_group_map.size()) {
+        debug_.node_group_map.resize(nodes_.size());
+      }
+      debug_.node_group_map[node_handle] = debug_.used_groups.size() - 1;
+    }
+
+    node.template finalize_node<NodeInfo>(storage_, resources_, links_, create_info);
+    ref_resources(node);
+  }
+
  private:
   /**
    * Add a node to the render graph.
@@ -154,6 +215,7 @@ class VKRenderGraph : public NonCopyable {
     VKRenderGraphNode &node = nodes_[node_handle];
     node.set_node_data<NodeInfo>(storage_, create_info);
     node.build_links<NodeInfo>(resources_, links_, create_info);
+    ref_resources(node);
 
     if (G.debug & G_DEBUG_GPU) {
       if (!debug_.group_used) {
@@ -168,6 +230,33 @@ class VKRenderGraph : public NonCopyable {
     return node_handle;
   }
 
+  /**
+   * Add a graph reference to each resource of the node that is not yet referenced by this
+   * render graph.
+   */
+  void ref_resources(const VKRenderGraphNode &node)
+  {
+    BLI_assert_msg(resource_usages_.size() <= resources_.resources_.size(),
+                   "State tracker resources can only grow.");
+    resource_usages_.resize(resources_.resources_.size());
+    for (const VKRenderGraphBuffer &buffer : links_.buffers.as_span().slice(node.links.buffers)) {
+      ResourceHandle handle = buffer.resource.handle;
+      if (resource_usages_[handle]) {
+        continue;
+      }
+      resource_usages_[handle].set();
+      resources_.ref_resource_impl(handle);
+    }
+    for (const VKRenderGraphImage &image : links_.images.as_span().slice(node.links.images)) {
+      ResourceHandle handle = image.resource.handle;
+      if (resource_usages_[handle]) {
+        continue;
+      }
+      resource_usages_[handle].set();
+      resources_.ref_resource_impl(handle);
+    }
+  }
+
  public:
 #define ADD_NODE(NODE_CLASS) \
   NodeHandle add_node(const NODE_CLASS::CreateInfo &create_info) \
@@ -176,6 +265,7 @@ class VKRenderGraph : public NonCopyable {
   }
   ADD_NODE(VKBeginQueryNode)
   ADD_NODE(VKBeginRenderingNode)
+  ADD_NODE(VKBuildAccelerationStructureNode)
   ADD_NODE(VKEndQueryNode)
   ADD_NODE(VKEndRenderingNode)
   ADD_NODE(VKClearAttachmentsNode)
@@ -189,10 +279,6 @@ class VKRenderGraph : public NonCopyable {
   ADD_NODE(VKBlitImageNode)
   ADD_NODE(VKDispatchNode)
   ADD_NODE(VKDispatchIndirectNode)
-  ADD_NODE(VKDrawNode)
-  ADD_NODE(VKDrawIndexedNode)
-  ADD_NODE(VKDrawIndexedIndirectNode)
-  ADD_NODE(VKDrawIndirectNode)
   ADD_NODE(VKResetQueryPoolNode)
   ADD_NODE(VKUpdateBufferNode)
   ADD_NODE(VKUpdateMipmapsNode)
@@ -266,8 +352,21 @@ class VKRenderGraph : public NonCopyable {
 
   /**
    * Reset the render graph.
+   *
+   * Clears the nodes, links and storage, and releases the graph's resource references.
    */
   void reset();
+
+  /**
+   * Release the graph's reference to each in-use resource.
+   *
+   * Call once after the graph's work has been submitted; zero-ref resources become discardable.
+   */
+  void deref_resources()
+  {
+    resources_.deref_resources(resource_usages_);
+    resource_usages_.fill(false);
+  }
 
   void memstats() const;
 
@@ -294,5 +393,12 @@ class VKRenderGraph : public NonCopyable {
 
  private:
 };
+
+template<typename NodeInfo>
+void VKNodeData<NodeInfo>::finalize(VKRenderGraph &render_graph,
+                                    const typename NodeInfo::CreateInfo &create_info)
+{
+  render_graph.finalize_node<NodeInfo>(node_handle, create_info);
+}
 
 }  // namespace blender::gpu::render_graph

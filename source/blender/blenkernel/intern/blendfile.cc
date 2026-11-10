@@ -23,15 +23,15 @@
 #include "DNA_space_types.h"
 #include "DNA_windowmanager_types.h"
 
-#include "BLI_fileops.h"
+#include "BLI_fileops.hh"
 #include "BLI_function_ref.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_system.h"
-#include "BLI_time.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_system.hh"
+#include "BLI_time.hh"
+#include "BLI_utildefines.hh"
 #include "BLI_vector.hh"
 #include "BLI_vector_set.hh"
 
@@ -337,8 +337,8 @@ static bool reuse_bmain_move_id(ReuseOldBMainData *reuse_data,
 
   Main *new_bmain = reuse_data->new_bmain;
   Main *old_bmain = reuse_data->old_bmain;
-  ListBaseT<ID> *new_lb = which_libbase(new_bmain, GS(id->name));
-  ListBaseT<ID> *old_lb = which_libbase(old_bmain, GS(id->name));
+  ListBaseT<ID> *new_lb = which_libbase(new_bmain, id->id_type());
+  ListBaseT<ID> *old_lb = which_libbase(old_bmain, id->id_type());
 
   if (reuse_existing) {
     /* A 'new' version of the same data may already exist in new_bmain, in the rare case
@@ -444,7 +444,7 @@ static int reuse_editable_asset_bmain_data_dependencies_process_cb(
     return IDWALK_RET_NOP;
   }
 
-  if (GS(id->name) == ID_LI) {
+  if (id->id_type() == ID_LI) {
     /* Libraries are handled separately. */
     return IDWALK_RET_STOP_RECURSION;
   }
@@ -465,7 +465,7 @@ static int reuse_editable_asset_bmain_data_dependencies_process_cb(
   }
 
   /* Only preserve specific datablock types. */
-  if (!ID_TYPE_SUPPORTS_ASSET_EDITABLE(GS(id->name))) {
+  if (!ID_TYPE_SUPPORTS_ASSET_EDITABLE(id->id_type())) {
     remapper.add(id, nullptr);
     return IDWALK_RET_STOP_RECURSION;
   }
@@ -596,8 +596,8 @@ static void swap_old_bmain_data_for_blendfile(ReuseOldBMainData *reuse_data, con
 
   /* NOTE: Full swapping is only supported for ID types that are assumed to be only local
    * data-blocks (like UI-like ones). Otherwise, the swapping could fail in many funny ways. */
-  BLI_assert(old_lb->is_empty() || !ID_IS_LINKED(static_cast<ID *>(old_lb->last)));
-  BLI_assert(new_lb->is_empty() || !ID_IS_LINKED(static_cast<ID *>(new_lb->last)));
+  BLI_assert(old_lb->is_empty() || !ID_IS_LINKED(old_lb->last()));
+  BLI_assert(new_lb->is_empty() || !ID_IS_LINKED(new_lb->last()));
 
   std::swap(*new_lb, *old_lb);
 
@@ -613,8 +613,8 @@ static void swap_old_bmain_data_for_blendfile(ReuseOldBMainData *reuse_data, con
    *
    * Since both lists are ordered, and they are all local, we can do a smart parallel processing of
    * both lists here instead of doing complete full list searches. */
-  ID *discarded_id_iter = static_cast<ID *>(old_lb->first);
-  ID *reused_id_iter = static_cast<ID *>(new_lb->first);
+  ID *discarded_id_iter = old_lb->first();
+  ID *reused_id_iter = new_lb->first();
   while (!ELEM(nullptr, discarded_id_iter, reused_id_iter)) {
     const int strcmp_result = strcmp(discarded_id_iter->name + 2, reused_id_iter->name + 2);
     if (strcmp_result == 0) {
@@ -668,8 +668,8 @@ static void swap_wm_data_for_blendfile(ReuseOldBMainData *reuse_data, const bool
   BLI_assert(BLI_listbase_count_at_most(new_wm_list, 2) <= 1);
   BLI_assert(BLI_listbase_count_at_most(old_wm_list, 2) <= 1);
 
-  wmWindowManager *old_wm = static_cast<wmWindowManager *>(old_wm_list->first);
-  wmWindowManager *new_wm = static_cast<wmWindowManager *>(new_wm_list->first);
+  wmWindowManager *old_wm = old_wm_list->first();
+  wmWindowManager *new_wm = new_wm_list->first();
 
   if (old_wm == nullptr) {
     /* No current (old) WM. Either (new) WM from file is used, or if none, WM code is responsible
@@ -858,7 +858,7 @@ static void view3d_data_consistency_ensure(wmWindow *win, Scene *scene, ViewLaye
       /* Local-view can become invalid during undo/redo steps, exit it when no valid object could
        * be found. */
       Base *base;
-      for (base = static_cast<Base *>(view_layer->object_bases.first); base; base = base->next) {
+      for (base = view_layer->object_bases.first(); base; base = base->next) {
         if (base->local_view_bits & v3d->local_view_uid) {
           break;
         }
@@ -874,8 +874,8 @@ static void view3d_data_consistency_ensure(wmWindow *win, Scene *scene, ViewLaye
       v3d->local_view_uid = 0;
 
       /* Region-base storage is different depending on whether the space is active or not. */
-      ListBaseT<ARegion> *regionbase = (&sl == area.spacedata.first) ? &area.regionbase :
-                                                                       &sl.regionbase;
+      ListBaseT<ARegion> *regionbase = (&sl == area.spacedata.first()) ? &area.regionbase :
+                                                                         &sl.regionbase;
       for (ARegion &region : *regionbase) {
         if (region.regiontype != RGN_TYPE_WINDOW) {
           continue;
@@ -989,6 +989,10 @@ static void setup_app_data(bContext *C,
                                      reuse_editable_asset_needed(&reuse_data);
 
   if (mode != LOAD_UNDO) {
+    /* Convert editable assets to the new file working space. */
+    IMB_colormanagement_file_read_post(
+        bfd->main, bmain, params->is_startup, reuse_editable_assets);
+
     const short ui_id_codes[]{ID_WS, ID_SCR};
 
     /* WM needs special complex handling, regardless of whether UI is kept or loaded from file. */
@@ -1055,7 +1059,7 @@ static void setup_app_data(bContext *C,
 
   /* Ensure that there is a valid scene and view-layer. */
   if (curscene == nullptr) {
-    curscene = static_cast<Scene *>(bfd->main->scenes.first);
+    curscene = bfd->main->scenes.first();
   }
   /* Empty file, add a scene to make Blender work. */
   if (curscene == nullptr) {
@@ -1073,7 +1077,7 @@ static void setup_app_data(bContext *C,
     win = CTX_wm_window(C);
     curscreen = CTX_wm_screen(C);
 
-    track_undo_scene = (mode == LOAD_UNDO && curscreen && curscene && bfd->main->wm.first);
+    track_undo_scene = (mode == LOAD_UNDO && curscreen && curscene && bfd->main->wm.first());
 
     if (track_undo_scene) {
       /* Keep the old (to-be-freed) scene, remapping below will ensure it's remapped to the
@@ -1133,7 +1137,7 @@ static void setup_app_data(bContext *C,
     }
 
     if (track_undo_scene) {
-      wmWindowManager *wm = static_cast<wmWindowManager *>(bfd->main->wm.first);
+      wmWindowManager *wm = bfd->main->wm.first();
       if (!wm_scene_is_visible(wm, bfd->curscene)) {
         curscene = bfd->curscene;
         if (win) {
@@ -1154,6 +1158,9 @@ static void setup_app_data(bContext *C,
 
   BLI_assert(BKE_main_namemap_validate(*bfd->main));
 
+  /* For undo to preserve some runtime state. */
+  const MainColorspace old_colorspace = bmain->colorspace;
+
   /* This frees the `old_bmain`. */
   BKE_blender_globals_main_replace(bfd->main);
   bmain = G_MAIN;
@@ -1167,13 +1174,13 @@ static void setup_app_data(bContext *C,
     /* Setting a window-manger clears all other windowing members (window, screen, area, etc).
      * So only do it when effectively loading a new #wmWindowManager
      * otherwise just assert that the WM from context is still the same as in `new_bmain`. */
-    CTX_wm_manager_set(C, static_cast<wmWindowManager *>(bmain->wm.first));
+    CTX_wm_manager_set(C, bmain->wm.first());
     CTX_wm_screen_set(C, bfd->curscreen);
     CTX_wm_area_set(C, nullptr);
     CTX_wm_region_set(C, nullptr);
     CTX_wm_region_popup_set(C, nullptr);
   }
-  BLI_assert(CTX_wm_manager(C) == static_cast<wmWindowManager *>(bmain->wm.first));
+  BLI_assert(CTX_wm_manager(C) == bmain->wm.first());
 
   /* Keep state from preferences. */
   const int fileflags_keep = G_FILE_FLAG_ALL_RUNTIME;
@@ -1226,7 +1233,7 @@ static void setup_app_data(bContext *C,
   /* Base-flags, groups, make depsgraph, etc. */
   /* first handle case if other windows have different scenes visible. */
   if (mode == LOAD_UI) {
-    wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+    wmWindowManager *wm = bmain->wm.first();
     if (wm) {
       for (wmWindow &win : wm->windows) {
         if (win.scene && win.scene != curscene) {
@@ -1239,10 +1246,9 @@ static void setup_app_data(bContext *C,
   /* Setting scene might require having a dependency graph, with copy-on-eval
    * we need to make sure we ensure scene has correct color management before
    * constructing dependency graph. */
-  if (params->is_startup) {
-    IMB_colormanagement_working_space_init_startup(bmain);
+  if (mode == LOAD_UNDO) {
+    IMB_colormanagement_undo_read_post(bmain, old_colorspace);
   }
-  IMB_colormanagement_working_space_check(bmain, mode == LOAD_UNDO, reuse_editable_assets);
   IMB_colormanagement_check_file_config(bmain);
 
   BKE_scene_set_background(bmain, curscene);
@@ -1291,7 +1297,7 @@ static void setup_app_data(bContext *C,
         BLO_reportf_wrap(reports,
                          RPT_INFO,
                          RPT_("LIB: %s: '%s' missing from '%s', parent '%s'"),
-                         BKE_idtype_idcode_to_name(GS(id_iter->name)),
+                         BKE_idtype_idcode_to_name(id_iter->id_type()),
                          id_iter->name + 2,
                          id_iter->lib->runtime->filepath_abs,
                          id_iter->lib->runtime->parent ?
@@ -1434,7 +1440,7 @@ void BKE_blendfile_read_make_empty(bContext *C)
 
   FOREACH_MAIN_LISTBASE_BEGIN (bmain, lb) {
     FOREACH_MAIN_LISTBASE_ID_BEGIN (lb, id) {
-      if (ELEM(GS(id->name), ID_SCE, ID_SCR, ID_WM, ID_WS)) {
+      if (ELEM(id->id_type(), ID_SCE, ID_SCR, ID_WM, ID_WS)) {
         break;
       }
       BKE_id_delete(bmain, id);
@@ -2259,6 +2265,11 @@ bool PartialWriteContext::is_valid()
     /* By definition, embedded IDs are not in Main, so they are not listed in this context either.
      */
     if (cb_data->cb_flag & (IDWALK_CB_EMBEDDED | IDWALK_CB_EMBEDDED_NOT_OWNING)) {
+      return IDWALK_RET_NOP;
+    }
+    /* 'Runtime' ID usages ignored by read/write file code can also be ignored here. Covers e.g.
+     * the 'parent' runtime pointer of Library. */
+    if (cb_data->cb_flag & (IDWALK_CB_READFILE_IGNORE | IDWALK_CB_WRITEFILE_IGNORE)) {
       return IDWALK_RET_NOP;
     }
 

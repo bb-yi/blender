@@ -6,9 +6,9 @@
  * \ingroup draw
  */
 
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
+#include "BLI_math_geom_c.hh"
 #include "BLI_math_matrix.hh"
+#include "BLI_math_matrix_c.hh"
 
 #include "DRW_render.hh"
 #include "GPU_compute.hh"
@@ -344,6 +344,21 @@ std::array<float3, 8> View::frustum_corners_get(int view_id) const
           culling_[view_id].frustum_corners.corners[5].xyz(),
           culling_[view_id].frustum_corners.corners[6].xyz(),
           culling_[view_id].frustum_corners.corners[7].xyz()};
+}
+
+float View::screen_pixel_radius(const float4x4 &wininv, bool is_perspective, const int2 &extent)
+{
+  float min_dim = float(min_ii(extent.x, extent.y));
+  float3 p0 = float3(-1.0f, -1.0f, 0.0f);
+  float3 p1 = float3(float2(min_dim / extent) * 2.0f - 1.0f, 0.0f);
+  p0 = math::project_point(wininv, p0);
+  p1 = math::project_point(wininv, p1);
+  /* Compute radius at unit plane from the camera. This is NOT the perspective division. */
+  if (is_perspective) {
+    p0 = p0 / p0.z;
+    p1 = p1 / p1.z;
+  }
+  return math::distance(p0, p1) / min_dim;
 }
 
 }  // namespace blender::draw

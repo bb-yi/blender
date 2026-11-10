@@ -17,10 +17,10 @@
 #include "BKE_library.hh"
 #include "BKE_object.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BLT_translation.hh"
 
@@ -589,7 +589,7 @@ static void view3d_collection_drop_copy_external_asset(bContext *C, wmDrag *drag
   WM_event_add_notifier(C, NC_SCENE | ND_LAYER_CONTENT, scene);
 
   /* Make an object active, just use the first one in the collection. */
-  CollectionObject *cobject = static_cast<CollectionObject *>(collection->gobject.first);
+  CollectionObject *cobject = collection->gobject.first();
   BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
   Base *base = cobject ? BKE_view_layer_base_find(view_layer, cobject->ob) : nullptr;
   if (base) {

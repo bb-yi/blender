@@ -17,15 +17,15 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_base_safe.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_safe.hh"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_vector.hh"
-#include "BLI_rect.h"
-#include "BLI_string_utf8.h"
-#include "BLI_threads.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_vector_c.hh"
+#include "BLI_rect.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_threads.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_curve_types.h"
 #include "DNA_object_types.h"
@@ -82,7 +82,7 @@ static VFont *vfont_from_charinfo(const Curve &cu, const CharInfo *info)
   }
 }
 
-static VFontData *vfont_data_ensure_with_lock(VFont *vfont)
+static VFontData *vfont_data_ensure(VFont *vfont)
 {
   if (vfont == nullptr) {
     return nullptr;
@@ -109,7 +109,13 @@ static VFontData *vfont_data_ensure_with_lock(VFont *vfont)
   return vfont->data;
 }
 
-static bool vfont_char_find(const VFontData *vfd, char32_t charcode, VChar **r_che)
+/**
+ * The caller is responsible for locking.
+ *
+ * \note Even when characters are known to exist, locking is needed
+ * as the hash-table may be added to (and resized) by another thread.
+ */
+static bool vfont_char_find_no_lock(const VFontData *vfd, char32_t charcode, VChar **r_che)
 {
   if (VChar **che_p = vfd->characters->lookup_ptr(charcode)) {
     *r_che = *che_p;
@@ -119,20 +125,26 @@ static bool vfont_char_find(const VFontData *vfd, char32_t charcode, VChar **r_c
   return false;
 }
 
+static bool vfont_char_find(const VFontData *vfd, char32_t charcode, VChar **r_che)
+{
+  BLI_rw_mutex_lock(&vfont_rwlock, THREAD_LOCK_READ);
+  bool che_found = vfont_char_find_no_lock(vfd, charcode, r_che);
+  BLI_rw_mutex_unlock(&vfont_rwlock);
+  return che_found;
+}
+
 /**
  * Find the character or lazily initialize it.
  *
  * The intended use-case for this function is that characters are initialized once.
  * Any future access can then use #vfont_char_find or #vfont_char_find_or_placeholder.
  */
-static VChar *vfont_char_ensure_with_lock(VFont *vfont, char32_t charcode)
+static VChar *vfont_char_ensure(VFont *vfont, char32_t charcode)
 {
   VChar *che;
   if (vfont && vfont->data) {
     VFontData *vfd = vfont->data;
-    BLI_rw_mutex_lock(&vfont_rwlock, THREAD_LOCK_READ);
     bool che_found = vfont_char_find(vfd, charcode, &che);
-    BLI_rw_mutex_unlock(&vfont_rwlock);
 
     /* The character wasn't in the current curve base so load it. */
     if (che_found == false) {
@@ -142,7 +154,7 @@ static VChar *vfont_char_ensure_with_lock(VFont *vfont, char32_t charcode)
        *
        * Such a check should not be a bottleneck since it wouldn't
        * happen often once all the chars are load. */
-      che_found = vfont_char_find(vfd, charcode, &che);
+      che_found = vfont_char_find_no_lock(vfd, charcode, &che);
       if (che_found == false) {
         che = BKE_vfontdata_char_from_freetypefont(vfont, charcode);
       }
@@ -270,6 +282,8 @@ static VChar *vfont_placeholder_ensure(VCharPlaceHolder &che_placeholder, char32
 
 /**
  * A version of #vfont_char_find that returns a place-holder if the glyph cannot be found.
+ *
+ * This relies on a previous lookup having ensured the character has been loaded.
  */
 static VChar *vfont_char_find_or_placeholder(const VFontData *vfd,
                                              char32_t charcode,
@@ -277,9 +291,11 @@ static VChar *vfont_char_find_or_placeholder(const VFontData *vfd,
 {
   VChar *che = nullptr;
   if (vfd) {
+    /* While the characters are known to exist, locking is needed
+     * as the hash-table may be added to (and resized) by another thread. */
     vfont_char_find(vfd, charcode, &che);
   }
-  if (UNLIKELY(che == nullptr)) {
+  if (che == nullptr) [[unlikely]] {
     che = vfont_placeholder_ensure(che_placeholder, charcode);
   }
   return che;
@@ -391,7 +407,7 @@ static void vfont_char_build_impl(const Curve &cu,
   /* Select the glyph data */
   const Nurb *nu_from_vchar = nullptr;
   if (che) {
-    nu_from_vchar = static_cast<Nurb *>(che->nurbsbase.first);
+    nu_from_vchar = che->nurbsbase.first();
   }
 
   /* Create the character. */
@@ -497,12 +513,18 @@ void BKE_vfont_char_build(const Curve &cu,
                           int charidx,
                           const float fsize)
 {
-  VFontData *vfd = vfont_data_ensure_with_lock(vfont_from_charinfo(cu, info));
+  VFontData *vfd = vfont_data_ensure(vfont_from_charinfo(cu, info));
   if (!vfd) {
     return;
   }
-  VChar *che;
-  vfont_char_find(vfd, charcode, &che);
+  VChar *che = nullptr;
+  /* C0 control characters should not generate geometry. */
+  if (charcode >= 32) {
+    VCharPlaceHolder che_placeholder = {
+        /*metrics*/ &vfd->metrics,
+    };
+    che = vfont_char_find_or_placeholder(vfd, charcode, che_placeholder);
+  }
   vfont_char_build_impl(cu, nubase, che, info, is_smallcaps, offset, rotate, charidx, fsize);
 }
 
@@ -534,7 +556,7 @@ static bool vfont_char_is_combining(const char32_t charcode, const float char_wi
 
 static char32_t vfont_char_apply_smallcaps(char32_t charcode, const bool is_smallcaps)
 {
-  if (UNLIKELY(is_smallcaps)) {
+  if (is_smallcaps) [[unlikely]] {
     return toupper(charcode);
   }
   return charcode;
@@ -626,7 +648,7 @@ static void vfont_info_context_init(VFontInfoContext *vfinfo_ctx, const Curve &c
   BLI_assert(!vfinfo_ctx->vfd);
 
   vfinfo_ctx->vfont = cu.vfont;
-  vfinfo_ctx->vfd = vfont_data_ensure_with_lock(vfinfo_ctx->vfont);
+  vfinfo_ctx->vfd = vfont_data_ensure(vfinfo_ctx->vfont);
 }
 
 static void vfont_info_context_update(VFontInfoContext *vfinfo_ctx,
@@ -636,7 +658,7 @@ static void vfont_info_context_update(VFontInfoContext *vfinfo_ctx,
   VFont *vfont = vfont_from_charinfo(cu, info);
   if (vfinfo_ctx->vfont != vfont) {
     vfinfo_ctx->vfont = vfont;
-    vfinfo_ctx->vfd = vfont_data_ensure_with_lock(vfont);
+    vfinfo_ctx->vfd = vfont_data_ensure(vfont);
   }
 }
 
@@ -734,7 +756,7 @@ static bool vfont_to_curve(Object *ob,
   BLI_assert(ob == nullptr || ob->type == OB_FONT);
 
   /* Read-file ensures non-null, must have become null at run-time, this is a bug! */
-  if (UNLIKELY(!(cu.str && cu.tb && (ef ? ef->textbufinfo : cu.strinfo)))) {
+  if (!(cu.str && cu.tb && (ef ? ef->textbufinfo : cu.strinfo))) [[unlikely]] {
     BLI_assert(0);
     return false;
   }
@@ -912,7 +934,7 @@ static bool vfont_to_curve(Object *ob,
     vfont_info_context_update(&vfinfo_ctx, cu, info);
 
     if (!ELEM(charcode, '\n', '\0')) {
-      che = vfont_char_ensure_with_lock(vfinfo_ctx.vfont, charcode);
+      che = vfont_char_ensure(vfinfo_ctx.vfont, charcode);
       if (che == nullptr) {
         che = vfont_placeholder_ensure(che_placeholder, charcode);
       }
@@ -953,7 +975,7 @@ static bool vfont_to_curve(Object *ob,
         for (j = i; (mem[j] != '\n') && (chartransdata[j].do_break == 0); j--) {
 
           /* Special case when there are no breaks possible. */
-          if (UNLIKELY(j == 0)) {
+          if (j == 0) [[unlikely]] {
             if (i == slen) {
               /* Use the behavior of zero a height text-box when a break cannot be inserted.
                *
@@ -1883,12 +1905,13 @@ static bool vfont_to_curve(Object *ob,
        * (using the character midpoint on the x-axis as a reference). */
       for (; i <= char_end && chartransdata[i].linenr == char_line; i++) {
         info = &custrinfo[i];
-        const char32_t charcode = vfont_char_apply_smallcaps(mem[i], info);
+        const bool is_smallcaps = chartransdata[i].is_smallcaps;
+        const char32_t charcode = vfont_char_apply_smallcaps(mem[i], is_smallcaps);
 
         vfont_info_context_update(&vfinfo_ctx, cu, info);
         che = vfont_char_find_or_placeholder(vfinfo_ctx.vfd, charcode, che_placeholder);
 
-        const float charwidth = vfont_char_width(cu, che, info);
+        const float charwidth = vfont_char_width(cu, che, is_smallcaps);
         if (vfont_char_is_combining(charcode, charwidth)) [[unlikely]] {
           /* Combining character, skip so the cursor won't be between combining characters. */
           continue;

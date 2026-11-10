@@ -8,7 +8,7 @@
 
 #include "sequencer_strips_batch.hh"
 
-#include "BLI_rect.h"
+#include "BLI_rect.hh"
 
 #include "DNA_userdef_types.h"
 #include "DNA_view2d_types.h"
@@ -73,9 +73,7 @@ StripsDrawBatch::~StripsDrawBatch()
 {
   flush_batch();
 
-  GPU_uniformbuf_unbind(ubo_strips_);
   GPU_uniformbuf_free(ubo_strips_);
-  GPU_uniformbuf_unbind(ubo_context_);
   GPU_uniformbuf_free(ubo_context_);
 }
 

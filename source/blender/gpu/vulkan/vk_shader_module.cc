@@ -45,15 +45,18 @@ void VKShaderModule::finalize(StringRefNull name)
   }
 
   const VKDevice &device = VKBackend::get().device;
-  vkCreateShaderModule(device.vk_handle(), &create_info, nullptr, &vk_shader_module);
+  device.functions.vkCreateShaderModule(
+      device.vk_handle(), &create_info, nullptr, &vk_shader_module);
   debug::object_label(vk_shader_module, name.c_str());
 }
 
-void VKShaderModule::build_sources_hash()
+void VKShaderModule::build_sources_hash(StringRef extra)
 {
   DefaultHash<std::string> hasher;
   BLI_assert(!combined_sources.empty());
-  uint64_t hash = hasher(combined_sources);
+  std::string key = combined_sources;
+  key.append(extra.data(), extra.size());
+  uint64_t hash = hasher(key);
   std::stringstream ss;
   ss << std::setfill('0') << std::setw(sizeof(uint64_t) * 2) << std::hex << hash;
   sources_hash = ss.str();

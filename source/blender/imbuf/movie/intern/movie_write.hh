@@ -72,7 +72,7 @@ struct MovieWriter {
 
   /* Image frame in Blender's own pixel format, may need conversion to the output pixel format. */
   AVFrame *img_convert_frame = nullptr;
-  SwsContext *img_convert_ctx = nullptr;
+  SwsContext *sws_ctx = nullptr;
 
   uint8_t *audio_input_buffer = nullptr;
   uint8_t *audio_deinterleave_buffer = nullptr;
@@ -103,7 +103,7 @@ AVStream *alloc_audio_stream(MovieWriter *context,
                              AVCodecID codec_id,
                              AVFormatContext *of,
                              char *error,
-                             int error_size,
+                             int error_maxncpy,
                              ReportList *reports);
 void write_audio_frames(MovieWriter *context, double to_pts);
 

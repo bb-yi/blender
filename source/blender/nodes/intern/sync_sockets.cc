@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
@@ -29,10 +33,11 @@
 #include "ED_node.hh"
 #include "ED_screen.hh"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_set.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_memory_utils.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "BLT_translation.hh"
 
@@ -1493,11 +1498,11 @@ bool node_can_sync_sockets(const bContext &C, const bNodeTree & /*tree*/, const 
 
 void node_can_sync_cache_clear(Main &bmain)
 {
-  if (wmWindowManager *wm = static_cast<wmWindowManager *>(bmain.wm.first)) {
+  if (wmWindowManager *wm = bmain.wm.first()) {
     for (wmWindow &window : wm->windows) {
       bScreen *screen = BKE_workspace_active_screen_get(window.workspace_hook);
       for (ScrArea &area : screen->areabase) {
-        SpaceLink *sl = static_cast<SpaceLink *>(area.spacedata.first);
+        SpaceLink *sl = area.spacedata.first_as<SpaceLink>();
         if (sl->spacetype == SPACE_NODE) {
           SpaceNode *snode = reinterpret_cast<SpaceNode *>(sl);
           Map<int, bool> &cache = ed::space_node::node_can_sync_cache_get(*snode);

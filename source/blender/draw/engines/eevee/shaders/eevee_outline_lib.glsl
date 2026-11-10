@@ -7,8 +7,8 @@
 #include "infos/eevee_outline_infos.hh"
 
 #include "eevee_defines.hh"
-#include "gpu_shader_math_base_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_base.bsl.hh"
+#include "gpu_shader_utildefines.bsl.hh"
 
 /* Select one full-resolution source pixel per reduced outline pixel. Integer data (IDs,
  * packed parameters and surface depth) must never be filtered across material boundaries. */
@@ -201,16 +201,11 @@ uint outline_expansion_block_replace(uint info_a, float block)
     defined(GPU_FRAGMENT_SHADER)
 float4 g_outline_staged_color;
 uint4 g_outline_staged_info;
+uint4 g_outline_staged_surface_data;
 bool g_outline_staged_receiver;
 #endif
 
-#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(GPU_FRAGMENT_SHADER)
-/* Emitted with the material graph, where its shading globals and depth offset are available.
- * Layer 1 stores raw reverse-Z depth followed by the world-space surface normal. */
-uint4 outline_surface_data();
-ObjectInfos drw_object_infos();
-uint drw_resource_id();
-#endif
+
 
 void outline_output_reset()
 {
@@ -218,11 +213,12 @@ void outline_output_reset()
     defined(GPU_FRAGMENT_SHADER)
   g_outline_staged_color = float4(0.0f);
   g_outline_staged_info = uint4(0u);
+  g_outline_staged_surface_data = uint4(0u);
   g_outline_staged_receiver = false;
 #endif
 }
 
-void outline_output_flush(float surface_opacity)
+void outline_output_flush(float surface_opacity, uint resource_id)
 {
 #if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(MAT_OUTLINE_CLEAR) && \
     defined(GPU_FRAGMENT_SHADER)
@@ -244,7 +240,7 @@ void outline_output_flush(float surface_opacity)
   stored_info.a = outline_expansion_block_replace(stored_info.a, block);
   if (contributes) {
     imageStoreFast(outline_color_img, texel, g_outline_staged_color);
-    imageStoreFast(outline_info_img, int3(texel, 1), outline_surface_data());
+    imageStoreFast(outline_info_img, int3(texel, 1), g_outline_staged_surface_data);
   }
   if (contributes || block > 0.0f) {
     imageStoreFast(outline_info_img, int3(texel, 0), stored_info);
@@ -254,7 +250,7 @@ void outline_output_flush(float surface_opacity)
 #  ifdef MAT_FORWARD
     identity = imageLoadFast(outline_info_img, int3(texel, 2));
 #  endif
-    identity.g = drw_resource_id() + 1u;
+    identity.g = resource_id + 1u;
     if (contributes) {
       identity.r = identity.g;
     }
@@ -337,10 +333,13 @@ void output_outline(float4 line_color,
                     bool freestyle_edge,
                     float expansion_mask,
                     float id_combine,
-                    float edge_priority)
+                    float edge_priority,
+                    ObjectInfos object_infos,
+                    uint resource_id,
+                    uint4 surface_data)
 {
 #if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(GPU_FRAGMENT_SHADER)
-  if (flag_test(drw_object_infos().flag, OBJECT_HOLDOUT)) {
+  if (flag_test(object_infos.flag, OBJECT_HOLDOUT)) {
     return;
   }
 
@@ -354,7 +353,7 @@ void output_outline(float4 line_color,
   int2 texel = int2(gl_FragCoord.xy);
   uint custom_outline_id = uint(max(outline_id, 0.0f) + 0.5f);
   uint resolved_outline_id = (custom_outline_id > 0u) ? custom_outline_id :
-                                                      min(drw_resource_id() + 1u,
+                                                      min(resource_id + 1u,
                                                           OUTLINE_ID_VALUE_MASK);
 
   float4 stored_color = line_color;
@@ -377,6 +376,7 @@ void output_outline(float4 line_color,
 #  if defined(MAT_OUTLINE_CLEAR)
   g_outline_staged_color = stored_color;
   g_outline_staged_info = stored_info;
+  g_outline_staged_surface_data = surface_data;
   g_outline_staged_receiver = true;
 #    if !defined(MAT_FORWARD)
   /* Deferred refraction preserves the existing source style. It has no Forward flush, but
@@ -388,16 +388,16 @@ void output_outline(float4 line_color,
   }
   if (instance_identity) {
     uint4 identity = imageLoadFast(outline_info_img, int3(texel, 2));
-    identity.g = drw_resource_id() + 1u;
+    identity.g = resource_id + 1u;
     imageStoreFast(outline_info_img, int3(texel, 2), identity);
   }
 #    endif
 #  else
   imageStoreFast(outline_color_img, texel, stored_color);
   imageStoreFast(outline_info_img, int3(texel, 0), stored_info);
-  imageStoreFast(outline_info_img, int3(texel, 1), outline_surface_data());
+  imageStoreFast(outline_info_img, int3(texel, 1), surface_data);
   if (instance_identity) {
-    const uint identity = drw_resource_id() + 1u;
+    const uint identity = resource_id + 1u;
     imageStoreFast(outline_info_img, int3(texel, 2),
                    uint4(contributes ? identity : 0u, identity, 0u, 0u));
   }

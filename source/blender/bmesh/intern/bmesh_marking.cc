@@ -19,11 +19,12 @@
 
 #include "DNA_scene_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_vector.h"
-#include "BLI_task.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_task_c.hh"
 
 #include "bmesh.hh"
+#include "bmesh_iterators_parallel.hh"
 #include "bmesh_query_uv.hh"
 #include "bmesh_structure.hh"
 
@@ -973,7 +974,7 @@ BMFace *BM_mesh_active_face_get(BMesh *bm, const bool is_sloppy, const bool is_s
     BMEditSelection *ese;
 
     /* Find the latest non-hidden face from the BMEditSelection */
-    ese = static_cast<BMEditSelection *>(bm->selected.last);
+    ese = bm->selected.last();
     for (; ese; ese = ese->prev) {
       if (ese->htype == BM_FACE) {
         f = reinterpret_cast<BMFace *>(ese->ele);
@@ -1004,8 +1005,8 @@ BMFace *BM_mesh_active_face_get(BMesh *bm, const bool is_sloppy, const bool is_s
 
 BMEdge *BM_mesh_active_edge_get(BMesh *bm)
 {
-  if (bm->selected.last) {
-    BMEditSelection *ese = static_cast<BMEditSelection *>(bm->selected.last);
+  if (bm->selected.last()) {
+    BMEditSelection *ese = bm->selected.last();
 
     if (ese && ese->htype == BM_EDGE) {
       return reinterpret_cast<BMEdge *>(ese->ele);
@@ -1017,8 +1018,8 @@ BMEdge *BM_mesh_active_edge_get(BMesh *bm)
 
 BMVert *BM_mesh_active_vert_get(BMesh *bm)
 {
-  if (bm->selected.last) {
-    BMEditSelection *ese = static_cast<BMEditSelection *>(bm->selected.last);
+  if (bm->selected.last()) {
+    BMEditSelection *ese = bm->selected.last();
 
     if (ese && ese->htype == BM_VERT) {
       return reinterpret_cast<BMVert *>(ese->ele);
@@ -1030,8 +1031,8 @@ BMVert *BM_mesh_active_vert_get(BMesh *bm)
 
 BMElem *BM_mesh_active_elem_get(BMesh *bm)
 {
-  if (bm->selected.last) {
-    BMEditSelection *ese = static_cast<BMEditSelection *>(bm->selected.last);
+  if (bm->selected.last()) {
+    BMEditSelection *ese = bm->selected.last();
 
     if (ese) {
       return ese->ele;
@@ -1216,7 +1217,7 @@ void BM_select_history_validate(BMesh *bm)
 {
   BMEditSelection *ese, *ese_next;
 
-  for (ese = static_cast<BMEditSelection *>(bm->selected.first); ese; ese = ese_next) {
+  for (ese = bm->selected.first(); ese; ese = ese_next) {
     ese_next = ese->next;
     if (!BM_elem_flag_test(ese->ele, BM_ELEM_SELECT)) {
       BLI_freelinkN(&(bm->selected), ese);
@@ -1239,7 +1240,7 @@ char BM_select_history_htype_all(const BMesh *bm)
 
 bool BM_select_history_active_get(BMesh *bm, BMEditSelection *ese)
 {
-  BMEditSelection *ese_last = static_cast<BMEditSelection *>(bm->selected.last);
+  BMEditSelection *ese_last = bm->selected.last();
   BMFace *efa = BM_mesh_active_face_get(bm, false, true);
 
   ese->next = ese->prev = nullptr;
@@ -1330,7 +1331,7 @@ void BM_select_history_merge_from_targetmap(BMesh *bm,
         }
         ele_dst = ele_dst_next;
         /* Break loop on circular reference (should never happen). */
-        if (UNLIKELY(ele_dst == ese.ele)) {
+        if (ele_dst == ese.ele) [[unlikely]] {
           BLI_assert(0);
           break;
         }
@@ -1343,9 +1344,7 @@ void BM_select_history_merge_from_targetmap(BMesh *bm,
   }
 
   /* Remove overlapping duplicates. */
-  for (BMEditSelection *ese = static_cast<BMEditSelection *>(bm->selected.first), *ese_next; ese;
-       ese = ese_next)
-  {
+  for (BMEditSelection *ese = bm->selected.first(), *ese_next; ese; ese = ese_next) {
     ese_next = ese->next;
     if (BM_ELEM_API_FLAG_TEST(ese->ele, _FLAG_OVERLAP)) {
       BM_ELEM_API_FLAG_DISABLE(ese->ele, _FLAG_OVERLAP);
@@ -1403,7 +1402,7 @@ void BM_mesh_elem_hflag_disable_test(BMesh *bm,
         ele = static_cast<BMElem *>(BM_iter_new(&iter, bm, iter_types[i], nullptr));
         for (; ele; ele = static_cast<BMElem *>(BM_iter_step(&iter))) {
 
-          if (UNLIKELY(respecthide && BM_elem_flag_test(ele, BM_ELEM_HIDDEN))) {
+          if (respecthide && BM_elem_flag_test(ele, BM_ELEM_HIDDEN)) [[unlikely]] {
             /* pass */
           }
           else if (!hflag_test || BM_elem_flag_test(ele, hflag_test)) {
@@ -1457,7 +1456,7 @@ void BM_mesh_elem_hflag_enable_test(BMesh *bm,
       ele = static_cast<BMElem *>(BM_iter_new(&iter, bm, iter_types[i], nullptr));
       for (; ele; ele = static_cast<BMElem *>(BM_iter_step(&iter))) {
 
-        if (UNLIKELY(respecthide && BM_elem_flag_test(ele, BM_ELEM_HIDDEN))) {
+        if (respecthide && BM_elem_flag_test(ele, BM_ELEM_HIDDEN)) [[unlikely]] {
           /* pass */
         }
         else if (!hflag_test || BM_elem_flag_test(ele, hflag_test)) {

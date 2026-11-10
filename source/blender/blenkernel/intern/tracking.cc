@@ -22,21 +22,21 @@
 #include "DNA_object_types.h" /* SELECT */
 #include "DNA_scene_types.h"
 
-#include "BLI_bitmap_draw_2d.h"
-#include "BLI_ghash.h"
+#include "BLI_bitmap_draw_2d.hh"
+#include "BLI_ghash.hh"
 #include "BLI_hash.hh"
 #include "BLI_index_range.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
 #include "BLI_task.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -137,7 +137,7 @@ static void tracking_dopesheet_free(MovieTrackingDopesheet *dopesheet)
   MovieTrackingDopesheetChannel *channel;
 
   /* Free channel's segments. */
-  channel = static_cast<MovieTrackingDopesheetChannel *>(dopesheet->channels.first);
+  channel = dopesheet->channels.first();
   while (channel) {
     if (channel->segments) {
       MEM_delete(channel->segments);
@@ -444,8 +444,7 @@ void BKE_tracking_get_projection_matrix(MovieTracking *tracking,
 
 void BKE_tracking_clipboard_free()
 {
-  MovieTrackingTrack *track = static_cast<MovieTrackingTrack *>(tracking_clipboard.tracks.first),
-                     *next_track;
+  MovieTrackingTrack *track = tracking_clipboard.tracks.first(), *next_track;
 
   while (track) {
     next_track = track->next;
@@ -1060,15 +1059,15 @@ static bGPDlayer *track_mask_gpencil_layer_get(const MovieTrackingTrack *track)
     return nullptr;
   }
 
-  layer = static_cast<bGPDlayer *>(track->gpd->layers.first);
+  layer = track->gpd->layers.first();
 
   while (layer) {
     if (layer->flag & GP_LAYER_ACTIVE) {
-      bGPDframe *frame = static_cast<bGPDframe *>(layer->frames.first);
+      bGPDframe *frame = layer->frames.first();
       bool ok = false;
 
       while (frame) {
-        if (frame->strokes.first) {
+        if (frame->strokes.first()) {
           ok = true;
           break;
         }
@@ -1111,7 +1110,7 @@ static void track_mask_gpencil_layer_rasterize(const int frame_width,
                                                const int mask_width,
                                                const int mask_height)
 {
-  const bGPDframe *frame = static_cast<const bGPDframe *>(layer->frames.first);
+  const bGPDframe *frame = layer->frames.first();
   TrackMaskSetPixelData data;
 
   data.mask = mask;
@@ -1119,7 +1118,7 @@ static void track_mask_gpencil_layer_rasterize(const int frame_width,
   data.mask_height = mask_height;
 
   while (frame) {
-    const bGPDstroke *stroke = static_cast<const bGPDstroke *>(frame->strokes.first);
+    const bGPDstroke *stroke = frame->strokes.first();
 
     while (stroke) {
       const bGPDspoint *stroke_points = stroke->points;
@@ -1202,7 +1201,7 @@ void BKE_tracking_track_select(ListBaseT<MovieTrackingTrack> *tracksbase,
     BKE_tracking_track_flag_set(track, area, TRACK_SELECT);
   }
   else {
-    MovieTrackingTrack *cur = static_cast<MovieTrackingTrack *>(tracksbase->first);
+    MovieTrackingTrack *cur = tracksbase->first();
 
     while (cur) {
       if ((cur->flag & TRACK_HIDDEN) == 0) {
@@ -2872,10 +2871,6 @@ void BKE_tracking_disable_channels(
         }
       }
     }
-  }
-
-  if (ibuf->float_data()) {
-    ibuf->userflags |= IB_RECT_INVALID;
   }
 }
 

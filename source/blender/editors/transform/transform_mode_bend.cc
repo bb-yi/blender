@@ -10,11 +10,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_string_utf8.h"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_task.hh"
 
 #include "BKE_unit.hh"
@@ -74,7 +74,7 @@ static void transdata_elem_bend(const TransInfo *t,
 
                                 bool is_clamp)
 {
-  if (UNLIKELY(angle == 0.0f)) {
+  if (angle == 0.0f) [[unlikely]] {
     copy_v3_v3(td->loc, td->iloc);
     return;
   }
@@ -163,6 +163,9 @@ static void Bend(TransInfo *t)
   /* Amount of radians for bend. */
   copy_v2_v2(values.vector, t->values);
 
+  /* Zero without a 3D view or when the mouse is over the 3D cursor, the radius is zero then. */
+  const bool has_init_dist = bend_data->warp_init_dist != 0.0f;
+
 #if 0
   snapGrid(t, angle_rad);
 #else
@@ -170,7 +173,9 @@ static void Bend(TransInfo *t)
    * this isn't essential but nicer to give reasonable snapping values for radius. */
   if (t->tsnap.mode & SCE_SNAP_TO_INCREMENT) {
     const float radius_snap = 0.1f;
-    const float snap_hack = (t->increment[0] * bend_data->warp_init_dist) / radius_snap;
+    const float snap_hack = has_init_dist ?
+                                (t->increment[0] * bend_data->warp_init_dist) / radius_snap :
+                                1.0f;
     values.scale *= snap_hack;
     transform_snap_increment(t, values.vector);
     values.scale /= snap_hack;
@@ -178,7 +183,9 @@ static void Bend(TransInfo *t)
 #endif
 
   if (applyNumInput(&t->num, values.vector)) {
-    values.scale = values.scale / bend_data->warp_init_dist;
+    if (has_init_dist) {
+      values.scale = values.scale / bend_data->warp_init_dist;
+    }
   }
 
   copy_v2_v2(t->values_final, values.vector);
@@ -305,7 +312,7 @@ static void initBend(TransInfo *t, wmOperator * /*op*/)
   copy_v3_v3(data->warp_sta, curs);
   if (t->spacetype == SPACE_VIEW3D) {
     ED_view3d_win_to_3d(
-        static_cast<View3D *>(t->area->spacedata.first), t->region, curs, t->mval, data->warp_end);
+        t->area->spacedata.first_as<View3D>(), t->region, curs, t->mval, data->warp_end);
   }
   else {
     copy_v3_v3(data->warp_end, curs); /* Dummy value. */
@@ -336,6 +343,7 @@ TransModeInfo TransMode_bend = {
     /*snap_distance_fn*/ nullptr,
     /*snap_apply_fn*/ nullptr,
     /*draw_fn*/ nullptr,
+    /*status_fn*/ nullptr,
 };
 
 }  // namespace blender::ed::transform

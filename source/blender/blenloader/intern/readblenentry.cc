@@ -13,12 +13,12 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_ghash.h"
-#include "BLI_linklist.h"
+#include "BLI_ghash.hh"
+#include "BLI_linklist.hh"
 #include "BLI_path_utils.hh" /* Only for assertions. */
 #include "BLI_set.hh"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_genfile.h"
 
@@ -31,12 +31,12 @@
 
 #include "readfile.hh"
 
-#include "BLI_sys_types.h" /* Needed for `intptr_t`. */
+#include "BLI_sys_types.hh" /* Needed for `intptr_t`. */
 
 namespace blender {
 
 #ifdef WIN32
-#  include "BLI_winstuff.h"
+#  include "BLI_winstuff.hh"
 #endif
 
 /* Access routines used by file-selector. */
@@ -101,6 +101,9 @@ static bool blendhandle_load_id_data_and_validate(FileData *fd,
   r_idflag = blo_bhead_id_flag(fd, bhead);
   if (r_library_data) {
     r_library_data->filepath = blo_bhead_library_filepath(fd, bhead);
+    if (!r_library_data->filepath) {
+      return false;
+    }
     r_library_data->flag = blo_bhead_library_flag(fd, bhead);
   }
   /* Do not list (and therefore allow direct linking of) packed data.
@@ -162,7 +165,7 @@ LinkNode *BLO_blendhandle_get_datablock_info(BlendHandle *bh,
 
   const bool is_library = (ofblocktype == ID_LI);
 
-  const int sdna_nr_preview_image = DNA_struct_find_with_alias(fd->filesdna, "PreviewImage");
+  const int sdna_nr_preview_image = DNA_struct_find_with_alias(fd->filesdna.get(), "PreviewImage");
 
   for (bhead = blo_bhead_first(fd); bhead; bhead = blo_bhead_next(fd, bhead)) {
     if (bhead->code == BLO_CODE_ENDB) {
@@ -198,7 +201,14 @@ LinkNode *BLO_blendhandle_get_datablock_info(BlendHandle *bh,
         bhead = blo_read_asset_data_block(fd, bhead, &asset_meta_data);
         /* blo_read_asset_data_block() reads all DATA heads and already advances bhead to the
          * next non-DATA one. Go back, so the loop doesn't skip the non-DATA head. */
-        bhead = blo_bhead_prev(fd, bhead);
+        if (bhead) {
+          bhead = blo_bhead_prev(fd, bhead);
+        }
+        /* Asset data is missing in corrupt files. */
+        if (use_assets_only && asset_meta_data == nullptr) {
+          MEM_delete(info);
+          continue;
+        }
       }
 
       STRNCPY(info->name, name);
@@ -207,7 +217,8 @@ LinkNode *BLO_blendhandle_get_datablock_info(BlendHandle *bh,
 
       bool has_preview = false;
       /* See if we can find a preview in the data of this ID. */
-      for (BHead *data_bhead = blo_bhead_next(fd, id_bhead); data_bhead->code == BLO_CODE_DATA;
+      for (BHead *data_bhead = blo_bhead_next(fd, id_bhead);
+           data_bhead && data_bhead->code == BLO_CODE_DATA;
            data_bhead = blo_bhead_next(fd, data_bhead))
       {
         if (data_bhead->SDNAnr == sdna_nr_preview_image) {
@@ -250,17 +261,26 @@ static BHead *blo_blendhandle_read_preview_rects(FileData *fd,
         preview_from_file->h[preview_index])
     {
       bhead = blo_bhead_next(fd, bhead);
-      BLI_assert((preview_from_file->w[preview_index] * preview_from_file->h[preview_index] *
-                  sizeof(uint)) == bhead->len);
-      result->rect[preview_index] = static_cast<uint *>(
-          BLO_library_read_struct(fd, bhead, "PreviewImage Icon Rect"));
+
+      const int64_t pixels_num = int64_t(preview_from_file->w[preview_index]) *
+                                 preview_from_file->h[preview_index];
+      const int64_t pixel_size = sizeof(uint);
+      if (bhead && bhead->SDNAnr == SDNA_RAW_DATA_STRUCT_INDEX && bhead->len % pixel_size == 0 &&
+          bhead->len / pixel_size == pixels_num)
+      {
+        result->rect[preview_index] = static_cast<uint *>(
+            BLO_library_read_struct(fd, bhead, "PreviewImage Icon Rect"));
+      }
+      else {
+        result->rect[preview_index] = nullptr;
+      }
+      if (result->rect[preview_index] == nullptr) {
+        result->w[preview_index] = result->h[preview_index] = 0;
+      }
     }
     else {
       /* This should not be needed, but can happen in 'broken' .blend files,
        * better handle this gracefully than crashing. */
-      BLI_assert(preview_from_file->rect[preview_index] == nullptr &&
-                 preview_from_file->w[preview_index] == 0 &&
-                 preview_from_file->h[preview_index] == 0);
       result->rect[preview_index] = nullptr;
       result->w[preview_index] = result->h[preview_index] = 0;
     }
@@ -276,7 +296,7 @@ PreviewImage *BLO_blendhandle_get_preview_for_id(BlendHandle *bh,
 {
   FileData *fd = reinterpret_cast<FileData *>(bh);
   bool looking = false;
-  const int sdna_preview_image = DNA_struct_find_with_alias(fd->filesdna, "PreviewImage");
+  const int sdna_preview_image = DNA_struct_find_with_alias(fd->filesdna.get(), "PreviewImage");
 
   for (BHead *bhead = blo_bhead_first(fd); bhead; bhead = blo_bhead_next(fd, bhead)) {
     if (bhead->code == BLO_CODE_DATA) {

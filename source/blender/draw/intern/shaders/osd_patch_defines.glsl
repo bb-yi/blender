@@ -2,7 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/**
+/** \file
+ * \ingroup draw
+ *
  * File that contains dynamic defines based on the actual used GPU backend.
  *
  * NOTE: file must be included before `osd_patch_basis.glsl`.
@@ -20,4 +22,8 @@
 #  define OSD_PATCH_BASIS_METAL 1
 #else
 #  define OSD_PATCH_BASIS_GLSL
+#endif
+
+#ifdef SRT_CONSTANT_use_1st_derivatives
+#  define OPENSUBDIV_GLSL_COMPUTE_USE_1ST_DERIVATIVES
 #endif

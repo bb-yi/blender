@@ -15,10 +15,10 @@
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_array_utils.h"
-#include "BLI_listbase.h"
+#include "BLI_array_utils_c.hh"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BKE_armature.hh"
 #include "BKE_context.hh"
@@ -312,7 +312,7 @@ static void armature_undosys_foreach_ID_ref(UndoStep *us_p,
 
 void ED_armature_undosys_type(UndoType *ut)
 {
-  ut->name = "Edit Armature";
+  ut->identifier = "EDIT_ARMATURE";
   ut->poll = armature_undosys_poll;
   ut->step_encode = armature_undosys_step_encode;
   ut->step_decode = armature_undosys_step_decode;
@@ -320,7 +320,7 @@ void ED_armature_undosys_type(UndoType *ut)
 
   ut->step_foreach_ID_ref = armature_undosys_foreach_ID_ref;
 
-  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE;
+  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE | UNDOTYPE_FLAG_ENCODE_PRE_MEMFILE_SUPPORTED;
 
   ut->step_size = sizeof(ArmatureUndoStep);
 }

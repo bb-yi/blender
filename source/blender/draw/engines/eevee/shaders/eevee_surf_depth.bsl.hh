@@ -7,15 +7,7 @@
  */
 #pragma once
 
-#include "infos/eevee_geom_infos.hh"
-#include "infos/eevee_nodetree_infos.hh"
-
-FRAGMENT_SHADER_CREATE_INFO(eevee_nodetree)
-FRAGMENT_SHADER_CREATE_INFO(eevee_clip_plane)
-FRAGMENT_SHADER_CREATE_INFO(eevee_geom_iface_info)
-
-#include "draw_curves_lib.glsl" /* IWYU pragma: export. For nodetree functions. */
-#include "eevee_nodetree_frag_lib.glsl"
+#include "eevee_nodetree_frag_lib.bsl.hh"
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_surf_common.bsl.hh"
 #include "eevee_outline_shell_lib.bsl.hh"
@@ -23,22 +15,22 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_geom_iface_info)
 #include "eevee_utility_tx.bsl.hh"
 #include "eevee_velocity.bsl.hh"
 
-float4 closure_to_rgba_depth(Closure /*cl*/)
+float4 closure_to_rgba_depth(KernelGlobals &kg, ShadingData &sd, Closure /*cl*/)
 {
   float4 out_color;
-  out_color.rgb = g_emission;
-  out_color.a = saturate(1.0f - average(g_transmittance));
+  out_color.rgb = sd.emission;
+  out_color.a = saturate(1.0f - average(sd.transmittance));
 
   /* Reset for the next closure tree. */
-  closure_weights_reset(0.0f);
+  closure_weights_reset(kg, sd, 0.0f);
 
   return out_color;
 }
 
 namespace eevee {
 
-struct SurfaceDepth {
-  [[legacy_info]] ShaderCreateInfo eevee_geom_iface_info;
+struct StencilWriterSurfaceData {
+  [[push_constant]] int stencil_writer_reference;
 };
 
 /* WORKAROUND(fclem): This is not supposed to be needed.
@@ -57,61 +49,85 @@ template<> struct SurfaceDepthFragOut<true> {
   [[frag_color(PREPASS_FRAG_OUT_VELOCITY)]] float4 velocity;
 };
 
+
 template<bool with_velocity>
 [[fragment]]
-void surf_depth([[resource_table]] PipelineConstants &pipe,
-                [[resource_table]] SurfaceDepth & /*srt*/,
+void surf_depth([[resource_table]] KernelGlobals &kg,
+                [[resource_table]] PipelineConstants &pipe,
                 [[resource_table]] const Uniform &uni,
                 [[resource_table]] const Sampling &sampling,
-                [[resource_table]] const UtilityTexture & /*util_tx*/,
+                [[resource_table]] const UtilityTexture &util_tx,
                 [[resource_table]] const draw::View &views,
-                [[frag_coord]] const float4 /*frag_co*/,
+                [[resource_table, condition(is_stencil_writer_surface)]]
+                const StencilWriterSurfaceData &stencil_writer,
+                [[resource_table]] [[condition(use_velocity)]] const GeometryVelocity &geo_vel,
+                [[frag_coord]] const float4 frag_co,
+                [[in]] const VertOutCommon &interp,
+                [[in]] [[condition(is_curves)]] const VertOutCurves &curves_interp,
+                [[in]] [[condition(is_pointcloud)]] const VertOutPointcloud &ptcloud_interp,
+                [[in]] [[condition(is_gsplat)]] const VertOutGSplat &gsplat_interp,
+                [[in]] [[condition(use_velocity)]] const VertOutVelocity &motion,
+                [[in]] [[condition(use_clip_plane)]] const VertOutClipPlane &clip_interp,
                 [[out]] SurfaceDepthFragOut<with_velocity> &frag_out,
+                [[bary_coord]] [[condition(use_barycentric)]] const float3 bary_co,
                 [[front_facing]] const bool front_face)
 {
 #ifdef MAT_OUTLINE_SHELL_SELF_OCCLUSION
-  if (outline_shell_self_occluded()) {
+  if (outline_shell_self_occluded(interp.resource_id_raw, frag_co)) {
     gpu_discard_fragment();
     return;
   }
 #endif
-  if (pipe.use_transparency) [[static_branch]] {
+  float out_depth = frag_co.z;
+  material_surface_cull_discard(front_face);
     const ViewMatrices view = views.get(0);
 
-    init_globals(uni, view, front_face);
+    float3 barycentric_co = float3(0.0f);
+    if (pipe.use_barycentric) [[static_branch]] {
+      barycentric_co = bary_co;
+    }
 
-    nodetree_surface(0.0f);
+    ShadingData sd = init_globals(pipe, uni, interp, view, front_face, frag_co);
+    if (pipe.is_mesh) [[static_branch]] {
+      init_globals_mesh(interp, sd, barycentric_co);
+    }
+    else if (pipe.is_curves) [[static_branch]] {
+      init_globals_curves(interp, curves_interp, sd, view);
+    }
+    else if (pipe.is_pointcloud) [[static_branch]] {
+      init_globals_pointcloud(ptcloud_interp, sd);
+    }
 
+  if (pipe.use_transparency) [[static_branch]] {
+    nodetree_surface(kg, sd, 0.0f);
+
+    if (pipe.is_gsplat) [[static_branch]] {
+      sd.transmittance = gsplat_amend_transmittance(gsplat_interp, sd.transmittance);
+    }
+
+    float threshold;
 #if defined(MAT_OUTLINE_OCCLUSION)
     /* Outline resolve needs a binary front-most surface mask. Treat any visible transparent
      * coverage as an occluder, but keep fully transparent regions from writing depth. */
-    float threshold = 1.0f - 1e-5f;
+    threshold = 1.0f - 1e-5f;
 #else
     float noise_offset = sampling.rng_1D_get(SAMPLING_TRANSPARENCY);
-    float threshold = hashed_transparency::alpha_threshold(
-        uni.pipeline_buf.alpha_hash_scale, noise_offset, g_data.P);
+    threshold = hashed_transparency::alpha_threshold(
+        uni.pipeline_buf.alpha_hash_scale, noise_offset, sd.P);
 #endif
 
-    float transparency = average(g_transmittance);
-    if (transparency > threshold
+    float transparency = average(sd.transmittance);
+    bool discard_surface = transparency > threshold;
 #ifdef MAT_OUTLINE_SHELL
-        || transparency >= 1.0f
+    discard_surface = discard_surface || transparency >= 1.0f;
 #endif
-    ) {
+    if (discard_surface) {
       gpu_discard_fragment();
       return;
     }
   }
 
-#if defined(MAT_DEPTH_OFFSET)
-  {
-    const ViewMatrices view = views.get(0);
-    init_globals(uni, view, front_face);
-  }
-#endif
-
   if (pipe.use_clip_plane) [[static_branch]] {
-    auto &clip_interp = interface_get(eevee_clip_plane, clip_interp);
     /* Do not use hardware clip planes as they modify the rasterization (some GPUs add vertices).
      * This would in turn create a discrepancy between the pre-pass depth and the G-buffer depth
      * which exhibits missing pixels data. */
@@ -121,58 +137,232 @@ void surf_depth([[resource_table]] PipelineConstants &pipe,
     }
   }
 
+  float depth_offset = 0.0f;
 #ifdef MAT_DEPTH_OFFSET
-  float depth_offset = nodetree_depth_offset();
+  depth_offset = nodetree_depth_offset(kg, sd);
 #endif
 
   if constexpr (with_velocity) {
     if (pipe.use_velocity) [[static_branch]] {
-      /* clang-format off */ /* Multi-line define messes up line index. */
-      [[resource_table]] const GeometryVelocity &geo_vel = resource_table_get(eevee::GeometryVelocity);
-      /* clang-format on */
-      [[resource_table]] const CameraVelocity &cam_vel = geo_vel.camera;
-      const auto &motion = interface_get(eevee_velocity_iface_info, motion);
+      const ViewMatrices view = views.get(0);
+      float3 P_prv = interp.P + motion.prev;
+      float3 P = interp.P;
+      float3 P_nxt = interp.P + motion.next;
 #  ifdef MAT_DEPTH_OFFSET
-      frag_out.velocity = cam_vel.surface_velocity_depth_offset(
-          interp.P + motion.prev, interp.P, interp.P + motion.next, depth_offset);
-#  else
-      frag_out.velocity = cam_vel.surface_velocity(
-          interp.P + motion.prev, interp.P, interp.P + motion.next);
+      P_prv = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_prev.viewmat,
+                                                  geo_vel.camera.camera_prev.viewinv,
+                                                  P_prv, depth_offset);
+      P = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_curr.viewmat,
+                                              geo_vel.camera.camera_curr.viewinv,
+                                              P, depth_offset);
+      P_nxt = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_next.viewmat,
+                                                  geo_vel.camera.camera_next.viewinv,
+                                                  P_nxt, depth_offset);
 #  endif
-      frag_out.velocity = velocity::pack(frag_out.velocity);
+      frag_out.velocity = velocity::pack(geo_vel.camera.surface_velocity_local(view, P_prv, P, P_nxt));
     }
   }
 
 #ifdef MAT_DEPTH_OFFSET
-  material_depth_offset_write(depth_offset);
+  material_depth_offset_write(kg, sd, depth_offset, out_depth);
 #endif
 
   /* Always written, but may be optimized out by frame-buffer/subpass setup. */
   frag_out.normal.rgb = normalize(interp.N) * 0.5f + 0.5f;
-#ifdef MAT_STENCIL_WRITER_SURFACE
-  frag_out.object_id = uint(stencil_writer_reference) & 15u;
+  frag_out.object_id = interp.resource_id_raw & 0xFFFFu;
+  if (pipe.is_stencil_writer_surface) [[static_branch]] {
+    frag_out.object_id = uint(stencil_writer.stencil_writer_reference) & 15u;
+  }
+}
+template<bool with_velocity>
+[[fragment]]
+void surf_depth_offset([[resource_table]] KernelGlobals &kg,
+                [[resource_table]] PipelineConstants &pipe,
+                [[resource_table]] const Uniform &uni,
+                [[resource_table]] const Sampling &sampling,
+                [[resource_table]] const UtilityTexture &util_tx,
+                [[resource_table]] const draw::View &views,
+                [[resource_table, condition(is_stencil_writer_surface)]]
+                const StencilWriterSurfaceData &stencil_writer,
+                [[resource_table]] [[condition(use_velocity)]] const GeometryVelocity &geo_vel,
+                [[frag_coord]] const float4 frag_co,
+                [[in]] const VertOutCommon &interp,
+                [[in]] [[condition(is_curves)]] const VertOutCurves &curves_interp,
+                [[in]] [[condition(is_pointcloud)]] const VertOutPointcloud &ptcloud_interp,
+                [[in]] [[condition(is_gsplat)]] const VertOutGSplat &gsplat_interp,
+                [[in]] [[condition(use_velocity)]] const VertOutVelocity &motion,
+                [[in]] [[condition(use_clip_plane)]] const VertOutClipPlane &clip_interp,
+                [[out]] SurfaceDepthFragOut<with_velocity> &frag_out,
+                [[bary_coord]] [[condition(use_barycentric)]] const float3 bary_co,
+                [[front_facing]] const bool front_face,
+                [[frag_depth(any)]] float &out_depth)
+{
+  out_depth = frag_co.z;
+  material_surface_cull_discard(front_face);
+    const ViewMatrices view = views.get(0);
+
+    float3 barycentric_co = float3(0.0f);
+    if (pipe.use_barycentric) [[static_branch]] {
+      barycentric_co = bary_co;
+    }
+
+    ShadingData sd = init_globals(pipe, uni, interp, view, front_face, frag_co);
+    if (pipe.is_mesh) [[static_branch]] {
+      init_globals_mesh(interp, sd, barycentric_co);
+    }
+    else if (pipe.is_curves) [[static_branch]] {
+      init_globals_curves(interp, curves_interp, sd, view);
+    }
+    else if (pipe.is_pointcloud) [[static_branch]] {
+      init_globals_pointcloud(ptcloud_interp, sd);
+    }
+
+  if (pipe.use_transparency) [[static_branch]] {
+    nodetree_surface(kg, sd, 0.0f);
+
+    if (pipe.is_gsplat) [[static_branch]] {
+      sd.transmittance = gsplat_amend_transmittance(gsplat_interp, sd.transmittance);
+    }
+
+    float threshold;
+#if defined(MAT_OUTLINE_OCCLUSION)
+    /* Outline resolve needs a binary front-most surface mask. Treat any visible transparent
+     * coverage as an occluder, but keep fully transparent regions from writing depth. */
+    threshold = 1.0f - 1e-5f;
 #else
-  frag_out.object_id = interp_flat.resource_id_raw & uint(0xFFFF);
+    float noise_offset = sampling.rng_1D_get(SAMPLING_TRANSPARENCY);
+    threshold = hashed_transparency::alpha_threshold(
+        uni.pipeline_buf.alpha_hash_scale, noise_offset, sd.P);
 #endif
+
+    float transparency = average(sd.transmittance);
+    bool discard_surface = transparency > threshold;
+#ifdef MAT_OUTLINE_SHELL
+    discard_surface = discard_surface || transparency >= 1.0f;
+#endif
+    if (discard_surface) {
+      gpu_discard_fragment();
+      return;
+    }
+  }
+
+  if (pipe.use_clip_plane) [[static_branch]] {
+    /* Do not use hardware clip planes as they modify the rasterization (some GPUs add vertices).
+     * This would in turn create a discrepancy between the pre-pass depth and the G-buffer depth
+     * which exhibits missing pixels data. */
+    if (clip_interp.clip_distance > 0.0f) {
+      gpu_discard_fragment();
+      return;
+    }
+  }
+
+  float depth_offset = 0.0f;
+#ifdef MAT_DEPTH_OFFSET
+  depth_offset = nodetree_depth_offset(kg, sd);
+#endif
+
+  if constexpr (with_velocity) {
+    if (pipe.use_velocity) [[static_branch]] {
+      const ViewMatrices view = views.get(0);
+      float3 P_prv = interp.P + motion.prev;
+      float3 P = interp.P;
+      float3 P_nxt = interp.P + motion.next;
+#  ifdef MAT_DEPTH_OFFSET
+      P_prv = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_prev.viewmat,
+                                                  geo_vel.camera.camera_prev.viewinv,
+                                                  P_prv, depth_offset);
+      P = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_curr.viewmat,
+                                              geo_vel.camera.camera_curr.viewinv,
+                                              P, depth_offset);
+      P_nxt = geo_vel.camera.depth_offset_position(geo_vel.camera.camera_next.viewmat,
+                                                  geo_vel.camera.camera_next.viewinv,
+                                                  P_nxt, depth_offset);
+#  endif
+      frag_out.velocity = velocity::pack(geo_vel.camera.surface_velocity_local(view, P_prv, P, P_nxt));
+    }
+  }
+
+#ifdef MAT_DEPTH_OFFSET
+  material_depth_offset_write(kg, sd, depth_offset, out_depth);
+#endif
+
+  /* Always written, but may be optimized out by frame-buffer/subpass setup. */
+  frag_out.normal.rgb = normalize(interp.N) * 0.5f + 0.5f;
+  frag_out.object_id = interp.resource_id_raw & 0xFFFFu;
+  if (pipe.is_stencil_writer_surface) [[static_branch]] {
+    frag_out.object_id = uint(stencil_writer.stencil_writer_reference) & 15u;
+  }
 }
 
-template void surf_depth<true>(PipelineConstants &,
-                               SurfaceDepth &,
+
+template void surf_depth<true>(KernelGlobals &,
+                               PipelineConstants &,
                                const Uniform &,
                                const Sampling &,
                                const UtilityTexture &,
                                const draw::View &,
+                               const GeometryVelocity &,
                                const float4,
+                               const VertOutCommon &,
+                               const VertOutCurves &,
+                               const VertOutPointcloud &,
+                               const VertOutGSplat &,
+                               const VertOutVelocity &,
+                               const VertOutClipPlane &,
                                SurfaceDepthFragOut<true> &,
+                               const float3,
                                const bool);
-template void surf_depth<false>(PipelineConstants &,
-                                SurfaceDepth &,
+template void surf_depth<false>(KernelGlobals &,
+                                PipelineConstants &,
                                 const Uniform &,
                                 const Sampling &,
                                 const UtilityTexture &,
                                 const draw::View &,
+                                const GeometryVelocity &,
                                 const float4,
+                                const VertOutCommon &,
+                                const VertOutCurves &,
+                                const VertOutPointcloud &,
+                                const VertOutGSplat &,
+                                const VertOutVelocity &,
+                                const VertOutClipPlane &,
                                 SurfaceDepthFragOut<false> &,
+                                const float3,
                                 const bool);
+
+template void surf_depth_offset<true>(KernelGlobals &,
+                               PipelineConstants &,
+                               const Uniform &,
+                               const Sampling &,
+                               const UtilityTexture &,
+                               const draw::View &,
+                               const GeometryVelocity &,
+                               const float4,
+                               const VertOutCommon &,
+                               const VertOutCurves &,
+                               const VertOutPointcloud &,
+                               const VertOutGSplat &,
+                               const VertOutVelocity &,
+                               const VertOutClipPlane &,
+                               SurfaceDepthFragOut<true> &,
+                               const float3,
+                               const bool, float &);
+template void surf_depth_offset<false>(KernelGlobals &,
+                                PipelineConstants &,
+                                const Uniform &,
+                                const Sampling &,
+                                const UtilityTexture &,
+                                const draw::View &,
+                                const GeometryVelocity &,
+                                const float4,
+                                const VertOutCommon &,
+                                const VertOutCurves &,
+                                const VertOutPointcloud &,
+                                const VertOutGSplat &,
+                                const VertOutVelocity &,
+                                const VertOutClipPlane &,
+                                SurfaceDepthFragOut<false> &,
+                                const float3,
+                                const bool, float &);
 
 }  // namespace eevee

@@ -46,6 +46,10 @@ bool RenderScheduler::is_background() const
 void RenderScheduler::set_denoiser_params(const DenoiseParams &params)
 {
   denoiser_params_ = params;
+
+  if (is_denoiser_interactive()) {
+    state_.resolution_divider = pixel_size_;
+  }
 }
 
 bool RenderScheduler::is_denoiser_gpu_used() const
@@ -120,6 +124,11 @@ int RenderScheduler::get_num_rendered_samples() const
   return state_.num_rendered_samples;
 }
 
+int RenderScheduler::get_total_rendered_samples() const
+{
+  return state_.total_rendered_samples;
+}
+
 void RenderScheduler::reset(const BufferParams &buffer_params)
 {
   buffer_params_ = buffer_params;
@@ -137,6 +146,7 @@ void RenderScheduler::reset(const BufferParams &buffer_params)
   }
 
   state_.num_rendered_samples = 0;
+  state_.total_rendered_samples = 0;
   state_.last_display_update_time = 0.0;
   state_.last_display_update_sample = -1;
 
@@ -239,6 +249,7 @@ void RenderScheduler::render_work_reschedule_on_cancel(RenderWork &render_work)
 
   /* Un-schedule samples: they will not be rendered and should not be counted. */
   state_.num_rendered_samples -= render_work.path_trace.num_samples;
+  state_.total_rendered_samples -= render_work.path_trace.num_samples;
 
   const bool has_rendered_samples = get_num_rendered_samples() != 0;
 
@@ -288,7 +299,7 @@ bool RenderScheduler::done() const
     return true;
   }
 
-  return get_num_rendered_samples() >= num_samples_;
+  return get_total_rendered_samples() >= get_num_samples();
 }
 
 RenderWork RenderScheduler::get_render_work()
@@ -337,6 +348,7 @@ RenderWork RenderScheduler::get_render_work()
 
     state_.resolution_divider = max(state_.resolution_divider, pixel_size_);
     state_.num_rendered_samples = 0;
+    state_.total_rendered_samples = 0;
     state_.last_display_update_sample = -1;
   }
 
@@ -344,6 +356,9 @@ RenderWork RenderScheduler::get_render_work()
   render_work.denoised_resolution_divider = state_.resolution_divider;
   if (denoiser_params_.use) {
     render_work.resolution_divider *= denoiser_params_.upscale_factor;
+  }
+  if (is_denoiser_interactive()) {
+    state_.num_rendered_samples = 0;
   }
 
   render_work.path_trace.start_sample = get_start_sample_to_path_trace();
@@ -358,6 +373,7 @@ RenderWork RenderScheduler::get_render_work()
   /* NOTE: Advance number of samples now, so that filter and denoising check can see that all the
    * samples are rendered. */
   state_.num_rendered_samples += render_work.path_trace.num_samples;
+  state_.total_rendered_samples += render_work.path_trace.num_samples;
 
   render_work.adaptive_sampling.filter = work_need_adaptive_filter();
   render_work.adaptive_sampling.threshold = work_adaptive_threshold();
@@ -479,11 +495,10 @@ void RenderScheduler::report_work_begin(const RenderWork &render_work)
   /* Start counting render time when rendering samples at their final resolution.
    *
    * NOTE: The work might have the path trace part be all zero: this happens when a post-processing
-   * work is scheduled after the path tracing. Checking for just a start sample doesn't work here
-   * because it might be wrongly 0. Check for whether path tracing is actually happening as it is
-   * expected to happen in the first work. */
+   * work is scheduled after the path tracing. Check for whether path tracing is actually happening
+   * as it is expected to happen in the first work. */
   if (render_work.resolution_divider == pixel_size_ && render_work.path_trace.num_samples != 0 &&
-      render_work.path_trace.start_sample == get_sample_offset())
+      state_.start_render_time == 0.0)
   {
     state_.start_render_time = time_dt();
   }
@@ -630,7 +645,7 @@ void RenderScheduler::report_rebalance_time(const RenderWork &render_work,
 string RenderScheduler::full_report() const
 {
   const double render_wall_time = state_.end_render_time - state_.start_render_time;
-  const int num_rendered_samples = get_num_rendered_samples();
+  const int num_rendered_samples = get_total_rendered_samples();
 
   string result = "\nRender Scheduler Summary\n\n";
 
@@ -681,8 +696,11 @@ string RenderScheduler::full_report() const
     if (denoiser_params_.passes & DENOISER_PASS_DEPTH) {
       passes += ", Depth";
     }
-    if (denoiser_params_.passes & DENOISER_PASS_MOTION) {
-      passes += ", Motion";
+    if (denoiser_params_.passes & DENOISER_PASS_BACKWARD_MOTION) {
+      passes += ", Backward Motion";
+    }
+    if (denoiser_params_.passes & DENOISER_PASS_SPECULAR_MOTION) {
+      passes += ", Specular Motion";
     }
 
     result += "  Passes: " + passes + "\n";
@@ -871,7 +889,7 @@ int RenderScheduler::get_num_samples_to_path_trace() const
   /* Always start full resolution render  with a single sample. Gives more instant feedback to
    * artists, and allows to gather information for a subsequent path tracing works. Do it in the
    * headless mode as well, to give some estimate of how long samples are taking. */
-  if (state_.num_rendered_samples == 0) {
+  if (state_.num_rendered_samples == 0 && state_.last_display_update_sample == -1) {
     return 1;
   }
 
@@ -886,7 +904,7 @@ int RenderScheduler::get_num_samples_to_path_trace() const
    * more than N samples. */
   const int num_samples_pot = round_num_samples_to_power_of_2(num_samples_per_update);
 
-  const int max_num_samples_to_render = sample_offset_ + num_samples_ - path_trace_start_sample;
+  const int max_num_samples_to_render = get_num_samples() - get_total_rendered_samples();
 
   int num_samples_to_render = min(num_samples_pot, max_num_samples_to_render);
 
@@ -958,7 +976,7 @@ int RenderScheduler::get_num_samples_to_path_trace() const
                                 min(num_samples_to_occupy, max_num_samples_to_render));
   }
 
-  if (limit_samples_per_update_) {
+  if (limit_samples_per_update_ && !is_denoiser_interactive()) {
     num_samples_to_render = min(limit_samples_per_update_, num_samples_to_render);
   }
 
@@ -1043,6 +1061,10 @@ bool RenderScheduler::work_need_denoise(bool &delayed, bool &ready_to_display)
   }
 
   /* Viewport render. */
+
+  if (is_denoiser_interactive()) {
+    return true;
+  }
 
   /* Navigation might render multiple samples at a lower resolution. Those are not to be counted as
    * final samples. */
@@ -1151,6 +1173,11 @@ bool RenderScheduler::work_need_rebalance()
 
 void RenderScheduler::update_start_resolution_divider()
 {
+  if (is_denoiser_interactive()) {
+    start_resolution_divider_ = 1;
+    return;
+  }
+
   if (default_start_resolution_divider_ == 0) {
     return;
   }
@@ -1230,6 +1257,11 @@ bool RenderScheduler::is_denoise_active_during_update() const
   }
 
   return true;
+}
+
+bool RenderScheduler::is_denoiser_interactive() const
+{
+  return denoiser_params_.use && denoiser_params_.type == DENOISER_DLSS;
 }
 
 bool RenderScheduler::work_is_usable_for_first_render_estimation(const RenderWork &render_work)

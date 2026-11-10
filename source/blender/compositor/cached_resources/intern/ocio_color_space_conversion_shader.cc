@@ -9,9 +9,9 @@
 #include <mutex>
 #include <string>
 
-#include "BLI_assert.h"
+#include "BLI_assert.hh"
 #include "BLI_hash.hh"
-#include "BLI_fileops.h"
+#include "BLI_fileops.hh"
 #include "BLI_hash_md5.hh"
 #include "BLI_path_utils.hh"
 #include "BLI_map.hh"
@@ -24,9 +24,11 @@
 #include "GPU_texture.hh"
 #include "GPU_uniform_buffer.hh"
 
+#include "DNA_color_types.h"
 #include "DNA_node_types.h"
 #include "DNA_packedFile_types.h"
 #include "BKE_appdir.hh"
+#include "IMB_colormanagement.hh"
 #include "IMB_imbuf.hh"
 
 #include "gpu_shader_create_info.hh"
@@ -592,11 +594,12 @@ static OCIO::Lut3DTransformRcPtr image_lut_transform(const NodeCompositorLUT &se
   /* LUT texels are encoded table values. Never apply image gamma or alpha premultiplication. */
   const ImBufFlags flags = ImBufFlags::ByteData | ImBufFlags::NoColorspaceConvert |
                            ImBufFlags::AlphaChannelPacked;
-  char colorspace[IM_MAX_SPACE] = "Non-Color";
+  ColorManagedColorspaceSettings colorspace;
+  IMB_colormanagement_colorspace_settings_set(&colorspace, "Non-Color");
   const auto *bytes = reinterpret_cast<const unsigned char *>(data);
   std::unique_ptr<ImBuf, decltype(&IMB_freeImBuf)> image(
       IMB_load_image_from_memory(
-          bytes, size, flags | ImBufFlags::Test, filepath, filepath, colorspace),
+          bytes, size, flags | ImBufFlags::Test, filepath, filepath, &colorspace),
       IMB_freeImBuf);
   if (!image) {
     error = "LUT: could not read the image";
@@ -609,7 +612,7 @@ static OCIO::Lut3DTransformRcPtr image_lut_transform(const NodeCompositorLUT &se
     return nullptr;
   }
   const int width = image->x, height = image->y;
-  image.reset(IMB_load_image_from_memory(bytes, size, flags, filepath, filepath, colorspace));
+  image.reset(IMB_load_image_from_memory(bytes, size, flags, filepath, filepath, &colorspace));
   if (!image || image->x != width || image->y != height ||
       (!image->float_data() && !image->byte_data()))
   {

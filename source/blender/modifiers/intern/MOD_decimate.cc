@@ -8,8 +8,8 @@
 
 #include <fmt/format.h>
 
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -39,8 +39,8 @@
 // #define USE_TIMEIT
 
 #ifdef USE_TIMEIT
-#  include "BLI_time.h"
-#  include "BLI_time_utildefines.h"
+#  include "BLI_time.hh"
+#  include "BLI_time_utildefines.hh"
 #endif
 
 #include "MOD_ui_common.hh"

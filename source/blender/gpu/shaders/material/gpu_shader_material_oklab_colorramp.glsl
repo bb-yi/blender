@@ -6,7 +6,7 @@
  * Based on: https://github.com/aras-p/oklab_gradient_test
  * OKLab color space provides perceptually uniform color interpolation. */
 
-#include "gpu_shader_common_color_ramp.glsl"
+#include "gpu_shader_common_color_ramp.bsl.hh"
 
 float oklab_signed_cbrt(float value)
 {

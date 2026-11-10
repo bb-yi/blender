@@ -28,15 +28,15 @@
 #    include <float.h>
 #    include <windows.h>
 
-#    include "BLI_winstuff.h"
+#    include "BLI_winstuff.hh"
 
 #    include "GPU_platform.hh"
 #  endif
 
-#  include "BLI_fileops.h"
+#  include "BLI_fileops.hh"
 #  include "BLI_path_utils.hh"
-#  include "BLI_string.h"
-#  include "BLI_system.h"
+#  include "BLI_string.hh"
+#  include "BLI_system.hh"
 #  include BLI_SYSTEM_PID_H
 
 #  include "BKE_appdir.hh" /* #BKE_tempdir_session_purge. */
@@ -89,7 +89,7 @@ static void crashlog_file_generate(const char *filepath, const void *os_info)
   /* Might be called after WM/Main exit, so needs to be careful about nullptr-checking before
    * de-referencing. */
 
-  wmWindowManager *wm = G_MAIN ? static_cast<wmWindowManager *>(G_MAIN->wm.first) : nullptr;
+  wmWindowManager *wm = G_MAIN ? G_MAIN->wm.first() : nullptr;
 
   FILE *fp;
   char header[512];
@@ -165,7 +165,7 @@ static void sig_handle_crash_fn(int signum)
   };
 
   /* The use of `std::call_once` ensures that the crash handling function is only executed once,
-   * even if multiple crashes occur simultaneously. */
+   * even if multiple crashes occur simultaneously on different threads. */
   static std::once_flag crash_func_once;
   std::call_once(crash_func_once, crash_func);
 }
@@ -216,7 +216,7 @@ extern LONG WINAPI windows_exception_handler(EXCEPTION_POINTERS *ExceptionInfo)
     };
 
     /* The use of `std::call_once` ensures that the crash handling function is only executed once,
-     * even if multiple crashes occur simultaneously. */
+     * even if multiple crashes occur simultaneously on different threads. */
     static std::once_flag crash_func_once;
     std::call_once(crash_func_once, crash_func);
   }

@@ -11,10 +11,10 @@
 #include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
-#include "BLI_session_uid.h"
-#include "BLI_string.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
+#include "BLI_session_uid.hh"
+#include "BLI_string.hh"
 
 #include "BKE_layer.hh"
 #include "BKE_main.hh"
@@ -22,8 +22,6 @@
 #include "BKE_scene.hh"
 
 #include "DEG_depsgraph.hh"
-
-#include "MOV_read.hh"
 
 #include "SEQ_iterator.hh"
 #include "SEQ_prefetch.hh"
@@ -35,6 +33,7 @@
 
 #include "cache/final_image_cache.hh"
 #include "cache/intra_frame_cache.hh"
+#include "cache/movie_reader_cache.hh"
 #include "cache/source_image_cache.hh"
 #include "effects/effects.hh"
 #include "sequencer.hh"
@@ -133,7 +132,7 @@ static void update_range_with_effects(const Scene *scene, const Strip *strip, in
 {
   r_range.x = std::min(r_range.x, strip->left_handle());
   r_range.y = std::max(r_range.y, strip->right_handle(scene) - 1);
-  Span<Strip *> effects = SEQ_lookup_effects_by_strip(scene->ed, strip);
+  Span<Strip *> effects = lookup_effects_by_strip(scene->ed, strip);
   for (Strip *effect : effects) {
     update_range_with_effects(scene, effect, r_range);
   }
@@ -161,6 +160,7 @@ void relations_invalidate_cache_raw(Scene *scene, Strip *strip)
   source_image_cache_invalidate_strip(scene, strip);
   media_presence_invalidate_strip(scene, strip);
   relations_invalidate_cache(scene, strip);
+  thumbnail_cache_invalidate_strip(scene, strip);
 }
 
 void relations_invalidate_cache(Scene *scene, Strip *strip)
@@ -257,17 +257,25 @@ void relations_invalidate_compositor_users(const Main *bmain, const bNodeTree *n
   }
 }
 
+void relations_invalidate_generator_strips(Scene *scene)
+{
+  for (Strip *strip : query_all_strips_recursive(&editing_get(scene)->seqbase)) {
+    if (strip->is_effect() && !strip->is_effect_with_inputs()) {
+      source_image_cache_invalidate_strip(scene, strip);
+    }
+  }
+}
+
 static void invalidate_movieclip_strips(Scene *scene,
                                         MovieClip *clip_target,
                                         ListBaseT<Strip> *seqbase)
 {
-  for (Strip *strip = static_cast<Strip *>(seqbase->first); strip != nullptr; strip = strip->next)
-  {
+  for (Strip *strip = seqbase->first(); strip != nullptr; strip = strip->next) {
     if (strip->clip == clip_target) {
       relations_invalidate_cache_raw(scene, strip);
     }
 
-    if (strip->seqbase.first != nullptr) {
+    if (strip->seqbase.first_ != nullptr) {
       invalidate_movieclip_strips(scene, clip_target, &strip->seqbase);
     }
   }
@@ -275,7 +283,7 @@ static void invalidate_movieclip_strips(Scene *scene,
 
 void relations_invalidate_movieclip_strips(Main *bmain, MovieClip *clip_target)
 {
-  for (Scene *scene = static_cast<Scene *>(bmain->scenes.first); scene != nullptr;
+  for (Scene *scene = bmain->scenes.first(); scene != nullptr;
        scene = static_cast<Scene *>(scene->id.next))
   {
     if (scene->ed != nullptr) {
@@ -291,6 +299,9 @@ void relations_free_imbuf(Scene *scene, ListBaseT<Strip> *seqbase, bool for_rend
   }
 
   prefetch_stop(scene);
+  if (!for_render && seqbase == &scene->ed->seqbase) {
+    movie_reader_cache_clear(*scene);
+  }
 
   for (Strip &strip : *seqbase) {
     if (for_render && strip.intersects_frame(scene, scene->r.cfra)) {
@@ -298,8 +309,8 @@ void relations_free_imbuf(Scene *scene, ListBaseT<Strip> *seqbase, bool for_rend
     }
 
     if (strip.data) {
-      if (strip.type == STRIP_TYPE_MOVIE) {
-        strip_free_movie_readers(&strip);
+      if (!for_render && strip.type == STRIP_TYPE_MOVIE) {
+        movie_metadata_invalidate(strip);
       }
       if (strip.type == STRIP_TYPE_SPEED) {
         strip_effect_speed_rebuild_map(scene, &strip);
@@ -315,47 +326,16 @@ void relations_free_imbuf(Scene *scene, ListBaseT<Strip> *seqbase, bool for_rend
   }
 }
 
-static void sequencer_all_free_anim_ibufs(const Scene *scene,
-                                          ListBaseT<Strip> *seqbase,
-                                          int timeline_frame,
-                                          const int frame_range[2])
-{
-  Editing *ed = editing_get(scene);
-  for (Strip *strip = static_cast<Strip *>(seqbase->first); strip != nullptr; strip = strip->next)
-  {
-    if (!strip->intersects_frame(scene, timeline_frame) ||
-        !((frame_range[0] <= timeline_frame) && (frame_range[1] > timeline_frame)))
-    {
-      strip_free_movie_readers(strip);
-    }
-    if (strip->type == STRIP_TYPE_META) {
-      int meta_range[2];
-
-      MetaStack *ms = meta_stack_active_get(ed);
-      if (ms != nullptr && ms->parent_strip == strip) {
-        meta_range[0] = -MAXFRAME;
-        meta_range[1] = MAXFRAME;
-      }
-      else {
-        /* Limit frame range to meta strip. */
-        meta_range[0] = max_ii(frame_range[0], strip->left_handle());
-        meta_range[1] = min_ii(frame_range[1], strip->right_handle(scene));
-      }
-
-      sequencer_all_free_anim_ibufs(scene, &strip->seqbase, timeline_frame, meta_range);
-    }
-  }
-}
-
-void relations_free_all_anim_ibufs(Scene *scene, int timeline_frame)
+void relations_refresh_all(Scene *scene)
 {
   Editing *ed = editing_get(scene);
   if (ed == nullptr) {
     return;
   }
 
-  const int frame_range[2] = {-MAXFRAME, MAXFRAME};
-  sequencer_all_free_anim_ibufs(scene, &ed->seqbase, timeline_frame, frame_range);
+  relations_free_imbuf(scene, &ed->seqbase, false);
+  media_presence_free(scene);
+  cache_cleanup(scene, CacheCleanup::All);
 }
 
 static Strip *sequencer_check_scene_recursion(Scene *scene, ListBaseT<Strip> *seqbase)
@@ -435,14 +415,6 @@ bool relations_render_loop_check(Strip *strip_main, Strip *strip)
   return false;
 }
 
-void strip_free_movie_readers(Strip *strip)
-{
-  for (MovieReader *anim : strip->runtime->movie_readers) {
-    MOV_close(anim);
-  }
-  strip->runtime->movie_readers.clear();
-}
-
 void relations_session_uid_generate(Strip *strip)
 {
   strip->runtime->session_uid = BLI_session_uid_generate();
@@ -452,7 +424,7 @@ static bool get_uids_cb(Strip *strip, void *user_data)
 {
   Set<SessionUID> &used_uids = *static_cast<Set<SessionUID> *>(user_data);
   const SessionUID &session_uid = strip->runtime->session_uid;
-  if (!BLI_session_uid_is_generated(&session_uid)) {
+  if (!session_uid.is_generated()) {
     printf("Sequence %s does not have UID generated.\n", strip->name);
     return true;
   }

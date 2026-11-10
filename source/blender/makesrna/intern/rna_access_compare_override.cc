@@ -22,13 +22,14 @@
 #include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 // #define DEBUG_OVERRIDE_TIMEIT
 
 #ifdef DEBUG_OVERRIDE_TIMEIT
-#  include "BLI_time_utildefines.h"
+#  include "BLI_time_utildefines.hh"
 #  include <stdio.h>
 #endif
 
@@ -86,7 +87,7 @@ static ID *rna_property_override_property_real_id_owner(Main * /*bmain*/,
     switch (GS(id->name)) {
       case ID_KE:
         owner_id = (id_cast<Key *>(id))->from;
-        rna_path_prefix = "shape_keys.";
+        rna_path_prefix = "shape_keys";
         break;
       case ID_GR:
       case ID_NT:
@@ -104,7 +105,8 @@ static ID *rna_property_override_property_real_id_owner(Main * /*bmain*/,
 
   if (std::optional<std::string> rna_path = RNA_path_from_ID_to_property(ptr, prop)) {
     if (rna_path_prefix) {
-      r_rna_path->emplace(fmt::format("{}{}", rna_path_prefix, *rna_path));
+      r_rna_path->emplace(
+          fmt::format("{}{}{}", rna_path_prefix, (*rna_path)[0] == '[' ? "" : ".", *rna_path));
     }
     else {
       r_rna_path->emplace(std::move(*rna_path));
@@ -307,8 +309,8 @@ bool RNA_struct_equals(Main *bmain, PointerRNA *ptr_a, PointerRNA *ptr_b, eRNACo
     return false;
   }
 
-  if (RNA_pointer_is_null(ptr_a)) {
-    if (RNA_pointer_is_null(ptr_b)) {
+  if (!*ptr_a) {
+    if (!*ptr_b) {
       return true;
     }
     return false;
@@ -426,7 +428,7 @@ static int rna_property_override_diff(Main *bmain,
     CLOG_ERROR(
         &LOG,
         "'%s' gives unmatching or nullptr RNA diff callbacks, should not happen (%d vs. %d)",
-        rna_path ? rna_path : prop_a->identifier,
+        rna_path ? rna_path : prop_a->identifier.c_str(),
         !prop_a->is_idprop,
         !prop_b->is_idprop);
     BLI_assert_unreachable();
@@ -473,7 +475,13 @@ static bool rna_property_override_operation_store(Main *bmain,
   int len_local, len_reference, len_storage = 0;
   bool changed = false;
 
-  if (ptr_storage == nullptr) {
+  if (ptr_storage == nullptr || !*ptr_storage || prop_storage == nullptr) {
+    return changed;
+  }
+
+  /* Runtime definitions may have changed since the operation was created. */
+  const PropertyType type = RNA_property_type(prop_local);
+  if (type != RNA_property_type(prop_reference) || type != RNA_property_type(prop_storage)) {
     return changed;
   }
 
@@ -609,7 +617,8 @@ static bool rna_property_override_operation_apply(Main *bmain,
     CLOG_ERROR(
         &LOG,
         "'%s' gives unmatching or nullptr RNA apply callbacks, should not happen (%d vs. %d)",
-        prop_dst->magic != RNA_MAGIC ? ((IDProperty *)prop_dst)->name : prop_dst->identifier,
+        prop_dst->magic != RNA_MAGIC ? ((IDProperty *)prop_dst)->name :
+                                       prop_dst->identifier.c_str(),
         prop_dst->magic == RNA_MAGIC,
         prop_src->magic == RNA_MAGIC);
     BLI_assert_unreachable();
@@ -636,6 +645,34 @@ static bool rna_property_override_operation_apply(Main *bmain,
   return success;
 }
 
+bool rna_struct_override_type_matches(const StructRNA *type_a, const StructRNA *type_b)
+{
+  if (type_a == type_b) {
+    return true;
+  }
+  if (ELEM(nullptr, type_a, type_b)) {
+    return false;
+  }
+  /* Public types have unique definitions. Private runtime types, e.g. generated node group
+   * interfaces, can be defined independently for the override and its reference. */
+  return (type_a->flag & STRUCT_RUNTIME) && (type_b->flag & STRUCT_RUNTIME) &&
+         !(type_a->flag & (STRUCT_PUBLIC_NAMESPACE | STRUCT_ID)) &&
+         !(type_b->flag & (STRUCT_PUBLIC_NAMESPACE | STRUCT_ID)) &&
+         !type_a->identifier.is_empty() && type_a->identifier == type_b->identifier &&
+         type_a->base == type_b->base;
+}
+
+static bool rna_property_override_definition_matches(const PropertyRNA &a, const PropertyRNA &b)
+{
+  /* Interfaces may have changed. Matching identifiers alone do not guarantee compatible
+   * values, storage, ownership, or override callbacks. UI metadata and defaults may differ. */
+  return a.type == b.type && a.subtype == b.subtype && a.flag == b.flag &&
+         a.flag_override == b.flag_override && a.override_diff == b.override_diff &&
+         a.override_store == b.override_store && a.override_apply == b.override_apply &&
+         a.getlength == b.getlength && a.arraydimension == b.arraydimension &&
+         memcmp(a.arraylength, b.arraylength, sizeof(a.arraylength[0]) * a.arraydimension) == 0;
+}
+
 bool RNA_struct_override_matches(Main *bmain,
                                  PointerRNA *ptr_local,
                                  PointerRNA *ptr_reference,
@@ -649,7 +686,7 @@ bool RNA_struct_override_matches(Main *bmain,
   PropertyRNA *iterprop;
   bool matching = true;
 
-  BLI_assert(ptr_local->type == ptr_reference->type);
+  BLI_assert(rna_struct_override_type_matches(ptr_local->type, ptr_reference->type));
   BLI_assert(ptr_local->owner_id && ptr_reference->owner_id);
 
   const bool ignore_non_overridable = (flags & RNA_OVERRIDE_COMPARE_IGNORE_NON_OVERRIDABLE) != 0;
@@ -701,17 +738,50 @@ bool RNA_struct_override_matches(Main *bmain,
   for (RNA_property_collection_begin(ptr_local, iterprop, &iter); iter.valid;
        RNA_property_collection_next(&iter))
   {
-    PropertyRNA *rawprop = static_cast<PropertyRNA *>(iter.ptr.data);
+    PropertyRNA *rawprop_local = static_cast<PropertyRNA *>(iter.ptr.data);
+    PropertyRNA *rawprop_reference = rawprop_local;
+    if (ptr_local->type != ptr_reference->type) {
+      /* Use each side's own definition, including defaults, access callbacks, and custom
+       * property array element types. */
+      rawprop_reference = rawprop_local->magic == RNA_MAGIC ?
+                              RNA_struct_find_property(ptr_reference, rawprop_local->identifier) :
+                              reinterpret_cast<PropertyRNA *>(rna_idproperty_find(
+                                  ptr_reference,
+                                  reinterpret_cast<IDProperty *>(rawprop_local)->name));
+      if (!rawprop_reference) {
+        continue;
+      }
+    }
 
     PropertyRNAOrID prop_local;
     PropertyRNAOrID prop_reference;
 
-    rna_property_rna_or_id_get(rawprop, ptr_local, &prop_local);
-    rna_property_rna_or_id_get(rawprop, ptr_reference, &prop_reference);
+    rna_property_rna_or_id_get(rawprop_local, ptr_local, &prop_local);
+    rna_property_rna_or_id_get(rawprop_reference, ptr_reference, &prop_reference);
 
     BLI_assert(prop_local.rnaprop != nullptr);
-    BLI_assert(prop_local.rnaprop == prop_reference.rnaprop);
     BLI_assert(prop_local.is_idprop == prop_reference.is_idprop);
+
+    /* Private runtime RNA types, e.g. generated node group interfaces, may be generated
+     * independently for the local override and its reference, so compatible property definitions
+     * can have different addresses. */
+    if (prop_local.rnaprop != prop_reference.rnaprop) {
+      const PropertyRNA &a = *prop_local.rnaprop;
+      const PropertyRNA &b = *prop_reference.rnaprop;
+      if (!rna_property_override_definition_matches(a, b) ||
+          prop_local.is_array != prop_reference.is_array ||
+          prop_local.array_len != prop_reference.array_len)
+      {
+        continue;
+      }
+      if (ELEM(a.type, PROP_POINTER, PROP_COLLECTION) &&
+          !rna_struct_override_type_matches(
+              RNA_property_pointer_type(ptr_local, rawprop_local),
+              RNA_property_pointer_type(ptr_reference, rawprop_reference)))
+      {
+        continue;
+      }
+    }
 
     if ((prop_local.is_idprop && prop_local.idprop == nullptr) ||
         (prop_reference.is_idprop && prop_reference.idprop == nullptr))
@@ -719,7 +789,7 @@ bool RNA_struct_override_matches(Main *bmain,
       continue;
     }
 
-    if (ignore_non_overridable && !RNA_property_overridable_get(prop_local.ptr, rawprop)) {
+    if (ignore_non_overridable && !RNA_property_overridable_get(prop_local.ptr, rawprop_local)) {
       continue;
     }
 
@@ -747,8 +817,8 @@ bool RNA_struct_override_matches(Main *bmain,
     if (root_path) {
       BLI_assert(strlen(root_path) == root_path_len);
 
-      const char *prop_name = prop_local.identifier;
-      const size_t prop_name_len = strlen(prop_name);
+      const char *prop_name = prop_local.identifier.c_str();
+      const size_t prop_name_len = prop_local.identifier.size();
 
       char rna_path_buffer[RNA_PATH_BUFFSIZE];
       char *rna_path_c = rna_path_buffer;
@@ -757,7 +827,7 @@ bool RNA_struct_override_matches(Main *bmain,
       if (!prop_local.is_idprop) {
         rna_path_len = root_path_len + 1 + prop_name_len;
         if (rna_path_len >= RNA_PATH_BUFFSIZE) {
-          rna_path = MEM_new_array_uninitialized<char>(rna_path_len + 1, __func__);
+          rna_path_c = MEM_new_array_uninitialized<char>(rna_path_len + 1, __func__);
         }
 
         memcpy(rna_path_c, root_path, root_path_len);
@@ -766,7 +836,11 @@ bool RNA_struct_override_matches(Main *bmain,
         rna_path_c[rna_path_len] = '\0';
       }
       else {
-        rna_path_len = root_path_len + 2 + prop_name_len + 2;
+        char prop_name_esc[MAX_IDPROP_NAME * 2];
+        const size_t prop_name_esc_len = BLI_str_escape(
+            prop_name_esc, prop_name, sizeof(prop_name_esc));
+
+        rna_path_len = root_path_len + 2 + prop_name_esc_len + 2;
         if (rna_path_len >= RNA_PATH_BUFFSIZE) {
           rna_path_c = MEM_new_array_uninitialized<char>(rna_path_len + 1, __func__);
         }
@@ -774,17 +848,20 @@ bool RNA_struct_override_matches(Main *bmain,
         memcpy(rna_path_c, root_path, root_path_len);
         rna_path_c[root_path_len] = '[';
         rna_path_c[root_path_len + 1] = '"';
-        memcpy(rna_path_c + root_path_len + 2, prop_name, prop_name_len);
-        rna_path_c[root_path_len + 2 + prop_name_len] = '"';
-        rna_path_c[root_path_len + 2 + prop_name_len + 1] = ']';
+        memcpy(rna_path_c + root_path_len + 2, prop_name_esc, prop_name_esc_len);
+        rna_path_c[root_path_len + 2 + prop_name_esc_len] = '"';
+        rna_path_c[root_path_len + 2 + prop_name_esc_len + 1] = ']';
         rna_path_c[rna_path_len] = '\0';
       }
 
       rna_path.emplace(rna_path_c);
+      if (rna_path_c != rna_path_buffer) {
+        MEM_delete(rna_path_c);
+      }
     }
     else {
       /* This is rather slow, but is not much called, so not really worth optimizing. */
-      rna_path = RNA_path_from_ID_to_property(ptr_local, rawprop);
+      rna_path = RNA_path_from_ID_to_property(ptr_local, rawprop_local);
       if (rna_path) {
         rna_path_len = rna_path->size();
       }
@@ -839,7 +916,7 @@ bool RNA_struct_override_matches(Main *bmain,
       IDOverrideLibraryProperty *op = BKE_lib_override_library_property_find(liboverride,
                                                                              rna_path->c_str());
       IDOverrideLibraryPropertyOperation *opop = static_cast<IDOverrideLibraryPropertyOperation *>(
-          op ? op->operations.first : nullptr);
+          op ? op->operations.first_ : nullptr);
 
       if (op != nullptr) {
         /* Only set all operations from this property as used (via
@@ -859,7 +936,7 @@ bool RNA_struct_override_matches(Main *bmain,
       {
         /* We are allowed to restore to reference's values. */
         if (ELEM(nullptr, op, opop) || opop->operation == LIBOVERRIDE_OP_NOOP) {
-          if (RNA_property_editable(ptr_local, rawprop)) {
+          if (RNA_property_editable(ptr_local, rawprop_local)) {
             /* This property should be restored to its reference value. This should not be done
              * here, since this code may be called from non-main thread (modifying data through RNA
              * is not thread safe). */
@@ -872,15 +949,15 @@ bool RNA_struct_override_matches(Main *bmain,
               RNAPropertyOverrideApplyContext rnaapply_ctx;
               rnaapply_ctx.ptr_dst = *ptr_local;
               rnaapply_ctx.ptr_src = *ptr_reference;
-              rnaapply_ctx.prop_dst = rawprop;
-              rnaapply_ctx.prop_src = rawprop;
+              rnaapply_ctx.prop_dst = rawprop_local;
+              rnaapply_ctx.prop_src = rawprop_reference;
               rnaapply_ctx.liboverride_operation = &opop_tmp;
 
               const bool is_restored = rna_property_override_operation_apply(bmain, rnaapply_ctx);
 
               if (is_restored) {
                 CLOG_DEBUG(&LOG,
-                           "Restoreed forbidden liboverride `%s` for override data '%s'",
+                           "Restored forbidden liboverride `%s` for override data '%s'",
                            rna_path->c_str(),
                            ptr_local->owner_id->name);
                 if (r_report_flags) {
@@ -1017,8 +1094,8 @@ bool RNA_struct_override_store(Main *bmain,
                                                 &data_local,
                                                 &data_reference,
                                                 &data_storage,
-                                                prop_reference,
                                                 prop_local,
+                                                prop_reference,
                                                 prop_storage,
                                                 &op))
       {
@@ -1062,7 +1139,7 @@ static bool rna_property_override_collection_subitem_name_id_match(
 
   is_match = ((item_name_len == namelen) && STREQ(item_name, name));
 
-  if (UNLIKELY(name != name_buf)) {
+  if (name != name_buf) [[unlikely]] {
     MEM_delete(name);
   }
 
@@ -1092,7 +1169,7 @@ static bool rna_property_override_collection_subitem_name_id_lookup(
 
     RNA_property_collection_begin(ptr, prop, &iter);
     for (; iter.valid; RNA_property_collection_next(&iter)) {
-      if (iter.ptr.data && iter.ptr.type->nameproperty) {
+      if (iter.ptr && iter.ptr.type->nameproperty) {
         if (rna_property_override_collection_subitem_name_id_match(
                 item_name, item_name_len, do_id_pointer, item_id, &iter.ptr))
         {
@@ -1138,7 +1215,7 @@ static void rna_property_override_collection_subitem_name_index_lookup(
    */
   if (item_index != -1) {
     if (RNA_property_collection_lookup_int(ptr, prop, item_index, r_ptr_item_index)) {
-      if (item_name && r_ptr_item_index->type) {
+      if (item_name && r_ptr_item_index->has_type()) {
         if (rna_property_override_collection_subitem_name_id_match(
                 item_name, item_name_len, do_id_pointer, item_id, r_ptr_item_index))
         {
@@ -1214,7 +1291,7 @@ static void rna_property_override_collection_subitem_lookup(
   BLI_assert(opop->subitem_reference_name || !subitem_reference_id);
   /* Do not match by index only, if there are valid item names and ID.
    *
-   * Otherwise, it can end up 'matching by index' e.g. collection childrens, re-assigning
+   * Otherwise, it can end up 'matching by index' e.g. collection children, re-assigning
    * completely wrong collections only based on indices. This is especially bad when some
    * collections are _removed_ from the reference collection's children. */
   const bool ignore_index_only_lookup = (subitem_local_id || subitem_reference_id);
@@ -1248,7 +1325,7 @@ static void rna_property_override_collection_subitem_lookup(
    * pointers to their expected values.
    * In that case we simply try to get the property from the local expected name. */
   if (opop->subitem_reference_name != nullptr && opop->subitem_local_name != nullptr &&
-      ptr_item_dst_name.type == nullptr)
+      !ptr_item_dst_name.has_type())
   {
     rna_property_override_collection_subitem_name_index_lookup(
         ptr_dst,
@@ -1319,7 +1396,7 @@ static void rna_property_override_collection_subitem_lookup(
                                                                ignore_index_only_lookup,
                                                                &ptr_item_storage_name,
                                                                &ptr_item_storage_index);
-    if (ptr_item_storage_name.data == nullptr) {
+    if (!ptr_item_storage_name) {
       rna_property_override_collection_subitem_name_index_lookup(ptr_storage,
                                                                  prop_storage,
                                                                  opop->subitem_reference_name,
@@ -1329,7 +1406,7 @@ static void rna_property_override_collection_subitem_lookup(
                                                                  &ptr_item_storage_name,
                                                                  &ptr_item_storage_index);
     }
-    if (ptr_item_storage_name.data == nullptr && ptr_item_storage_index.data == nullptr) {
+    if (!ptr_item_storage_name && !ptr_item_storage_index) {
       rna_property_override_collection_subitem_name_index_lookup(ptr_storage,
                                                                  prop_storage,
                                                                  nullptr,
@@ -1344,8 +1421,8 @@ static void rna_property_override_collection_subitem_lookup(
   /* Final selection. Both matches have to be based on names, or indices, but not a mix of both.
    * If we are missing either source or destination data based on names, and based on indices, then
    * use partial data from names (allows to handle 'need resync' detection cases). */
-  if ((ptr_item_src_name.type || ptr_item_dst_name.type) &&
-      !(ptr_item_src_index.type && ptr_item_dst_index.type))
+  if ((ptr_item_src_name.has_type() || ptr_item_dst_name.has_type()) &&
+      !(ptr_item_src_index.has_type() && ptr_item_dst_index.has_type()))
   {
     *ptr_item_src = ptr_item_src_name;
     *ptr_item_dst = ptr_item_dst_name;
@@ -1353,7 +1430,7 @@ static void rna_property_override_collection_subitem_lookup(
       *ptr_item_storage = ptr_item_storage_name;
     }
   }
-  else if (ptr_item_src_index.type != nullptr || ptr_item_dst_index.type != nullptr) {
+  else if (ptr_item_src_index.has_type() || ptr_item_dst_index.has_type()) {
     *ptr_item_src = ptr_item_src_index;
     *ptr_item_dst = ptr_item_dst_index;
     if (prop_storage != nullptr) {
@@ -1364,7 +1441,7 @@ static void rna_property_override_collection_subitem_lookup(
   /* Note that there is no reason to report in case no item is expected, i.e. in case subitem name
    * and index are invalid. This can often happen when inserting new items (constraint,
    * modifier...) in a collection that supports it. */
-  if (ptr_item_dst->type == nullptr &&
+  if (!ptr_item_dst->has_type() &&
       ((opop->subitem_reference_name != nullptr && opop->subitem_reference_name[0] != '\0') ||
        opop->subitem_reference_index != -1))
   {
@@ -1375,7 +1452,7 @@ static void rna_property_override_collection_subitem_lookup(
                op->rna_path,
                ptr_dst->owner_id->name);
   }
-  if (ptr_item_src->type == nullptr &&
+  if (!ptr_item_src->has_type() &&
       ((opop->subitem_local_name != nullptr && opop->subitem_local_name[0] != '\0') ||
        opop->subitem_local_index != -1))
   {
@@ -1521,9 +1598,7 @@ static bool override_apply_property_check_skip(Main *bmain,
 
   switch (op->rna_prop_type) {
     case PROP_POINTER: {
-      if ((static_cast<IDOverrideLibraryPropertyOperation *>(op->operations.first)->flag &
-           LIBOVERRIDE_OP_FLAG_IDPOINTER_MATCH_REFERENCE) == 0)
-      {
+      if ((op->operations.first()->flag & LIBOVERRIDE_OP_FLAG_IDPOINTER_MATCH_REFERENCE) == 0) {
         BLI_assert(id_ptr_src->owner_id == rna_property_override_property_real_id_owner(
                                                bmain, &rnaapply_ctx.ptr_src, nullptr, nullptr));
         BLI_assert(id_ptr_dst->owner_id == rna_property_override_property_real_id_owner(
@@ -1626,9 +1701,8 @@ void RNA_struct_override_apply(Main *bmain,
       if ((flag & RNA_OVERRIDE_APPLY_FLAG_SKIP_RESYNC_CHECK) == 0 &&
           (id_ptr_dst->owner_id->tag & ID_TAG_LIBOVERRIDE_NEED_RESYNC) == 0)
       {
-        if (op.rna_prop_type == PROP_POINTER && op.operations.first != nullptr &&
-            (static_cast<IDOverrideLibraryPropertyOperation *>(op.operations.first)->flag &
-             LIBOVERRIDE_OP_FLAG_IDPOINTER_MATCH_REFERENCE) != 0)
+        if (op.rna_prop_type == PROP_POINTER && op.operations.first_ != nullptr &&
+            (op.operations.first()->flag & LIBOVERRIDE_OP_FLAG_IDPOINTER_MATCH_REFERENCE) != 0)
         {
           BLI_assert(RNA_struct_is_ID(
               RNA_property_pointer_type(&rnaapply_ctx.ptr_src, rnaapply_ctx.prop_src)));
