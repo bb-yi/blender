@@ -1210,20 +1210,23 @@ struct Film {
       float4 current = float4(0.0f);
       float current_weight = 0.0f;
       for (int i = samples_len - 1; i >= 0; i--) {
-        FilmSample src = sample_get(i, texel_film);
+        FilmSample src = sample_get(i, texel_film, panoramic_samples);
+        if (sample_is_black(src)) {
+          continue;
+        }
         float4 c = texelfetch_as_YCoCg_opacity(pre_fx_tx, src.texel);
-        float w = src.weight * luma_weight(uni, c.x);
+        float w = src.weight * luma_weight(uniforms, c.x);
         current += c * w;
         current_weight += w;
       }
       current /= max(current_weight, 1e-8f);
-      int3 co = int3(texel_film, uni.uniform_buf.film.pre_fx_id);
+      int3 co = int3(texel_film, uni.film.pre_fx_id);
       float4 previous = current;
       float previous_weight = 0.0f;
-      if (uni.uniform_buf.film.use_history && !use_reprojection) {
+      if (uni.film.use_history && !use_reprojection) {
         previous = imageLoadFast(color_accum_img, co);
         previous.rgb = colorspace::YCoCg_from_scene_linear(previous.rgb);
-        previous_weight = dst.weight * luma_weight(uni, previous.x);
+        previous_weight = dst.weight * luma_weight(uniforms, previous.x);
       }
       float4 color = (previous * previous_weight + current * current_weight) /
                      max(previous_weight + current_weight, 1e-8f);
