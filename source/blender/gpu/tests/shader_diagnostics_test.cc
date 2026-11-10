@@ -115,6 +115,28 @@ TEST(shader_diagnostics, bundle_default_helpers)
             0);
 }
 
+TEST(shader_diagnostics, glsl_function_namespace_aliases)
+{
+  const std::vector<ShaderDiagnosticSource> namespaced_sources = {
+      {"glsl_src_first_same", "GLSL Function", ""},
+      {"glsl_src_second_same", "GLSL Function", ""}};
+  const auto ranges = shader_diagnostics::evaluation_ranges(
+      "#define same glsl_src_first_same\n"
+      "vec3 same() { return missing_first; }\n"
+      "#undef same\n"
+      "#define same glsl_src_second_same\n"
+      "vec3 same() { return missing_second; }\n"
+      "#undef same\n"
+      "vec3 same() { return unrelated; }\n", namespaced_sources);
+  ASSERT_EQ(ranges.size(), 2);
+  EXPECT_EQ(ranges[0].source, 0);
+  EXPECT_EQ(ranges[0].first_line, 2);
+  EXPECT_EQ(ranges[0].last_line, 2);
+  EXPECT_EQ(ranges[1].source, 1);
+  EXPECT_EQ(ranges[1].first_line, 5);
+  EXPECT_EQ(ranges[1].last_line, 5);
+}
+
 }  // namespace blender::gpu::tests
 
 #ifdef GPU_DIAGNOSTICS_STANDALONE
@@ -127,5 +149,6 @@ int main()
   result_adapter_excluded();
   ambiguous_macro_expansion();
   bundle_default_helpers();
+  glsl_function_namespace_aliases();
 }
 #endif

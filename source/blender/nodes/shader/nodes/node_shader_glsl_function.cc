@@ -12013,8 +12013,9 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       };
       replace_all("g_data.", sd_name + ".");
       replace_all("coordinate_incoming(", "coordinate_incoming(" + kg_name + ", " + sd_name + ", ");
-      replace_all("view_matrices_get()", kg_name + ".view_matrices_get(" + sd_name + ")");
-      replace_all("object_matrices_get()", kg_name + ".object_matrices_get(" + sd_name + ")");
+      /* Runtime GLSL bypasses BSL's member-call lowering. Use its emitted free functions. */
+      replace_all("view_matrices_get()", "_view_matrices_get(" + kg_name + ", " + sd_name + ")");
+      replace_all("object_matrices_get()", "_object_matrices_get(" + kg_name + ", " + sd_name + ")");
       replace_all("node_light_probe_color(vec3(0.0), 1.0,",
                   "node_light_probe_color(vec3(0.0), 1.0, " + kg_name + ", " + sd_name + ",");
       replace_all("#if defined(CREATE_INFO_eevee_LightprobeRenderData)", "#if 1");
@@ -12181,6 +12182,15 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       const std::string kg_name = context_prefix + "kg";
       const std::string sd_name = context_prefix + "sd";
       Set<std::string> context_functions;
+      const std::string diagnostic_signature = shader_glsl_bundle_error_signature(*node);
+      const auto register_diagnostic = [&](const std::string &name) {
+        GPU_material_expression_source_add(
+            mat, *node, {name, "GLSL Function", ""}, diagnostic_signature);
+      };
+      register_diagnostic(parse_result.wrapper_name);
+      for (const std::string &name : parse_result.analysis->function_names) {
+        register_diagnostic(parse_result.source_prefix + name);
+      }
       for (const char* name : {"glsl_light_count", "glsl_light_iterator_next", "glsl_light_get",
                                "glsl_light_shadow", "glsl_light_shadow_raw",
                                "glsl_light_cast_shadow_raw"})
@@ -12200,6 +12210,14 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       }
       if (parse_result.analysis->uses_matrix_access)
       {
+        for (const char *name : {"glsl_view_matrix", "glsl_view_matrix_inverse",
+                                 "glsl_projection_matrix", "glsl_projection_matrix_inverse",
+                                 "glsl_view_projection_matrix", "glsl_view_projection_matrix_inverse",
+                                 "glsl_model_matrix", "glsl_model_matrix_inverse",
+                                 "glsl_model_view_matrix", "glsl_model_view_projection_matrix",
+                                 "glsl_normal_matrix", "glsl_stencil_uv"}) {
+          register_diagnostic(name);
+        }
         const std::string matrix_helper_source = glsl_material_builtin_context_source(
           build_glsl_matrix_helper_block(), context_functions, kg_name, sd_name);
         GPU_material_generated_source_add(

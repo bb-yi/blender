@@ -7,6 +7,7 @@
 #include <cctype>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace blender::gpu {
@@ -42,6 +43,7 @@ inline std::vector<EvaluationRange> evaluation_ranges(
     std::string_view code, const std::vector<ShaderDiagnosticSource> &sources)
 {
   std::vector<Token> tokens;
+  std::unordered_map<std::string_view, std::string_view> glsl_aliases;
   int line = 1;
   for (size_t i = 0; i < code.size();) {
     const char c = code[i];
@@ -51,6 +53,31 @@ inline std::vector<EvaluationRange> evaluation_ranges(
       continue;
     }
     if (c == '#') {
+      /* GLSL Function namespaces its source with object-like aliases. Resolve only these
+       * generated aliases, retaining each token's original line and per-block ownership. */
+      size_t cursor = i + 1;
+      const auto word = [&]() {
+        while (cursor < code.size() && (code[cursor] == ' ' || code[cursor] == '\t')) {
+          cursor++;
+        }
+        const size_t start = cursor;
+        while (cursor < code.size() &&
+               (std::isalnum(static_cast<unsigned char>(code[cursor])) || code[cursor] == '_')) {
+          cursor++;
+        }
+        return code.substr(start, cursor - start);
+      };
+      const auto directive = word();
+      const auto name = word();
+      if (directive == "define" && cursor < code.size() && code[cursor] != '(') {
+        const auto value = word();
+        if (value.starts_with("glsl_src_")) {
+          glsl_aliases[name] = value;
+        }
+      }
+      else if (directive == "undef") {
+        glsl_aliases.erase(name);
+      }
       while (i < code.size()) {
         if (code[i] == '\n') {
           line++;
@@ -103,7 +130,9 @@ inline std::vector<EvaluationRange> evaluation_ranges(
         i++;
       }
     }
-    tokens.push_back({code.substr(start, i - start), line});
+    const auto identifier = code.substr(start, i - start);
+    const auto alias = glsl_aliases.find(identifier);
+    tokens.push_back({alias == glsl_aliases.end() ? identifier : alias->second, line});
   }
 
   std::vector<EvaluationRange> ranges;
