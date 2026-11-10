@@ -54,7 +54,7 @@ for node_type in ('NPRLineNodeObjects', 'NPRLineNodeBrush', 'NPRLineNodeSettings
                   'NPRLineNodeOutput', 'NPRLineNodeUVMap', 'NPRLineNodeColorAttribute',
                   'NPRLineNodeMaterialAOV', 'ShaderNodeFloatCurve', 'ShaderNodeTexImage'):
     lines.nodes.new(node_type)
-light_info = tree.nodes.new('ShaderNodeLightInfo')
+light_info = tree.nodes.new('ShaderNodeNPRLightInfo' if bpy.app.version >= (5, 3, 0) else 'ShaderNodeLightInfo')
 assert all(name in light_info.outputs for name in ('Origin', 'X Axis', 'Y Axis', 'Z Axis'))
 bpy.context.view_layer.use_pass_pre_fx = True
 assert bpy.context.view_layer.use_pass_pre_fx

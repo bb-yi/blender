@@ -1,5 +1,8 @@
 # Light Info: light space / 灯光空间
 
+In Blender 5.3 this is **NPR Light Info** (`ShaderNodeNPRLightInfo`), distinct from
+the official Light Info node. Existing NPR nodes are migrated when opening old files.
+
 In EEVEE surface materials and NPR node trees, expand **Light Info → Transform**
 to read the selected light object's evaluated world matrix. The panel is closed
 by default. These outputs update with animation, parenting and constraints.
@@ -34,6 +37,8 @@ No projection is applied: light space is not a spot projection, shadow-map UV,
 or an area-light normalized rectangle. This feature does not add Cycles support.
 
 ## 中文说明
+
+Blender 5.3 中对应 **NPR Light Info**，与官方 Light Info 区分；旧文件中的 NPR 节点会自动迁移。
 
 展开 **Light Info → 变换（Transform）**，将 **Origin、X Axis、Y Axis、Z Axis**
 分别连接至 **Basis Transform** 的同名输入。选择 **XYZ**，关闭
