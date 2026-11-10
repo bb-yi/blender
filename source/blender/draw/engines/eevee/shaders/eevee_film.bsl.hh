@@ -1238,7 +1238,9 @@ struct Film {
         color = float4(0.0f, 0.0f, 0.0f, 1.0f);
       }
       imageStoreFast(
-          color_accum_img, co, patch_float_for_16f_storage(clamp_negative_values(color)));
+          color_accum_img,
+          co,
+          patch_float_for_16f_storage(clamp_negative_values(color), quantization_dither()));
     }
 
     if (flag_test(enabled_categories, PASS_CATEGORY_DATA)) {

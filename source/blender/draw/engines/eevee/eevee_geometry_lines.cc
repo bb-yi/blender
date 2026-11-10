@@ -570,6 +570,7 @@ struct GeometryLineModule::Impl {
       if (it == image_updates.end()) {
         image_updates.push_back({image, image->id.session_uid.uid_, 0});
         it = image_updates.end() - 1;
+        changed = true;
       }
       const uint64_t revision = BKE_image_partial_update_revision(image);
       changed |= revision != it->revision;
