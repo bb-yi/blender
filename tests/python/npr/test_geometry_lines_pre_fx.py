@@ -39,7 +39,7 @@ def main(out):
     obj = mesh_object('Pre-FX Line', [(-1, 0, 0), (1, 0, 0)], edges=[(0, 1)])
     tree, source, brush, settings, output = setup_lines([obj], ('wire',), width=6,
                                                        color=(.8, .05, .2, 1))
-    bpy.context.view_layer.eevee.use_pass_pre_fx = True
+    bpy.context.view_layer.use_pass_pre_fx = True
     combined, raw = render(out, 'pre-fx-lines-plain')
     stage = stage_pixels(out / 'pre-fx-lines-plain.exr')
     require(raw[:, :, 3].sum() > 400, 'Fixture must draw real lines')
@@ -56,11 +56,11 @@ def main(out):
             'Pre-FX must accumulate raw line color before line camera effects')
     require(np.count_nonzero((stage[:, :, 3] < .01) & (combined[:, :, 3] > .01)) > 20,
             'Combined must still apply the requested line depth of field')
-    bpy.context.view_layer.eevee.use_pass_pre_fx = False
+    bpy.context.view_layer.use_pass_pre_fx = False
     disabled, _ = render(out, 'pre-fx-lines-disabled')
     require(np.abs(disabled - combined).max() < .003,
             'Requesting Pre-FX must not change Combined')
-    bpy.context.view_layer.eevee.use_pass_pre_fx = True
+    bpy.context.view_layer.use_pass_pre_fx = True
     set_value(output, 'composite', False)
     combined, raw = render(out, 'pre-fx-lines-separate')
     stage = stage_pixels(out / 'pre-fx-lines-separate.exr')

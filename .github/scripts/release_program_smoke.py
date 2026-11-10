@@ -42,6 +42,23 @@ with bpy.data.libraries.load(str(npr_library)) as (library, _):
 
 scene = bpy.context.scene
 assert scene.camera is not None
+lines = bpy.data.node_groups.new('ReleaseGeometryLines', 'NPRLineNodeTree')
+parameters = lines.nodes.new('NPRLineNodeBrushClosureInput')
+brush_output = lines.nodes.new('NPRLineNodeBrushClosureOutput')
+assert parameters.pair_with_output(brush_output)
+assert parameters.paired_output == brush_output
+assert [s.identifier for s in parameters.outputs] == ['Distance', 'Factor', 'Length', 'ID', 'Closed']
+assert [s.identifier for s in brush_output.inputs] == ['position_offset', 'width', 'color', 'opacity']
+assert brush_output.outputs[0].bl_idname == 'NodeSocketNPRLineBrush'
+for node_type in ('NPRLineNodeObjects', 'NPRLineNodeBrush', 'NPRLineNodeSettings',
+                  'NPRLineNodeOutput', 'NPRLineNodeUVMap', 'NPRLineNodeColorAttribute',
+                  'NPRLineNodeMaterialAOV', 'ShaderNodeFloatCurve', 'ShaderNodeTexImage'):
+    lines.nodes.new(node_type)
+light_info = tree.nodes.new('ShaderNodeLightInfo')
+assert all(name in light_info.outputs for name in ('Origin', 'X Axis', 'Y Axis', 'Z Axis'))
+bpy.context.view_layer.use_pass_pre_fx = True
+assert bpy.context.view_layer.use_pass_pre_fx
+scene.eevee.use_geometry_lines = False
 scene.render.engine = 'CYCLES'
 scene.cycles.device = 'CPU'
 scene.cycles.samples = 1
@@ -64,6 +81,7 @@ print('NPR_RELEASE_PROGRAM_SMOKE=' + json.dumps({
     'expected_commit': expected, 'build_hash': actual,
     'version': bpy.app.version_string, 'binary': bpy.app.binary_path,
     'parser': 'PASS', 'stencil_bundle_nodes': 'PASS', 'npr_asset_library': 'PASS',
+    'geometry_line_closure_schema': 'PASS', 'light_transform_and_pre_fx_schema': 'PASS',
     'cycles_cpu_16x16_finite_nonconstant': 'PASS',
     'gpu_pixel_tests': 'NOT_RUN_ON_THIS_CI_PLATFORM',
 }), flush=True)
