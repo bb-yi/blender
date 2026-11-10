@@ -54,6 +54,8 @@ struct [[host_shared]] RenderBuffersInfoData {
   int shadow_id;
   int ambient_occlusion_id;
   int _pad0;
+  int4 line_aov_marker_info; /* Optional marker base in x; vector keeps std140 alignment. */
+  int4 line_aov_marker_layers[AOV_MAX / 4];
 };
 
 #ifndef GPU_SHADER

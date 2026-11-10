@@ -13,7 +13,7 @@ import bpy
 
 
 def run():
-    addon_dir = Path(__file__).resolve().parents[3] / 'scripts' / 'addons_core'
+    addon_dir = Path(bpy.utils.system_resource('SCRIPTS')) / 'addons_core'
     sys.path.insert(0, str(addon_dir))
     addon_utils.enable('node_wrangler', default_set=True)
     from node_wrangler.operators.link_to_output import _preview_sockets, is_light_tree

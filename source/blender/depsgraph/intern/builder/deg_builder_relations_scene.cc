@@ -65,6 +65,7 @@ void DepsgraphRelationBuilder::build_scene_parameters(Scene *scene)
 
   /* Include filter materials and their image animation in viewport and render graphs. */
   build_nodetree(scene->eevee.filter_graph);
+  build_nodetree(scene->eevee.geometry_line_tree);
 
   for (TimeMarker &marker : scene->markers) {
     build_idproperties(marker.prop);

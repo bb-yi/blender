@@ -27,6 +27,7 @@ _modules = [
     "image_as_planes",
     "mesh",
     "node",
+    "npr_lines",
     "object",
     "object_align",
     "object_quick_effects",

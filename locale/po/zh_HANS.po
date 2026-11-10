@@ -165746,3 +165746,1319 @@ msgstr "世界空间中的局部 +Y 矩阵轴，保留缩放与剪切"
 
 msgid "World-space local +Z matrix axis, including scale and shear; emission points along local -Z"
 msgstr "世界空间中的局部 +Z 矩阵轴，保留缩放与剪切；发光方向沿局部 -Z"
+
+
+# Scene-level geometry line node tree UI.
+
+msgid "Geometry Lines"
+msgstr "几何描边"
+
+
+msgid "Line Objects"
+msgstr "描边物体"
+
+
+msgid "Line Brush"
+msgstr "笔刷"
+
+
+msgid "Line Settings"
+msgstr "描边设置"
+
+
+msgid "Geometry Line Output"
+msgstr "描边输出"
+
+
+msgid "Combine Lines"
+msgstr "描边组合"
+
+
+msgid "Line Occlusion"
+msgstr "遮挡规则"
+
+
+msgid "Line Plan"
+msgstr "描边方案"
+
+
+msgid "New Geometry Lines"
+msgstr "新建几何描边"
+
+
+msgid "Copy Geometry Lines"
+msgstr "复制几何描边节点树"
+
+
+msgid "Add Line Group"
+msgstr "添加描边组"
+
+
+msgid "Add Selected Line Objects"
+msgstr "添加选中的描边物体"
+
+
+msgid "Copy Visible Line Settings"
+msgstr "复制可见线设置"
+
+
+msgid "Make Line Brush Single User"
+msgstr "复制为独立笔刷"
+
+
+msgid "Move Geometry Line Rule"
+msgstr "移动描边规则"
+
+
+msgid "Brush Preview"
+msgstr "笔刷预览"
+
+
+msgid "Preview Brush"
+msgstr "预览笔刷"
+
+
+msgid "Solo Line Preview"
+msgstr "独显描边预览"
+
+
+msgid "Solo Preview"
+msgstr "独显预览"
+
+
+msgid "Exit Solo Preview"
+msgstr "退出独显预览"
+
+
+msgid "Scene-wide geometry line node tree"
+msgstr "由场景引用的公共几何描边节点树"
+
+
+msgid "Scene-wide geometry line rules and reusable brushes"
+msgstr "在场景中统一管理几何描边规则和共享笔刷"
+
+
+msgid "Requires a Geometry Lines node tree"
+msgstr "需要几何描边节点树"
+
+
+msgid "Current view layer objects"
+msgstr "当前视图层中参与渲染的物体"
+
+
+msgid "No line objects assigned"
+msgstr "未指定描边物体"
+
+
+msgid "object references"
+msgstr "个物体引用"
+
+
+msgid "brush connections"
+msgstr "个笔刷连接"
+
+
+msgid "Scope Options"
+msgstr "范围选项"
+
+
+msgid "Include Child Collections"
+msgstr "包含子集合"
+
+
+msgid "Include Instances"
+msgstr "包含实例"
+
+
+msgid "Exclude Selected"
+msgstr "排除选中物体"
+
+
+msgid "Tip and Texture"
+msgstr "笔尖与纹理"
+
+
+msgid "Start and End"
+msgstr "起收笔"
+
+
+msgid "Start Width"
+msgstr "起笔宽度渐变"
+
+
+msgid "End Width"
+msgstr "收笔宽度渐变"
+
+
+msgid "Start Opacity"
+msgstr "起笔透明度渐变"
+
+
+msgid "End Opacity"
+msgstr "收笔透明度渐变"
+
+
+msgid "Width Random"
+msgstr "宽度随机"
+
+
+msgid "Rotation Random"
+msgstr "旋转随机"
+
+
+msgid "Grain"
+msgstr "颗粒"
+
+
+msgid "Path Deformation"
+msgstr "路径形变"
+
+
+msgid "Copies"
+msgstr "副本数"
+
+
+msgid "Choose Normal or Multiple for texture tips"
+msgstr "使用普通或多笔点模式绘制纹理笔尖"
+
+
+msgid "Visible Brush"
+msgstr "可见笔刷"
+
+
+msgid "Hidden Brush"
+msgstr "隐藏笔刷"
+
+
+msgid "Hidden Lines"
+msgstr "隐藏线"
+
+
+msgid "Object Contour"
+msgstr "内部轮廓"
+
+
+msgid "Smoothing Boundary"
+msgstr "平滑边界"
+
+
+msgid "Normal Angle"
+msgstr "法线角"
+
+
+msgid "Marked Edge"
+msgstr "标记边"
+
+
+msgid "Unlinked hidden brush uses visible brush"
+msgstr "隐藏笔刷未连接时使用可见笔刷"
+
+
+msgid "Connect Line Objects"
+msgstr "请连接描边物体"
+
+
+msgid "Connect a visible brush"
+msgstr "请连接可见笔刷"
+
+
+msgid "Copy Visible Brush"
+msgstr "复制可见笔刷为独立笔刷"
+
+
+msgid "Copy Hidden Brush"
+msgstr "复制隐藏笔刷为独立笔刷"
+
+
+msgid "Copy Visible Settings"
+msgstr "复制可见线设置"
+
+
+msgid "Per-Type Style"
+msgstr "按线型调整"
+
+
+msgid "Visible Overrides"
+msgstr "可见线独立笔刷"
+
+
+msgid "Hidden Overrides"
+msgstr "隐藏线独立笔刷"
+
+
+msgid "Specific Brushes"
+msgstr "独立笔刷"
+
+
+msgid "Stroke Connection"
+msgstr "笔画连接"
+
+
+msgid "Intersection Join"
+msgstr "相交线连接距离"
+
+
+msgid "Gap Join"
+msgstr "跨间隙连接距离"
+
+
+msgid "Depth Tolerance"
+msgstr "深度容差"
+
+
+msgid "Clockwise Loops"
+msgstr "闭环顺时针"
+
+
+msgid "Connect Objects"
+msgstr "跨物体连接"
+
+
+msgid "Open Edges"
+msgstr "开放边"
+
+
+msgid "Material Filter"
+msgstr "材质筛选"
+
+
+msgid "Exclude Materials"
+msgstr "排除指定材质"
+
+
+msgid "Plans (Top First)"
+msgstr "描边方案（上方优先）"
+
+
+msgid "Occlusion Rules (Top First)"
+msgstr "遮挡规则（上方优先）"
+
+
+msgid "Alpha Image"
+msgstr "Alpha 遮罩图像"
+
+
+msgid "Assign an alpha mask image"
+msgstr "请指定 Alpha 遮罩图像"
+
+
+msgid "Width Scale"
+msgstr "全局线宽倍率"
+
+
+msgid "Relative Width"
+msgstr "按参考分辨率缩放线宽"
+
+
+msgid "Reference Width"
+msgstr "参考分辨率宽度"
+
+
+msgid "Stable identity used by temporary viewport previews"
+msgstr "供临时视口预览使用的稳定节点标识"
+
+
+msgid "Temporarily isolate a line rule in the viewport only"
+msgstr "仅在视口临时独显描边规则，不改变最终渲染"
+
+
+msgid "Enable this geometry line rule"
+msgstr "启用这条几何描边规则"
+
+
+msgid "Number of persistent reference slots"
+msgstr "保存明确引用的插槽数量"
+
+
+msgid "Expose independent brushes for these edge types"
+msgstr "为选定线型显示独立笔刷输入"
+
+
+msgid "Geometry line node mode"
+msgstr "几何描边节点的工作模式"
+
+
+msgid "Use this geometry line output"
+msgstr "使用此描边输出"
+
+
+msgid "Give this scene an independent copy of its geometry line node tree"
+msgstr "为当前场景创建独立的几何描边节点树副本"
+
+
+msgid "Preview this brush on a sample curve without evaluating scene geometry or visibility"
+msgstr "在示例曲线上预览笔刷，无须计算场景几何或遮挡"
+
+
+msgid "Temporarily isolate this rule in the viewport; final renders always use the complete tree"
+msgstr "仅在视口临时独显这条规则；最终渲染始终使用完整节点树"
+
+
+msgid "Local sample curve; large widths are fitted to the swatch"
+msgstr "局部示例曲线；过大线宽会缩放以适应预览"
+
+
+msgid "Open the Brush Preview sidebar to compare live edits"
+msgstr "打开侧栏中的笔刷预览可即时对照参数修改"
+
+
+msgid "Local sample; no visibility calculation"
+msgstr "局部示例，无须计算遮挡"
+
+
+msgid "Return to the scene tree to isolate a line rule"
+msgstr "请返回场景级节点树再独显描边规则"
+
+
+msgid "Select Line Settings or Combine Lines to isolate"
+msgstr "请选择描边设置或描边组合节点进行独显"
+
+
+msgctxt "Geometry Lines"
+msgid "Mode"
+msgstr "模式"
+
+
+msgctxt "Geometry Lines"
+msgid "Current View Layer"
+msgstr "当前视图层"
+
+
+msgctxt "Geometry Lines"
+msgid "Collection"
+msgstr "集合"
+
+
+msgctxt "Geometry Lines"
+msgid "Object List"
+msgstr "物体列表"
+
+
+msgctxt "Geometry Lines"
+msgid "Simple"
+msgstr "简单"
+
+
+msgctxt "Geometry Lines"
+msgid "Normal"
+msgstr "普通"
+
+
+msgctxt "Geometry Lines"
+msgid "Multiple"
+msgstr "多笔点"
+
+
+msgctxt "Geometry Lines"
+msgid "Priority Override"
+msgstr "优先级覆盖"
+
+
+msgctxt "Geometry Lines"
+msgid "Overlay"
+msgstr "叠加绘制"
+
+
+msgctxt "Geometry Lines"
+msgid "Automatic Preview"
+msgstr "自动预览"
+
+
+msgctxt "Geometry Lines"
+msgid "Full"
+msgstr "完整"
+
+
+msgctxt "Geometry Lines"
+msgid "Fast Preview"
+msgstr "快速预览"
+
+
+msgctxt "Geometry Lines"
+msgid "Solid"
+msgstr "实体"
+
+
+msgctxt "Geometry Lines"
+msgid "Ignore"
+msgstr "忽略"
+
+
+msgctxt "Geometry Lines"
+msgid "Alpha Mask"
+msgstr "Alpha 遮罩"
+
+
+# Scene-level geometry line node tree UI.
+
+msgid "Width (px)"
+msgstr "宽度（像素）"
+
+
+msgid "Stroke width in output pixels before global and per-type multipliers"
+msgstr "输出像素中的笔画宽度，随后应用全局和线型倍率"
+
+
+msgid "Distance between stamps as a fraction of the brush width"
+msgstr "笔点之间的距离，相对于笔刷宽度的比例"
+
+
+msgid "Fraction of the stroke length used to fade the starting width from zero"
+msgstr "起笔宽度从零渐入的区间占整条笔画的比例"
+
+
+msgid "Fraction of the stroke length used to fade the ending width to zero"
+msgstr "收笔宽度渐出至零的区间占整条笔画的比例"
+
+
+msgid "Fraction of the stroke length used to fade in opacity"
+msgstr "起笔透明度渐入的区间占整条笔画的比例"
+
+
+msgid "Fraction of the stroke length used to fade out opacity"
+msgstr "收笔透明度渐出的区间占整条笔画的比例"
+
+
+msgid "Maximum camera-depth difference between connected endpoints, in scene units"
+msgstr "连接端点允许的最大相机深度差，使用场景单位"
+
+
+# Scene-level geometry line node tree UI.
+
+msgid "Detection"
+msgstr "检测"
+
+
+msgid "Minimum Angle"
+msgstr "最小法线角"
+
+
+msgid "Maximum Angle"
+msgstr "最大法线角"
+
+
+msgid "Visible Outline"
+msgstr "可见：外轮廓"
+
+
+msgid "Hidden Outline"
+msgstr "隐藏：外轮廓"
+
+
+msgid "Visible Object Contour"
+msgstr "可见：内部轮廓"
+
+
+msgid "Hidden Object Contour"
+msgstr "隐藏：内部轮廓"
+
+
+msgid "Visible Intersection"
+msgstr "可见：相交线"
+
+
+msgid "Hidden Intersection"
+msgstr "隐藏：相交线"
+
+
+msgid "Visible Smoothing Boundary"
+msgstr "可见：平滑边界"
+
+
+msgid "Hidden Smoothing Boundary"
+msgstr "隐藏：平滑边界"
+
+
+msgid "Visible Material Boundary"
+msgstr "可见：材质边界"
+
+
+msgid "Hidden Material Boundary"
+msgstr "隐藏：材质边界"
+
+
+msgid "Visible Normal Angle"
+msgstr "可见：法线角"
+
+
+msgid "Hidden Normal Angle"
+msgstr "隐藏：法线角"
+
+
+msgid "Visible Wire"
+msgstr "可见：线框"
+
+
+msgid "Hidden Wire"
+msgstr "隐藏：线框"
+
+
+msgid "Visible Marked Edge"
+msgstr "可见：标记边"
+
+
+msgid "Hidden Marked Edge"
+msgstr "隐藏：标记边"
+
+
+# Scene-level geometry line node tree UI.
+
+msgid "Connect a line plan"
+msgstr "请连接描边方案"
+
+
+# Scene-level geometry line node tree UI.
+
+msgid "Add Selected"
+msgstr "添加选中物体"
+
+
+msgctxt "Operator"
+msgid "New Geometry Lines"
+msgstr "新建几何描边"
+
+
+msgctxt "Operator"
+msgid "Copy Geometry Lines"
+msgstr "复制几何描边节点树"
+
+
+msgctxt "Operator"
+msgid "Add Line Group"
+msgstr "添加描边组"
+
+
+msgctxt "Operator"
+msgid "Add Selected Line Objects"
+msgstr "添加选中的描边物体"
+
+
+msgctxt "Operator"
+msgid "Copy Visible Line Settings"
+msgstr "复制可见线设置"
+
+
+msgctxt "Operator"
+msgid "Make Line Brush Single User"
+msgstr "复制为独立笔刷"
+
+
+msgctxt "Operator"
+msgid "Move Geometry Line Rule"
+msgstr "移动描边规则"
+
+
+msgctxt "Operator"
+msgid "Brush Preview"
+msgstr "笔刷预览"
+
+
+msgctxt "Operator"
+msgid "Preview Brush"
+msgstr "预览笔刷"
+
+
+msgctxt "Operator"
+msgid "Solo Line Preview"
+msgstr "独显描边预览"
+
+
+msgctxt "Operator"
+msgid "Solo Preview"
+msgstr "独显预览"
+
+
+msgctxt "Operator"
+msgid "Exit Solo Preview"
+msgstr "退出独显预览"
+
+
+msgctxt "Operator"
+msgid "Line Objects"
+msgstr "描边物体"
+
+
+msgctxt "Operator"
+msgid "Line Brush"
+msgstr "笔刷"
+
+
+msgctxt "Operator"
+msgid "Line Settings"
+msgstr "描边设置"
+
+
+msgctxt "Operator"
+msgid "Geometry Line Output"
+msgstr "描边输出"
+
+
+msgctxt "Operator"
+msgid "Combine Lines"
+msgstr "描边组合"
+
+
+msgctxt "Operator"
+msgid "Line Occlusion"
+msgstr "遮挡规则"
+
+
+msgctxt "Operator"
+msgid "Give this scene an independent copy of its geometry line node tree"
+msgstr "为当前场景创建独立的几何描边节点树副本"
+
+
+msgctxt "Operator"
+msgid "Preview this brush on a sample curve without evaluating scene geometry or visibility"
+msgstr "在示例曲线上预览笔刷，无须计算场景几何或遮挡"
+
+
+msgctxt "Operator"
+msgid "Temporarily isolate this rule in the viewport; final renders always use the complete tree"
+msgstr "仅在视口临时独显这条规则；最终渲染始终使用完整节点树"
+
+
+# Scene-level geometry line node tree UI.
+
+msgid "Variation"
+msgstr "笔触变化"
+
+
+msgid "Geometry Lines: Quick Preview (approximate depth, no intersections or joining)"
+msgstr "几何描边：快速预览（近似深度，不计算相交线和笔画连接）"
+
+
+msgid "Connect Coincident Seams"
+msgstr "连接重合接缝"
+
+
+msgid "Line Timings"
+msgstr "描边耗时"
+
+
+msgid "Show CPU stage timings and drawing submission costs without blocking for GPU readback"
+msgstr "显示 CPU 各阶段与绘制提交耗时，不等待 GPU 回读"
+
+
+msgid "Render the viewport to measure"
+msgstr "切换到渲染预览以测量耗时"
+
+
+msgid "Geometry Lines CPU"
+msgstr "几何描边 CPU"
+
+
+msgid "Geometry Lines inactive"
+msgstr "几何描边未启用"
+
+
+msgid "Geometry computation"
+msgstr "几何计算"
+
+
+msgid "Preparation"
+msgstr "几何准备"
+
+
+msgid "Connection"
+msgstr "笔画连接"
+
+
+msgid "Drawing submission"
+msgstr "绘制提交"
+
+
+msgid "Display submission"
+msgstr "显示提交"
+
+
+msgid "Updated"
+msgstr "已更新"
+
+
+msgid "Cached"
+msgstr "已缓存"
+
+
+msgid "segments"
+msgstr "线段"
+
+
+msgid "strokes"
+msgstr "笔画"
+
+
+msgid "instances"
+msgstr "实例"
+
+
+msgid "Use virtual adjacency for an unambiguous pair of exactly coincident, oppositely wound boundary edges in the same mesh; keeps the original mesh unchanged"
+msgstr "将同一网格内位置完全重合、绕向相反且配对唯一的开放边视作接缝相邻面；不修改原始网格"
+
+
+msgid "Intersection lines"
+msgstr "相交线"
+
+
+msgid "Width Curve"
+msgstr "宽度曲线"
+
+
+msgid "Opacity Curve"
+msgstr "透明度曲线"
+
+
+msgid "Normalized stroke envelope"
+msgstr "沿笔画归一化的宽度或透明度包络"
+
+
+msgid "Use a normalized curve along the stroke instead of linear start and end reduction"
+msgstr "使用曲线控制整条笔画的渐变；关闭后恢复线性起收笔参数"
+
+
+msgid "Raster Size Response"
+msgstr "栅格线宽响应"
+
+
+msgid "Use calibrated raster width and subpixel opacity for antialiased Simple strokes when matching Pencil+4"
+msgstr "用校准后的栅格线宽和亚像素透明度对照 Pencil+4 的抗锯齿简单笔刷"
+
+
+msgid "Join Coincident Endpoints"
+msgstr "连接重合端点"
+
+
+msgid "Join exactly overlapping stroke endpoints within one object, including split vertices; does not modify surfaces or mesh topology"
+msgstr "连接同一物体内位置完全重合的笔画端点，支持拆分顶点；不修改面或网格拓扑"
+
+
+msgid "Offscreen Stroke Margin"
+msgstr "画外笔画范围"
+
+
+msgid "Continue stroke detection and joining outside the image border in pixels; zero uses the automatic brush margin"
+msgstr "在画面外继续检测与连接笔画，单位为像素；0 使用自动笔刷范围"
+
+
+msgid "Over Sampling"
+msgstr "超采样"
+
+
+msgid "Samples per pixel axis; two evaluates a 2 by 2 subpixel grid"
+msgstr "每个像素轴上的采样数量；2 代表 2×2 子像素采样网格"
+
+
+msgid "Per-Object Contours"
+msgstr "按物体区分轮廓"
+
+
+msgid "Classify outer and inner contours within each object; other objects still occlude lines. Disable to classify against the whole scene"
+msgstr "按物体自身区分外轮廓和内部轮廓，其他物体仍参与遮挡；关闭后按整个场景分类"
+
+
+msgid "Open Edge Options"
+msgstr "开放边细分控制"
+
+
+msgid "Visible Inner Contour"
+msgstr "可见内部轮廓"
+
+
+msgid "Hidden Inner Contour"
+msgstr "隐藏内部轮廓"
+
+
+msgid "Stroke Orientation"
+msgstr "笔触方向"
+
+
+msgid "Fixed Angle"
+msgstr "固定角度"
+
+
+msgid "Orient brush tips along the stroke tangent"
+msgstr "沿笔画切线旋转笔尖"
+
+
+msgid "Keep the brush orientation constant"
+msgstr "保持笔尖角度固定"
+
+
+msgid "Vary brush orientation using Rotation Random and the fixed seed"
+msgstr "使用旋转随机参数和固定种子改变笔尖角度"
+
+
+msgid "Control how textured brush tips follow the stroke"
+msgstr "控制纹理笔尖如何跟随笔画"
+
+
+msgid "Tip width divided by height, before rotation; one is circular"
+msgstr "旋转前笔尖的宽度与高度之比；1 为圆形"
+
+
+msgid "Multiple Tip"
+msgstr "多点笔尖"
+
+
+msgid "Dot Size (%)"
+msgstr "笔点大小 (%)"
+
+
+msgid "Size of each point in the reusable tip pattern; independent of the stroke width"
+msgstr "固定笔尖图案内各笔点的大小，与整条笔画宽度独立"
+
+
+msgid "Dot Size Random"
+msgstr "笔点大小随机"
+
+
+msgid "Dot Antialiasing"
+msgstr "笔点抗锯齿"
+
+
+msgid "Horizontal Space"
+msgstr "横向间距"
+
+
+msgid "Horizontal Random"
+msgstr "横向间距随机"
+
+
+msgid "Vertical Space"
+msgstr "纵向间距"
+
+
+msgid "Vertical Random"
+msgstr "纵向间距随机"
+
+
+msgid "Groove Count"
+msgstr "沟槽数量"
+
+
+msgid "Tip Fade Start"
+msgstr "笔尖渐隐起点"
+
+
+msgid "Tip Fade End"
+msgstr "笔尖渐隐终点"
+
+
+msgid "Normalized radius where the brush tip begins to fade; separate from stroke start and end"
+msgstr "笔尖开始渐隐的归一化半径，与笔画的起笔和收笔独立"
+
+
+msgid "Override Stroke Connection"
+msgstr "覆盖笔画连接设置"
+
+
+msgid "Use this brush's connection and direction settings for visible, hidden and per-type lines; otherwise use Line Settings"
+msgstr "为使用此笔刷的可见线、隐藏线和按类型笔刷单独设置连接与方向；关闭后沿用描边设置"
+
+
+msgid "Uses rule connection settings"
+msgstr "沿用描边设置中的笔画连接"
+
+
+msgid "Minimum Stroke"
+msgstr "最短笔画长度"
+
+
+msgid "Distance Reduction"
+msgstr "距离衰减"
+
+
+msgid "Reduction"
+msgstr "衰减"
+
+
+msgid "Width Reduction"
+msgstr "线宽衰减"
+
+
+msgid "Opacity Reduction"
+msgstr "透明度衰减"
+
+
+msgid "Start Distance"
+msgstr "起始距离"
+
+
+msgid "End Distance"
+msgstr "结束距离"
+
+
+msgid "Camera Distance"
+msgstr "到相机距离"
+
+
+msgid "Object Distance"
+msgstr "到物体距离"
+
+
+msgid "Reduction Curve"
+msgstr "衰减曲线"
+
+
+msgid "Measure distance from the camera position"
+msgstr "以相机位置作为距离参考点"
+
+
+msgid "Measure distance from the evaluated reference object's origin"
+msgstr "以求值后的参考物体原点作为距离参考点"
+
+
+msgid "Use the evaluated object origin as the distance reference"
+msgstr "使用求值后的物体原点作为距离参考点"
+
+
+msgid "Choose a reference object; reduction is inactive"
+msgstr "选择参考物体以启用衰减"
+
+
+msgid "Distance along the horizontal axis, width or opacity factor along the vertical axis"
+msgstr "横轴为从起始距离到结束距离的归一化位置，纵轴为线宽或透明度倍率"
+
+
+msgid "Line Map"
+msgstr "描边贴图"
+
+
+msgid "Surface Maps"
+msgstr "表面贴图"
+
+
+msgid "Width Map"
+msgstr "宽度贴图"
+
+
+msgid "Width Map Strength"
+msgstr "宽度贴图强度"
+
+
+msgid "UV Selection"
+msgstr "UV 选择方式"
+
+
+msgid "UV Index"
+msgstr "UV 索引"
+
+
+msgid "UV Name"
+msgstr "UV 名称"
+
+
+msgid "Wrap U"
+msgstr "U 轴包裹"
+
+
+msgid "Wrap V"
+msgstr "V 轴包裹"
+
+
+msgid "Mirror Once"
+msgstr "单次镜像"
+
+
+msgid "Tiling U"
+msgstr "U 轴平铺"
+
+
+msgid "Tiling V"
+msgstr "V 轴平铺"
+
+
+msgid "Offset V"
+msgstr "V 轴偏移"
+
+
+msgid "View surface maps in the scene"
+msgstr "贴图效果请查看场景"
+
+
+msgid "Choose an image to enable the map"
+msgstr "选择图像以启用贴图"
+
+
+msgid "Use evaluated mesh UV coordinates; stable when the view changes"
+msgstr "使用求值网格的 UV 坐标，不随视角变化"
+
+
+msgid "Top-left is zero, bottom-right is one"
+msgstr "画面左上角为 0，右下角为 1"
+
+
+msgid "UV map order in the object data, starting at zero"
+msgstr "物体数据中的 UV 列表顺序，从 0 开始"
+
+
+msgid "Select a UV map by name"
+msgstr "按名称选择 UV 层"
+
+
+msgid "Choose the UV layer by index or name"
+msgstr "按索引或名称选择 UV 层"
+
+
+msgid "Texture boundary behavior"
+msgstr "贴图边界外的采样方式"
+
+
+msgid "Image sampling filter"
+msgstr "图像采样过滤方式"
+
+
+msgid "Sample the nearest image pixel"
+msgstr "取最近的图像像素"
+
+
+msgid "Interpolate four image pixels"
+msgstr "对相邻四个图像像素插值"
+
+
+msgid "Visible Width Reduction"
+msgstr "可见线宽度衰减"
+
+
+msgid "Visible Opacity Reduction"
+msgstr "可见线透明度衰减"
+
+
+msgid "Hidden Width Reduction"
+msgstr "隐藏线宽度衰减"
+
+
+msgid "Hidden Opacity Reduction"
+msgstr "隐藏线透明度衰减"
+
+
+msgid "Color Map Strength"
+msgstr "颜色贴图强度"
+
+
+msgid "Blend image RGB over the base color; image alpha does not change the color strength or stroke opacity"
+msgstr "将图像 RGB 混合到基础颜色；图像 Alpha 不改变颜色强度或笔画透明度"
+
+
+msgid "Screen Space Joins"
+msgstr "按屏幕连接"
+
+
+msgid "Join small gaps on the screen plane; disable to also apply the depth tolerance"
+msgstr "按屏幕平面连接小间隙；关闭后同时应用深度限制"
+
+
+msgid "Maximum camera-depth difference for intersection joins, and for gap joins when Screen Space Joins is disabled, in scene units"
+msgstr "交线近连接的最大相机深度差，单位为场景单位；关闭“按屏幕连接”时也限制跨间隙连接"
+
+
+msgid "Contour Priority"
+msgstr "轮廓优先"
+
+msgid "Brush Map"
+msgstr "笔刷贴图"
+
+msgid "Brush Map Opacity"
+msgstr "笔刷贴图强度"
+
+msgid "Attribute Selection"
+msgstr "属性选择"
+
+msgid "Attribute Index"
+msgstr "属性索引"
+
+msgid "Wave and Map"
+msgstr "波形与贴图"
+
+msgid "Wave Units"
+msgstr "波形单位"
+
+msgid "Cycles per Stroke"
+msgstr "每笔周期数"
+
+msgid "Pixel Wavelength"
+msgstr "像素波长"
+
+msgid "Wavelength (px)"
+msgstr "波长（像素）"
+
+msgid "Wave Phase"
+msgstr "波形相位"
+
+msgid "Wave Amount Random"
+msgstr "幅度随机"
+
+msgid "Wave Period Random"
+msgstr "周期随机"
+
+msgid "Wave Phase Random"
+msgstr "相位随机"
+
+msgid "Normal Offset Random (px)"
+msgstr "法线偏移随机（像素）"
+
+msgid "Keep the saved normalized cycle count along each stroke"
+msgstr "沿每笔使用已保存的归一化周期数"
+
+msgid "Keep the wave length fixed in output pixels"
+msgstr "波长固定为输出像素，不随笔画长度拉伸"
+
+msgid "Choose a pixel wavelength or the legacy number of cycles per stroke"
+msgstr "选择像素波长或旧版每笔周期数；已有参数会保留"
+
+msgctxt "Geometry Lines"
+msgid "Color Attribute"
+msgstr "颜色属性"
+
+msgctxt "Geometry Lines"
+msgid "Surface UV"
+msgstr "表面 UV"
+
+msgctxt "Geometry Lines"
+msgid "Screen"
+msgstr "屏幕"
+
+msgid "Color attributes use RGB; alpha is ignored"
+msgstr "使用颜色属性 RGB，忽略 Alpha"
+
+msgid "Preview color attributes in the scene"
+msgstr "颜色属性效果请在场景中查看"
+
+msgid "Use an evaluated mesh point or face-corner color attribute"
+msgstr "使用求值后网格的点域或角点域颜色属性"
+
+msgid "Choose a mesh color attribute by index or name"
+msgstr "按索引或名称选择网格颜色属性"
+
+msgid "Color Attributes order in the object data, starting at zero"
+msgstr "物体数据中颜色属性的顺序，从零开始"
+
+msgid "Select a color attribute by name"
+msgstr "按名称选择颜色属性"
+
+msgid "Multiply tip coverage by the map RGB average; images use brush-local coordinates"
+msgstr "以贴图 RGB 平均值调整笔尖覆盖率；图像使用笔尖局部坐标"
+
+msgid "Distortion Map"
+msgstr "形变贴图"
+
+msgid "Map Amount (px)"
+msgstr "贴图位移（像素）"
+
+msgid "Use Pencil-style raster coverage and subpixel opacity for Simple, Normal, and Multiple brushes"
+msgstr "使用 Pencil 风格的栅格覆盖和亚像素透明度，适用于 Simple、Normal 和 Multiple 笔刷"
+
+msgid "Multiply tip coverage by the RGB average of a shared map in brush-local coordinates"
+msgstr "在笔尖局部坐标中，以共享贴图的 RGB 平均值调整笔尖覆盖率"
+
+msgid "Blend the map with the untextured tip; image alpha does not change this mask"
+msgstr "与原笔尖混合的贴图强度；不使用图像 Alpha"
+
+msgid "Offset the path along its normal by the map RGB average, in output pixels"
+msgstr "按贴图 RGB 平均值沿路径法线偏移，单位为输出像素"
+
+
+msgid "Keep silhouette boundaries in Outline or Object categories; disabling a contour type also suppresses its wire and marked-edge fallback"
+msgstr "将轮廓边保留为外轮廓或内部轮廓；关闭对应轮廓类型时，不由线框或标记边补画"
+
+msgid "Brush Closure"
+msgstr "笔刷闭包"
+
+msgid "Brush Parameters"
+msgstr "笔画参数"
+
+msgid "Brush Output"
+msgstr "笔刷输出"
+
+msgid "Position Offset"
+msgstr "位置偏移"
+
+msgid "Brush Effects"
+msgstr "笔刷效果"
+
+msgid "Per Stroke Random"
+msgstr "逐笔随机"
+
+msgid "Field Sample Length (px)"
+msgstr "字段采样间距（像素）"
+
+msgid "Color and Vector"
+msgstr "颜色与矢量"
+
+msgid "Line Setup"
+msgstr "描边"
+
+msgid "Material AOV"
+msgstr "材质 AOV"
+
+msgid "Closed"
+msgstr "闭合"
+
+msgctxt "Operator"
+msgid "Add Brush Effect Group"
+msgstr "添加笔刷效果节点组"
+
+msgctxt "Operator"
+msgid "Add an editable node group for a brush effect"
+msgstr "添加可编辑的笔刷效果节点组"
+
+msgctxt "NPRBrushEffect"
+msgid "Effect"
+msgstr "效果"
+
+msgctxt "NPRBrushEffect"
+msgid "Wave"
+msgstr "波纹"
+
+msgctxt "NPRBrushEffect"
+msgid "Dashes"
+msgstr "虚线"
+
+msgctxt "NPRBrushEffect"
+msgid "Taper"
+msgstr "起收笔"
+
+msgctxt "NPRBrushEffect"
+msgid "Per Stroke Random"
+msgstr "逐笔随机"
+
+msgctxt "NPRBrushEffect"
+msgid "Distance to a normal offset"
+msgstr "沿线距离生成法线偏移"
+
+msgctxt "NPRBrushEffect"
+msgid "Distance to an opacity mask"
+msgstr "沿线距离生成透明度遮罩"
+
+msgctxt "NPRBrushEffect"
+msgid "Factor through an editable Float Curve"
+msgstr "通过可编辑浮点曲线调节沿线宽度"
+
+msgctxt "NPRBrushEffect"
+msgid "ID and seed to a value range"
+msgstr "根据笔画标识和种子生成指定范围的数值"
+
+msgid "Original pixel distance along the source contour"
+msgstr "沿源轮廓累计的原始像素距离"
+
+msgid "Original distance divided by the complete stroke length"
+msgstr "原始距离除以整笔长度"
+
+msgid "Original complete stroke length in pixels"
+msgstr "原始笔画总长度（像素）"
+
+msgid "Stable per-stroke identity for procedural variation"
+msgstr "每笔画的稳定标识，用于程序化随机变化"
+
+msgid "Whether the source stroke is a loop"
+msgstr "源笔画是否闭合"
+
+msgid "Preview Filter Graph / Light Node"
+msgstr "预览过滤图／灯光节点"
+
+msgctxt "Operator"
+msgid "Preview Filter Graph / Light Node"
+msgstr "预览过滤图／灯光节点"
+
+msgid "Preview a Filter Graph image or light shader output; click again to cycle sockets"
+msgstr "预览过滤图图像或灯光着色器输出；再次单击以切换插口"

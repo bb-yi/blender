@@ -51,6 +51,7 @@ void RenderBuffers::init()
   data.outline_id = pass_index_get(EEVEE_RENDER_PASS_OUTLINE);
 
   data.aovs = inst_.film.aovs_info;
+  data.line_aov_marker_info = int4(-1, 0, 0, 0);
 }
 
 int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
@@ -111,6 +112,16 @@ int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
                   inst_.native_postfx_outputs.color_len_get();
   int value_len = data.value_len + data.aovs.value_len +
                   inst_.native_postfx_outputs.value_len_get();
+  data.line_aov_marker_info.x = inst_.geometry_lines.uses_aov() ? color_len : -1;
+  for (int i = 0; i < AOV_MAX; i++) {
+    int &marker = data.line_aov_marker_layers[i / 4][i % 4];
+    marker = -1;
+    if (i < data.aovs.color_len + data.aovs.value_len &&
+        inst_.geometry_lines.uses_aov(data.aovs.hash[i / 4][i % 4], i >= data.aovs.color_len)) {
+      marker = color_len;
+      color_len += 2;
+    }
+  }
 
   created += rp_color_tx.ensure_2d_array(color_format,
                                          (color_len > 0) ? extent : int2(1),
@@ -120,6 +131,14 @@ int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
                                          (value_len > 0) ? extent : int2(1),
                                          math::max(1, value_len),
                                          usage_attachment_read_write);
+  if (data.line_aov_marker_info.x >= 0) {
+    /* Only requested by a live brush AOV field. Zero is an unwritten marker,
+     * independent of the AOV's numerical value. Clear every sample. */
+    rp_color_tx.clear(float4(0));
+  }
+  /* acquire() follows the main-view uniform upload; publish the current optional
+   * marker layout before any Deferred surface shader writes an AOV. */
+  inst_.uniform_data.data.push_update();
 
   const gpu::TextureFormat cryptomatte_format = gpu::TextureFormat::SFLOAT_32_32_32_32;
   cryptomatte_tx.acquire_2d(pass_extent(EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT |

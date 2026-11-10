@@ -543,13 +543,25 @@ void DepthOfField::render(View &view,
 
     update_sample_table();
 
+    /* Native outputs can have Film resolution while the main scene is rendered smaller.
+     * Use the actual input for reduction coordinates and retain a large enough scatter list. */
+    const int2 max_extent = math::max(inst_.film.render_extent_get(), extent_);
+    const int2 reduce_extent = math::ceil_to_multiple(
+        math::divide_ceil(max_extent, int2(2)), int2(DOF_REDUCE_GROUP_SIZE));
+    data_.gather_uv_fac = 1.0f / float2(reduce_extent);
+    data_.scatter_max_rect = (reduce_extent.x * reduce_extent.y / 4) / 2;
+    if (scatter_fg_list_buf_.size() < data_.scatter_max_rect) {
+      scatter_fg_list_buf_.resize(data_.scatter_max_rect);
+      scatter_bg_list_buf_.resize(data_.scatter_max_rect);
+    }
+
     data_.push_update();
   }
 
   /* Acquire reduce texture mip chains, and views for each mip level. */
   {
     /* TODO(fclem): Once we render into multiple view, we'll need to use the maximum resolution. */
-    int2 max_render_res = inst_.film.render_extent_get();
+    int2 max_render_res = math::max(inst_.film.render_extent_get(), extent_);
     int2 half_render_res = math::divide_ceil(max_render_res, int2(2));
     int2 reduce_size = math::ceil_to_multiple(half_render_res, int2(DOF_REDUCE_GROUP_SIZE));
 

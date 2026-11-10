@@ -42,7 +42,8 @@ struct RenderPassOutput {
 }  // namespace eevee
 
 void output_aov(
-    int2 texel, float4 color, float value, uint hash, float holdout, eObjectInfoFlag ob_flag)
+    int2 texel, float4 color, float value, uint hash, float holdout, eObjectInfoFlag ob_flag,
+    uint source_resource, float3 source_material)
 {
   [[resource_table]] eevee::RenderPassOutput &rp = resource_table_get(eevee::RenderPassOutput);
   [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
@@ -100,5 +101,16 @@ void output_aov(
     else {
       rp.store_color(texel, int(uni.uniform_buf.render_pass.color_len + aov_index), out_aov);
     }
+#ifdef MAT_DEFERRED
+    int marker_base = uni.uniform_buf.render_pass.line_aov_marker_layers[hash_index / 4u][hash_index % 4u];
+    if (marker_base >= 0) {
+      /* All 32 identity bits survive the half-float render-pass storage. */
+      rp.store_color(texel, marker_base,
+                     float4(float(source_resource & 2047u),
+                            float((source_resource >> 11u) & 2047u),
+                            float(source_resource >> 22u), 1.0f));
+      rp.store_color(texel, marker_base + 1, float4(source_material, 1.0f));
+    }
+#endif
   }
 }

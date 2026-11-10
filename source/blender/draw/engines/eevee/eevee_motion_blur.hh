@@ -103,6 +103,7 @@ class MotionBlurModule {
   gpu::Texture *output_color_tx_ = nullptr;
 
   PassSimple motion_blur_ps_ = {"MotionBlur"};
+  gpu::TextureFormat flatten_format_ = gpu::TextureFormat::SFLOAT_16_16_16_16;
 
   MotionBlurTileIndirectionBuf tile_indirection_buf_;
   MotionBlurDataBuf data_;
@@ -137,6 +138,7 @@ class MotionBlurModule {
               gpu::Texture *velocity_tx = nullptr);
 
  private:
+  void sync_passes(gpu::TextureFormat velocity_format);
   float shutter_time_to_scene_time(float time);
 };
 

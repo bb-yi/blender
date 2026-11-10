@@ -1412,8 +1412,10 @@ void accumulate_comp([[resource_table]] Film &film,
 struct CapturePreFX {
   [[sampler(0)]] sampler2D input_tx;
   [[sampler(1)]] sampler2D outline_tx;
+  [[sampler(2)]] sampler2D line_tx;
   [[image(0, write, SFLOAT_16_16_16_16)]] image2D output_img;
   [[push_constant]] const bool has_outline;
+  [[push_constant]] const bool has_line;
 };
 
 [[compute, local_size(FILM_GROUP_SIZE, FILM_GROUP_SIZE)]]
@@ -1429,6 +1431,12 @@ void capture_pre_fx([[resource_table]] CapturePreFX &srt,
     float4 outline = texelFetch(srt.outline_tx, texel, 0);
     color.rgb = outline.rgb + color.rgb * (1.0f - outline.a);
     color.a *= 1.0f - outline.a;
+  }
+  if (srt.has_line) {
+    float2 uv = (float2(texel) + 0.5f) / float2(imageSize(srt.output_img));
+    float4 line = textureLod(srt.line_tx, uv, 0.0f);
+    color.rgb = line.rgb + color.rgb * (1.0f - line.a);
+    color.a *= 1.0f - line.a;
   }
   imageStoreFast(srt.output_img, texel, color);
 }

@@ -45,6 +45,9 @@ enum class ePartialUpdateCollectResult {
   PartialChangesDetected,
 };
 
+/** Content revision for UI caches, without reading pixels or consuming a user's changes. */
+uint64_t BKE_image_partial_update_revision(Image *image);
+
 /**
  * \brief A region to update.
  *

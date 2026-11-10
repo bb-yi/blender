@@ -254,7 +254,8 @@ struct LayerCollection {
 struct ViewLayerEEVEE {
   eViewLayerEEVEEPassType render_passes = {};
   float ambient_occlusion_distance = 10.0f;
-  int _pad[2] = {};
+  int geometry_lines_disabled = 0;
+  int use_pass_geometry_line = 0;
 };
 
 /** AOV Render-pass definition. */

@@ -73,6 +73,14 @@ static void propagate_node_tree_changes(Main &bmain,
   params.tree_changed_fn = [&bmain](bNodeTree &ntree, ID &owner_id) {
     send_notifiers_after_node_tree_change(&owner_id, &ntree);
     DEG_id_tag_update(&ntree.id, ID_RECALC_SYNC_TO_EVAL);
+    if (ntree.type == NTREE_NPR_LINE) {
+      for (Scene &scene : bmain.scenes) {
+        if (scene.eevee.geometry_line_tree) {
+          DEG_id_tag_update(&scene.id, ID_RECALC_SYNC_TO_EVAL);
+        }
+      }
+      WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+    }
 
     if (ntree.type != NTREE_SHADER || GS(owner_id.name) != ID_MA) {
       if (ntree.type == NTREE_SHADER && GS(owner_id.name) == ID_LA) {

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "NOD_register.hh"
+#include "NOD_npr_line.hh"
 
 #include "node_shader_register.hh"
 
@@ -12,6 +13,7 @@ void register_shader_nodes()
 {
   register_node_tree_type_sh();
   register_node_tree_type_eevee_filter_graph();
+  nodes::register_npr_line_nodes();
 
   register_node_type_sh_group();
 

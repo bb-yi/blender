@@ -368,6 +368,7 @@ static eViewLayerEEVEEPassType with_light_pass_color_dependencies(eViewLayerEEVE
 
 void Film::init(const int2 &extent, const rcti *output_rect)
 {
+  inst_.geometry_lines.reset_accumulation();
   using namespace math;
 
   Sampling &sampling = inst_.sampling;
@@ -703,8 +704,15 @@ void Film::init(const int2 &extent, const rcti *output_rect)
         inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE);
     const bool nr_requested = scene.eevee.dlss5_mode == SCE_EEVEE_DLSSNR &&
                               scene.eevee.dlss5_intensity != 0.0f;
+    /* Line composition occurs after Film. Keep a stage layer when lines are
+     * requested so Pre-FX includes their raw samples, without camera effects.
+     * Do not inspect the line module's state from the previous frame here. */
+    const bool geometry_lines_requested = scene.eevee.use_geometry_lines &&
+                                          scene.eevee.geometry_line_tree &&
+                                          !inst_.view_layer->eevee.geometry_lines_disabled;
     const bool alias = (enabled_passes_ & EEVEE_RENDER_PASS_PRE_FX) && !camera_dof && !motion_fx &&
                        !later_filters && !data_.sr_active && !nr_requested &&
+                       !geometry_lines_requested &&
                        !inst_.is_dlss_guide_render &&
                        (!inst_.is_viewport() ||
                         ui_render_pass_ != EEVEE_RENDER_PASS_STENCIL_VALUE);
@@ -1219,6 +1227,7 @@ void Film::accumulate(View &view,
   has_outline_input_ = outline_input_tx != nullptr;
   use_outline_in_combined_ = outline_combined_tx != nullptr;
   display_only_ = false;
+  inst_.geometry_lines.accumulate(view);
   gpu::Texture *dlss_display_tx = nullptr;
   inst_.manager->submit(accumulate_ps_, view);
   const bool dlss_live_viewport = inst_.is_viewport() && !inst_.is_image_render;
@@ -1250,6 +1259,9 @@ void Film::accumulate(View &view,
     }
   }
 
+  if (inst_.is_viewport() && data_.display_id == -1) {
+    inst_.geometry_lines.present(view);
+  }
   combined_tx_.swap();
   weight_tx_.swap();
 
@@ -1323,6 +1335,9 @@ void Film::display()
 
   display_only_ = true;
   DRW_manager_get()->submit(accumulate_ps_, drw_view);
+  if (data_.display_id == -1) {
+    inst_.geometry_lines.present(drw_view);
+  }
 
   inst_.render_buffers.release();
 
@@ -1340,6 +1355,9 @@ float *Film::read_pass(eViewLayerEEVEEPassType pass_type, int layer_offset)
    * normal pass lookup here so render readback and viewport display share one
    * authoritative Combined texture. */
   gpu::Texture *pass_tx = this->get_pass_texture(pass_type, layer_offset);
+  if (pass_type == EEVEE_RENDER_PASS_COMBINED && layer_offset == 0 && pass_tx) {
+    pass_tx = inst_.geometry_lines.composite(draw::View::default_get(), pass_tx);
+  }
   if (pass_tx == nullptr) {
     return nullptr;
   }
@@ -1436,6 +1454,8 @@ static eShaderType get_aov_write_pass_shader_type(const ViewLayerAOV *aov)
 
 void Film::capture_pre_fx(View &view, gpu::Texture *input_tx, gpu::Texture *outline_tx)
 {
+  gpu::Texture *line_tx = inst_.geometry_lines.use_in_combined() ?
+                              inst_.geometry_lines.texture() : nullptr;
   /* Only two camera effects can ping-pong back into their input. A later Filter may reuse
    * its stage input, and raw outlines must be composited before Film reconstruction. */
   const bool snapshot = pre_fx_needs_capture() &&
@@ -1445,7 +1465,7 @@ void Film::capture_pre_fx(View &view, gpu::Texture *input_tx, gpu::Texture *outl
                              SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD) ||
                          inst_.filter_materials.has_stage_entries(
                              SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE) ||
-                         outline_tx != nullptr ||
+                         outline_tx != nullptr || line_tx != nullptr ||
                          (inst_.is_viewport() && ui_render_pass_ == EEVEE_RENDER_PASS_STENCIL_VALUE));
   if (pre_fx_needs_capture()) {
     if (snapshot) {
@@ -1455,8 +1475,10 @@ void Film::capture_pre_fx(View &view, gpu::Texture *input_tx, gpu::Texture *outl
       pass.shader_set(inst_.shaders.static_shader_get(FILM_PRE_FX_CAPTURE));
       pass.bind_texture("input_tx", input_tx);
       pass.bind_texture("outline_tx", outline_tx ? outline_tx : input_tx);
+      pass.bind_texture("line_tx", line_tx ? line_tx : input_tx);
       pass.bind_image("output_img", &pre_fx_input_tx_);
       pass.push_constant("has_outline", outline_tx != nullptr);
+      pass.push_constant("has_line", line_tx != nullptr);
       pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
       pass.dispatch(math::divide_ceil(render_extent_get(), int2(FILM_GROUP_SIZE)));
       pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
@@ -1499,6 +1521,9 @@ void Film::write_viewport_compositor_passes()
     Vector<std::string> pass_names = Film::pass_to_render_pass_names(pass_type, inst_.view_layer);
     for (const int64_t pass_offset : IndexRange(pass_names.size())) {
       gpu::Texture *pass_texture = this->get_pass_texture(pass_type, pass_offset);
+      if (pass_type == EEVEE_RENDER_PASS_COMBINED && pass_texture) {
+        pass_texture = inst_.geometry_lines.composite(draw::View::default_get(), pass_texture);
+      }
       if (!pass_texture) {
         continue;
       }
@@ -1525,6 +1550,21 @@ void Film::write_viewport_compositor_passes()
       write_pass_ps.barrier(GPU_BARRIER_TEXTURE_FETCH);
       write_pass_ps.dispatch(math::divide_ceil(this->display_extent, int2(FILM_GROUP_SIZE)));
       inst_.manager->submit(write_pass_ps);
+    }
+  }
+
+  if (inst_.view_layer->eevee.use_pass_geometry_line) {
+    if (gpu::Texture *line = inst_.geometry_lines.texture()) {
+      draw::TextureFromPool &output = DRW_viewport_pass_texture_get("Geometry Line");
+      output.acquire_2d(this->display_extent, GPU_texture_format(line));
+      PassSimple pass("Film.WriteGeometryLine");
+      pass.shader_set(inst_.shaders.static_shader_get(FILM_PASS_CONVERT_COMBINED));
+      pass.push_constant("offset", data_.offset);
+      pass.bind_texture("input_tx", line);
+      pass.bind_image("output_img", output);
+      pass.barrier(GPU_BARRIER_TEXTURE_FETCH);
+      pass.dispatch(math::divide_ceil(this->display_extent, int2(FILM_GROUP_SIZE)));
+      inst_.manager->submit(pass);
     }
   }
 

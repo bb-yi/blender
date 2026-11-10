@@ -2744,6 +2744,42 @@ static void rna_def_node_socket_subtypes(BlenderRNA *brna)
 
 void rna_def_node_socket_interface_subtypes(BlenderRNA *brna)
 {
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeTreeInterfaceSocketNPRLineObjects", "NodeTreeInterfaceSocket");
+    RNA_def_struct_ui_text(srna, "Line Objects", "Geometry line graph interface");
+    RNA_def_struct_sdna(srna, "bNodeTreeInterfaceSocket");
+    rna_def_node_tree_interface_socket_builtin(srna);
+  }
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeTreeInterfaceSocketNPRLineBrush", "NodeTreeInterfaceSocket");
+    RNA_def_struct_ui_text(srna, "Line Brush", "Geometry line graph interface");
+    RNA_def_struct_sdna(srna, "bNodeTreeInterfaceSocket");
+    rna_def_node_tree_interface_socket_builtin(srna);
+  }
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeTreeInterfaceSocketNPRLinePlan", "NodeTreeInterfaceSocket");
+    RNA_def_struct_ui_text(srna, "Line Plan", "Geometry line graph interface");
+    RNA_def_struct_sdna(srna, "bNodeTreeInterfaceSocket");
+    rna_def_node_tree_interface_socket_builtin(srna);
+  }
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeTreeInterfaceSocketNPRLineOcclusion", "NodeTreeInterfaceSocket");
+    RNA_def_struct_ui_text(srna, "Line Occlusion", "Geometry line graph interface");
+    RNA_def_struct_sdna(srna, "bNodeTreeInterfaceSocket");
+    rna_def_node_tree_interface_socket_builtin(srna);
+  }
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeTreeInterfaceSocketNPRLineReduction", "NodeTreeInterfaceSocket");
+    RNA_def_struct_ui_text(srna, "Distance Reduction", "Geometry line graph interface");
+    RNA_def_struct_sdna(srna, "bNodeTreeInterfaceSocket");
+    rna_def_node_tree_interface_socket_builtin(srna);
+  }
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeTreeInterfaceSocketNPRLineMap", "NodeTreeInterfaceSocket");
+    RNA_def_struct_ui_text(srna, "Line Map", "Geometry line graph interface");
+    RNA_def_struct_sdna(srna, "bNodeTreeInterfaceSocket");
+    rna_def_node_tree_interface_socket_builtin(srna);
+  }
   /* NOTE: interface items are defined outside this file.
    * The subtypes must be defined after the base type, so this function
    * is called from the interface rna file to ensure correct order. */
@@ -2850,6 +2886,40 @@ void RNA_def_node_socket_subtypes(BlenderRNA *brna)
 
   rna_def_node_socket_standard(brna);
   rna_def_node_socket_subtypes(brna);
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeSocketNPRLineObjects", "NodeSocketStandard");
+    RNA_def_struct_ui_text(srna, "Line Objects", "Geometry line graph descriptor");
+    RNA_def_struct_sdna(srna, "bNodeSocket");
+  }
+
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeSocketNPRLineBrush", "NodeSocketStandard");
+    RNA_def_struct_ui_text(srna, "Line Brush", "Geometry line graph descriptor");
+    RNA_def_struct_sdna(srna, "bNodeSocket");
+  }
+
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeSocketNPRLinePlan", "NodeSocketStandard");
+    RNA_def_struct_ui_text(srna, "Line Plan", "Geometry line graph descriptor");
+    RNA_def_struct_sdna(srna, "bNodeSocket");
+  }
+
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeSocketNPRLineOcclusion", "NodeSocketStandard");
+    RNA_def_struct_ui_text(srna, "Line Occlusion", "Geometry line graph descriptor");
+    RNA_def_struct_sdna(srna, "bNodeSocket");
+  }
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeSocketNPRLineReduction", "NodeSocketStandard");
+    RNA_def_struct_ui_text(srna, "Distance Reduction", "Geometry line graph descriptor");
+    RNA_def_struct_sdna(srna, "bNodeSocket");
+  }
+  {
+    StructRNA *srna = RNA_def_struct(brna, "NodeSocketNPRLineMap", "NodeSocketStandard");
+    RNA_def_struct_ui_text(srna, "Line Map", "Geometry line graph descriptor");
+    RNA_def_struct_sdna(srna, "bNodeSocket");
+  }
+
 }
 
 }  // namespace blender

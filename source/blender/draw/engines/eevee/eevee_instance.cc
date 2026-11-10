@@ -318,6 +318,7 @@ namespace blender::eevee
     render_textures.init();
     ambient_occlusion.init();
     velocity.init();
+    geometry_lines.capture_reference_geometry();
     raytracing.init();
     depth_of_field.init();
     shadows.init();
@@ -579,6 +580,7 @@ namespace blender::eevee
       ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncBeginNPRPost);
       filter_materials.begin_sync();
       outline.begin_sync();
+      geometry_lines.begin_sync();
       outline_shell.begin_sync();
       ambient_occlusion.sync();
       volume_probes.sync();
@@ -643,6 +645,7 @@ namespace blender::eevee
           lights.sync_light(ob_ref);
           break;
         case OB_MESH:
+          geometry_lines.sync_object(ob_ref);
           if (!sync.sync_sculpt(ob_ref)) {
             sync.sync_mesh(ob_ref);
           }
@@ -744,6 +747,7 @@ namespace blender::eevee
     {
       ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndNPRPost);
       filter_materials.end_sync();
+      geometry_lines.end_sync();
     }
 
     {
@@ -946,6 +950,16 @@ namespace blender::eevee
            * happen correctly (see #GLTexture::read()). So we need a custom memory allocation. */
            /* Avoid `memcpy()`, replace the pointer directly. */
           RE_pass_set_buffer_data(rp, result);
+          BLI_mutex_unlock(&render->update_render_passes_mutex);
+        }
+      }
+    }
+
+    if (view_layer->eevee.use_pass_geometry_line) {
+      if (RenderPass *pass = RE_pass_find_by_name(render_layer, "Geometry Line", view_name)) {
+        if (float *data = geometry_lines.read_pass()) {
+          BLI_mutex_lock(&render->update_render_passes_mutex);
+          RE_pass_set_buffer_data(pass, data);
           BLI_mutex_unlock(&render->update_render_passes_mutex);
         }
       }
@@ -1322,6 +1336,10 @@ namespace blender::eevee
   void Instance::update_passes(RenderEngine* engine, Scene* scene, ViewLayer* view_layer)
   {
     RE_engine_register_pass(engine, scene, view_layer, RE_PASSNAME_COMBINED, 4, "RGBA", SOCK_RGBA);
+    if (scene->eevee.use_geometry_lines && scene->eevee.geometry_line_tree &&
+        !view_layer->eevee.geometry_lines_disabled && view_layer->eevee.use_pass_geometry_line) {
+      RE_engine_register_pass(engine, scene, view_layer, "Geometry Line", 4, "RGBA", SOCK_RGBA);
+    }
     int enabled_render_textures = 0;
     for (const SceneRenderTexture *render_texture =
              static_cast<const SceneRenderTexture *>(scene->eevee.render_textures.first);

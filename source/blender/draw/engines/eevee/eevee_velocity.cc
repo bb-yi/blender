@@ -16,6 +16,7 @@
 
 #include "BKE_duplilist.hh"
 #include "BKE_object.hh"
+#include "BKE_mesh.hh"
 #include "BLI_map.hh"
 #include "BLI_time.h"
 #include "DEG_depsgraph_query.hh"
@@ -30,6 +31,7 @@
 #include "draw_cache_impl.hh"
 
 #include "eevee_instance.hh"
+#include "eevee_geometry_lines_graph.hh"
 // #include "eevee_renderpasses.hh"
 #include "eevee_shader.hh"
 #include "eevee_velocity.hh"
@@ -93,6 +95,15 @@ static uint64_t velocity_buffer_upload(draw::StorageArrayBuffer<T, 16> &buffer, 
 
 void VelocityModule::init()
 {
+  geometry_line_steps_enabled_ = !inst_.is_viewport() && !inst_.is_baking() &&
+      !inst_.is_dlss_guide_render && inst_.scene->eevee.use_geometry_lines &&
+      inst_.scene->eevee.geometry_line_tree && !inst_.view_layer->eevee.geometry_lines_disabled &&
+      (inst_.scene->r.mode & R_MBLUR) &&
+      (inst_.view_layer->layflag & SCE_LAY_MOTION_BLUR) &&
+      geometry_lines::compile_graph(*inst_.scene->eevee.geometry_line_tree).motion_blur;
+  for (auto &steps : geometry_line_steps_) {
+    steps.clear();
+  }
   runtime_stats_enabled_ = inst_.telemetry.enabled();
   runtime_stats_ = {};
   if (runtime_stats_enabled_) {
@@ -166,9 +177,40 @@ void VelocityModule::step_sync(eVelocityStep step, float time)
   object_steps_usage[step_] = 0;
   step_camera_sync();
 
+  geometry_line_steps_[step].clear();
+  Map<const Mesh *, GeometryLineStep> line_meshes;
+
   DRW_render_object_iter(
       inst_.render, inst_.depsgraph, [&](draw::ObjectRef &ob_ref, RenderEngine *, Depsgraph *) {
         step_object_sync_render(inst_, ob_ref);
+        if (!geometry_line_steps_enabled_ || ob_ref.object->type != OB_MESH) {
+          return;
+        }
+        const int visibility = DRW_object_visibility_in_active_context(ob_ref.object);
+        if (!DRW_object_is_renderable(ob_ref.object) || !(visibility & OB_VISIBLE_SELF)) {
+          return;
+        }
+        const Mesh *mesh = BKE_object_get_evaluated_mesh(ob_ref.object);
+        if (mesh == nullptr) {
+          return;
+        }
+        const GeometryLineStep &mesh_step = line_meshes.lookup_or_add_cb(mesh, [&]() {
+          GeometryLineStep data;
+          data.positions = std::make_shared<Vector<float3>>(mesh->vert_positions());
+          data.topology = geometry_line_topology_hash(*mesh);
+          data.revision = data.topology;
+          const Span<float3> positions = *data.positions;
+          const auto *bytes = reinterpret_cast<const unsigned char *>(positions.data());
+          for (size_t i = 0; i < positions.size_in_bytes(); i++) {
+            data.revision = (data.revision ^ bytes[i]) * 1099511628211ULL;
+          }
+          return data;
+        });
+        for (int instance : IndexRange(ob_ref.instances_count())) {
+          GeometryLineStep data = mesh_step;
+          data.object_to_world = ob_ref.object_to_world(instance);
+          geometry_line_steps_[step].add_overwrite(ObjectKey(ob_ref, instance), std::move(data));
+        }
       });
 
   geometry_steps_fill();
@@ -436,6 +478,8 @@ void VelocityModule::step_swap()
     std::swap(camera_steps[step_a], camera_steps[step_b]);
     std::swap(step_time[step_a], step_time[step_b]);
     std::swap(object_steps_usage[step_a], object_steps_usage[step_b]);
+    std::swap(geometry_line_steps_[step_a], geometry_line_steps_[step_b]);
+    geometry_line_steps_[step_b].clear();
 
     for (VelocityObjectData &vel : velocity_map.values()) {
       vel.obj.ofs[step_a] = vel.obj.ofs[step_b];
@@ -459,6 +503,35 @@ void VelocityModule::step_swap()
     /* Render case: The STEP_CURRENT is left untouched. */
     swap_steps(eVelocityStep::STEP_PREVIOUS, eVelocityStep::STEP_NEXT);
   }
+}
+
+uint64_t VelocityModule::geometry_line_topology_hash(const Mesh &mesh)
+{
+  uint64_t hash = 14695981039346656037ULL;
+  auto append = [&](const void *data, size_t size) {
+    const auto *bytes = static_cast<const unsigned char *>(data);
+    for (size_t i = 0; i < size; i++) {
+      hash = (hash ^ bytes[i]) * 1099511628211ULL;
+    }
+  };
+  append(&mesh.verts_num, sizeof(mesh.verts_num));
+  const auto edges = mesh.edges();
+  const auto corners = mesh.corner_verts();
+  const auto offsets = mesh.face_offsets();
+  append(edges.data(), edges.size_in_bytes());
+  append(corners.data(), corners.size_in_bytes());
+  append(offsets.data(), offsets.size_in_bytes());
+  return hash;
+}
+
+const VelocityModule::GeometryLineStep *VelocityModule::geometry_line_step_get(
+    const ObjectRef &object, int instance, eVelocityStep step, uint64_t topology, int vertex_count) const
+{
+  const GeometryLineStep *data = geometry_line_steps_[step].lookup_ptr(ObjectKey(object, instance));
+  if (data == nullptr || data->topology != topology || data->positions->size() != vertex_count) {
+    return nullptr;
+  }
+  return data;
 }
 
 void VelocityModule::begin_sync()

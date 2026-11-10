@@ -67,6 +67,7 @@ class FilterMaterialModule {
 
   blender::Vector<FilterPassEntry> entries_;
   Framebuffer framebuffer_ = {"FilterMaterial.Framebuffer"};
+  Framebuffer geometry_line_input_fb_ = {"FilterMaterial.GeometryLines"};
   Texture ping_tx_ = {"FilterMaterial.Ping"};
   Texture pong_tx_ = {"FilterMaterial.Pong"};
   Texture graph_black_tx_ = {"FilterMaterial.GraphBlack"};

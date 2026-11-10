@@ -724,13 +724,21 @@ static wmOperatorStatus node_add_object_exec(bContext *C, wmOperator *op)
 
   ED_preview_kill_jobs(CTX_wm_manager(C), CTX_data_main(C));
 
-  bNode *object_node = add_static_node(*C, GEO_NODE_OBJECT_INFO, snode->runtime->cursor);
+  const bool geometry_lines = ntree->type == NTREE_NPR_LINE;
+  bNode *object_node = add_static_node(*C,
+                                       geometry_lines ? NPR_LINE_NODE_OBJECTS : GEO_NODE_OBJECT_INFO,
+                                       snode->runtime->cursor);
   if (!object_node) {
     BKE_report(op->reports, RPT_WARNING, "Could not add node object");
     return OPERATOR_CANCELLED;
   }
 
-  bNodeSocket *sock = bke::node_find_socket(*object_node, SOCK_IN, "Object"_ustr);
+  if (geometry_lines) {
+    static_cast<NodeNPRLine *>(object_node->storage)->mode = 2;
+    BKE_ntree_update_tag_node_property(ntree, object_node);
+  }
+  bNodeSocket *sock = bke::node_find_socket(
+      *object_node, SOCK_IN, geometry_lines ? "Object 1"_ustr : "Object"_ustr);
   if (!sock) {
     BLI_assert_unreachable();
     return OPERATOR_CANCELLED;
@@ -770,7 +778,7 @@ static bool node_add_object_poll(bContext *C)
 {
   const SpaceNode *snode = CTX_wm_space_node(C);
   return ED_operator_node_editable(C) &&
-         ELEM(snode->nodetree->type, NTREE_GEOMETRY, NTREE_COMPOSIT);
+         ELEM(snode->nodetree->type, NTREE_GEOMETRY, NTREE_COMPOSIT, NTREE_NPR_LINE);
 }
 
 void NODE_OT_add_object(wmOperatorType *ot)
@@ -812,12 +820,19 @@ static wmOperatorStatus node_add_collection_exec(bContext *C, wmOperator *op)
 
   ED_preview_kill_jobs(CTX_wm_manager(C), CTX_data_main(C));
 
-  bNode *collection_node = add_static_node(*C, GEO_NODE_COLLECTION_INFO, snode.runtime->cursor);
+  const bool geometry_lines = ntree.type == NTREE_NPR_LINE;
+  bNode *collection_node = add_static_node(*C,
+                                           geometry_lines ? NPR_LINE_NODE_OBJECTS : GEO_NODE_COLLECTION_INFO,
+                                           snode.runtime->cursor);
   if (!collection_node) {
     BKE_report(op->reports, RPT_WARNING, "Could not add node collection");
     return OPERATOR_CANCELLED;
   }
 
+  if (geometry_lines) {
+    static_cast<NodeNPRLine *>(collection_node->storage)->mode = 1;
+    BKE_ntree_update_tag_node_property(&ntree, collection_node);
+  }
   bNodeSocket *sock = bke::node_find_socket(*collection_node, SOCK_IN, "Collection"_ustr);
   if (!sock) {
     BKE_report(op->reports, RPT_WARNING, "Could not find node collection socket");
@@ -860,7 +875,7 @@ static wmOperatorStatus node_add_collection_invoke(bContext *C,
 static bool node_add_collection_poll(bContext *C)
 {
   const SpaceNode *snode = CTX_wm_space_node(C);
-  return ED_operator_node_editable(C) && ELEM(snode->nodetree->type, NTREE_GEOMETRY);
+  return ED_operator_node_editable(C) && ELEM(snode->nodetree->type, NTREE_GEOMETRY, NTREE_NPR_LINE);
 }
 
 void NODE_OT_add_collection(wmOperatorType *ot)

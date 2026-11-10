@@ -118,6 +118,11 @@ set(SRC
   engines/eevee/eevee_motion_blur.cc
   engines/eevee/eevee_native_postfx_output.cc
   engines/eevee/eevee_outline.cc
+  engines/eevee/eevee_geometry_lines_geometry.cc
+  engines/eevee/eevee_geometry_lines_connection.cc
+  engines/eevee/eevee_geometry_lines_graph.cc
+  engines/eevee/eevee_geometry_lines_mesh.cc
+  engines/eevee/eevee_geometry_lines.cc
   engines/eevee/eevee_outline_shell.cc
   engines/eevee/eevee_pipeline.cc
   engines/eevee/eevee_precompute.cc
@@ -353,6 +358,7 @@ set(GLSL_SRC
   engines/eevee/shaders/infos/eevee_nodetree_infos.hh
   engines/eevee/shaders/infos/eevee_stencil_infos.hh
   engines/eevee/shaders/infos/eevee_outline_infos.hh
+  engines/eevee/shaders/infos/eevee_geometry_lines_infos.hh
   engines/eevee/shaders/infos/eevee_render_texture_infos.hh
   engines/eevee/shaders/infos/eevee_sampling_infos.hh
   engines/eevee/shaders/infos/eevee_shadow_filter_infos.hh
@@ -501,6 +507,15 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_outline_jfa_init_frag.glsl
   engines/eevee/shaders/eevee_outline_jfa_step_comp.glsl
   engines/eevee/shaders/eevee_outline_lib.glsl
+  engines/eevee/shaders/eevee_geometry_lines_lib.glsl
+  engines/eevee/shaders/eevee_geometry_lines_fields_lib.glsl
+  engines/eevee/shaders/eevee_geometry_lines_expand_comp.glsl
+  engines/eevee/shaders/eevee_geometry_lines_vert.glsl
+  engines/eevee/shaders/eevee_geometry_lines_frag.glsl
+  engines/eevee/shaders/eevee_geometry_lines_composite_comp.glsl
+  engines/eevee/shaders/eevee_geometry_lines_accumulate_comp.glsl
+  engines/eevee/shaders/eevee_geometry_lines_present_frag.glsl
+  engines/eevee/shaders/eevee_geometry_lines_mask_resolve_frag.glsl
   engines/eevee/shaders/eevee_outline_shell_lib.bsl.hh
   engines/eevee/shaders/eevee_outline_resolve_frag.glsl
   engines/eevee/shaders/eevee_outline_upsample_frag.glsl
@@ -577,6 +592,7 @@ set(GLSL_SRC
   engines/eevee/eevee_debug_shared.hh
   engines/eevee/eevee_defines.hh
   engines/eevee/eevee_filter_material_shared.hh
+  engines/eevee/eevee_geometry_lines_shared.hh
   engines/eevee/eevee_depth_of_field_shared.hh
   engines/eevee/eevee_film_shared.hh
   engines/eevee/eevee_hizbuffer_shared.hh
@@ -864,6 +880,7 @@ set(GLSL_INC
   ../gpu/shaders
   ../gpu/shaders/common
   ../gpu/shaders/infos
+  ../gpu/shaders/material
 
   engines/gpencil
   engines/gpencil/shaders

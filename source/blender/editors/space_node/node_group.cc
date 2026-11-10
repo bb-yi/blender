@@ -178,6 +178,7 @@ static bool node_group_operator_active_poll(bContext *C)
                  "CompositorNodeTree",
                  "TextureNodeTree",
                  "GeometryNodeTree",
+                 "NPRLineNodeTree",
                  "EeveeFilterGraphNodeTree"))
     {
       return true;
@@ -206,7 +207,7 @@ static bool node_group_operator_editable(bContext *C)
      * Disabled otherwise to allow python-nodes define their own operators
      * with same key-map. */
     if (ED_node_is_shader(snode) || ED_node_is_compositor(snode) || ED_node_is_texture(snode) ||
-        ED_node_is_geometry(snode))
+        ED_node_is_geometry(snode) || snode->edittree->type == NTREE_NPR_LINE)
     {
       return true;
     }
@@ -235,6 +236,9 @@ UString node_group_idname(const bContext *C)
   }
   if (ED_node_is_geometry(snode)) {
     return ntreeType_Geometry->group_idname;
+  }
+  if (snode->edittree && snode->edittree->type == NTREE_NPR_LINE) {
+    return snode->edittree->typeinfo->group_idname;
   }
 
   return ""_ustr;

@@ -1463,7 +1463,7 @@ class NodeTreeMainUpdater {
   void update_link_validation(bNodeTree &ntree)
   {
     const bNodeTreeZones *fallback_zones = nullptr;
-    if (ELEM(ntree.type, NTREE_GEOMETRY, NTREE_SHADER) && !ntree.zones() &&
+    if (ELEM(ntree.type, NTREE_GEOMETRY, NTREE_SHADER, NTREE_NPR_LINE) && !ntree.zones() &&
         ntree.runtime->last_valid_zones)
     {
       fallback_zones = ntree.runtime->last_valid_zones.get();

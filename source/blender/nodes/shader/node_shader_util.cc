@@ -37,10 +37,20 @@
 
 namespace blender {
 
-bool sh_node_poll_default(const bke::bNodeType * /*ntype*/,
+static bool line_field_node(const bke::bNodeType *type, const bNodeTree *tree)
+{
+  return tree->type == NTREE_NPR_LINE &&
+         ELEM(type->type_legacy, SH_NODE_VALUE, SH_NODE_RGB, SH_NODE_MATH,
+              SH_NODE_VECTOR_MATH, SH_NODE_MAP_RANGE, SH_NODE_VALTORGB,
+              SH_NODE_MIX, SH_NODE_COMBXYZ, SH_NODE_SEPXYZ, SH_NODE_TEX_IMAGE,
+              SH_NODE_CURVE_FLOAT, SH_NODE_TEX_WHITE_NOISE);
+}
+
+bool sh_node_poll_default(const bke::bNodeType *ntype,
                           const bNodeTree *ntree,
                           const char **r_disabled_hint)
 {
+  if (line_field_node(ntype, ntree)) { return true; }
   if (!STREQ(ntree->idname, "ShaderNodeTree")) {
     *r_disabled_hint = RPT_("Not a shader node tree");
     return false;
@@ -48,10 +58,11 @@ bool sh_node_poll_default(const bke::bNodeType * /*ntype*/,
   return true;
 }
 
-static bool sh_geo_poll_default(const bke::bNodeType * /*ntype*/,
+static bool sh_geo_poll_default(const bke::bNodeType *ntype,
                                 const bNodeTree *ntree,
                                 const char **r_disabled_hint)
 {
+  if (line_field_node(ntype, ntree)) { return true; }
   if (!STR_ELEM(ntree->idname, "ShaderNodeTree", "GeometryNodeTree")) {
     *r_disabled_hint = RPT_("Not a shader or geometry node tree");
     return false;
@@ -59,10 +70,11 @@ static bool sh_geo_poll_default(const bke::bNodeType * /*ntype*/,
   return true;
 }
 
-static bool common_poll_default(const bke::bNodeType * /*ntype*/,
+static bool common_poll_default(const bke::bNodeType *ntype,
                                 const bNodeTree *ntree,
                                 const char **r_disabled_hint)
 {
+  if (line_field_node(ntype, ntree)) { return true; }
   if (!STR_ELEM(ntree->idname, "ShaderNodeTree", "GeometryNodeTree", "CompositorNodeTree")) {
     *r_disabled_hint = RPT_("Not a shader, geometry, or compositor node tree");
     return false;

@@ -158,6 +158,10 @@ class VIEWLAYER_PT_eevee_layer_passes_data(ViewLayerButtonsPanel, Panel):
         sub = col.column()
         sub.active = scene.eevee.use_outline
         sub.prop(view_layer_eevee, "use_pass_outline", text="Outline")
+        sub = col.column()
+        sub.active = scene.eevee.use_geometry_lines
+        sub.prop(view_layer_eevee, "use_geometry_lines", text="Geometry Lines")
+        sub.prop(view_layer_eevee, "use_pass_geometry_line", text="Geometry Line Pass")
 
 
 class VIEWLAYER_PT_workbench_layer_passes_data(ViewLayerButtonsPanel, Panel):
