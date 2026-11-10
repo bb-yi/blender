@@ -257,6 +257,10 @@ void VKVertexBuffer::allocate()
                  0.8f,
                  false,
                  "VertexBuffer");
+  if (buffer_.is_allocated() && usage_ == GPU_USAGE_DEVICE_ONLY) {
+    /* GPU-generated buffers are allocated without a host upload. */
+    flag |= GPU_VERTBUF_DATA_UPLOADED;
+  }
 }
 
 }  // namespace gpu

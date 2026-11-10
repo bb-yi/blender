@@ -29,6 +29,7 @@ void filter_material([[resource_table]] KernelGlobals &kg,
   sd.Ni = sd.N;
   sd.Ng = sd.N;
   sd.P = -sd.N;
+  sd.world_view_position = interp.P;
   attrib_load(WorldPoint{sd.P});
 
   nodetree_filter_outputs(kg, sd);

@@ -1747,7 +1747,10 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
   SlotAllocator available_slots;
   info.compilation_constant(gpu::shader::Type::bool_t,
                             "use_aov_output",
-                            ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD));
+                            ELEM(pipeline_type,
+                                 MAT_PIPE_DEFERRED,
+                                 MAT_PIPE_DEFERRED_NPR,
+                                 MAT_PIPE_FORWARD));
 
   if (!pipeline_info_name.is_empty()) {
     add_create_info_and_reserve(info, available_slots, pipeline_info_name);
