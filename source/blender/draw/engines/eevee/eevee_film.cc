@@ -43,6 +43,9 @@
 
 namespace blender::eevee {
 
+static_assert(EEVEE_RENDER_PASS_PRE_FX <= (1u << EEVEE_RENDER_PASS_MAX_BIT),
+              "Film pass iteration must include Pre-FX");
+
 /* -------------------------------------------------------------------- */
 /** \name Arbitrary Output Variables
  * \{ */

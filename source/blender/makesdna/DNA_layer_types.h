@@ -66,12 +66,12 @@ enum eViewLayerEEVEEPassType : int {
   EEVEE_RENDER_PASS_DENOISING_DIFFUSE_ALBEDO = (1 << 25),
   EEVEE_RENDER_PASS_DENOISING_SPECULAR_ALBEDO = (1 << 26),
   EEVEE_RENDER_PASS_OUTLINE = (1 << 27),
-  /** Separate final-render instance output, not a Film accumulation pass. */
+  /** Color captured before camera post-processing and accumulated by Film. */
   EEVEE_RENDER_PASS_PRE_FX = (1 << 28),
   /** Viewport-only debug display. Not stored in #ViewLayerEEVEE.render_passes. */
   EEVEE_RENDER_PASS_STENCIL_VALUE = (1 << 29),
 };
-#define EEVEE_RENDER_PASS_MAX_BIT 27
+#define EEVEE_RENDER_PASS_MAX_BIT 28
 ENUM_OPERATORS(eViewLayerEEVEEPassType)
 
 /** #SceneRenderLayer::passflag */
