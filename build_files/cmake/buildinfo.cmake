@@ -89,44 +89,14 @@ if(EXISTS ${SOURCE_DIR}/.git)
 
     unset(_git_contains_check)
   else()
+    # NPR builds must identify the checked-out source, including unpushed main commits.
     execute_process(
-      COMMAND git log HEAD..@{u}
+      COMMAND git rev-parse --short=12 HEAD
       WORKING_DIRECTORY ${SOURCE_DIR}
-      OUTPUT_VARIABLE _git_below_check
+      OUTPUT_VARIABLE MY_WC_HASH
       OUTPUT_STRIP_TRAILING_WHITESPACE
       ERROR_QUIET
     )
-    if(NOT _git_below_check STREQUAL "")
-      # If there are commits between HEAD and upstream this means
-      # that we're reset-ed to older revision. Use its hash then.
-      execute_process(
-        COMMAND git rev-parse --short=12 HEAD
-        WORKING_DIRECTORY ${SOURCE_DIR}
-        OUTPUT_VARIABLE MY_WC_HASH
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-      )
-    else()
-      execute_process(
-        COMMAND git rev-parse --short=12 @{u}
-        WORKING_DIRECTORY ${SOURCE_DIR}
-        OUTPUT_VARIABLE MY_WC_HASH
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-      )
-
-      if(MY_WC_HASH STREQUAL "")
-        # Local branch, not set to upstream.
-        # Well, let's use HEAD for now
-        execute_process(
-          COMMAND git rev-parse --short=12 HEAD
-          WORKING_DIRECTORY ${SOURCE_DIR}
-          OUTPUT_VARIABLE MY_WC_HASH
-          OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
-      endif()
-    endif()
-
-    unset(_git_below_check)
   endif()
 
   execute_process(
