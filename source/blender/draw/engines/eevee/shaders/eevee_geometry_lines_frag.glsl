@@ -5,16 +5,39 @@
 #include "infos/eevee_geometry_lines_infos.hh"
 FRAGMENT_SHADER_CREATE_INFO(eevee_geometry_lines_draw)
 #include "eevee_geometry_lines_lib.glsl"
+#include "eevee_geometry_lines_fields_lib.glsl"
 
 float coverage_at(float2 pixel, GeometryLineInstanceData instance, GeometryLineBrushData brush, out float t, out float2 local)
 {
   t = 0.0f;
   float coverage;
   if ((instance.meta.y & 3u) == 0u) {
+    float2 clip = float2(0.0f, 1.0f);
+    if (brush.dash.w != 0.0f && brush.curve_options.z != 0) {
+      /* Clip the short source capsule to the active dash before measuring its
+       * distance. Cutting the final pixel mask makes square ends and removes
+       * the round coverage of Pencil's Simple dashes. */
+      float period = max(brush.dash.x + brush.dash.y, 0.001f);
+      float start = floor((instance.stroke.x + brush.dash.z) / period) * period - brush.dash.z;
+      if (start + brush.dash.x < instance.stroke.x) { start += period; }
+      float2 bounds = float2(max(instance.stroke.x, start),
+                             min(instance.stroke.y, start + brush.dash.x));
+      if (bounds.x > bounds.y) {
+        local = float2(0.0f);
+        return 0.0f;
+      }
+      clip = clamp((bounds - instance.stroke.x) /
+                   max(instance.stroke.y - instance.stroke.x, 1e-8f), 0.0f, 1.0f);
+      float4 a = instance.a, b = instance.b;
+      instance.a = mix(a, b, clip.x);
+      instance.b = mix(a, b, clip.y);
+      instance.stroke.xy = bounds;
+    }
     float2 d = instance.b.xy - instance.a.xy;
     float path_t = dot(pixel - instance.a.xy, d) / max(dot(d, d), 1e-8f);
-    t = clamp(path_t, 0.0f, 1.0f);
-    float radius = mix(instance.a.w, instance.b.w, t);
+    float segment_t = clamp(path_t, 0.0f, 1.0f);
+    t = mix(clip.x, clip.y, segment_t);
+    float radius = mix(instance.a.w, instance.b.w, segment_t);
     float size_alpha = 1.0f;
     if (brush.curve_options.z != 0 && antialiasing > 0.0f) {
       float width = radius * 2.0f;
@@ -26,7 +49,7 @@ float coverage_at(float2 pixel, GeometryLineInstanceData instance, GeometryLineB
       size_alpha = domain < 1.0f ? domain * domain : 1.0f;
       radius = (domain < 1.0f ? 1.0f : 2.0f * domain - 1.0f) * 0.5f;
     }
-    float distance = length(pixel - mix(instance.a.xy, instance.b.xy, t));
+    float distance = length(pixel - mix(instance.a.xy, instance.b.xy, segment_t));
     float aa = max(antialiasing, 1e-5f);
     coverage = antialiasing == 0.0f ? float(distance <= radius) : clamp((radius - distance) / aa + 0.5f, 0.0f, 1.0f);
     coverage *= size_alpha;
@@ -124,18 +147,21 @@ void main()
   }
   float arc = mix(instance.stroke.x, instance.stroke.y, t);
   float path_arc = arc;
+  float field_t = t;
   if ((instance.meta.y & 3u) == 0u) {
     /* Adjacent Simple capsules overlap to cover curves. Their end caps must not fill the
      * next dash gap or advance opacity to a later segment's start. */
     float2 delta = instance.b.xy - instance.a.xy;
     float path_t = dot(pixel - instance.a.xy, delta) / max(dot(delta, delta), 1e-8f);
     path_arc = mix(instance.stroke.x, instance.stroke.y, path_t);
+    field_t = path_t;
   }
   float depth = 1.0f - (mix(instance.a.z, instance.b.z, t) * 0.5f + 0.5f);
   if (quick_preview && depth + 2e-5f < texture(preview_depth_tx, pixel / float2(line_extent)).r) {
     discard;
   }
-  if (brush.dash.w != 0.0f && mod(path_arc + brush.dash.z, max(brush.dash.x + brush.dash.y, 0.001f)) >= brush.dash.x) {
+  if (((instance.meta.y & 3u) != 0u || brush.curve_options.z == 0) && brush.dash.w != 0.0f &&
+      mod(path_arc + brush.dash.z, max(brush.dash.x + brush.dash.y, 0.001f)) >= brush.dash.x) {
     discard;
   }
   float opacity = line_brush_envelope(brush, instance.meta.x, path_arc, instance.stroke.z, true);
@@ -149,7 +175,29 @@ void main()
                       uint(max(floor((local.y + 2.0f) * 71.0f), 0.0f)) * 131u;
     opacity *= 1.0f - brush.offset_noise.w * line_noise(grain_seed);
   }
-  float alpha = clamp(coverage * opacity * brush.tip.y * brush.color.a, 0.0f, 1.0f);
+  float4 field_color = brush.color;
+  float field_opacity = brush.tip.y;
+  if (brush.field_outputs.w != 0) {
+    float3 position;
+    float field_width;
+    GeometryLinePartData field_part = source_parts[instance.meta.z];
+    /* Evaluate explicit masks at the projected path coordinate too. Clamping each
+     * capsule's parameter lets its round cap paint into the next opacity gap. */
+    bool projected = brush.field_outputs.w == 2;
+    int field_stage = 12;
+    if ((instance.meta.y & 3u) == 0u &&
+        ((field_t <= 0.0f && instance.field_parameters.z > 0.0f) ||
+         (field_t >= 1.0f && instance.field_parameters.w > 0.0f))) {
+      /* A valid endpoint's round cap may overlap a connection gap, just as on
+       * the quick brush. Clipping its projected source arc cuts a full-width
+       * slit. Explicit opacity fields still evaluate at the projected arc. */
+      field_stage |= LINE_FIELD_ALLOW_GAP_CAPS;
+    }
+    line_fields(brush, field_part, projected ? path_arc : arc,
+                mix(instance.field_parameters.x, instance.field_parameters.y, projected ? field_t : t), field_stage,
+                position, field_color, field_width, field_opacity);
+  }
+  float alpha = clamp(coverage * opacity * field_opacity * field_color.a, 0.0f, 1.0f);
   if (alpha <= 0.0f) {
     discard;
   }
@@ -165,7 +213,7 @@ void main()
   if (color_pass && alpha + max(0.0001f, alpha * 0.001f) < texture(coverage_tx, pixel / float2(line_extent)).r) {
     discard;
   }
-  float3 color = brush.color.rgb;
+  float3 color = field_color.rgb;
   if (color_pass && brush.maps.z >= 0.0f) {
     GeometryLineMapData map = line_maps[int(brush.maps.z)];
     float2 uv;
@@ -192,7 +240,8 @@ void main()
     }
     if (valid) {
       float4 sampled = line_map_sample(color_map_tx, map, uv);
-      color = mix(color, sampled.rgb, brush.maps.w * clamp(sampled.a, 0.0f, 1.0f));
+      /* Pencil Color Map strength blends RGB independently of image alpha. */
+      color = mix(color, sampled.rgb, brush.maps.w);
     }
   }
   out_color = coverage_mask ? float4(alpha) : float4(color * alpha, alpha);

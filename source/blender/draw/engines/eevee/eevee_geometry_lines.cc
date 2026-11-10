@@ -22,7 +22,9 @@
 #include "DNA_layer_types.h"
 #include "DNA_object_types.h"
 #include "BLI_math_matrix.hh"
+#include "BLI_hash.h"
 #include "BKE_image.hh"
+#include "BKE_image_partial_update.hh"
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 #include "GPU_framebuffer.hh"
@@ -83,7 +85,15 @@ void upload_buffer(gpu::StorageBuf *&buffer, size_t &capacity, std::vector<T> &d
 
 GeometryLineBrushData pack_brush(const glines::Brush &brush)
 {
-  GeometryLineBrushData data;
+  GeometryLineBrushData data{};
+  data.field_program = int4(0, 0, -1, -1);
+  data.field_outputs = int4(-1, -1, 0, 0);
+  if (brush.fields) {
+    const auto &fields = *brush.fields;
+    data.field_program = int4(0, fields.instructions.size(), fields.position, fields.color);
+    data.field_outputs = int4(fields.width, fields.opacity, fields.registers,
+                             fields.project_parameters ? 2 : 1);
+  }
   data.color = brush.color;
   data.tip = float4(brush.width, brush.opacity, brush.spacing, brush.stretch);
   data.variation = float4(brush.angle, brush.softness, brush.width_random, brush.angle_random);
@@ -431,6 +441,10 @@ struct GeometryLineModule::Impl {
   Instance &inst;
   bool enabled = false;
   glines::Graph graph;
+  std::optional<glines::Graph> compiled_graph;
+  const bNodeTree *compiled_tree = nullptr;
+  uint64_t compiled_update = ~uint64_t(0);
+  int compiled_solo = 0;
   glines::GeometryBuilder builder;
   std::shared_ptr<const glines::Geometry> geometry;
   std::shared_ptr<const glines::Geometry> reference_geometry;
@@ -460,6 +474,12 @@ struct GeometryLineModule::Impl {
   uint64_t last_depsgraph_update = 0;
   uint64_t last_geometry_revision = 0;
   uint64_t image_revision = 0;
+  struct ImageUpdate {
+    blender::Image *image;
+    uint32_t session_uid;
+    PartialUpdateUser *user;
+  };
+  std::vector<ImageUpdate> image_updates;
   uint64_t accumulated_samples = 0;
   uint64_t last_accumulated_sample = 0;
   uint64_t last_accumulated_paint_signature = 0;
@@ -496,11 +516,14 @@ struct GeometryLineModule::Impl {
   gpu::StorageBuf *reductions_buffer = nullptr;
   gpu::StorageBuf *maps_buffer = nullptr;
   gpu::StorageBuf *instances_buffer = nullptr;
+  gpu::StorageBuf *fields_buffer = nullptr, *ramps_buffer = nullptr, *original_buffer = nullptr;
   size_t parts_capacity = 0, brushes_capacity = 0, curves_capacity = 0, instances_capacity = 0;
   size_t reductions_capacity = 0;
   size_t maps_capacity = 0;
+  size_t fields_capacity = 0, ramps_capacity = 0, original_capacity = 0;
   float4x4 world_from_clip = float4x4::identity();
   double3 reduction_camera_position = double3(0);
+  /* Borrowed from the shared EEVEE shader cache, including across local previews. */
   gpu::Shader *expand_shader = nullptr;
   gpu::Shader *draw_shader = nullptr;
   gpu::Shader *composite_shader = nullptr;
@@ -513,14 +536,49 @@ struct GeometryLineModule::Impl {
   explicit Impl(Instance &instance) : inst(instance) {}
   ~Impl()
   {
+    for (auto &image : image_updates) { BKE_image_partial_update_free(image.user); }
     for (auto &chunk : expanded_chunks) { chunk.free(); }
-    for (auto *buffer : {parts_buffer, brushes_buffer, curves_buffer, reductions_buffer, maps_buffer, instances_buffer}) {
+    for (auto *buffer : {parts_buffer, brushes_buffer, curves_buffer, reductions_buffer, maps_buffer, instances_buffer,
+                        fields_buffer, ramps_buffer, original_buffer}) {
       if (buffer) { GPU_storagebuf_free(buffer); }
     }
-    for (auto *shader : {expand_shader, draw_shader, composite_shader, present_shader, accumulate_shader,
-                        mask_resolve_shader, draw_samples_shader, mask_samples_resolve_shader}) {
-      if (shader) { GPU_shader_free(shader); }
+  }
+
+  bool refresh_images()
+  {
+    using namespace bke::image::partial_update;
+    std::vector<blender::Image *> referenced;
+    auto add = [&](blender::Image *image) {
+      if (image && std::find(referenced.begin(), referenced.end(), image) == referenced.end()) {
+        referenced.push_back(image);
+      }
+    };
+    for (const auto &map : graph.maps) { add(map.image); }
+    for (const auto &brush : graph.brushes) {
+      add(brush.image);
+      if (brush.fields) { for (blender::Image *image : brush.fields->images) { add(image); } }
     }
+    for (const auto &rule : graph.occlusion) { if (rule.mode == 2) { add(rule.image); } }
+    for (auto it = image_updates.begin(); it != image_updates.end();) {
+      const auto found = std::find(referenced.begin(), referenced.end(), it->image);
+      if (found == referenced.end() || (*found)->id.session_uid != it->session_uid) {
+        BKE_image_partial_update_free(it->user);
+        it = image_updates.erase(it);
+      }
+      else { ++it; }
+    }
+    bool changed = false;
+    for (blender::Image *image : referenced) {
+      auto it = std::find_if(image_updates.begin(), image_updates.end(),
+                             [&](const ImageUpdate &item) { return item.image == image; });
+      if (it == image_updates.end()) {
+        image_updates.push_back({image, image->id.session_uid, BKE_image_partial_update_create(image)});
+        it = image_updates.end() - 1;
+      }
+      changed |= BKE_image_partial_update_collect_changes(image, it->user) !=
+                 ePartialUpdateCollectResult::NoChangesDetected;
+    }
+    return changed;
   }
 
   gpu::Texture *tip_texture(const glines::Brush &brush, int index)
@@ -561,11 +619,11 @@ struct GeometryLineModule::Impl {
 
   bool ensure_shaders()
   {
-    if (!expand_shader) { expand_shader = GPU_shader_create_from_info_name("eevee_geometry_lines_expand"); }
-    if (!draw_shader) { draw_shader = GPU_shader_create_from_info_name("eevee_geometry_lines_draw"); }
-    if (!composite_shader) { composite_shader = GPU_shader_create_from_info_name("eevee_geometry_lines_composite"); }
-    if (!present_shader) { present_shader = GPU_shader_create_from_info_name("eevee_geometry_lines_present"); }
-    if (!mask_resolve_shader) { mask_resolve_shader = GPU_shader_create_from_info_name("eevee_geometry_lines_mask_resolve"); }
+    if (!expand_shader) { expand_shader = inst.shaders.static_shader_get(GEOMETRY_LINES_EXPAND); }
+    if (!draw_shader) { draw_shader = inst.shaders.static_shader_get(GEOMETRY_LINES_DRAW); }
+    if (!composite_shader) { composite_shader = inst.shaders.static_shader_get(GEOMETRY_LINES_COMPOSITE); }
+    if (!present_shader) { present_shader = inst.shaders.static_shader_get(GEOMETRY_LINES_PRESENT); }
+    if (!mask_resolve_shader) { mask_resolve_shader = inst.shaders.static_shader_get(GEOMETRY_LINES_MASK_RESOLVE); }
     if (!expand_shader || !draw_shader || !composite_shader || !present_shader || !mask_resolve_shader) {
       inst.info_append("Geometry Lines: GPU shader compilation failed");
       return false;
@@ -600,10 +658,36 @@ struct GeometryLineModule::Impl {
               !inst.view_layer->eevee.geometry_lines_disabled &&
               !inst.is_pre_fx_render && !inst.is_dlss_guide_render;
     if (enabled) {
-      graph = reference_graph ? *reference_graph :
-                  glines::compile_graph(*inst.scene->eevee.geometry_line_tree,
-                      inst.is_viewport() ? nodes::npr_line_solo_node(*inst.scene->eevee.geometry_line_tree) : 0);
+      const bNodeTree *tree = inst.scene->eevee.geometry_line_tree;
+      const uint64_t update = DEG_get_update_count(inst.depsgraph);
+      const int solo = inst.is_viewport() ? nodes::npr_line_solo_node(*tree) : 0;
+      if (reference_graph) { graph = *reference_graph; }
+      else {
+        if (!compiled_graph || compiled_tree != tree || compiled_update != update || compiled_solo != solo) {
+          compiled_graph = glines::compile_graph(*tree, solo);
+          if (std::getenv("BLENDER_NPR_LINE_STATS")) {
+            std::printf("NPR_BRUSH_FIELDS event=compile\n"); std::fflush(stdout);
+          }
+          compiled_tree = tree;
+          compiled_update = update;
+          compiled_solo = solo;
+        }
+        graph = *compiled_graph;
+      }
       if (!graph.error.empty()) { inst.info_append(graph.error.c_str()); }
+      for (const auto &brush : graph.brushes) {
+        if (!brush.fields) { continue; }
+        for (const auto &source : brush.fields->sources) {
+          if (source.type != 2) { continue; }
+          bool registered = false;
+          const auto &aovs = inst.film.aovs_info;
+          const uint32_t hash = BLI_hash_string(source.attribute.name.c_str());
+          const int first = source.aov_type ? aovs.color_len : 0;
+          const int last = source.aov_type ? aovs.color_len + aovs.value_len : aovs.color_len;
+          for (int i = first; i < last; i++) { registered |= aovs.hash[i / 4][i % 4] == hash; }
+          if (!registered) { inst.info_append("Brush Material AOV: name/type is not registered; using fallback"); }
+        }
+      }
       for (const auto &map : graph.maps) {
         if (map.image && ELEM(map.image->source, IMA_SRC_SEQUENCE, IMA_SRC_MOVIE)) {
           graph.paint_signature = hash_value(graph.paint_signature, inst.scene->r.cfra);
@@ -654,7 +738,8 @@ struct GeometryLineModule::Impl {
       inst.sampling.reset();
     }
     const uint64_t update = DEG_get_update_count(inst.depsgraph);
-    const bool images_changed = update != last_depsgraph_update && DEG_id_type_updated(inst.depsgraph, ID_IM);
+    const bool images_changed = refresh_images() ||
+        (update != last_depsgraph_update && DEG_id_type_updated(inst.depsgraph, ID_IM));
     last_depsgraph_update = update;
     if (images_changed) { paint_signature = 0; image_revision++; }
     bool masks_changed = false;
@@ -773,10 +858,10 @@ struct GeometryLineModule::Impl {
     const int mask_count = has_sample_masks ? (samples * samples + 3) / 4 : 1;
     if (has_sample_masks) {
       if (!draw_samples_shader) {
-        draw_samples_shader = GPU_shader_create_from_info_name("eevee_geometry_lines_draw_samples");
+        draw_samples_shader = inst.shaders.static_shader_get(GEOMETRY_LINES_DRAW_SAMPLES);
       }
       if (!mask_samples_resolve_shader) {
-        mask_samples_resolve_shader = GPU_shader_create_from_info_name("eevee_geometry_lines_mask_resolve_samples");
+        mask_samples_resolve_shader = inst.shaders.static_shader_get(GEOMETRY_LINES_MASK_RESOLVE_SAMPLES);
       }
       if (!draw_samples_shader || !mask_samples_resolve_shader) {
         inst.info_append("Geometry Lines: multisample coverage shader compilation failed");
@@ -798,9 +883,26 @@ struct GeometryLineModule::Impl {
       }
     }
     std::vector<GeometryLineBrushData> brush_data;
+    std::vector<GeometryLineFieldInstruction> field_data;
+    std::vector<float4> ramp_data;
     brush_tips.resize(graph.brushes.size());
     brush_data.reserve(graph.brushes.size());
-    for (const auto &brush : graph.brushes) { brush_data.push_back(pack_brush(brush)); }
+    for (const auto &brush : graph.brushes) {
+      auto packed = pack_brush(brush);
+      packed.field_program.x = int(field_data.size());
+      if (brush.fields) {
+        for (auto instruction : brush.fields->instructions) {
+          if (ELEM(instruction.op.x, LINE_FIELD_RAMP, LINE_FIELD_CURVE)) {
+            instruction.meta.y += int(ramp_data.size());
+          }
+          field_data.push_back(instruction);
+        }
+        ramp_data.insert(ramp_data.end(), brush.fields->ramps.begin(), brush.fields->ramps.end());
+      }
+      brush_data.push_back(packed);
+    }
+    upload_buffer(fields_buffer, fields_capacity, field_data, "GeometryLines.Fields");
+    upload_buffer(ramps_buffer, ramps_capacity, ramp_data, "GeometryLines.FieldRamps");
     upload_buffer(brushes_buffer, brushes_capacity, brush_data, "GeometryLines.Brushes");
     std::vector<GeometryLineCurveData> curve_data(graph.brushes.size());
     for (int i = 0; i < int(graph.brushes.size()); i++) {
@@ -877,8 +979,8 @@ struct GeometryLineModule::Impl {
           const auto found = geometry->style_colors.find(map.uv);
           if (found != geometry->style_colors.end() && size_t(point.triangle) * 3 + 2 < found->second.size()) {
             const auto *colors = found->second.data() + size_t(point.triangle) * 3;
-            value = colors[0] + (colors[1] - colors[0]) * point.barycentric.x +
-                               (colors[2] - colors[0]) * point.barycentric.y;
+            value = float3(colors[0] + (colors[1] - colors[0]) * point.barycentric.x +
+                               (colors[2] - colors[0]) * point.barycentric.y);
             found_value = true;
           }
         }
@@ -888,7 +990,7 @@ struct GeometryLineModule::Impl {
           if (size_t(edge_index) < geometry->edges.size() && found != geometry->point_colors.end()) {
             const int2 vertices = geometry->edges[edge_index].vertices;
             if (size_t(std::max(vertices.x, vertices.y)) < found->second.size()) {
-              value = found->second[vertices.x] + (found->second[vertices.y] - found->second[vertices.x]) * point.barycentric.x;
+              value = float3(found->second[vertices.x] + (found->second[vertices.y] - found->second[vertices.x]) * point.barycentric.x);
               found_value = true;
             }
           }
@@ -905,7 +1007,28 @@ struct GeometryLineModule::Impl {
       return result;
     };
     bool missing_width_uv = false, missing_color_uv = false, missing_distortion_uv = false, missing_attribute = false;
-    if (std::none_of(graph.brushes.begin(), graph.brushes.end(), [](const auto &brush) { return brush.color_map >= 0; })) {
+    auto dynamic_color = [](const glines::Brush &brush) {
+      return brush.color_map >= 0 || (brush.fields && brush.fields->color >= 0);
+    };
+    auto bind_fields = [&](draw::PassSimple &pass, const glines::Brush &brush) {
+      pass.bind_ssbo("field_instructions", fields_buffer);
+      pass.bind_ssbo("field_ramps", ramps_buffer);
+      pass.bind_ssbo("original_parts", original_buffer);
+      ImageUser image_user{};
+      BKE_imageuser_default(&image_user);
+      image_user.framenr = inst.scene->r.cfra;
+      const char *names[] = {"field_image_0_tx", "field_image_1_tx", "field_image_2_tx", "field_image_3_tx"};
+      for (int i = 0; i < LINE_FIELD_MAX_IMAGES; i++) {
+        blender::Image *image = brush.fields && i < int(brush.fields->images.size()) ? brush.fields->images[i] : nullptr;
+        gpu::Texture *texture = image ? BKE_image_get_gpu_texture(image, &image_user) : nullptr;
+        pass.bind_texture(names[i], texture ? texture : transparent_tx.gpu_texture(),
+                          GPUSamplerState(GPU_SAMPLER_FILTERING_LINEAR));
+      }
+      pass.bind_texture("field_aov_color_tx", inst.render_buffers.rp_color_tx);
+      pass.bind_texture("field_aov_value_tx", inst.render_buffers.rp_value_tx);
+      pass.bind_texture("field_depth_tx", inst.render_buffers.depth_tx);
+    };
+    if (std::none_of(graph.brushes.begin(), graph.brushes.end(), dynamic_color)) {
       if (mapped_color_tx.is_valid()) { mapped_color_fb.ensure(); mapped_color_tx.free(); }
     }
     int coverage_brush = -1, coverage_rule = -1, coverage_sample_count = 1;
@@ -925,7 +1048,7 @@ struct GeometryLineModule::Impl {
         resolve.bind_texture("mask_3_tx", coverage_3_tx.is_valid() ? coverage_3_tx.gpu_texture() : transparent_tx.gpu_texture());
         resolve.push_constant("sample_count", coverage_sample_count);
       }
-      const bool mapped = graph.brushes[coverage_brush].color_map >= 0;
+      const bool mapped = dynamic_color(graph.brushes[coverage_brush]);
       resolve.bind_texture("mapped_color_tx", mapped ? mapped_color_tx.gpu_texture() : white_tx.gpu_texture());
       resolve.push_constant("mapped_color", mapped);
       resolve.push_constant("brush_color", graph.brushes[coverage_brush].color);
@@ -937,7 +1060,7 @@ struct GeometryLineModule::Impl {
       for (const DrawRange &range : ranges) {
         drawing_instances += range.count;
         const auto &brush = graph.brushes[range.brush];
-        const bool mapped = brush.color_map >= 0;
+        const bool mapped = dynamic_color(brush);
         const bool packed = samples > 1 && brush.mode != 0 && brush.raster_size_response && !mapped;
         if (coverage_brush != range.brush || coverage_rule != range.rule) {
           resolve_coverage();
@@ -971,7 +1094,7 @@ struct GeometryLineModule::Impl {
         gpu::Texture *tip = tip_texture(brush, range.brush);
         ImageUser color_user{};
         BKE_imageuser_default(&color_user);color_user.framenr=inst.scene->r.cfra;
-        gpu::Texture *color_texture = mapped && graph.maps[brush.color_map].image ?
+        gpu::Texture *color_texture = brush.color_map >= 0 && graph.maps[brush.color_map].image ?
             BKE_image_get_gpu_texture(graph.maps[brush.color_map].image, &color_user) : nullptr;
         if (!color_texture) { color_texture = transparent_tx; }
         gpu::Texture *brush_map_texture = brush.brush_map >= 0 && graph.maps[brush.brush_map].image ?
@@ -990,6 +1113,7 @@ struct GeometryLineModule::Impl {
           draw.bind_ssbo("brush_curves", curves_buffer);
           draw.bind_ssbo("line_maps", maps_buffer);
           draw.bind_ssbo("source_parts", source_parts);
+          bind_fields(draw, brush);
           draw.bind_texture("brush_tx", brush_texture);
           draw.bind_texture("tip_tx", tip);
           draw.bind_texture("color_map_tx", color_texture);
@@ -1020,7 +1144,24 @@ struct GeometryLineModule::Impl {
       expansion_key = hash_value(expansion_key, rule.hidden_opacity_reduction);
     }
     for (const auto &brush : graph.brushes) {
+      if (brush.fields) {
+        expansion_key = hash_value(expansion_key, brush.fields->shape_signature);
+        if (brush.fields->shape_uses_image) { expansion_key = hash_value(expansion_key, image_revision); }
+        for (const auto &source : brush.fields->sources) {
+          if (source.type == 2) {
+            expansion_key = hash_value(expansion_key, inst.render_buffers.data.aovs);
+            expansion_key = hash_value(expansion_key, inst.render_buffers.data.line_aov_marker_layers);
+          }
+        }
+        /* Source AOVs belong to the current sample, never to the Film history. */
+        if (brush.fields->shape_uses_aov) {
+          expansion_key = hash_value(expansion_key, inst.sampling.sample_index());
+          expansion_key = hash_value(expansion_key, DEG_get_update_count(inst.depsgraph));
+        }
+      }
       auto data = pack_brush(brush);
+      data.field_program = int4(0);
+      data.field_outputs = int4(0);
       data.color = float4(0);
       data.tip.y = 0;
       data.variation.y = 0;
@@ -1046,6 +1187,9 @@ struct GeometryLineModule::Impl {
     }
     for (auto &chunk : expanded_chunks) { chunk.free(); }
     expanded_chunks.clear();
+    if (std::getenv("BLENDER_NPR_LINE_STATS")) {
+      std::printf("NPR_BRUSH_FIELDS event=expand\n"); std::fflush(stdout);
+    }
     expansion_signature = expansion_key;
     expansion_cached = true;
     size_t cached_bytes = 0;
@@ -1057,6 +1201,97 @@ struct GeometryLineModule::Impl {
       const int ra = a->parts.front().segment.rule, rb = b->parts.front().segment.rule;
       return ra != rb ? ra > rb : a->brush < b->brush;
     });
+
+    /* Original path geometry is independent of draw chunking. X remapping can cross
+     * part boundaries while preserving source attributes and non-drawable gaps. */
+    std::vector<GeometryLinePartData> original_parts;
+    std::map<const glines::Stroke *, uint2> source_ranges;
+    auto source_color = [&](const glines::AttributePoint &point, const glines::UVMapKey &key, bool &valid) {
+      float4 result(0);
+      valid = false;
+      if (point.triangle >= 0) {
+        const auto found = geometry->style_colors.find(key);
+        if (found != geometry->style_colors.end() && size_t(point.triangle) * 3 + 2 < found->second.size()) {
+          const auto *colors = found->second.data() + size_t(point.triangle) * 3;
+          result = colors[0] + (colors[1] - colors[0]) * point.barycentric.x + (colors[2] - colors[0]) * point.barycentric.y;
+          valid = true;
+        }
+      }
+      else if (point.triangle < -1) {
+        const size_t edge = size_t(-int64_t(point.triangle) - 2);
+        const auto found = geometry->point_colors.find(key);
+        if (edge < geometry->edges.size() && found != geometry->point_colors.end()) {
+          const int2 vertices = geometry->edges[edge].vertices;
+          result = found->second[vertices.x] + (found->second[vertices.y] - found->second[vertices.x]) * point.barycentric.x;
+          valid = true;
+        }
+      }
+      for (int i = 0; i < 4; i++) { valid &= std::isfinite(result[i]); }
+      return valid ? result : float4(0);
+    };
+    for (const glines::Stroke *stroke : ordered) {
+      const uint32_t first = uint32_t(original_parts.size());
+      const auto &brush = graph.brushes[stroke->brush];
+      if (!brush.fields) { continue; }
+      for (const auto &part : stroke->parts) {
+        const auto &segment = part.segment;
+        GeometryLinePartData packed{};
+        packed.a = float4(float3(segment.a), 0);
+        packed.b = float4(float3(segment.b), 0);
+        packed.arc = float4(float(part.arc), float(part.length), float(stroke->length), segment.width_scale);
+        packed.meta = uint4(uint32_t(stroke->identity ^ (stroke->identity >> 32)), stroke->closed ? 1 : 0, 0, 0);
+        packed.offset_normals = float4(part.offset_normal_a.x, part.offset_normal_a.y, part.offset_normal_b.x, part.offset_normal_b.y);
+        packed.field_weights = float4(segment.attribute_a.inverse_w, segment.attribute_b.inverse_w, 0, 0);
+        packed.field_meta.w = segment.hidden ? 1 : 0;
+        const glines::Surface *surface = nullptr;
+        const int triangle = segment.attribute_a.triangle;
+        if (triangle >= 0 && triangle < int(geometry->triangles.size())) {
+          surface = &geometry->surfaces[geometry->faces[geometry->triangles[triangle].face].surface];
+          packed.field_meta.z = surface->resource_id;
+        }
+        if (brush.fields) {
+          for (int i = 0; i < std::min<int>(LINE_FIELD_MAX_SOURCES, brush.fields->sources.size()); i++) {
+            const auto &source = brush.fields->sources[i];
+            bool valid_a = false, valid_b = false;
+            if (source.type == 0) {
+              glines::TextureMap map;
+              map.uv = source.attribute;
+              float4 a = coordinates(segment.attribute_a, map), b = coordinates(segment.attribute_b, map);
+              packed.field_source_a[i] = float4(a.x, a.y, 0, 0);
+              packed.field_source_b[i] = float4(b.x, b.y, 0, 0);
+              valid_a = a.w != 0; valid_b = b.w != 0;
+            }
+            else if (source.type == 1) {
+              packed.field_source_a[i] = source_color(segment.attribute_a, source.attribute, valid_a);
+              packed.field_source_b[i] = source_color(segment.attribute_b, source.attribute, valid_b);
+            }
+            else {
+              int layer = -1, marker = -1;
+              const auto &buffers = inst.render_buffers.data;
+              const auto &aovs = buffers.aovs;
+              const uint32_t hash = BLI_hash_string(source.attribute.name.c_str());
+              const int begin = source.aov_type ? aovs.color_len : 0;
+              const int end = source.aov_type ? aovs.color_len + aovs.value_len : aovs.color_len;
+              for (int index = begin; index < end; index++) {
+                if (aovs.hash[index / 4][index % 4] == hash && buffers.line_aov_marker_info.x >= 0) {
+                  layer = (source.aov_type ? buffers.value_len - aovs.color_len : buffers.color_len) + index;
+                  marker = buffers.line_aov_marker_layers[index / 4][index % 4];
+                }
+              }
+              const uint32_t material = surface ? surface->material_tag : 0;
+              packed.field_source_a[i] = packed.field_source_b[i] = float4(layer, marker, material & 65535u, material >> 16u);
+            }
+            if (valid_a) { packed.field_meta.x |= 1u << i; }
+            if (valid_b) { packed.field_meta.y |= 1u << i; }
+          }
+        }
+        original_parts.push_back(packed);
+      }
+      const uint32_t count = uint32_t(original_parts.size()) - first;
+      source_ranges[stroke] = uint2(first, count);
+      for (uint32_t i = first; i < first + count; i++) { original_parts[i].source_range = uint4(first, count, i, 0); }
+    }
+    upload_buffer(original_buffer, original_capacity, original_parts, "GeometryLines.OriginalParts");
 
     /* Bound each dispatch/storage allocation without dropping strokes. A single task is
      * further divided below when an unusually long stroke exceeds the chunk budget. */
@@ -1084,6 +1319,7 @@ struct GeometryLineModule::Impl {
       expand.bind_ssbo("reductions", reductions_buffer);
       expand.bind_ssbo("line_maps", maps_buffer);
       const auto &brush = graph.brushes[parts.front().range.z];
+      bind_fields(expand, brush);
       ImageUser image_user{};
       BKE_imageuser_default(&image_user);
       image_user.framenr = inst.scene->r.cfra;
@@ -1140,7 +1376,7 @@ struct GeometryLineModule::Impl {
           /* Simple follows the visibility path lattice. Textured strokes use the
            * measured half-pixel raster lattice and include both terminal stamps. */
           const uint64_t grid = brush.mode == 0 ?
-              std::max<uint64_t>(1, uint64_t(std::ceil(part.length / 0.9))) :
+              std::max<uint64_t>(1, uint64_t(std::ceil(part.length / (brush.fields ? brush.fields->resample : 0.9f)))) :
               uint64_t(float(part.length) * 2.0f) + 1;
           const double spacing = brush.spacing <= 0 ? 0 :
                                      std::max(0.35, double(brush.width * scale * type_scale * brush.spacing));
@@ -1151,7 +1387,8 @@ struct GeometryLineModule::Impl {
           for (uint64_t first = 0; first < samples; first += batch_samples) {
             const uint32_t count = uint32_t(std::min(samples - first, batch_samples));
             if (instance_count + count > chunk_budget) { flush(); }
-            GeometryLinePartData packed;
+            GeometryLinePartData packed{};
+            if (brush.fields) { packed = original_parts[source_ranges[stroke].x + i]; }
             packed.a = float4(float3(segment.a), tip.rotation);
             packed.b = float4(float3(segment.b), 0);
             packed.previous_a = float4(float3(segment.previous_a), 0);
@@ -1260,7 +1497,7 @@ struct GeometryLineModule::Impl {
     if (accumulated_samples && sample == last_accumulated_sample) { return; }
     if (sample < last_accumulated_sample) { reset_accumulation(); }
     if (!accumulate_shader) {
-      accumulate_shader = GPU_shader_create_from_info_name("eevee_geometry_lines_accumulate");
+      accumulate_shader = inst.shaders.static_shader_get(GEOMETRY_LINES_ACCUMULATE);
     }
     if (!accumulate_shader) {
       inst.info_append("Geometry Lines: GPU accumulation shader compilation failed");
@@ -1498,7 +1735,11 @@ struct GeometryLineModule::Impl {
     previous_projection = camera.projection;
     has_previous_projection = true;
     last_geometry_revision = geometry->revision;
-    const uint64_t paint_key = hash_value(hash_value(result_signature, quick), graph.paint_signature);
+    uint64_t paint_key = hash_value(hash_value(result_signature, quick), graph.paint_signature);
+    if (inst.geometry_lines.uses_aov()) {
+      paint_key = hash_value(paint_key, inst.sampling.sample_index());
+      paint_key = hash_value(paint_key, DEG_get_update_count(inst.depsgraph));
+    }
     const auto drawing_start = std::chrono::steady_clock::now();
     const bool repainted = paint_signature != paint_key || !color_tx.is_valid();
     if (paint_signature != paint_key || !color_tx.is_valid()) {
@@ -1521,7 +1762,8 @@ void GeometryLineModule::sync_object(const draw::ObjectRef &object)
 {
   if (impl_->enabled && !impl_->reference_geometry) {
     const auto start = std::chrono::steady_clock::now();
-    impl_->builder.add(object);
+    const auto handle = impl_->inst.manager->unique_handle(object);
+    impl_->builder.add(object, handle.sub_handle(0).index());
     if (impl_->timing_enabled) { impl_->prepare_ms += elapsed_ms(start); }
   }
 }
@@ -1538,6 +1780,27 @@ void GeometryLineModule::accumulate(draw::View &view) { impl_->accumulate(view);
 bool GeometryLineModule::enabled() const { return impl_->enabled; }
 bool GeometryLineModule::use_in_combined() const { return impl_->enabled && impl_->graph.composite; }
 bool GeometryLineModule::is_quick_preview() const { return impl_->enabled && impl_->quick; }
+bool GeometryLineModule::uses_aov() const
+{
+  if (!impl_->enabled) { return false; }
+  for (const auto &brush : impl_->graph.brushes) {
+    if (brush.fields && std::any_of(brush.fields->sources.begin(), brush.fields->sources.end(),
+                                   [](const auto &source) { return source.type == 2; })) { return true; }
+  }
+  return false;
+}
+bool GeometryLineModule::uses_aov(uint32_t hash, bool value_type) const
+{
+  if (!impl_->enabled) { return false; }
+  for (const auto &brush : impl_->graph.brushes) {
+    if (!brush.fields) { continue; }
+    for (const auto &source : brush.fields->sources) {
+      if (source.type == 2 && bool(source.aov_type) == value_type &&
+          BLI_hash_string(source.attribute.name.c_str()) == hash) { return true; }
+    }
+  }
+  return false;
+}
 std::string GeometryLineModule::timing_info() const
 {
   return impl_->timing_enabled && impl_->inst.scene->eevee.geometry_line_tree ?
@@ -1564,6 +1827,13 @@ void GeometryLineModule::present(draw::View &view)
   const auto timing_start = std::chrono::steady_clock::now();
   bool repainted = false;
   if (impl_->enabled && impl_->current_job) {
+    /* Image.update and texture painting can change pixels without a depsgraph rebuild.
+     * Track the same partial-update register as Blender's GPU textures, without readback. */
+    if (impl_->refresh_images()) {
+      impl_->image_revision++;
+      impl_->graph.paint_signature = hash_value(impl_->graph.paint_signature, impl_->image_revision);
+      impl_->inst.sampling.reset();
+    }
     const bool moving = impl_->inst.is_navigating || impl_->inst.is_transforming || impl_->inst.is_playback;
     if (moving) { impl_->changed_at = std::chrono::steady_clock::now(); }
     if (impl_->quick && impl_->graph.preview == 0 && !moving &&

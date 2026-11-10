@@ -25,7 +25,7 @@ class GeometryBuilder {
   GeometryBuilder();
   ~GeometryBuilder();
   void begin(const Graph &graph, bool images_changed, VelocityModule *motion = nullptr);
-  void add(const draw::ObjectRef &object);
+  void add(const draw::ObjectRef &object, uint32_t first_resource = 0);
   std::shared_ptr<const Geometry> finish();
   void clear();
   const std::string &error() const;

@@ -744,6 +744,22 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_filter_graph_input_copy";
     case FILTER_GRAPH_RESOLVE:
       return "eevee_filter_graph_resolve";
+    case GEOMETRY_LINES_ACCUMULATE:
+      return "eevee_geometry_lines_accumulate";
+    case GEOMETRY_LINES_COMPOSITE:
+      return "eevee_geometry_lines_composite";
+    case GEOMETRY_LINES_DRAW:
+      return "eevee_geometry_lines_draw";
+    case GEOMETRY_LINES_DRAW_SAMPLES:
+      return "eevee_geometry_lines_draw_samples";
+    case GEOMETRY_LINES_EXPAND:
+      return "eevee_geometry_lines_expand";
+    case GEOMETRY_LINES_MASK_RESOLVE:
+      return "eevee_geometry_lines_mask_resolve";
+    case GEOMETRY_LINES_MASK_RESOLVE_SAMPLES:
+      return "eevee_geometry_lines_mask_resolve_samples";
+    case GEOMETRY_LINES_PRESENT:
+      return "eevee_geometry_lines_present";
     case DEFERRED_COMBINE:
       return "eevee_deferred_combine";
     case DEFERRED_LIGHT_SINGLE:

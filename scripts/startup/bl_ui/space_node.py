@@ -364,28 +364,74 @@ class NODE_MT_add(node_add_menu.AddNodeMenu):
         elif snode.tree_type == 'TextureNodeTree':
             layout.menu_contents("NODE_MT_texture_node_add_all")
         elif snode.tree_type == 'NPRLineNodeTree':
-            for node_type, label in (
-                    ('NPRLineNodeObjects', 'Line Objects'),
-                    ('NPRLineNodeBrush', 'Line Brush'),
-                    ('NPRLineNodeSettings', 'Line Settings'),
-                    ('NPRLineNodeCombine', 'Combine Lines'),
-                    ('NPRLineNodeOcclusion', 'Line Occlusion'),
-                    ('NPRLineNodeReduction', 'Distance Reduction'),
-                    ('NPRLineNodeMap', 'Line Map'),
-                    ('NPRLineNodeOutput', 'Geometry Line Output')):
-                props = layout.operator("node.add_node", text=label)
-                props.type = node_type
-                props.use_transform = True
+            layout.menu('NODE_MT_npr_line_node_brush')
+            layout.menu('NODE_MT_npr_line_node_input')
+            layout.menu('NODE_MT_npr_line_node_math')
+            layout.menu('NODE_MT_npr_line_node_color_vector')
+            layout.menu('NODE_MT_npr_line_node_setup')
             layout.separator()
-            layout.menu("NODE_MT_node_add_root_catalogs")
-            layout.menu("NODE_MT_node_add_group")
-            layout.operator("node.add_node", text="Reroute").type = 'NodeReroute'
-            layout.operator("node.add_node", text="Frame").type = 'NodeFrame'
+            layout.menu('NODE_MT_group_add', text='Node Groups', text_ctxt=i18n_contexts.default)
+            layout.menu('NODE_MT_category_layout')
+            layout.menu('NODE_MT_node_add_root_catalogs', text='Assets', text_ctxt=i18n_contexts.default)
         elif snode.tree_type == 'EeveeFilterGraphNodeTree':
             layout.menu_contents("NODE_MT_filter_graph_node_add_all")
         elif nodeitems_utils.has_node_categories(context):
             # Actual node sub-menus are defined by draw functions from node categories.
             nodeitems_utils.draw_node_categories_menu(self, context)
+
+
+class _NPRLineAddMenu(node_add_menu.AddNodeMenu):
+    bl_space_type = 'NODE_EDITOR'
+    bl_translation_context = i18n_contexts.default
+    node_types = ()
+
+    @classmethod
+    def poll(cls, context):
+        space = context.space_data
+        return space and space.type == 'NODE_EDITOR' and space.tree_type == 'NPRLineNodeTree'
+
+    def draw(self, _context):
+        for node_type in self.node_types:
+            self.node_operator(self.layout, node_type)
+
+
+class NODE_MT_npr_line_node_brush(_NPRLineAddMenu):
+    bl_label = 'Brush'
+
+    def draw(self, _context):
+        layout = self.layout
+        props = layout.operator('node.add_zone', text='Brush Closure', text_ctxt=i18n_contexts.default)
+        props.input_node_type = 'NPRLineNodeBrushClosureInput'
+        props.output_node_type = 'NPRLineNodeBrushClosureOutput'
+        props.add_default_geometry_link = False
+        props.offset = (300, 0)
+        props.use_transform = True
+        self.node_operator(layout, 'NPRLineNodeBrush')
+        layout.separator()
+        layout.operator_menu_enum('node.npr_line_brush_effect', 'effect', text='Brush Effects',
+                                  text_ctxt=i18n_contexts.default)
+
+
+class NODE_MT_npr_line_node_input(_NPRLineAddMenu):
+    bl_label = 'Input'
+    node_types = ('ShaderNodeValue', 'NPRLineNodeUVMap', 'NPRLineNodeColorAttribute',
+                  'NPRLineNodeMaterialAOV', 'ShaderNodeTexImage', 'ShaderNodeTexWhiteNoise')
+
+
+class NODE_MT_npr_line_node_math(_NPRLineAddMenu):
+    bl_label = 'Math'
+    node_types = ('ShaderNodeMath', 'ShaderNodeVectorMath', 'ShaderNodeMapRange', 'ShaderNodeFloatCurve')
+
+
+class NODE_MT_npr_line_node_color_vector(_NPRLineAddMenu):
+    bl_label = 'Color and Vector'
+    node_types = ('ShaderNodeValToRGB', 'ShaderNodeMix', 'ShaderNodeCombineXYZ', 'ShaderNodeSeparateXYZ')
+
+
+class NODE_MT_npr_line_node_setup(_NPRLineAddMenu):
+    bl_label = 'Line Setup'
+    node_types = ('NPRLineNodeObjects', 'NPRLineNodeSettings', 'NPRLineNodeCombine',
+                  'NPRLineNodeOcclusion', 'NPRLineNodeReduction', 'NPRLineNodeMap', 'NPRLineNodeOutput')
 
 
 class NODE_MT_filter_graph_node_input(node_add_menu.AddNodeMenu):
@@ -1256,14 +1302,20 @@ class NODE_PT_npr_line_brush_preview(Panel):
         space = context.space_data
         return (space.tree_type == 'NPRLineNodeTree' and space.edit_tree and
                 space.edit_tree.nodes.active and
-                space.edit_tree.nodes.active.bl_idname == 'NPRLineNodeBrush')
+                space.edit_tree.nodes.active.bl_idname in {
+                    'NPRLineNodeBrush', 'NPRLineNodeBrushOutput', 'NPRLineNodeBrushClosureOutput'})
 
     def draw(self, context):
-        from bl_operators.npr_lines import brush_preview
+        from bl_operators.npr_lines import brush_preview, output_brush_preview
         layout = self.layout
         node = context.space_data.edit_tree.nodes.active
-        layout.template_icon(icon_value=brush_preview(node).icon_id, scale=12.0)
-        layout.label(text='Local sample; no visibility calculation', icon='INFO')
+        if node.bl_idname in {'NPRLineNodeBrushOutput', 'NPRLineNodeBrushClosureOutput'}:
+            layout.template_icon(icon_value=output_brush_preview(node, 384, 128).icon_id, scale=12.0)
+            layout.prop(node, 'preview_length')
+            layout.label(text='Scene UV, color attributes and AOV use fallback values', icon='INFO')
+        else:
+            layout.template_icon(icon_value=brush_preview(node).icon_id, scale=12.0)
+            layout.label(text='Local sample; no visibility calculation', icon='INFO')
 
 
 class NODE_PT_annotation(AnnotationDataPanel, Panel):
@@ -1349,6 +1401,11 @@ classes = (
     NODE_HT_header,
     NODE_MT_editor_menus,
     NODE_MT_add,
+    NODE_MT_npr_line_node_brush,
+    NODE_MT_npr_line_node_input,
+    NODE_MT_npr_line_node_math,
+    NODE_MT_npr_line_node_color_vector,
+    NODE_MT_npr_line_node_setup,
     NODE_MT_filter_graph_node_input,
     NODE_MT_filter_graph_node_pass,
     NODE_MT_filter_graph_node_output,

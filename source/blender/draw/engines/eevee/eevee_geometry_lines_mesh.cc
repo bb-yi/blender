@@ -20,6 +20,7 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_color.hh"
+#include "BLI_hash.h"
 #include "BKE_attribute.hh"
 #include "BKE_collection.hh"
 #include "BKE_customdata.hh"
@@ -107,8 +108,8 @@ struct LocalMesh {
   std::vector<int> triangle_faces;
   std::map<std::string, std::vector<float2>> triangle_uvs;
   std::map<UVMapKey, std::vector<float2>> style_uvs;
-  std::map<UVMapKey, std::vector<float3>> style_colors;
-  std::map<UVMapKey, std::vector<float3>> point_colors;
+  std::map<UVMapKey, std::vector<float4>> style_colors;
+  std::map<UVMapKey, std::vector<float4>> point_colors;
   std::vector<Edge> edges;
   std::vector<int> edge_faces;
   std::vector<int> seam_representatives;
@@ -309,7 +310,7 @@ std::shared_ptr<LocalMesh> read_mesh(const Mesh &mesh,
       for (const int3 corner : corners) {
         for (const int index : {corner.x, corner.y, corner.z}) {
           const ColorGeometry4f color = colors[index];
-          data.emplace_back(color.r, color.g, color.b);
+          data.emplace_back(color.r, color.g, color.b, color.a);
         }
       }
     }
@@ -319,7 +320,7 @@ std::shared_ptr<LocalMesh> read_mesh(const Mesh &mesh,
       data.reserve(positions.size());
       for (int i = 0; i < positions.size(); i++) {
         const ColorGeometry4f color = colors[i];
-        data.emplace_back(color.r, color.g, color.b);
+        data.emplace_back(color.r, color.g, color.b, color.a);
       }
     }
   }
@@ -371,7 +372,7 @@ std::shared_ptr<LocalMesh> read_mesh(const Mesh &mesh,
       const auto found = collection->find(key);
       style_hash = hash_value(style_hash, found != collection->end());
       if (found != collection->end()) {
-        style_hash = hash_bytes(style_hash, found->second.data(), found->second.size() * sizeof(float3));
+        style_hash = hash_bytes(style_hash, found->second.data(), found->second.size() * sizeof(float4));
       }
     }
   }
@@ -417,6 +418,7 @@ struct MeshInstance {
   std::shared_ptr<LocalMesh> mesh;
   float4x4 transform;
   uint64_t identity = 0;
+  uint32_t resource_id = 0;
   std::vector<Surface> surfaces;
   std::vector<blender::Material *> materials;
   std::vector<std::string> uv_names;
@@ -490,6 +492,12 @@ struct GeometryBuilder::Impl {
       uv_signature = hash_value(uv_signature, name.size());
     }
     for (const auto &brush : graph->brushes) {
+      if (brush.fields) {
+        for (const auto &source : brush.fields->sources) {
+          if (source.type == 0) { style_uv_names.insert(source.attribute); }
+          if (source.type == 1) { color_names.insert(source.attribute); }
+        }
+      }
       for (const int index : {brush.width_map, brush.color_map, brush.distortion_map, brush.brush_map}) {
         if (index >= 0 && graph->maps[index].coordinates == 0 &&
             ELEM(index, brush.width_map, brush.color_map, brush.distortion_map)) { style_uv_names.insert(graph->maps[index].uv); }
@@ -507,7 +515,7 @@ struct GeometryBuilder::Impl {
     }
   }
 
-  void add(const draw::ObjectRef &ref)
+  void add(const draw::ObjectRef &ref, uint32_t first_resource)
   {
     Mesh *mesh = BKE_object_get_evaluated_mesh(ref.object);
     if (!mesh) { return; }
@@ -540,6 +548,7 @@ struct GeometryBuilder::Impl {
     for (int instance_index = 0; instance_index < ref.instances_count(); instance_index++) {
       MeshInstance instance;
       instance.mesh = local;
+      instance.resource_id = first_resource ? first_resource + instance_index : 0;
       instance.transform = ref.object_to_world(instance_index);
       if (motion) {
         if (const auto *step = motion->geometry_line_step_get(
@@ -562,6 +571,8 @@ struct GeometryBuilder::Impl {
         if (material) { material = reinterpret_cast<blender::Material *>(DEG_get_original_id(&material->id)); }
         Surface surface;
         surface.instance = instance.identity;
+        surface.resource_id = instance.resource_id;
+        surface.material_tag = material ? material->id.session_uid : 0;
         for (int rule = 0; rule < int(graph->scopes.size()); rule++) {
           if (matches[rule] && material_matches(graph->scopes[rule], material)) {
             surface.rules.push_back(rule);
@@ -605,6 +616,8 @@ struct GeometryBuilder::Impl {
       signature = hash_value(signature, instance.mesh->mask_uv_revision);
       attributes_signature = hash_value(attributes_signature, instance.identity);
       attributes_signature = hash_value(attributes_signature, instance.mesh->attributes_revision);
+      attributes_signature = hash_value(attributes_signature, instance.resource_id);
+      for (const auto &surface : instance.surfaces) { attributes_signature = hash_value(attributes_signature, surface.material_tag); }
       signature = hash_value(signature, instance.transform);
       if (motion) {
         signature = hash_value(signature, instance.previous.revision);
@@ -654,8 +667,8 @@ struct GeometryBuilder::Impl {
     const float nan = std::numeric_limits<float>::quiet_NaN();
     for (const UVMapKey &key : style_uv_names) { result->style_uvs[key].resize(triangles * 3, float2(nan)); }
     for (const UVMapKey &key : color_names) {
-      result->style_colors[key].resize(triangles * 3, float3(nan));
-      result->point_colors[key].resize(vertices, float3(nan));
+      result->style_colors[key].resize(triangles * 3, float4(nan));
+      result->point_colors[key].resize(vertices, float4(nan));
     }
     for (const MeshInstance &instance : instances) {
       const LocalMesh &mesh = *instance.mesh;
@@ -774,7 +787,7 @@ void GeometryBuilder::begin(const Graph &graph, bool images_changed, VelocityMod
 {
   impl_->begin(graph, images_changed, motion);
 }
-void GeometryBuilder::add(const draw::ObjectRef &object) { impl_->add(object); }
+void GeometryBuilder::add(const draw::ObjectRef &object, uint32_t first_resource) { impl_->add(object, first_resource); }
 std::shared_ptr<const Geometry> GeometryBuilder::finish() { return impl_->finish(); }
 const std::string &GeometryBuilder::error() const { return impl_->error; }
 void GeometryBuilder::clear() { impl_ = std::make_unique<Impl>(); }

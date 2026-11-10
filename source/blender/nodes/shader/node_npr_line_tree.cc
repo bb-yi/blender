@@ -60,7 +60,8 @@ static CurveMapping *new_brush_curve()
 
 static void ensure_brush_curves(bNode &node)
 {
-  if (!ELEM(node.type_legacy, NPR_LINE_NODE_BRUSH, NPR_LINE_NODE_REDUCTION)) { return; }
+  if (!ELEM(node.type_legacy, NPR_LINE_NODE_BRUSH, NPR_LINE_NODE_BRUSH_INPUT,
+            NPR_LINE_NODE_BRUSH_OUTPUT, NPR_LINE_NODE_REDUCTION)) { return; }
   auto &data = *static_cast<NodeNPRLine *>(node.storage);
   if (node.type_legacy == NPR_LINE_NODE_REDUCTION) {
     if (!data.width_curve) {
@@ -372,12 +373,8 @@ static void source_declare(NodeDeclarationBuilder &b)
       .description("Use virtual adjacency for an unambiguous pair of exactly coincident, oppositely wound boundary edges in the same mesh; keeps the original mesh unchanged");
 }
 
-static void brush_declare(NodeDeclarationBuilder &b)
+static void brush_preview_layout(NodeDeclarationBuilder &b)
 {
-  b.use_custom_socket_order();
-  descriptor_output(b, "Brush", npr_line_brush_socket);
-  const NodeNPRLine *data = settings(b);
-  const bool textured = !data || data->mode != 0;
   b.add_layout([](ui::Layout &layout, bContext *, PointerRNA *ptr) {
     PropertyRNA *property = RNA_struct_find_property(ptr, "brush_preview_icon");
     const int icon = property ? RNA_property_int_get(ptr, property) : 0;
@@ -397,11 +394,35 @@ static void brush_declare(NodeDeclarationBuilder &b)
       });
     }
   });
+}
+
+static void brush_declare(NodeDeclarationBuilder &b)
+{
+  b.use_custom_socket_order();
+  descriptor_output(b, "Brush", npr_line_brush_socket);
+  const NodeNPRLine *data = settings(b);
+  const bool output = b.node_or_null() &&
+                      b.node_or_null()->type_legacy == NPR_LINE_NODE_BRUSH_OUTPUT;
+  const bool textured = !data || data->mode != 0;
+  brush_preview_layout(b);
   mode_layout(b);
-  b.add_input<decl::Color>("Color"_ustr, "color"_ustr).default_value({0, 0, 0, 1});
-  number(b, "Width (px)", "width", 2, 0.001f, 1000)
-      .description("Stroke width in output pixels before global and per-type multipliers");
-  number(b, "Opacity", "opacity", 1, 0, 1);
+  const bool legacy_input = b.node_or_null() &&
+                            b.node_or_null()->type_legacy == NPR_LINE_NODE_BRUSH_INPUT;
+  if (output && data && !(data->curve_flags & (1 << 7))) {
+    /* Read old experimental files until the load handler converts their chain to fields. */
+    descriptor_input(b, "Legacy Brush", "brush", npr_line_brush_socket);
+  }
+  if (!legacy_input) {
+    if (output) {
+      b.add_input<decl::Vector>("Position Offset"_ustr, "position_offset"_ustr)
+          .description("Local offset in output pixels: X advances along the source contour, "
+                       "Y moves along its normal; unlinked is zero");
+    }
+    b.add_input<decl::Color>("Color"_ustr, "color"_ustr).default_value({0, 0, 0, 1});
+    number(b, "Width (px)", "width", 2, output ? 0.0f : 0.001f, 1000)
+        .description("Stroke width in output pixels before global and per-type multipliers");
+    number(b, "Opacity", "opacity", 1, 0, 1);
+  }
   b.add_layout([](ui::Layout &layout, bContext *, PointerRNA *ptr) {
     layout.prop(ptr, "raster_size_response", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
     auto &tree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
@@ -538,7 +559,40 @@ static void brush_declare(NodeDeclarationBuilder &b)
   number(maps, "Width Map Strength", "width_map_strength", 1, 0, 1);
   descriptor_input(maps, "Color Map", "color_map", npr_line_map_socket);
   number(maps, "Color Map Strength", "color_map_strength", 1, 0, 1)
-      .description("Blend the image color over the base color; image alpha controls the blend, not stroke opacity");
+      .description("Blend image RGB over the base color; image alpha does not change the color strength or stroke opacity");
+  if (output) {
+    auto &sampling = b.add_panel("Field Sampling"_ustr).default_closed(true);
+    number(sampling, "Sample Length (px)", "sample_length", 0.9f, 0.1f, 1000)
+        .description("Maximum local field sample interval; source boundaries and connection gaps are preserved");
+  }
+}
+
+static void brush_closure_input_declare(NodeDeclarationBuilder &b)
+{
+  b.use_custom_socket_order();
+  b.add_output<decl::Float>("Distance"_ustr, "Distance"_ustr)
+      .description("Original pixel distance along the source contour");
+  b.add_output<decl::Float>("Factor"_ustr, "Factor"_ustr)
+      .description("Original distance divided by the complete stroke length");
+  b.add_output<decl::Float>("Length"_ustr, "Length"_ustr)
+      .description("Original complete stroke length in pixels");
+  b.add_output<decl::Float>("ID"_ustr, "ID"_ustr)
+      .description("Stable per-stroke identity for procedural variation");
+  b.add_output<decl::Bool>("Closed"_ustr, "Closed"_ustr)
+      .description("Whether the source stroke is a loop");
+}
+
+static void brush_closure_output_declare(NodeDeclarationBuilder &b)
+{
+  b.use_custom_socket_order();
+  descriptor_output(b, "Brush", npr_line_brush_socket);
+  brush_preview_layout(b);
+  b.add_input<decl::Vector>("Position Offset"_ustr, "position_offset"_ustr)
+      .dimensions(2)
+      .description("Local pixel offset: X advances along the original contour, Y follows its normal");
+  number(b, "Width (px)", "width", 2, 0, 1000);
+  b.add_input<decl::Color>("Color"_ustr, "color"_ustr).default_value({0, 0, 0, 1});
+  number(b, "Opacity", "opacity", 1, 0, 1);
 }
 
 static void material_filter(DeclarationListBuilder &b, const NodeNPRLine *data)
@@ -588,7 +642,8 @@ static void settings_declare(NodeDeclarationBuilder &b)
         continue;
       }
       const bNodeLink &link = *socket->directly_linked_links().first();
-      if (link.fromnode->type_legacy == NPR_LINE_NODE_BRUSH &&
+      if (ELEM(link.fromnode->type_legacy, NPR_LINE_NODE_BRUSH, NPR_LINE_NODE_BRUSH_OUTPUT,
+               NPR_LINE_NODE_BRUSH_CLOSURE_OUTPUT) &&
           link.fromsock->directly_linked_links().size() > 1) {
         PointerRNA op = layout.op("node.npr_line_make_brush_unique",
                                   STREQ(identifier, "visible_brush") ? IFACE_("Copy Visible Brush") :
@@ -823,6 +878,8 @@ static void output_declare(NodeDeclarationBuilder &b)
   boolean(quality, "Depth of Field", "depth_of_field", false);
   boolean(quality, "Motion Blur", "motion_blur", false);
   number(quality, "Antialiasing", "antialiasing", 1, 0, 4);
+  number(quality, "Field Sample Length (px)", "field_sample_length", 0.9f, 0.1f, 1000)
+      .description("Shared Brush Closure sampling quality; preserves source boundaries and connection gaps");
   number(quality, "Offscreen Stroke Margin", "offscreen_margin", 0, 0, 1000)
       .description("Continue stroke detection and joining outside the image border in pixels; zero uses the automatic brush margin");
   quality.add_input<decl::Int>("Over Sampling"_ustr, "samples"_ustr).default_value(1).min(1).max(4)
@@ -842,11 +899,77 @@ static void output_declare(NodeDeclarationBuilder &b)
   });
 }
 
+static void position_declare(NodeDeclarationBuilder &b)
+{
+  b.use_custom_socket_order();
+  descriptor_output(b, "Brush", npr_line_brush_socket);
+  descriptor_input(b, "Brush", "brush", npr_line_brush_socket);
+  boolean(b, "Selection", "selection", true);
+  b.add_input<decl::Vector>("Position"_ustr, "position"_ustr).hide_value()
+      .description("Unlinked uses the incoming position; X is source arc length in pixels, Y is normal offset");
+  b.add_input<decl::Vector>("Offset"_ustr, "offset"_ustr);
+}
+
+static void info_declare(NodeDeclarationBuilder &b)
+{
+  b.use_custom_socket_order();
+  const NodeNPRLine *data = settings(b);
+  if (data && !(data->curve_flags & (1 << 7))) {
+    descriptor_input(b, "Legacy Brush", "brush", npr_line_brush_socket);
+  }
+  b.add_output<decl::Vector>("Position"_ustr, "position"_ustr);
+  for (const char *name : {"Distance", "Length", "Factor", "ID"}) {
+    b.add_output<decl::Float>(UString(name), UString(name));
+  }
+  for (const char *name : {"Start", "End", "Closed"}) {
+    b.add_output<decl::Bool>(UString(name), UString(name));
+  }
+}
+
+static void resample_declare(NodeDeclarationBuilder &b)
+{
+  b.use_custom_socket_order();
+  descriptor_output(b, "Brush", npr_line_brush_socket);
+  descriptor_input(b, "Brush", "brush", npr_line_brush_socket);
+  number(b, "Length (px)", "length", 1, 0.1f, 1000);
+}
+
+static void source_uv_declare(NodeDeclarationBuilder &b)
+{
+  b.add_input<decl::String>("Name"_ustr, "name"_ustr);
+  b.add_output<decl::Vector>("UV"_ustr, "UV"_ustr);
+  b.add_output<decl::Bool>("Valid"_ustr, "Valid"_ustr);
+}
+
+static void source_color_declare(NodeDeclarationBuilder &b)
+{
+  b.add_input<decl::String>("Name"_ustr, "name"_ustr);
+  b.add_output<decl::Color>("Color"_ustr, "Color"_ustr);
+  b.add_output<decl::Float>("Alpha"_ustr, "Alpha"_ustr);
+  b.add_output<decl::Bool>("Valid"_ustr, "Valid"_ustr);
+}
+
+static void source_aov_declare(NodeDeclarationBuilder &b)
+{
+  b.use_custom_socket_order();
+  mode_layout(b);
+  b.add_input<decl::String>("Name"_ustr, "name"_ustr).default_value("LineColor");
+  b.add_input<decl::Color>("Fallback Color"_ustr, "color"_ustr).default_value({0, 0, 0, 1});
+  number(b, "Fallback Value", "value", 0, -100000, 100000);
+  b.add_output<decl::Color>("Color"_ustr, "Color"_ustr);
+  b.add_output<decl::Float>("Value"_ustr, "Value"_ustr);
+  b.add_output<decl::Bool>("Valid"_ustr, "Valid"_ustr);
+}
+
 static void node_init(bNodeTree *tree, bNode *node)
 {
   node->storage = MEM_new<NodeNPRLine>(__func__);
-  if (node->type_legacy == NPR_LINE_NODE_BRUSH) {
+  if (ELEM(node->type_legacy, NPR_LINE_NODE_BRUSH, NPR_LINE_NODE_BRUSH_INPUT,
+           NPR_LINE_NODE_BRUSH_OUTPUT)) {
     static_cast<NodeNPRLine *>(node->storage)->curve_flags |= (1 << 6) | 4;
+  }
+  if (ELEM(node->type_legacy, NPR_LINE_NODE_BRUSH_OUTPUT, NPR_LINE_NODE_STROKE_INFO)) {
+    static_cast<NodeNPRLine *>(node->storage)->curve_flags |= (1 << 7);
   }
   ensure_brush_curves(*node);
   node->width = 250;
@@ -891,7 +1014,12 @@ void register_npr_line_nodes()
   tree->get_from_context = tree_context;
   tree->update = tree_update;
   tree->valid_socket_type = tree_socket_valid;
-  tree->validate_link = [](eNodeSocketDatatype a, eNodeSocketDatatype b) { return a == b; };
+  tree->validate_link = [](eNodeSocketDatatype a, eNodeSocketDatatype b) {
+    const auto numeric = [](eNodeSocketDatatype type) {
+      return ELEM(type, SOCK_FLOAT, SOCK_INT, SOCK_BOOLEAN, SOCK_VECTOR, SOCK_RGBA);
+    };
+    return a == b || (numeric(a) && numeric(b));
+  };
   tree->rna_ext.srna = RNA_struct_find(npr_line_tree_idname);
   bke::node_tree_type_add(*tree);
 
@@ -911,6 +1039,16 @@ void register_npr_line_nodes()
       {"NPRLineNodeOcclusion", "Line Occlusion", NPR_LINE_NODE_OCCLUSION, NODE_CLASS_OP_FILTER, occlusion_declare},
       {"NPRLineNodeReduction", "Distance Reduction", NPR_LINE_NODE_REDUCTION, NODE_CLASS_OP_FILTER, reduction_declare},
       {"NPRLineNodeMap", "Line Map", NPR_LINE_NODE_MAP, NODE_CLASS_INPUT, map_declare},
+      {"NPRLineNodeBrushInput", "Brush Input", NPR_LINE_NODE_BRUSH_INPUT, NODE_CLASS_INPUT, brush_declare},
+      {"NPRLineNodeBrushOutput", "Legacy Brush Output", NPR_LINE_NODE_BRUSH_OUTPUT, NODE_CLASS_OP_FILTER, brush_declare},
+      {"NPRLineNodeBrushClosureInput", "Brush Parameters", NPR_LINE_NODE_BRUSH_CLOSURE_INPUT, NODE_CLASS_INTERFACE, brush_closure_input_declare},
+      {"NPRLineNodeBrushClosureOutput", "Brush Output", NPR_LINE_NODE_BRUSH_CLOSURE_OUTPUT, NODE_CLASS_INTERFACE, brush_closure_output_declare},
+      {"NPRLineNodeSetPosition", "Set Position", NPR_LINE_NODE_SET_POSITION, NODE_CLASS_OP_FILTER, position_declare},
+      {"NPRLineNodeStrokeInfo", "Stroke Info", NPR_LINE_NODE_STROKE_INFO, NODE_CLASS_INPUT, info_declare},
+      {"NPRLineNodeResample", "Resample Stroke", NPR_LINE_NODE_RESAMPLE, NODE_CLASS_OP_FILTER, resample_declare},
+      {"NPRLineNodeUVMap", "UV Map", NPR_LINE_NODE_UV, NODE_CLASS_INPUT, source_uv_declare},
+      {"NPRLineNodeColorAttribute", "Color Attribute", NPR_LINE_NODE_COLOR_ATTRIBUTE, NODE_CLASS_INPUT, source_color_declare},
+      {"NPRLineNodeMaterialAOV", "Material AOV", NPR_LINE_NODE_AOV, NODE_CLASS_INPUT, source_aov_declare},
   };
   for (const Definition &definition : definitions) {
     auto *type = MEM_new<bke::bNodeType>(__func__);
@@ -918,10 +1056,37 @@ void register_npr_line_nodes()
     type->ui_name = definition.label;
     type->nclass = definition.nclass;
     type->poll = node_poll;
+    if (ELEM(definition.legacy, NPR_LINE_NODE_BRUSH_INPUT, NPR_LINE_NODE_BRUSH_OUTPUT,
+             NPR_LINE_NODE_STROKE_INFO, NPR_LINE_NODE_SET_POSITION, NPR_LINE_NODE_RESAMPLE)) {
+      /* Old experiments remain readable, but are not a second authoring workflow. */
+      type->add_ui_poll = [](const bContext *) { return false; };
+    }
+    if (ELEM(definition.legacy, NPR_LINE_NODE_BRUSH_CLOSURE_INPUT,
+             NPR_LINE_NODE_BRUSH_CLOSURE_OUTPUT)) {
+      type->no_muting = true;
+    }
+    if (definition.legacy == NPR_LINE_NODE_BRUSH_CLOSURE_INPUT) {
+      /* Parameters are created with their closure, never as an unpaired data source. */
+      type->add_ui_poll = [](const bContext *) { return false; };
+    }
     type->declare = definition.declare;
     type->initfunc = node_init;
     type->insert_link = insert_link;
     type->gather_link_search_ops = search_link_ops_for_basic_node;
+    if (definition.legacy == NPR_LINE_NODE_BRUSH_CLOSURE_OUTPUT) {
+      type->gather_link_search_ops = [](GatherLinkSearchOpParams &params) {
+        if (params.other_socket().in_out != SOCK_IN ||
+            !STREQ(params.other_socket().idname, npr_line_brush_socket)) { return; }
+        params.add_item_full_name(IFACE_("Brush Closure"), [](LinkSearchOpParams &p) {
+          bNode &start = p.add_node("NPRLineNodeBrushClosureInput"_ustr);
+          bNode &end = p.add_node("NPRLineNodeBrushClosureOutput"_ustr);
+          static_cast<NodeNPRLine *>(start.storage)->output_node_id = end.identifier;
+          start.location[0] = -300;
+          end.location[0] = 300;
+          p.connect_available_socket(end, "Brush"_ustr);
+        });
+      };
+    }
     type->default_width = 250;
     type->free_self = [](bke::bNodeType *self) { MEM_delete(self); };
     bke::node_type_storage(*type, "NodeNPRLine",

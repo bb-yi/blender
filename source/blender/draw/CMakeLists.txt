@@ -508,6 +508,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_outline_jfa_step_comp.glsl
   engines/eevee/shaders/eevee_outline_lib.glsl
   engines/eevee/shaders/eevee_geometry_lines_lib.glsl
+  engines/eevee/shaders/eevee_geometry_lines_fields_lib.glsl
   engines/eevee/shaders/eevee_geometry_lines_expand_comp.glsl
   engines/eevee/shaders/eevee_geometry_lines_vert.glsl
   engines/eevee/shaders/eevee_geometry_lines_frag.glsl
@@ -879,6 +880,7 @@ set(GLSL_INC
   ../gpu/shaders
   ../gpu/shaders/common
   ../gpu/shaders/infos
+  ../gpu/shaders/material
 
   engines/gpencil
   engines/gpencil/shaders

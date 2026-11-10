@@ -8,16 +8,20 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <set>
 
 #include "DNA_collection_types.h"
+#include "DNA_color_types.h"
 #include "DNA_image_types.h"
 #include "DNA_material_types.h"
 #include "DNA_node_types.h"
 #include "DNA_object_types.h"
+#include "DNA_texture_types.h"
 #include "BLI_listbase_iterator.hh"
 #include "BLI_string.h"
 #include "BKE_node.hh"
 #include "BKE_colortools.hh"
+#include "BKE_colorband.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "DEG_depsgraph_query.hh"
@@ -78,6 +82,216 @@ class Compiler {
   std::map<Key, int> brushes_;
   std::map<Key, int> reductions_;
   std::map<Key, int> maps_;
+
+  struct FieldBuild {
+    BrushFields &fields;
+    const Context *closure_context = nullptr;
+    const bNode *closure_input = nullptr;
+    bool invalid_closure = false;
+    std::map<std::pair<const Context *, const bNodeSocket *>, int> values;
+    std::map<Key, int> positions;
+    std::set<std::pair<const Context *, const bNodeSocket *>> visiting;
+  };
+
+  int emit(FieldBuild &build, int opcode, int a = -1, int b = -1, int c = -1,
+           float4 value = float4(0), int option = 0, int component = 0, int flags = 0,
+           int d = -1, int e = -1, int f = -1)
+  {
+    if (build.fields.registers >= LINE_FIELD_MAX_REGISTERS) {
+      error("Brush region exceeds 128 field registers; simplify the connected graph");
+      return 0;
+    }
+    const int result = build.fields.registers++;
+    GeometryLineFieldInstruction instruction{};
+    instruction.op = int4(opcode, a, b, c);
+    instruction.meta = int4(result, option, component, flags);
+    instruction.value = value;
+    instruction.extra = int4(d, e, f, 0);
+    build.fields.instructions.push_back(instruction);
+    return result;
+  }
+
+  int constant(FieldBuild &build, const bNodeSocket *socket)
+  {
+    float4 value(0);
+    if (socket && socket->default_value) {
+      switch (socket->type) {
+        case SOCK_FLOAT: value = float4(socket->default_value_typed<bNodeSocketValueFloat>()->value); break;
+        case SOCK_INT: value = float4(float(socket->default_value_typed<bNodeSocketValueInt>()->value)); break;
+        case SOCK_BOOLEAN: value = float4(socket->default_value_typed<bNodeSocketValueBoolean>()->value ? 1 : 0); break;
+        case SOCK_VECTOR: value = float4(float3(socket->default_value_typed<bNodeSocketValueVector>()->value), 0); break;
+        case SOCK_RGBA: value = float4(socket->default_value_typed<bNodeSocketValueRGBA>()->value); break;
+        default: break;
+      }
+    }
+    for (int i = 0; i < 4; i++) { if (!std::isfinite(value[i])) { value[i] = 0; } }
+    return emit(build, LINE_FIELD_CONSTANT, -1, -1, -1, value);
+  }
+
+  int position(FieldBuild &build, SocketRef ref, int depth = 0)
+  {
+    if (!ref || ref.socket->in_out != SOCK_OUT) {
+      return emit(build, LINE_FIELD_INFO, -1, -1, -1, float4(0), 0);
+    }
+    if (depth > 128) { error("Brush position chain contains a cycle"); return constant(build, nullptr); }
+    const Key key{ref.context, &ref.node()};
+    if (auto found = build.positions.find(key); found != build.positions.end()) {
+      if (found->second < 0) { error("Brush position depends on its own result"); return constant(build, nullptr); }
+      return found->second;
+    }
+    build.positions[key] = -1;
+    const bNode &node = ref.node();
+    int result;
+    if (ELEM(node.type_legacy, NPR_LINE_NODE_BRUSH_INPUT, NPR_LINE_NODE_BRUSH)) {
+      result = emit(build, LINE_FIELD_INFO, -1, -1, -1, float4(0), 0);
+    }
+    else if (ELEM(node.type_legacy, NPR_LINE_NODE_SET_POSITION, NPR_LINE_NODE_RESAMPLE)) {
+      const int incoming = position(build, value(*ref.context, node, "brush"), depth + 1);
+      if (node.type_legacy == NPR_LINE_NODE_RESAMPLE) {
+        build.fields.resample = std::clamp(number(*ref.context, node, "length", 1), 0.1f, 1000.0f);
+        result = incoming;
+      }
+      else {
+        const bNodeSocket *target = input(node, "position");
+        const int desired = target && target->is_directly_linked() ? field(build, *ref.context, target) : incoming;
+        const int offset = field(build, *ref.context, input(node, "offset"));
+        const int selection = field(build, *ref.context, input(node, "selection"));
+        result = emit(build, LINE_FIELD_POSITION, incoming, desired, offset, float4(0), 0, 0, 0, selection);
+      }
+    }
+    else { error("Brush processing must start from a Brush Input or Line Brush"); result = constant(build, nullptr); }
+    build.positions[key] = result;
+    return result;
+  }
+
+  int field(FieldBuild &build, const Context &context, const bNodeSocket *socket)
+  {
+    if (!socket) { return constant(build, nullptr); }
+    SocketRef ref = resolve(context, socket);
+    if (!ref) { return constant(build, socket); }
+    const auto key = std::make_pair(ref.context, ref.socket);
+    int result;
+    if (auto found = build.values.find(key); found != build.values.end()) { result = found->second; }
+    else {
+      if (!build.visiting.insert(key).second) {
+        error("Brush field contains a circular dependency on a later position stage");
+        return constant(build, nullptr);
+      }
+      const bNode &node = ref.node();
+      auto arg = [&](const char *name) { return field(build, *ref.context, input(node, name)); };
+      auto idx = [&](int index) { return field(build, *ref.context, node.input_sockets()[index]); };
+      const char *output = ref.socket->identifier;
+      if (ref.socket->in_out == SOCK_IN ||
+          ELEM(node.type_legacy, SH_NODE_VALUE, SH_NODE_RGB, NODE_GROUP_INPUT)) {
+        result = constant(build, ref.socket);
+      }
+      else if (ELEM(node.type_legacy, NPR_LINE_NODE_STROKE_INFO,
+                    NPR_LINE_NODE_BRUSH_CLOSURE_INPUT)) {
+        const bool parameter = node.type_legacy == NPR_LINE_NODE_BRUSH_CLOSURE_INPUT;
+        if (parameter && (build.closure_input != &node || build.closure_context != ref.context)) {
+          error("Brush parameter belongs to a different closure; reuse its node group instead");
+          build.invalid_closure = true;
+          return constant(build, nullptr);
+        }
+        const int current = parameter ? -1 : position(build, value(*ref.context, node, "brush"));
+        const char *names[] = {"position", "Distance", "Length", "Factor", "ID", "Start", "End", "Closed"};
+        int which = 0;
+        for (int i = 0; i < 8; i++) { if (STREQ(output, names[i])) { which = i; } }
+        result = emit(build, LINE_FIELD_INFO, current, -1, -1, float4(0), which);
+      }
+      else if (node.type_legacy == SH_NODE_MATH) {
+        result = emit(build, LINE_FIELD_MATH, idx(0), idx(1), idx(2), float4(0), node.custom1, 0, node.custom2);
+      }
+      else if (node.type_legacy == SH_NODE_VECTOR_MATH) {
+        result = emit(build, LINE_FIELD_VECTOR_MATH, idx(0), idx(1), idx(2), float4(0), node.custom1, 0, 0, idx(3));
+      }
+      else if (node.type_legacy == SH_NODE_TEX_WHITE_NOISE) {
+        result = emit(build, LINE_FIELD_WHITE_NOISE, idx(0), idx(1), -1,
+                      float4(0), node.custom1, STREQ(output, "Color") ? 1 : 0);
+      }
+      else if (node.type_legacy == SH_NODE_SEPXYZ) {
+        result = emit(build, LINE_FIELD_SEPARATE, idx(0), -1, -1, float4(0), 0, STREQ(output, "Y") ? 1 : STREQ(output, "Z") ? 2 : 0);
+      }
+      else if (node.type_legacy == SH_NODE_COMBXYZ) { result = emit(build, LINE_FIELD_COMBINE, idx(0), idx(1), idx(2)); }
+      else if (node.type_legacy == SH_NODE_VALTORGB) {
+        const int first = int(build.fields.ramps.size());
+        const auto &band = *static_cast<const ColorBand *>(node.storage);
+        for (int i = 0; i <= 256; i++) {
+          float4 color;
+          BKE_colorband_evaluate(&band, float(i) / 256, color);
+          build.fields.ramps.push_back(color);
+        }
+        result = emit(build, LINE_FIELD_RAMP, idx(0), -1, -1, float4(0), first, STREQ(output, "Alpha") ? 1 : 0);
+      }
+      else if (node.type_legacy == SH_NODE_CURVE_FLOAT) {
+        auto *mapping = static_cast<CurveMapping *>(node.storage);
+        BKE_curvemapping_init(mapping);
+        float minimum[CM_TOT], divider[CM_TOT], start[CM_TOT], end[CM_TOT];
+        BKE_curvemapping_get_range_minimums(mapping, minimum);
+        BKE_curvemapping_compute_range_dividers(mapping, divider);
+        BKE_curvemapping_compute_slopes(mapping, start, end);
+        const int first = int(build.fields.ramps.size());
+        for (int i = 0; i <= 256; i++) {
+          build.fields.ramps.push_back(float4(BKE_curvemapping_evaluateF(
+              mapping, 0, minimum[0] + float(i) / (256 * divider[0]))));
+        }
+        result = emit(build, LINE_FIELD_CURVE, idx(1), idx(0), -1,
+                      float4(minimum[0], divider[0], start[0], end[0]), first);
+      }
+      else if (node.type_legacy == SH_NODE_TEX_IMAGE) {
+        Image *image = original(reinterpret_cast<Image *>(node.id));
+        auto found = std::find(build.fields.images.begin(), build.fields.images.end(), image);
+        int index = int(found - build.fields.images.begin());
+        if (found == build.fields.images.end()) { build.fields.images.push_back(image); }
+        if (index >= LINE_FIELD_MAX_IMAGES) { error("A brush region supports at most four connected images"); index = -1; }
+        const auto &settings = *static_cast<const NodeTexImage *>(node.storage);
+        if (settings.projection != SHD_PROJ_FLAT || (image && image->source == IMA_SRC_TILED)) {
+          error("Brush Image Texture requires a flat source UV image; tiled images are not supported");
+        }
+        result = emit(build, LINE_FIELD_IMAGE, idx(0), -1, -1, float4(0), index,
+                      STREQ(output, "Alpha") ? 1 : 0, settings.extension | (settings.interpolation << 8));
+      }
+      else if (ELEM(node.type_legacy, NPR_LINE_NODE_UV, NPR_LINE_NODE_COLOR_ATTRIBUTE, NPR_LINE_NODE_AOV)) {
+        FieldSource source;
+        source.type = node.type_legacy == NPR_LINE_NODE_UV ? 0 : node.type_legacy == NPR_LINE_NODE_COLOR_ATTRIBUTE ? 1 : 2;
+        source.attribute.name = string(*ref.context, node, "name");
+        source.aov_type = static_cast<const NodeNPRLine *>(node.storage)->mode;
+        int index = 0;
+        for (; index < int(build.fields.sources.size()); index++) {
+          const auto &other = build.fields.sources[index];
+          if (other.type == source.type && other.attribute.name == source.attribute.name && other.aov_type == source.aov_type) { break; }
+        }
+        if (index == int(build.fields.sources.size())) { build.fields.sources.push_back(source); }
+        if (index >= LINE_FIELD_MAX_SOURCES) { error("A brush region supports at most eight source attributes or AOVs"); index = -1; }
+        const int component = STREQ(output, "Valid") ? 2 : STREQ(output, "Alpha") ? 1 : STREQ(output, "Value") ? 3 : 0;
+        result = emit(build, source.type == 2 ? LINE_FIELD_AOV : LINE_FIELD_SOURCE,
+                      source.type == 2 ? arg(source.aov_type ? "value" : "color") : -1,
+                      -1, -1, float4(0), index, component, source.aov_type);
+      }
+      else if (node.type_legacy == SH_NODE_MAP_RANGE) {
+        const auto &settings = *static_cast<const NodeMapRange *>(node.storage);
+        const int first = settings.data_type == CD_PROP_FLOAT ? 0 : 6;
+        result = emit(build, LINE_FIELD_MAP_RANGE, idx(first), idx(first + 1), idx(first + 2),
+                      float4(0), settings.interpolation_type, 0, settings.clamp,
+                      idx(first + 3), idx(first + 4), idx(first + 5));
+      }
+      else if (node.type_legacy == SH_NODE_MIX) {
+        const auto &settings = *static_cast<const NodeShaderMix *>(node.storage);
+        const int first = settings.data_type == SOCK_FLOAT ? 2 : settings.data_type == SOCK_VECTOR ? 4 : 6;
+        result = emit(build, LINE_FIELD_MIX, idx(settings.data_type == SOCK_VECTOR && settings.factor_mode ? 1 : 0),
+                      idx(first), idx(first + 1), float4(0), settings.data_type == SOCK_RGBA ? settings.blend_type : 0, 0,
+                      settings.clamp_factor | (settings.clamp_result << 1));
+      }
+      else { error("Unsupported field node in Brush region"); result = constant(build, nullptr); }
+      build.visiting.erase(key);
+      build.values[key] = result;
+    }
+    /* Match Blender's numeric socket conversions at every link, including group boundaries. */
+    if (socket->type != ref.socket->type && socket->in_out == SOCK_IN) {
+      result = emit(build, LINE_FIELD_CONVERT, result, -1, -1, float4(0), socket->type, ref.socket->type);
+    }
+    return result;
+  }
 
   void error(const char *message)
   {
@@ -306,11 +520,12 @@ class Compiler {
     return index;
   }
 
-  int brush(SocketRef ref)
+  int brush(SocketRef ref, int depth = 0)
   {
-    if (!ref || ref.socket->in_out != SOCK_OUT || ref.node().type_legacy != NPR_LINE_NODE_BRUSH) {
+    if (!ref || ref.socket->in_out != SOCK_OUT) {
       return -1;
     }
+    if (depth > 128) { error("Brush chain contains a cycle"); return -1; }
     const Key key{ref.context, &ref.node()};
     const auto found = brushes_.find(key);
     if (found != brushes_.end()) {
@@ -318,6 +533,130 @@ class Compiler {
     }
     const bNode &node = ref.node();
     const Context &context = *ref.context;
+    if (ELEM(node.type_legacy, NPR_LINE_NODE_BRUSH_OUTPUT, NPR_LINE_NODE_SET_POSITION,
+             NPR_LINE_NODE_RESAMPLE, NPR_LINE_NODE_BRUSH_CLOSURE_OUTPUT)) {
+      const bool closure = node.type_legacy == NPR_LINE_NODE_BRUSH_CLOSURE_OUTPUT;
+      const bool standalone = closure || (node.type_legacy == NPR_LINE_NODE_BRUSH_OUTPUT &&
+          (static_cast<const NodeNPRLine *>(node.storage)->curve_flags & (1 << 7)));
+      Brush result{};
+      SocketRef incoming;
+      const bNode *parameters = nullptr;
+      if (closure) {
+        const auto *zone = bke::zone_type_by_node_type(node.type_legacy);
+        parameters = zone->get_corresponding_input(*context.tree, node);
+        if (!parameters) {
+          error("Brush Closure requires its paired parameter input");
+          return -1;
+        }
+        /* Start from a neutral continuous stroke. Legacy taper, maps, randomization
+         * and distortion must never multiply the closure's explicit result fields. */
+        for (float2 &sample : result.curve) { sample = float2(1); }
+        /* Width fields use the same calibrated pixel coverage as the default
+         * quick Simple brush. This is a raster rule, not a second style control. */
+        result.raster_size_response = true;
+      }
+      else if (standalone) {
+        result = brush_settings(context, node);
+      }
+      else {
+        incoming = value(context, node, "brush");
+        const int base = brush(incoming, depth + 1);
+        if (base < 0) { error("Legacy brush chain has no connected source"); return -1; }
+        result = graph_.brushes[base];
+      }
+      result.fields = std::make_shared<BrushFields>();
+      result.fields->project_parameters = closure;
+      FieldBuild build{*result.fields};
+      build.closure_context = &context;
+      build.closure_input = parameters;
+      if (standalone) {
+        const int original = emit(build, LINE_FIELD_INFO, -1, -1, -1, float4(0), 0);
+        const int offset = field(build, context, input(node, "position_offset"));
+        result.fields->position = emit(build, LINE_FIELD_VECTOR_MATH, original, offset, -1,
+                                       float4(0), NODE_VECTOR_MATH_ADD);
+        result.fields->resample = closure ? graph_.field_sample_length :
+            std::clamp(number(context, node, "sample_length", 0.9f), 0.1f, 1000.0f);
+      }
+      else {
+        result.fields->position = position(build, node.type_legacy == NPR_LINE_NODE_BRUSH_OUTPUT ? incoming : ref);
+      }
+      if (closure || node.type_legacy == NPR_LINE_NODE_BRUSH_OUTPUT) {
+        result.fields->width = field(build, context, input(node, "width"));
+        result.fields->color = field(build, context, input(node, "color"));
+        result.fields->opacity = field(build, context, input(node, "opacity"));
+        /* RGB and opacity are independent fields. Quick brushes retain color alpha. */
+        result.color = float4(1);
+        result.width = result.opacity = 1;
+      }
+      result.identity = context.identity;
+      if (build.invalid_closure) { return -1; }
+      hash_value(result.identity, node.identifier);
+      auto &fields = *result.fields;
+      /* Mark the dependency slice used by each evaluation stage. Appearance-only
+       * image/AOV work must not run for every shape/tangent sample. */
+      auto mark = [&](auto &&self, int reg, int stage) -> void {
+        if (reg < 0) { return; }
+        auto &instruction = fields.instructions[reg];
+        if (instruction.extra.w & stage) { return; }
+        instruction.extra.w |= stage;
+        for (int dependency : {instruction.op.y, instruction.op.z, instruction.op.w,
+                               instruction.extra.x, instruction.extra.y, instruction.extra.z}) {
+          self(self, dependency, stage);
+        }
+      };
+      mark(mark, fields.position, 1);
+      mark(mark, fields.width, 2);
+      mark(mark, fields.color, 4);
+      mark(mark, fields.opacity, 8);
+      fields.shape_signature = result.identity;
+      hash_value(fields.shape_signature, fields.resample);
+      for (auto instruction : fields.instructions) {
+        if (!(instruction.extra.w & 3)) { continue; }
+        instruction.extra.w &= 3;
+        hash_value(fields.shape_signature, instruction);
+        if (ELEM(instruction.op.x, LINE_FIELD_RAMP, LINE_FIELD_CURVE)) {
+          fields.shape_signature = hash_bytes(fields.shape_signature,
+              fields.ramps.data() + instruction.meta.y, 257 * sizeof(float4));
+        }
+        if (instruction.op.x == LINE_FIELD_IMAGE) {
+          fields.shape_uses_image = true;
+          if (instruction.meta.y >= 0) { hash_value(fields.shape_signature, fields.images[instruction.meta.y]); }
+        }
+        fields.shape_uses_aov |= instruction.op.x == LINE_FIELD_AOV;
+      }
+      /* Source descriptors are baked in draw parts even when only color uses them. */
+      for (const auto &source : fields.sources) {
+        hash_value(fields.shape_signature, source.type);
+        hash_value(fields.shape_signature, source.aov_type);
+        fields.shape_signature = hash_bytes(fields.shape_signature,
+            source.attribute.name.data(), source.attribute.name.size());
+      }
+      fields.signature = hash_bytes(result.identity, fields.instructions.data(),
+                                    fields.instructions.size() * sizeof(GeometryLineFieldInstruction));
+      fields.signature = hash_bytes(fields.signature, fields.ramps.data(), fields.ramps.size() * sizeof(float4));
+      for (const auto &source : fields.sources) {
+        hash_value(fields.signature, source.type);
+        hash_value(fields.signature, source.aov_type);
+        fields.signature = hash_bytes(fields.signature, source.attribute.name.data(), source.attribute.name.size());
+      }
+      for (Image *image : fields.images) { hash_value(fields.signature, image); }
+      hash_value(fields.signature, fields.resample);
+      hash_value(fields.signature, fields.project_parameters);
+      const int index = int(graph_.brushes.size());
+      graph_.brushes.push_back(std::move(result));
+      brushes_[key] = index;
+      return index;
+    }
+    if (!ELEM(node.type_legacy, NPR_LINE_NODE_BRUSH, NPR_LINE_NODE_BRUSH_INPUT)) { return -1; }
+    Brush result = brush_settings(context, node);
+    const int index = int(graph_.brushes.size());
+    graph_.brushes.push_back(std::move(result));
+    brushes_[key] = index;
+    return index;
+  }
+
+  Brush brush_settings(const Context &context, const bNode &node)
+  {
     const auto &data = *static_cast<const NodeNPRLine *>(node.storage);
     Brush result;
     result.mode = data.mode;
@@ -428,10 +767,7 @@ class Compiler {
     result.copies = std::clamp(int(number(context, node, "copies", 1)), 1, 32);
     result.dashed = number(context, node, "dashed") != 0;
     result.image = reinterpret_cast<Image *>(id(context, node, "image"));
-    const int index = int(graph_.brushes.size());
-    graph_.brushes.push_back(result);
-    brushes_[key] = index;
-    return index;
+    return result;
   }
 
   Plan plan(SocketRef ref, int depth = 0)
@@ -623,6 +959,7 @@ class Compiler {
     graph_.connection_signature = connection;
     uint64_t paint = connection;
     for (const Brush &brush : graph_.brushes) {
+      if (brush.fields) { hash_value(paint, brush.fields->signature); }
       hash_value(paint, brush.color);
       const float values[] = {brush.width, brush.opacity, brush.spacing, brush.stretch, brush.angle,
                               brush.softness, brush.taper_start, brush.taper_end, brush.alpha_start,
@@ -714,6 +1051,8 @@ class Compiler {
       error("Geometry Lines has no active Line Output");
       return std::move(graph_);
     }
+    graph_.field_sample_length = std::clamp(number(root_, *output, "field_sample_length", 0.9f),
+                                          0.1f, 1000.0f);
     SocketRef plan_ref = value(root_, *output, "plan");
     if (solo_node_) {
       for (const bNode &node : tree.nodes) {
@@ -725,6 +1064,33 @@ class Compiler {
       }
     }
     graph_.plan = plan(plan_ref);
+    /* Intermediate Brush states are compiler inputs, not independently executed
+     * brushes. In particular, unreferenced sources must not allocate AOV layers. */
+    std::vector<int> remap(graph_.brushes.size(), -1);
+    for (auto &rule : graph_.rules) {
+      for (int i = 0; i < 8; i++) {
+        for (auto pair : {std::pair<int *, bool>{&rule.visible_brush[i], bool(rule.visible & (1 << i))},
+                          {&rule.hidden_brush[i], rule.hidden_enabled && bool(rule.hidden & (1 << i))}}) {
+          if (!pair.second) { *pair.first = -1; }
+          if (*pair.first >= 0) { remap[*pair.first] = 0; }
+        }
+      }
+    }
+    std::vector<Brush> live_brushes;
+    for (int i = 0; i < int(remap.size()); i++) {
+      if (remap[i] >= 0) {
+        remap[i] = int(live_brushes.size());
+        live_brushes.push_back(std::move(graph_.brushes[i]));
+      }
+    }
+    for (auto &rule : graph_.rules) {
+      for (int i = 0; i < 8; i++) {
+        if (rule.visible_brush[i] >= 0) { rule.visible_brush[i] = remap[rule.visible_brush[i]]; }
+        if (rule.hidden_brush[i] >= 0) { rule.hidden_brush[i] = remap[rule.hidden_brush[i]]; }
+      }
+      for (auto &connection : rule.brush_connections) { connection.first = remap[connection.first]; }
+    }
+    graph_.brushes = std::move(live_brushes);
     const auto &data = *static_cast<const NodeNPRLine *>(output->storage);
     graph_.preview = data.mode;
     graph_.composite = number(root_, *output, "composite", 1) != 0;

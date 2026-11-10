@@ -166836,8 +166836,8 @@ msgid "Color Map Strength"
 msgstr "颜色贴图强度"
 
 
-msgid "Blend the image color over the base color; image alpha controls the blend, not stroke opacity"
-msgstr "将图像颜色混合到基础颜色；图像透明度控制混合程度，不改变笔画透明度"
+msgid "Blend image RGB over the base color; image alpha does not change the color strength or stroke opacity"
+msgstr "将图像 RGB 混合到基础颜色；图像 Alpha 不改变颜色强度或笔画透明度"
 
 
 msgid "Screen Space Joins"
@@ -166960,3 +166960,95 @@ msgstr "按贴图 RGB 平均值沿路径法线偏移，单位为输出像素"
 
 msgid "Keep silhouette boundaries in Outline or Object categories; disabling a contour type also suppresses its wire and marked-edge fallback"
 msgstr "将轮廓边保留为外轮廓或内部轮廓；关闭对应轮廓类型时，不由线框或标记边补画"
+
+msgid "Brush Closure"
+msgstr "笔刷闭包"
+
+msgid "Brush Parameters"
+msgstr "笔画参数"
+
+msgid "Brush Output"
+msgstr "笔刷输出"
+
+msgid "Position Offset"
+msgstr "位置偏移"
+
+msgid "Brush Effects"
+msgstr "笔刷效果"
+
+msgid "Per Stroke Random"
+msgstr "逐笔随机"
+
+msgid "Field Sample Length (px)"
+msgstr "字段采样间距（像素）"
+
+msgid "Color and Vector"
+msgstr "颜色与矢量"
+
+msgid "Line Setup"
+msgstr "描边"
+
+msgid "Material AOV"
+msgstr "材质 AOV"
+
+msgid "Closed"
+msgstr "闭合"
+
+msgctxt "Operator"
+msgid "Add Brush Effect Group"
+msgstr "添加笔刷效果节点组"
+
+msgctxt "Operator"
+msgid "Add an editable node group for a brush effect"
+msgstr "添加可编辑的笔刷效果节点组"
+
+msgctxt "NPRBrushEffect"
+msgid "Effect"
+msgstr "效果"
+
+msgctxt "NPRBrushEffect"
+msgid "Wave"
+msgstr "波纹"
+
+msgctxt "NPRBrushEffect"
+msgid "Dashes"
+msgstr "虚线"
+
+msgctxt "NPRBrushEffect"
+msgid "Taper"
+msgstr "起收笔"
+
+msgctxt "NPRBrushEffect"
+msgid "Per Stroke Random"
+msgstr "逐笔随机"
+
+msgctxt "NPRBrushEffect"
+msgid "Distance to a normal offset"
+msgstr "沿线距离生成法线偏移"
+
+msgctxt "NPRBrushEffect"
+msgid "Distance to an opacity mask"
+msgstr "沿线距离生成透明度遮罩"
+
+msgctxt "NPRBrushEffect"
+msgid "Factor through an editable Float Curve"
+msgstr "通过可编辑浮点曲线调节沿线宽度"
+
+msgctxt "NPRBrushEffect"
+msgid "ID and seed to a value range"
+msgstr "根据笔画标识和种子生成指定范围的数值"
+
+msgid "Original pixel distance along the source contour"
+msgstr "沿源轮廓累计的原始像素距离"
+
+msgid "Original distance divided by the complete stroke length"
+msgstr "原始距离除以整笔长度"
+
+msgid "Original complete stroke length in pixels"
+msgstr "原始笔画总长度（像素）"
+
+msgid "Stable per-stroke identity for procedural variation"
+msgstr "每笔画的稳定标识，用于程序化随机变化"
+
+msgid "Whether the source stroke is a loop"
+msgstr "源笔画是否闭合"

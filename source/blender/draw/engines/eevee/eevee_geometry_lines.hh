@@ -5,6 +5,7 @@
 #pragma once
 
 #include <memory>
+#include <cstdint>
 #include <string>
 
 namespace blender::gpu { class Texture; }
@@ -37,6 +38,8 @@ class GeometryLineModule {
   bool enabled() const;
   bool use_in_combined() const;
   bool is_quick_preview() const;
+  bool uses_aov() const;
+  bool uses_aov(uint32_t hash, bool value_type) const;
   std::string timing_info() const;
 };
 

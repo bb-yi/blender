@@ -43,6 +43,7 @@ node_tree_group_type = {
     'ShaderNodeTree': 'ShaderNodeGroup',
     'TextureNodeTree': 'TextureNodeGroup',
     'GeometryNodeTree': 'GeometryNodeGroup',
+    'NPRLineNodeTree': 'NPRLineNodeGroup',
 }
 
 

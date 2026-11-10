@@ -1308,6 +1308,10 @@ static const EnumPropertyItem node_cryptomatte_layer_name_items[] = {
 
 #  include "ED_node.hh"
 #  include "ED_render.hh"
+#  include "ED_view3d_offscreen.hh"
+
+#  include "IMB_imbuf.hh"
+#  include "IMB_imbuf_types.hh"
 
 #  include "NOD_common.hh"
 #  include "NOD_composite.hh"
@@ -1378,6 +1382,52 @@ using nodes::ShaderFilterOutputItemsAccessor;
 using nodes::ShForeachLightItemsAccessor;
 using nodes::ShScriptExpressionVariablesAccessor;
 using nodes::SimulationItemsAccessor;
+
+static void rna_NPRLineTree_preview_pixels(bNodeTree *tree,
+                                          Main *bmain,
+                                          ReportList *reports,
+                                          Scene *scene,
+                                          int width,
+                                          int height,
+                                          float **r_pixels,
+                                          int *r_pixels_len)
+{
+  *r_pixels = nullptr;
+  *r_pixels_len = 0;
+  if (scene->eevee.geometry_line_tree != tree || !scene->camera ||
+      ED_view3d_draw_offscreen_check_nested()) {
+    BKE_report(reports, RPT_ERROR, "Brush preview requires its own scene, camera and non-drawing context");
+    return;
+  }
+  ViewLayer *view_layer = static_cast<ViewLayer *>(scene->view_layers.first);
+  Depsgraph *depsgraph = BKE_scene_ensure_depsgraph(bmain, scene, view_layer);
+  BKE_scene_graph_update_tagged(depsgraph, bmain);
+  char error[256] = {};
+  /* Reuse the viewport evaluator and its temporary draw target. No Render Result,
+   * screen changes, render operator or intermediate image file is involved. */
+  ImBuf *buffer = ED_view3d_draw_offscreen_imbuf_simple(depsgraph,
+                                                       scene,
+                                                       nullptr,
+                                                       OB_RENDER,
+                                                       scene->camera,
+                                                       width,
+                                                       height,
+                                                       ImBufFlags::FloatData,
+                                                       V3D_OFSDRAW_NONE,
+                                                       R_ALPHAPREMUL,
+                                                       "",
+                                                       nullptr,
+                                                       nullptr,
+                                                       error);
+  if (!buffer) {
+    BKE_report(reports, RPT_ERROR, error[0] ? error : "Brush preview could not draw the local stroke");
+    return;
+  }
+  *r_pixels_len = width * height * 4;
+  *r_pixels = MEM_new_array_uninitialized<float>(size_t(*r_pixels_len), __func__);
+  std::memcpy(*r_pixels, buffer->float_data(), size_t(*r_pixels_len) * sizeof(float));
+  IMB_freeImBuf(buffer);
+}
 
 static RawMap<NodeShaderGLSLDefineValue *, RawVector<bke::GLSLIntChoiceItem>>
     &rna_ShaderNodeGLSLDefineValue_choice_items()
@@ -12050,6 +12100,49 @@ static void def_common_zone_input(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_function_return(func, parm);
 }
 
+static void npr_field_inputs(StructRNA *srna)
+{
+  PropertyRNA *prop = RNA_def_property(srna, "use_field_inputs", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "curve_flags", 1 << 7);
+  RNA_def_property_flag(prop, PROP_HIDDEN);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
+static void def_npr_brush_output(BlenderRNA *brna, StructRNA *srna)
+{
+  def_npr_line_brush(brna, srna);
+  npr_field_inputs(srna);
+}
+
+static void def_npr_stroke_info(BlenderRNA *brna, StructRNA *srna)
+{
+  def_npr_line_common(brna, srna);
+  npr_field_inputs(srna);
+}
+
+static void def_npr_brush_closure_output(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  /* The field closure has no legacy effect properties or CurveMapping state. */
+  RNA_def_struct_sdna_from(srna, "NodeNPRLine", "storage");
+}
+
+static void def_npr_brush_closure_input(BlenderRNA *brna, StructRNA *srna)
+{
+  RNA_def_struct_sdna_from(srna, "NodeNPRLine", "storage");
+  def_common_zone_input(brna, srna);
+}
+
+static void def_npr_aov(BlenderRNA *brna, StructRNA *srna)
+{
+  def_npr_line_common(brna, srna);
+  static const EnumPropertyItem items[] = {
+    {0, "COLOR", 0, "Color", "Read a color AOV"},
+    {1, "VALUE", 0, "Value", "Read a value AOV"},
+    {0, nullptr, 0, nullptr, nullptr}};
+  npr_line_mode(srna, items);
+}
+
 static void def_geo_simulation_input(BlenderRNA *brna, StructRNA *srna)
 {
   RNA_def_struct_sdna_from(srna, "NodeGeometrySimulationInput", "storage");
@@ -14949,6 +15042,16 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("NodeInternal", "EeveeFilterGraphNodeSceneColor");
   define("NodeInternal", "NPRLineNodeObjects", def_npr_line_objects);
   define("NodeInternal", "NPRLineNodeBrush", def_npr_line_brush);
+  define("NodeInternal", "NPRLineNodeBrushInput", def_npr_line_brush);
+  define("NodeInternal", "NPRLineNodeBrushOutput", def_npr_brush_output);
+  define("NodeInternal", "NPRLineNodeBrushClosureInput", def_npr_brush_closure_input);
+  define("NodeInternal", "NPRLineNodeBrushClosureOutput", def_npr_brush_closure_output);
+  define("NodeInternal", "NPRLineNodeSetPosition", def_npr_line_common);
+  define("NodeInternal", "NPRLineNodeStrokeInfo", def_npr_stroke_info);
+  define("NodeInternal", "NPRLineNodeResample", def_npr_line_common);
+  define("NodeInternal", "NPRLineNodeUVMap", def_npr_line_common);
+  define("NodeInternal", "NPRLineNodeColorAttribute", def_npr_line_common);
+  define("NodeInternal", "NPRLineNodeMaterialAOV", def_npr_aov);
   define("NodeInternal", "NPRLineNodeSettings", def_npr_line_settings);
   define("NodeInternal", "NPRLineNodeCombine", def_npr_line_combine);
   define("NodeInternal", "NPRLineNodeOutput", def_npr_line_output);
@@ -15604,6 +15707,17 @@ void RNA_def_nodetree(BlenderRNA *brna)
     RNA_def_property_string_funcs(prop, "rna_NPRLineTree_timing_info_get", "rna_NPRLineTree_timing_info_length", nullptr);
     RNA_def_property_clear_flag(prop, PROP_EDITABLE | PROP_ANIMATABLE);
     RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+    FunctionRNA *func = RNA_def_function(srna, "preview_pixels", "rna_NPRLineTree_preview_pixels");
+    RNA_def_function_flag(func, FUNC_USE_MAIN | FUNC_USE_REPORTS);
+    RNA_def_function_ui_description(func, "Draw a disposable brush scene without changing Render Result");
+    PropertyRNA *parm = RNA_def_pointer(func, "scene", "Scene", "Scene", "Disposable local preview scene");
+    RNA_def_parameter_flags(parm, PROP_NEVER_NULL, PARM_REQUIRED);
+    parm = RNA_def_int(func, "width", 320, 16, 4160, "Width", "Local scene width in pixels", 16, 4160);
+    RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+    parm = RNA_def_int(func, "height", 128, 16, 1024, "Height", "Local scene height in pixels", 16, 1024);
+    RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+    parm = RNA_def_float_array(func, "pixels", 1, nullptr, -FLT_MAX, FLT_MAX, "Pixels", "Linear premultiplied RGBA", -FLT_MAX, FLT_MAX);
+    RNA_def_parameter_flags(parm, PROP_DYNAMIC, PARM_OUTPUT);
   }
 
   rna_def_shader_nodetree(brna);

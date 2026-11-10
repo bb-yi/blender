@@ -6,8 +6,9 @@ import bpy
 import math
 import time
 from bpy.utils import previews
-from bpy.props import BoolProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 from bpy.types import Operator
+from .node import NodeAddOperator
 
 
 # Preview pixels are runtime UI resources, never Images or scene data-blocks.
@@ -16,8 +17,419 @@ if '_brush_previews' in globals() and _brush_previews is not None:
 if '_clear_brush_preview_on_load' in globals():
     if _clear_brush_preview_on_load in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.remove(_clear_brush_preview_on_load)
+if '_migrate_brush_fields_on_load' in globals():
+    if _migrate_brush_fields_on_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_migrate_brush_fields_on_load)
+if '_update_output_brush_previews' in globals():
+    if bpy.app.timers.is_registered(_update_output_brush_previews):
+        bpy.app.timers.unregister(_update_output_brush_previews)
 _brush_previews = None
 _brush_preview_cache = {}
+_region_preview_busy = False
+_region_preview_cache = {}
+_region_preview_pending = {}
+_region_preview_errors = {}
+_BRUSH_PREVIEW_IDLE_DELAY = .35
+
+FIELD_BRUSH_TYPES = {'NPRLineNodeBrushOutput', 'NPRLineNodeBrushClosureOutput'}
+BRUSH_TYPES = {'NPRLineNodeBrush'} | FIELD_BRUSH_TYPES
+
+
+def add_brush_closure(tree, location=(0, 0)):
+    """Two native zone boundaries; no Brush geometry link inside the closure."""
+    parameters = tree.nodes.new('NPRLineNodeBrushClosureInput')
+    output = tree.nodes.new('NPRLineNodeBrushClosureOutput')
+    parameters.pair_with_output(output)
+    parameters.location = (location[0] - 300, location[1])
+    output.location = (location[0] + 300, location[1])
+    parameters.width = 180
+    output.width = 270
+    return parameters, output
+
+
+def brush_effect_group(effect):
+    """Reusable ordinary node groups, with no special brush-effect evaluator."""
+    for tree in bpy.data.node_groups:
+        if tree.bl_idname == 'NPRLineNodeTree' and tree.get('npr_brush_effect') == effect:
+            return tree
+    title = {'WAVE': 'Wave', 'DASH': 'Dashes', 'TAPER': 'Taper', 'RANDOM': 'Per Stroke Random'}[effect]
+    tree = bpy.data.node_groups.new(title, 'NPRLineNodeTree')
+    tree['npr_brush_effect'] = effect
+
+    def interface(name, value=0, output=False, vector=False):
+        socket = tree.interface.new_socket(name=name, in_out='OUTPUT' if output else 'INPUT',
+                    socket_type='NodeSocketVector' if vector else 'NodeSocketFloat')
+        if not output:
+            socket.default_value = value
+        return socket
+
+    inputs = {'WAVE': [('Distance', 0), ('Amplitude', 8), ('Wavelength', 64), ('Phase', 0)],
+              'DASH': [('Distance', 0), ('Length', 8), ('Gap', 5), ('Phase', 0)],
+              'TAPER': [('Factor', 0), ('Width', 4)],
+              'RANDOM': [('ID', 0), ('Seed', 0), ('Min', .5), ('Max', 1.5)]}[effect]
+    for name, default in inputs:
+        interface(name, default)
+    interface({'WAVE': 'Offset', 'DASH': 'Opacity', 'TAPER': 'Width', 'RANDOM': 'Value'}[effect],
+              output=True, vector=effect == 'WAVE')
+    source = tree.nodes.new('NodeGroupInput')
+    target = tree.nodes.new('NodeGroupOutput')
+    source.location = (-700, 120)
+    target.location = (600, 120)
+
+    def connect(value, socket):
+        if isinstance(value, bpy.types.NodeSocket):
+            tree.links.new(value, socket)
+        else:
+            socket.default_value = value
+
+    def math_node(operation, *values):
+        node = tree.nodes.new('ShaderNodeMath')
+        node.operation = operation
+        index = len(tree.nodes) - 3
+        node.location = (-450 + (index % 4) * 210, 120 - (index // 4) * 190)
+        for socket, value in zip(node.inputs, values):
+            connect(value, socket)
+        return node.outputs[0]
+
+    p = source.outputs
+    if effect == 'WAVE':
+        phase = math_node('ADD', math_node('DIVIDE', p['Distance'], p['Wavelength']), p['Phase'])
+        sine = math_node('SINE', math_node('MULTIPLY', phase, math.tau))
+        amplitude = math_node('MULTIPLY', sine, p['Amplitude'])
+        vector = tree.nodes.new('ShaderNodeCombineXYZ')
+        vector.location = (380, 120)
+        tree.links.new(amplitude, vector.inputs['Y'])
+        value = vector.outputs[0]
+    elif effect == 'DASH':
+        phase = math_node('ADD', p['Distance'], p['Phase'])
+        period = math_node('ADD', p['Length'], p['Gap'])
+        value = math_node('LESS_THAN', math_node('FLOORED_MODULO', phase, period), p['Length'])
+    elif effect == 'TAPER':
+        curve = tree.nodes.new('ShaderNodeFloatCurve')
+        curve.location = (-420, 120)
+        mapping = curve.mapping
+        mapping.curves[0].points[0].location = (0, 0)
+        mapping.curves[0].points[-1].location = (1, 0)
+        mapping.curves[0].points.new(.2, 1)
+        mapping.curves[0].points.new(.8, 1)
+        mapping.update()
+        tree.links.new(p['Factor'], curve.inputs['Value'])
+        # Apply pressure in the same raster size domain as the quick brush.
+        # A plain width multiplier makes thin ends broader than Pencil's curve.
+        domain = math_node('MINIMUM', p['Width'],
+                           math_node('MULTIPLY_ADD', p['Width'], .5, 1))
+        pressure = math_node('MULTIPLY', curve.outputs[0], domain)
+        value = math_node('MAXIMUM', pressure, math_node('MULTIPLY_ADD', pressure, 2, -2))
+    else:
+        vector = tree.nodes.new('ShaderNodeCombineXYZ')
+        vector.location = (-420, 120)
+        tree.links.new(p['ID'], vector.inputs['X'])
+        tree.links.new(p['Seed'], vector.inputs['Y'])
+        noise = tree.nodes.new('ShaderNodeTexWhiteNoise')
+        noise.noise_dimensions = '2D'
+        noise.location = (-200, 120)
+        tree.links.new(vector.outputs[0], noise.inputs['Vector'])
+        value = math_node('ADD', p['Min'], math_node('MULTIPLY', noise.outputs['Value'],
+                          math_node('SUBTRACT', p['Max'], p['Min'])))
+    tree.links.new(value, target.inputs[0])
+    return tree
+
+
+class NODE_OT_npr_line_brush_effect(NodeAddOperator, Operator):
+    bl_idname = 'node.npr_line_brush_effect'
+    bl_label = 'Add Brush Effect Group'
+    bl_description = 'Add an editable node group for a brush effect'
+    bl_options = {'REGISTER', 'UNDO'}
+    use_transform: BoolProperty(name='Use Transform', default=True)
+    effect: EnumProperty(name='Effect', translation_context='NPRBrushEffect',
+                        items=(('WAVE', 'Wave', 'Distance to a normal offset'),
+                               ('DASH', 'Dashes', 'Distance to an opacity mask'),
+                               ('TAPER', 'Taper', 'Factor through an editable Float Curve'),
+                               ('RANDOM', 'Per Stroke Random', 'ID and seed to a value range')))
+
+    @classmethod
+    def poll(cls, context):
+        space = context.space_data
+        return space and space.type == 'NODE_EDITOR' and space.tree_type == 'NPRLineNodeTree'
+
+    def execute(self, context):
+        group = brush_effect_group(self.effect)
+        self.deselect_nodes(context)
+        node = self.create_node(context, 'NPRLineNodeGroup')
+        if node is None:
+            return {'CANCELLED'}
+        node.node_tree = group
+        return {'FINISHED'}
+
+
+def _preview_parent_groups(node):
+    """Capture the edited instance now; deferred evaluation has no editor context."""
+    space = bpy.context.space_data
+    if not space or space.type != 'NODE_EDITOR' or space.edit_tree != node.id_data:
+        return ()
+    path = tuple(space.path)
+    parents = []
+    for previous, current in zip(path, path[1:]):
+        parent = previous.node_tree.nodes.active
+        if not parent or parent.bl_idname != 'NPRLineNodeGroup' or parent.node_tree != current.node_tree:
+            return ()
+        parents.append(parent)
+    return tuple(parents)
+
+
+def _preview_key(node, parents):
+    return (node.as_pointer(), tuple(parent.as_pointer() for parent in parents))
+
+
+def _preview_sampling(node, parents):
+    root = parents[0].id_data if parents else node.id_data
+    output = next((n for n in root.nodes if n.bl_idname == 'NPRLineNodeOutput' and n.is_active_output), None)
+    quality = next((s for s in output.inputs if s.identifier == 'field_sample_length'), None) if output else None
+    return float(_socket_value(quality) or .9) if quality else .9
+
+
+def region_preview(node, length=256, width=512, height=160, parents=None):
+    """Render a disposable local stroke through the scene's actual brush evaluator.
+
+    Preview fitting happens after evaluation; the requested length stays in pixels.
+    No user scene, object, image, node tree, or file is saved or edited.
+    """
+    global _brush_previews, _region_preview_busy
+    if _region_preview_busy:
+        return None
+    import numpy as np
+    _region_preview_busy = True
+    parents = _preview_parent_groups(node) if parents is None else parents
+    scene = tree = obj = mesh = camera = camera_data = None
+    trees = []
+    try:
+        scene = bpy.data.scenes.new('Brush Region Preview')
+        scene.render.engine = 'BLENDER_EEVEE'
+        render_width = int(length) + 64
+        render_height = 128
+        scene.render.resolution_x = render_width
+        scene.render.resolution_y = render_height
+        scene.render.resolution_percentage = 100
+        scene.render.film_transparent = True
+        scene.eevee.taa_samples = scene.eevee.taa_render_samples = 1
+        camera_data = bpy.data.cameras.new('Brush Preview Camera')
+        camera_data.type = 'ORTHO'
+        camera_data.ortho_scale = render_width
+        camera = bpy.data.objects.new('Brush Preview Camera', camera_data)
+        scene.collection.objects.link(camera)
+        camera.location = (0, 0, 5)
+        scene.camera = camera
+        mesh = bpy.data.meshes.new('Brush Preview Local Stroke')
+        mesh.from_pydata([(-length / 2, 0, 0), (length / 2, 0, 0)], [(0, 1)], [])
+        obj = bpy.data.objects.new('Brush Preview Local Stroke', mesh)
+        scene.collection.objects.link(obj)
+        tree = node.id_data.copy()
+        trees.append(tree)
+        selected = tree.nodes[node.name].outputs[0]
+        original_tree = node.id_data
+        # Carry the selected Brush through copies of its ancestor groups, retaining
+        # linked fields and per-instance defaults instead of baking scalar guesses.
+        for parent in reversed(parents):
+            if parent.node_tree != original_tree:
+                raise ReferenceError('Edited Brush Output group path changed')
+            interface = tree.interface.new_socket(name='Brush Preview', in_out='OUTPUT',
+                                                  socket_type='NodeSocketNPRLineBrush')
+            group_output = tree.nodes.new('NodeGroupOutput')
+            group_output.is_active_output = True
+            tree.links.new(selected, input_socket(group_output, interface.identifier))
+            parent_tree = parent.id_data.copy()
+            trees.append(parent_tree)
+            instance = parent_tree.nodes[parent.name]
+            instance.node_tree = tree
+            selected = next(s for s in instance.outputs if s.identifier == interface.identifier)
+            tree = parent_tree
+            original_tree = parent.id_data
+        output = tree.nodes.new('NPRLineNodeOutput')
+        output.is_active_output = True
+        input_socket(output, 'field_sample_length').default_value = _preview_sampling(node, parents)
+        source = tree.nodes.new('NPRLineNodeObjects')
+        source.mode = 'OBJECTS'
+        input_socket(source, 'object_0').default_value = obj
+        settings = tree.nodes.new('NPRLineNodeSettings')
+        for socket in settings.inputs:
+            if socket.identifier.startswith(('visible_', 'hidden_')) and socket.type == 'BOOLEAN':
+                socket.default_value = socket.identifier == 'visible_wire'
+        tree.links.new(source.outputs[0], input_socket(settings, 'objects'))
+        tree.links.new(selected, input_socket(settings, 'visible_brush'))
+        tree.links.new(settings.outputs[0], input_socket(output, 'plan'))
+        scene.eevee.geometry_line_tree = tree
+        scene.eevee.use_geometry_lines = True
+        scene.view_layers[0].eevee.use_pass_geometry_line = True
+        layer = np.asarray(tree.preview_pixels(scene, render_width, render_height), dtype=np.float32)
+        layer = layer.reshape(render_height, render_width, 4)[::-1].copy()
+        signature = _region_signature(node, parents)
+        key = _preview_key(node, parents)
+        _region_preview_cache[key] = (signature, layer)
+        preview = _output_preview_swatch(node, width, height, signature, layer, key)
+        if _clear_brush_preview_on_load not in bpy.app.handlers.load_pre:
+            bpy.app.handlers.load_pre.append(_clear_brush_preview_on_load)
+        return preview
+    finally:
+        if scene is not None:
+            bpy.data.scenes.remove(scene)
+        for copied_tree in reversed(trees):
+            bpy.data.node_groups.remove(copied_tree)
+        for collection, value in ((bpy.data.objects, obj), (bpy.data.objects, camera), (bpy.data.meshes, mesh),
+                                  (bpy.data.cameras, camera_data)):
+            if value is not None:
+                collection.remove(value)
+        _region_preview_busy = False
+
+
+def _region_signature(node, parents=()):
+    """Only upstream fields and brush settings affect the local test stroke."""
+    seen = set()
+    def signature(item):
+        pointer = item.as_pointer()
+        if pointer in seen:
+            return ('reference', pointer)
+        seen.add(pointer)
+        values = []
+        for socket in (*item.inputs, *item.outputs):
+            if socket.is_output:
+                value = getattr(socket, 'default_value', None)
+                if value is not None:
+                    values.append((socket.identifier, _preview_value_key(value)))
+                continue
+            if socket.is_linked:
+                values.append((socket.identifier, tuple((link.from_socket.identifier,
+                               signature(link.from_node)) for link in socket.links)))
+            else:
+                value = getattr(socket, 'default_value', None)
+                values.append((socket.identifier, _preview_value_key(value)))
+        properties = tuple((name, getattr(item, name)) for name in (
+            'mode', 'mute', 'operation', 'data_type', 'blend_type', 'factor_mode', 'clamp_factor',
+            'clamp_result', 'use_clamp', 'interpolation_type', 'clamp', 'interpolation',
+            'extension', 'projection', 'raster_size_response', 'stroke_mode', 'wave_units',
+            'override_stroke_connection', 'preview_length', 'enabled', 'uv_selection',
+            'wrap_u', 'wrap_v', 'filter_mode') if hasattr(item, name))
+        ramp = getattr(item, 'color_ramp', None)
+        color_ramp = ((ramp.interpolation, ramp.color_mode, ramp.hue_interpolation,
+                       tuple((e.position, tuple(e.color)) for e in ramp.elements)) if ramp else None)
+        group = getattr(item, 'node_tree', None)
+        nested = tuple(signature(n) for n in group.nodes) if group else None
+        image = getattr(item, 'image', None)
+        image_key = _preview_value_key(image)
+        curves = tuple(_curve_signature(item, c) for c in ('width', 'opacity'))
+        mapping = _mapping_signature(getattr(item, 'mapping', None))
+        return (pointer, properties, tuple(values), color_ramp, nested, image_key, curves, mapping,
+                getattr(item, 'noise_dimensions', None))
+    return (signature(node), tuple(signature(parent) for parent in parents), _preview_sampling(node, parents))
+
+
+def _output_preview_swatch(node, width, height, signature=None, layer=None, cache_key=None):
+    """All swatch sizes share one evaluated stroke; fitting never changes field inputs."""
+    global _brush_previews
+    import numpy as np
+    if _brush_previews is None:
+        _brush_previews = previews.new()
+    key = f'region_{cache_key or _preview_key(node, ())}_{width}_{height}'
+    if key not in _brush_previews:
+        if len(_brush_previews) >= 64:
+            oldest = next(iter(_brush_previews))
+            del _brush_previews[oldest]
+            _brush_preview_cache.pop(oldest, None)
+        _brush_previews.new(key)
+    cached = _brush_preview_cache.get(key)
+    if cached and cached[0] == signature:
+        return _brush_previews[key]
+    yy, xx = np.mgrid[:height, :width]
+    pixels = np.ones((height, width, 4), dtype=np.float32)
+    pixels[:, :, :3] = np.where((xx // 12 + yy // 12) % 2, .90, .98)[:, :, None]
+    pixels[height // 2, :, :3] = (.35, .45, .55)
+    if layer is not None:
+        render_height, render_width = layer.shape[:2]
+        scale = min(width / render_width, height / render_height)
+        draw_width, draw_height = int(render_width * scale), int(render_height * scale)
+        xs = np.minimum((np.arange(draw_width) / scale).astype(int), render_width - 1)
+        ys = np.minimum((np.arange(draw_height) / scale).astype(int), render_height - 1)
+        sampled = layer[ys[:, None], xs[None, :]]
+        alpha = sampled[:, :, 3:4]
+        rgb = np.divide(sampled[:, :, :3], np.maximum(alpha, 1e-10))
+        rgb = np.where(rgb < .0031308, rgb * 12.92, 1.055 * np.maximum(rgb, 0) ** (1 / 2.4) - .055)
+        left, bottom = (width - draw_width) // 2, (height - draw_height) // 2
+        target = pixels[bottom:bottom + draw_height, left:left + draw_width, :3]
+        target[:] = target * (1 - alpha) + rgb * alpha
+    preview = _brush_previews[key]
+    preview.image_size = (width, height)
+    preview.image_pixels_float = pixels[::-1].reshape(-1).tolist()
+    _brush_preview_cache[key] = (signature, time.monotonic())
+    return preview
+
+
+def _redraw_brush_nodes():
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type == 'NODE_EDITOR' and area.ui_type == 'NPRLineNodeTree':
+                area.tag_redraw()
+
+
+def output_brush_preview(node, width=192, height=64):
+    """Queue real GPU evaluation outside drawing and return a cached inline swatch."""
+    parents = _preview_parent_groups(node)
+    signature = _region_signature(node, parents)
+    cache_key = _preview_key(node, parents)
+    cached = _region_preview_cache.get(cache_key)
+    if not _region_preview_busy:
+        if cached is not None and cached[0] == signature:
+            _region_preview_pending.pop(cache_key, None)
+        else:
+            pending = _region_preview_pending.get(cache_key)
+            if pending is None or pending[3] != signature:
+                _region_preview_pending[cache_key] = (node.id_data, node.name, parents, signature,
+                                                     time.monotonic())
+            if not bpy.app.timers.is_registered(_update_output_brush_previews):
+                bpy.app.timers.register(_update_output_brush_previews,
+                                        first_interval=_BRUSH_PREVIEW_IDLE_DELAY)
+    if _clear_brush_preview_on_load not in bpy.app.handlers.load_pre:
+        bpy.app.handlers.load_pre.append(_clear_brush_preview_on_load)
+    return _output_preview_swatch(node, width, height, *(cached if cached else (None, None)), cache_key)
+
+
+def _update_output_brush_previews():
+    if not _region_preview_pending:
+        return None
+    if _region_preview_busy or bpy.app.is_job_running('RENDER'):
+        return .2
+    key = next(reversed(_region_preview_pending))
+    tree, name, parents, signature, changed_at = _region_preview_pending[key]
+    # A timer alone is not a debounce: a continuous slider drag would otherwise
+    # run synchronous offscreen drawing every few events on the UI thread.
+    if not bpy.app.background:
+        remaining = _BRUSH_PREVIEW_IDLE_DELAY - (time.monotonic() - changed_at)
+        if remaining > 0:
+            return remaining
+        if any(op.bl_idname.startswith(('TRANSFORM_OT_', 'NODE_OT_link', 'NODE_OT_resize'))
+               for window in bpy.context.window_manager.windows for op in window.modal_operators):
+            return .1
+    _region_preview_pending.pop(key)
+    try:
+        node = tree.nodes.get(name)
+        if node is not None and _preview_key(node, parents) == key:
+            current_signature = _region_signature(node, parents)
+            if not bpy.app.background and current_signature != signature:
+                _region_preview_pending[key] = (tree, name, parents, current_signature, time.monotonic())
+                return _BRUSH_PREVIEW_IDLE_DELAY
+            region_preview(node, node.preview_length, 192, 64, parents)
+            _region_preview_errors.pop(key, None)
+            while len(_region_preview_cache) > 64:
+                del _region_preview_cache[next(iter(_region_preview_cache))]
+    except ReferenceError:
+        # Undo and node/group deletion can invalidate a queued RNA handle before
+        # its timer runs. Discard that request; a live node queues its own preview.
+        _region_preview_errors.pop(key, None)
+        _region_preview_cache.pop(key, None)
+    except (RuntimeError, ValueError) as error:
+        _region_preview_errors[key] = str(error)
+        _region_preview_cache[key] = (signature, None)
+        print('Brush Output preview: ' + str(error))
+    _redraw_brush_nodes()
+    return .15 if _region_preview_pending else None
 
 
 def _socket_value(socket, seen=None, parents=()):
@@ -120,8 +532,13 @@ def _envelope(arc, length, start, end):
 def _curve_signature(node, channel):
     if not getattr(node, 'use_' + channel + '_curve', False):
         return None
-    mapping = getattr(node, channel + '_curve')
-    return (mapping.use_clip, mapping.clip_min_x, mapping.clip_max_x,
+    return _mapping_signature(getattr(node, channel + '_curve'))
+
+
+def _mapping_signature(mapping):
+    if mapping is None:
+        return None
+    return (mapping.extend, mapping.use_clip, mapping.clip_min_x, mapping.clip_max_x,
             mapping.clip_min_y, mapping.clip_max_y,
             tuple((p.location[0], p.location[1], p.handle_type) for p in mapping.curves[0].points))
 
@@ -331,11 +748,16 @@ def _sample_preview_map(texture, settings, u, v):
 
 
 def _preview_value_key(value):
+    if isinstance(value, bpy.types.Image):
+        return (value.as_pointer(), value.update_revision, tuple(value.size),
+                value.colorspace_settings.name, value.alpha_mode)
     if isinstance(value, bpy.types.ID):
         return value.as_pointer()
     if isinstance(value, dict):
         return tuple((key, _preview_value_key(item)) for key, item in sorted(value.items()))
-    return value
+    if isinstance(value, (str, int, float, bool, type(None))):
+        return value
+    return tuple(value)
 
 
 def brush_preview(node, width=384, height=128):
@@ -516,6 +938,22 @@ def brush_preview(node, width=384, height=128):
             stamp_seed = seed + int(arc) * 7
             r = radius if simple and raster else _scale_width(radius, width_envelope(arc), raster)
             next_r = _scale_width(radius, width_envelope(min(length, arc + length / count)), raster) if simple and not raster else r
+            sample_step = length / count
+            if simple and raster and values.get('dashed', False):
+                period = max(.001, number('dash_length', 8) + number('dash_space', 5))
+                phase = number('dash_phase')
+                dash_start = math.floor((arc + phase) / period) * period - phase
+                if dash_start + number('dash_length', 8) < arc:
+                    dash_start += period
+                first = max(arc, dash_start)
+                last = min(arc + sample_step, dash_start + number('dash_length', 8))
+                if first > last:
+                    continue
+                u0, u1 = (first - arc) / sample_step, (last - arc) / sample_step
+                vx, vy = bx - ax, by - ay
+                bx, by = ax + vx * u1, ay + vy * u1
+                ax, ay = ax + vx * u0, ay + vy * u0
+                arc, sample_step = first, last - first
             cx, cy = ax, ay
             angle = math.atan2(height * (13 / 128) * math.tau * math.cos(t * math.tau), length)
             if stroke_mode != 'RAKE':angle = 0
@@ -549,7 +987,7 @@ def brush_preview(node, width=384, height=128):
                 distance = np.hypot(dx - vx * u, dy - vy * u)
                 local_radius = r + (next_r - r) * u
                 if raster:
-                    pressure_arc = arc + length / count * raw_u
+                    pressure_arc = arc + sample_step * raw_u
                     if width_table is not None:
                         pressure = np.interp(np.clip(pressure_arc / max(length, 1e-8) * 256 / 255, 0, 1),
                                              np.linspace(0, 1, 256), width_table)
@@ -563,8 +1001,8 @@ def brush_preview(node, width=384, height=128):
                 else:
                     physical_radius, size_alpha = local_radius, 1
                 coverage = np.clip(physical_radius - distance + .5, 0, 1) * size_alpha
-                sample_arc += length / count * u
-                dash_arc += length / count * raw_u
+                sample_arc += sample_step * u
+                dash_arc += sample_step * raw_u
                 local_x, local_y = u, distance / np.maximum(local_radius, 1e-5)
             else:
                 physical_r, size_alpha = _raster_size(r, True) if raster else (r, 1)
@@ -591,7 +1029,7 @@ def brush_preview(node, width=384, height=128):
                     amount = np.clip(number('brush_map_opacity', 1), 0, 1)
                     coverage *= 1 - amount + amount * mask
                 coverage *= size_alpha
-            if values.get('dashed', False):
+            if values.get('dashed', False) and not (simple and raster):
                 coverage = np.where((dash_arc + number('dash_phase')) % max(.001, number('dash_length', 8) +
                                      number('dash_space', 5)) < number('dash_length', 8), coverage, 0)
             alpha = coverage * opacity * opacity_envelope(sample_arc)
@@ -616,6 +1054,11 @@ def clear_brush_preview():
         previews.remove(_brush_previews)
         _brush_previews = None
     _brush_preview_cache = {}
+    _region_preview_cache.clear()
+    _region_preview_pending.clear()
+    _region_preview_errors.clear()
+    if bpy.app.timers.is_registered(_update_output_brush_previews):
+        bpy.app.timers.unregister(_update_output_brush_previews)
 
 
 @bpy.app.handlers.persistent
@@ -625,6 +1068,195 @@ def _clear_brush_preview_on_load(_):
 
 def input_socket(node, identifier):
     return next(socket for socket in node.inputs if socket.identifier == identifier)
+
+
+def _copy_brush_settings(source, target, skip=()):
+    """Shared by single-user copies and conversion of the experimental Brush chain."""
+    for name in ('mode', 'raster_size_response', 'stroke_mode', 'wave_units',
+                 'override_stroke_connection', 'use_width_curve', 'use_opacity_curve'):
+        setattr(target, name, getattr(source, name))
+    for name in ('width_curve', 'opacity_curve'):
+        old, new = getattr(source, name), getattr(target, name)
+        for prop in ('use_clip', 'clip_min_x', 'clip_max_x', 'clip_min_y', 'clip_max_y', 'extend'):
+            setattr(new, prop, getattr(old, prop))
+        old_points, points = old.curves[0].points, new.curves[0].points
+        while len(points) > 2:
+            points.remove(points[1])
+        points[0].location, points[-1].location = old_points[0].location[:], old_points[-1].location[:]
+        for point in list(old_points)[1:-1]:
+            points.new(*point.location)
+        for a, b in zip(old_points, points):
+            b.handle_type = a.handle_type
+        new.update()
+    for socket in source.inputs:
+        if socket.identifier in skip:
+            continue
+        copy = next((s for s in target.inputs if s.identifier == socket.identifier), None)
+        if copy is not None:
+            if hasattr(socket, 'default_value'):
+                value = socket.default_value
+                copy.default_value = value[:] if hasattr(value, '__len__') and not isinstance(value, str) else value
+            if socket.is_linked:
+                target.id_data.links.new(socket.links[0].from_socket, copy)
+
+
+def migrate_brush_fields(tree):
+    """Convert the former local Brush chain to ordinary vector fields, in memory."""
+    legacy = {'NPRLineNodeBrushInput', 'NPRLineNodeSetPosition', 'NPRLineNodeResample'}
+    if not any(n.bl_idname in legacy for n in tree.nodes):
+        return 0
+    positions = {}
+    roots = {}
+    intervals = {}
+    zero = None
+
+    def original():
+        nonlocal zero
+        if zero is None:
+            info = tree.nodes.new('NPRLineNodeStrokeInfo')
+            info.location = (-1000, 300)
+            zero = info.outputs['Position']
+        return zero
+
+    def source(socket):
+        seen = set()
+        while socket.is_linked:
+            socket = socket.links[0].from_socket
+            node = socket.node
+            if node.as_pointer() in seen:
+                raise ValueError('Cyclic legacy Brush chain')
+            seen.add(node.as_pointer())
+            if node.bl_idname != 'NodeReroute':
+                return node
+            socket = node.inputs[0]
+        return None
+
+    # Validate the complete convertible chain before changing any sockets. Cross-group
+    # legacy Brush routing keeps its original evaluator instead of a partial conversion.
+    checked = set()
+    visiting = set()
+    def validate(node):
+        if node is None or node.as_pointer() in checked:
+            return
+        key = node.as_pointer()
+        if key in visiting:
+            raise ValueError('Cyclic legacy Brush chain')
+        visiting.add(key)
+        if node.bl_idname in {'NPRLineNodeSetPosition', 'NPRLineNodeResample'}:
+            validate(source(input_socket(node, 'brush')))
+        elif node.bl_idname not in {'NPRLineNodeBrushInput', 'NPRLineNodeBrush'}:
+            raise ValueError('Legacy Brush routing through a group keeps its original evaluator')
+        visiting.remove(key)
+        checked.add(key)
+
+    for node in tree.nodes:
+        if (node.bl_idname in {'NPRLineNodeBrushOutput', 'NPRLineNodeStrokeInfo'} and
+                not node.use_field_inputs):
+            validate(source(input_socket(node, 'brush')))
+
+    def connect(value, target):
+        if isinstance(value, bpy.types.NodeSocket):
+            tree.links.new(value, target)
+        else:
+            target.default_value = value
+
+    def value(socket):
+        return socket.links[0].from_socket if socket.is_linked else socket.default_value[:]
+
+    def vector(operation, a, b, location):
+        node = tree.nodes.new('ShaderNodeVectorMath')
+        node.operation = operation
+        node.location = location
+        connect(a, node.inputs[0])
+        connect(b, node.inputs[1])
+        return node.outputs['Vector']
+
+    def position(node):
+        key = node.as_pointer()
+        if key in positions:
+            if positions[key] is None:
+                raise ValueError('Cyclic legacy position field')
+            return positions[key]
+        positions[key] = None
+        if node.bl_idname in {'NPRLineNodeBrushInput', 'NPRLineNodeBrush'}:
+            result = original()
+            roots[key], intervals[key] = node, .9
+        elif node.bl_idname in {'NPRLineNodeSetPosition', 'NPRLineNodeResample'}:
+            incoming = source(input_socket(node, 'brush'))
+            if incoming is None:
+                raise ValueError('Legacy Brush chain has no source')
+            before = position(incoming)
+            roots[key], intervals[key] = roots[incoming.as_pointer()], intervals[incoming.as_pointer()]
+            result = before
+            if not node.mute and node.bl_idname == 'NPRLineNodeResample':
+                intervals[key] = float(_socket_value(input_socket(node, 'length')) or .9)
+            if not node.mute and node.bl_idname == 'NPRLineNodeSetPosition':
+                desired = input_socket(node, 'position')
+                result = vector('ADD', value(desired) if desired.is_linked else before,
+                                value(input_socket(node, 'offset')), tuple(node.location))
+                selection = input_socket(node, 'selection')
+                if selection.is_linked:
+                    mix = tree.nodes.new('ShaderNodeMix')
+                    mix.data_type = 'VECTOR'
+                    mix.location = (node.location.x + 200, node.location.y)
+                    tree.links.new(selection.links[0].from_socket, mix.inputs[0])
+                    connect(before, mix.inputs[4])
+                    connect(result, mix.inputs[5])
+                    result = mix.outputs[1]
+                elif not selection.default_value:
+                    result = before
+        else:
+            raise ValueError('Legacy Brush routing through a group requires its original evaluator')
+        positions[key] = result
+        return result
+
+    # Preserve old stage Position reads before removing their Brush input sockets.
+    for info in list(tree.nodes):
+        if info.bl_idname != 'NPRLineNodeStrokeInfo' or info.use_field_inputs:
+            continue
+        brush = source(input_socket(info, 'brush'))
+        current = position(brush) if brush else original()
+        for link in list(info.outputs['Position'].links):
+            tree.links.new(current, link.to_socket)
+        info.use_field_inputs = True
+
+    converted = 0
+    for output in list(tree.nodes):
+        if output.bl_idname != 'NPRLineNodeBrushOutput' or output.use_field_inputs:
+            continue
+        incoming = source(input_socket(output, 'brush'))
+        if incoming is None:
+            output.use_field_inputs = True
+            converted += 1
+            continue
+        current = position(incoming)
+        base = roots[incoming.as_pointer()]
+        _copy_brush_settings(base, output, skip={'color', 'width', 'opacity'})
+        offset = vector('SUBTRACT', current, original(),
+                        (output.location.x - 200, output.location.y - 220))
+        tree.links.new(offset, input_socket(output, 'position_offset'))
+        input_socket(output, 'sample_length').default_value = intervals[incoming.as_pointer()]
+        output.use_field_inputs = True
+        converted += 1
+    # Remove only nodes from this experiment whose Brush result is no longer used.
+    for _ in range(len(tree.nodes)):
+        unused = [n for n in tree.nodes if n.bl_idname in legacy and
+                  not any(s.is_linked for s in n.outputs)]
+        if not unused:
+            break
+        for node in unused:
+            tree.nodes.remove(node)
+    return converted
+
+
+@bpy.app.handlers.persistent
+def _migrate_brush_fields_on_load(_):
+    for tree in bpy.data.node_groups:
+        if tree.bl_idname == 'NPRLineNodeTree' and tree.is_editable:
+            try:
+                migrate_brush_fields(tree)
+            except (ValueError, RuntimeError) as error:
+                print('Legacy Brush field migration: ' + str(error))
 
 
 def current_tree(context):
@@ -733,7 +1365,8 @@ class SCENE_OT_npr_line_tree_copy(Operator):
 
 
 def _inline_brush_preview_icon(node):
-    return brush_preview(node, width=192, height=64).icon_id
+    preview = output_brush_preview if node.bl_idname in FIELD_BRUSH_TYPES else brush_preview
+    return preview(node, width=192, height=64).icon_id
 
 
 def _redraw_line_timings():
@@ -741,7 +1374,10 @@ def _redraw_line_timings():
         for area in window.screen.areas:
             if area.type == 'NODE_EDITOR' and area.ui_type == 'NPRLineNodeTree':
                 tree = window.scene.eevee.geometry_line_tree
-                if tree and getattr(tree, 'show_performance', False):
+                if (tree and getattr(tree, 'show_performance', False)) or (
+                        area.spaces.active.edit_tree and any(
+                            n.bl_idname in FIELD_BRUSH_TYPES
+                            for n in area.spaces.active.edit_tree.nodes)):
                     area.tag_redraw()
     return .25
 
@@ -749,14 +1385,18 @@ def _redraw_line_timings():
 class NODE_OT_npr_line_brush_preview(Operator):
     bl_idname = 'node.npr_line_brush_preview'
     bl_label = 'Brush Preview'
-    bl_description = 'Preview this brush on a sample curve without evaluating scene geometry or visibility'
+    bl_description = 'Preview this brush on a local sample stroke'
     node_name: StringProperty()
+    length: IntProperty(name='Length (px)', default=256, min=16, max=4096)
 
     def invoke(self, context, event):
         tree = current_tree(context)
         node = tree.nodes.get(self.node_name) if tree else None
-        if node is None or node.bl_idname != 'NPRLineNodeBrush':
+        if node is None or node.bl_idname not in BRUSH_TYPES:
             return {'CANCELLED'}
+        if node.bl_idname in FIELD_BRUSH_TYPES:
+            self.length = node.preview_length
+            return context.window_manager.invoke_props_dialog(self, width=420)
         return context.window_manager.invoke_popup(self, width=480)
 
     def draw(self, context):
@@ -765,6 +1405,10 @@ class NODE_OT_npr_line_brush_preview(Operator):
         if node is None:
             return
         layout = self.layout
+        if node.bl_idname in FIELD_BRUSH_TYPES:
+            layout.prop(self, 'length')
+            layout.label(text='Scene UV, color attributes and AOV use fallback values')
+            return
         layout.label(text=node.label or node.name, icon='BRUSH_DATA')
         layout.template_icon(icon_value=brush_preview(node).icon_id, scale=18.0)
         layout.label(text='Local sample curve; large widths are fitted to the swatch', icon='INFO')
@@ -773,15 +1417,28 @@ class NODE_OT_npr_line_brush_preview(Operator):
     def execute(self, context):
         tree = current_tree(context)
         node = tree.nodes.get(self.node_name) if tree else None
-        if node is None or node.bl_idname != 'NPRLineNodeBrush':
+        if node is None or node.bl_idname not in BRUSH_TYPES:
             return {'CANCELLED'}
-        brush_preview(node)
+        if node.bl_idname in FIELD_BRUSH_TYPES:
+            node.preview_length = self.length
+            output_brush_preview(node)
+            _redraw_brush_nodes()
+        else:
+            brush_preview(node)
         return {'FINISHED'}
 
     @classmethod
     def register(cls):
         bpy.types.NPRLineNodeBrush.brush_preview_icon = IntProperty(
             get=_inline_brush_preview_icon, options={'HIDDEN', 'SKIP_SAVE'})
+        for name in FIELD_BRUSH_TYPES:
+            node_type = getattr(bpy.types, name)
+            node_type.brush_preview_icon = IntProperty(
+                get=_inline_brush_preview_icon, options={'HIDDEN', 'SKIP_SAVE'})
+            node_type.preview_length = IntProperty(
+                name='Preview Length (px)', default=256, min=16, max=4096)
+        if _migrate_brush_fields_on_load not in bpy.app.handlers.load_post:
+            bpy.app.handlers.load_post.append(_migrate_brush_fields_on_load)
         if not bpy.app.timers.is_registered(_redraw_line_timings):
             bpy.app.timers.register(_redraw_line_timings, persistent=True)
 
@@ -789,6 +1446,13 @@ class NODE_OT_npr_line_brush_preview(Operator):
     def unregister(cls):
         if hasattr(bpy.types.NPRLineNodeBrush, 'brush_preview_icon'):
             del bpy.types.NPRLineNodeBrush.brush_preview_icon
+        for type_name in FIELD_BRUSH_TYPES:
+            node_type = getattr(bpy.types, type_name)
+            for name in ('brush_preview_icon', 'preview_length'):
+                if hasattr(node_type, name):
+                    delattr(node_type, name)
+        if _migrate_brush_fields_on_load in bpy.app.handlers.load_post:
+            bpy.app.handlers.load_post.remove(_migrate_brush_fields_on_load)
         if bpy.app.timers.is_registered(_redraw_line_timings):
             bpy.app.timers.unregister(_redraw_line_timings)
         clear_brush_preview()
@@ -896,42 +1560,50 @@ class NODE_OT_npr_line_make_brush_unique(Operator):
         if node is None or node.bl_idname != 'NPRLineNodeSettings':
             return {'CANCELLED'}
         target = input_socket(node, self.socket_identifier)
-        if not target.is_linked or target.links[0].from_node.bl_idname != 'NPRLineNodeBrush':
+        if not target.is_linked or target.links[0].from_node.bl_idname not in BRUSH_TYPES:
             return {'CANCELLED'}
         original = target.links[0].from_node
-        brush = tree.nodes.new('NPRLineNodeBrush')
+        if original.bl_idname == 'NPRLineNodeBrushClosureOutput':
+            space = context.space_data
+            if not space or space.type != 'NODE_EDITOR' or space.edit_tree != tree:
+                self.report({'INFO'}, 'Open this brush closure in the node editor to copy it')
+                return {'CANCELLED'}
+            start = next((n for n in tree.nodes if n.bl_idname == 'NPRLineNodeBrushClosureInput'
+                          and n.paired_output == original), None)
+            if start is None:
+                return {'CANCELLED'}
+            connected = {start, original}
+            pending = [original]
+            while pending:
+                for socket in pending.pop().inputs:
+                    for link in socket.links:
+                        if link.from_node not in connected:
+                            connected.add(link.from_node)
+                            pending.append(link.from_node)
+            for candidate in tree.nodes:
+                candidate.select = candidate in connected
+            tree.nodes.active = original
+            previous = set(tree.nodes)
+            bpy.ops.node.duplicate('EXEC_DEFAULT')
+            copies = set(tree.nodes) - previous
+            brush = next(n for n in copies if n.bl_idname == original.bl_idname)
+            brush.preview_length = original.preview_length
+            for copy in copies:
+                copy.location.y -= 400
+            tree.links.new(brush.outputs[0], target)
+            tree.nodes.active = brush
+            return {'FINISHED'}
+        brush = tree.nodes.new(original.bl_idname)
         brush.name = original.name + ' Copy'
         brush.label = (original.label or original.name) + ' · ' + bpy.app.translations.pgettext_iface('Copy')
-        brush.mode = original.mode
-        for name in ('raster_size_response', 'stroke_mode', 'wave_units', 'override_stroke_connection',
-                     'use_width_curve', 'use_opacity_curve'):
-            setattr(brush, name, getattr(original, name))
-        for name in ('width_curve', 'opacity_curve'):
-            source_mapping, target_mapping = getattr(original, name), getattr(brush, name)
-            for prop in ('use_clip', 'clip_min_x', 'clip_max_x', 'clip_min_y', 'clip_max_y', 'extend'):
-                setattr(target_mapping, prop, getattr(source_mapping, prop))
-            source_points, target_points = source_mapping.curves[0].points, target_mapping.curves[0].points
-            while len(target_points) > 2:
-                target_points.remove(target_points[1])
-            target_points[0].location = source_points[0].location[:]
-            target_points[-1].location = source_points[-1].location[:]
-            for point in list(source_points)[1:-1]:
-                target_points.new(*point.location)
-            for source_point, target_point in zip(source_points, target_points):
-                target_point.handle_type = source_point.handle_type
-            target_mapping.update()
+        _copy_brush_settings(original, brush)
+        if original.bl_idname == 'NPRLineNodeBrushOutput':
+            brush.preview_length = original.preview_length
         brush.parent = original.parent
         brush.location = (original.location.x, original.location.y - max(320, original.dimensions.y + 60))
         brush.width = original.width
         for source_panel, target_panel in zip(original.panel_states, brush.panel_states):
             target_panel.is_collapsed = source_panel.is_collapsed
-        for socket in original.inputs:
-            copy = input_socket(brush, socket.identifier)
-            if hasattr(socket, 'default_value'):
-                value = socket.default_value
-                copy.default_value = value[:] if hasattr(value, '__len__') and not isinstance(value, str) else value
-            if socket.is_linked:
-                tree.links.new(socket.links[0].from_socket, copy)
         tree.links.new(brush.outputs[0], target)
         for candidate in tree.nodes:
             candidate.select = False
@@ -966,6 +1638,7 @@ class NODE_OT_npr_line_move_rule(Operator):
 
 
 classes = (
+    NODE_OT_npr_line_brush_effect,
     SCENE_OT_npr_line_tree_new,
     SCENE_OT_npr_line_tree_copy,
     NODE_OT_npr_line_brush_preview,

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "eevee_geometry_lines_geometry.hh"
+#include "eevee_geometry_lines_shared.hh"
 
 namespace blender {
 struct bNodeTree;
@@ -36,7 +37,31 @@ struct RuleScope {
   bool exclude_materials = false;
 };
 
+struct FieldSource {
+  int type = 0; /* UV, color attribute, visible surface AOV. */
+  UVMapKey attribute;
+  int aov_type = 0;
+};
+
+struct BrushFields {
+  std::vector<GeometryLineFieldInstruction> instructions;
+  std::vector<FieldSource> sources;
+  std::vector<blender::Image *> images;
+  std::vector<float4> ramps;
+  int position = -1, color = -1, width = -1, opacity = -1;
+  int registers = 0;
+  /* Match the quick Simple brush lattice; Brush Output can override the interval. */
+  float resample = 0.9f;
+  uint64_t signature = 0;
+  uint64_t shape_signature = 0;
+  bool shape_uses_aov = false;
+  bool shape_uses_image = false;
+  /** Continuous closures evaluate fragment masks at the projected path coordinate. */
+  bool project_parameters = false;
+};
+
 struct Brush {
+  std::shared_ptr<BrushFields> fields;
   float4 color = float4(0, 0, 0, 1);
   float width = 2, opacity = 1;
   float spacing = 0, stretch = 1, angle = 0, softness = 0;
@@ -114,6 +139,7 @@ struct Graph {
   float reference_width = 1920;
   float antialiasing = 1;
   float offscreen_margin = 0;
+  float field_sample_length = 0.9f;
   int samples = 1;
   int preview = 0;
   uint64_t visibility_signature = 0;

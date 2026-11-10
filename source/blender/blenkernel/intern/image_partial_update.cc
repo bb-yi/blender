@@ -469,6 +469,13 @@ static PartialUpdateRegister *image_partial_update_register_ensure(Image *image)
   return image->runtime->partial_update_register;
 }
 
+uint64_t BKE_image_partial_update_revision(Image *image)
+{
+  PartialUpdateRegisterImpl *updates = unwrap(image_partial_update_register_ensure(image));
+  updates->ensure_empty_changeset();
+  return uint64_t(updates->last_changeset_id);
+}
+
 ePartialUpdateCollectResult BKE_image_partial_update_collect_changes(Image *image,
                                                                      PartialUpdateUser *user)
 {

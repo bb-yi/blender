@@ -57,6 +57,7 @@ static const EnumPropertyItem image_source_items[] = {
 #  include "BLI_math_vector.h"
 #  include "BKE_global.hh"
 #  include "BKE_image.hh"
+#  include "BKE_image_partial_update.hh"
 #  include "BKE_image_format.hh"
 #  include "BKE_lib_id.hh"
 #  include "BKE_main.hh"
@@ -100,6 +101,12 @@ static bool rna_Image_is_multiview_get(PointerRNA *ptr)
 static bool rna_Image_dirty_get(PointerRNA *ptr)
 {
   return BKE_image_is_dirty(static_cast<Image *>(ptr->data));
+}
+
+static int rna_Image_update_revision_get(PointerRNA *ptr)
+{
+  return int(bke::image::partial_update::BKE_image_partial_update_revision(
+                 static_cast<Image *>(ptr->data)) & 0x7fffffff);
 }
 
 static void rna_Image_source_set(PointerRNA *ptr, int value)
@@ -1247,6 +1254,12 @@ static void rna_def_image(BlenderRNA *brna)
   RNA_def_property_boolean_funcs(prop, "rna_Image_dirty_get", nullptr);
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);
   RNA_def_property_ui_text(prop, "Dirty", "Image has changed and is not saved");
+
+  prop = RNA_def_property(srna, "update_revision", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_int_funcs(prop, "rna_Image_update_revision_get", nullptr, nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE | PROP_ANIMATABLE);
+  RNA_def_property_flag(prop, PROP_HIDDEN | PROP_SKIP_SAVE);
+  RNA_def_property_ui_text(prop, "Content Revision", "Runtime image content revision for preview invalidation");
 
   /* generated image (image_generated_change_cb) */
   prop = RNA_def_property(srna, "generated_type", PROP_ENUM, PROP_NONE);

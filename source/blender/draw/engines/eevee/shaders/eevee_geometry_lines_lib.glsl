@@ -83,8 +83,9 @@ float line_envelope(float arc, float path_length, float start, float end)
 
 float line_brush_envelope(GeometryLineBrushData brush, uint brush_index, float arc, float path_length, bool opacity)
 {
-  if (path_length <= 0.0f) { return 1.0f; }
   bool enabled = opacity ? brush.curve_options.y != 0 : brush.curve_options.x != 0;
+  if (path_length == 0.0f || (path_length < 0.0f && !enabled)) { return 1.0f; }
+  path_length = abs(path_length);
   if (!enabled) {
     return opacity ? line_envelope(arc, path_length, brush.taper.z, brush.taper.w) :
                      line_envelope(arc, path_length, brush.taper.x, brush.taper.y);

@@ -140,6 +140,23 @@ class ShaderForeachLightZoneType : public bke::bNodeZoneType {
   }
 };
 
+class NPRBrushClosureZoneType : public bke::bNodeZoneType {
+ public:
+  NPRBrushClosureZoneType()
+  {
+    this->input_idname = "NPRLineNodeBrushClosureInput"_ustr;
+    this->output_idname = "NPRLineNodeBrushClosureOutput"_ustr;
+    this->input_type = NPR_LINE_NODE_BRUSH_CLOSURE_INPUT;
+    this->output_type = NPR_LINE_NODE_BRUSH_CLOSURE_OUTPUT;
+    this->theme_id = TH_NODE_ZONE_CLOSURE;
+  }
+
+  const int &get_corresponding_output_id(const bNode &node) const override
+  {
+    return static_cast<const NodeNPRLine *>(node.storage)->output_node_id;
+  }
+};
+
 static void register_zone_types()
 {
   static SimulationZoneType simulation_zone_type;
@@ -147,11 +164,13 @@ static void register_zone_types()
   static ForeachGeometryElementZoneType foreach_geometry_element_zone_type;
   static ClosureZoneType closure_zone_type;
   static ShaderForeachLightZoneType shader_foreach_light_zone_type;
+  static NPRBrushClosureZoneType npr_brush_closure_zone_type;
   bke::register_node_zone_type(simulation_zone_type);
   bke::register_node_zone_type(repeat_zone_type);
   bke::register_node_zone_type(foreach_geometry_element_zone_type);
   bke::register_node_zone_type(closure_zone_type);
   bke::register_node_zone_type(shader_foreach_light_zone_type);
+  bke::register_node_zone_type(npr_brush_closure_zone_type);
 }
 
 void register_nodes()

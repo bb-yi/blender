@@ -5,6 +5,7 @@
 #include "infos/eevee_geometry_lines_infos.hh"
 COMPUTE_SHADER_CREATE_INFO(eevee_geometry_lines_expand)
 #include "eevee_geometry_lines_lib.glsl"
+#include "eevee_geometry_lines_fields_lib.glsl"
 
 float3 line_world_position(float3 pixel)
 {
@@ -34,6 +35,20 @@ float line_scale_width(float radius, float factor, GeometryLineBrushData brush)
 
 float3 line_point(GeometryLinePartData part, GeometryLineBrushData brush, float t)
 {
+  float original_arc = part.arc.x + part.arc.y * t;
+  float3 local_position;
+  float4 field_color;
+  float field_width, field_opacity;
+  line_fields(brush, part, original_arc, original_arc, 1, local_position, field_color, field_width, field_opacity);
+  float mapped_arc = local_position.x;
+  /* An unchanged X is an exact passthrough. Reconstructing t from rounded
+   * cumulative arc lengths needlessly moves short source segments. */
+  if (brush.field_outputs.w != 0 && mapped_arc != original_arc) {
+    part = line_source_part(part, mapped_arc);
+    if ((part.meta.y & 1u) != 0u) { mapped_arc = mod(mapped_arc, max(part.arc.z, 1e-8f)); }
+    /* Allow tangent extrapolation only at an open path's true ends. */
+    t = (mapped_arc - part.arc.x) / max(part.arc.y, 1e-20f);
+  }
   float3 p = mix(part.a.xyz, part.b.xyz, t);
   float arc = part.arc.x + part.arc.y * t;
   float2 delta = part.b.xy - part.a.xy;
@@ -75,7 +90,7 @@ float3 line_point(GeometryLinePartData part, GeometryLineBrushData brush, float 
       offset += clamp(dot(mapped, float3(1.0f / 3.0f)), 0.0f, 1.0f) * brush.detail_maps.w;
     }
   }
-  p.xy += path_normal * offset + normal * legacy_offset + brush.offset_noise.xy;
+  p.xy += path_normal * (offset + local_position.y) + normal * legacy_offset + brush.offset_noise.xy;
   if ((part.meta.y & 1u) == 0u && (part.meta.y & 2u) != 0u && t <= 0.0f) {
     p.xy -= tangent * brush.deformation.x;
   }
@@ -104,10 +119,15 @@ void main()
   bool simple = brush.options.x == 0;
   uint grid_index = min(part.sampling.x + sample_index * part.sampling.y, part.sampling.z);
   float t0 = float(grid_index) / float(max(part.sampling.z, 1u));
-  float t1 = simple ? t0 + 1.0f / float(max(part.sampling.z, 1u)) : t0;
+  /* Derive both endpoints from bounded integer grid positions. Adding a float
+   * step to the last t0 can round above 1 and extrapolate a terminal field. */
+  uint next_grid_index = min(grid_index + 1u, part.sampling.z);
+  float t1 = simple ? float(next_grid_index) / float(max(part.sampling.z, 1u)) : t0;
   float s0 = part.arc.x + part.arc.y * t0;
   float s1 = part.arc.x + part.arc.y * t1;
-  float path_length = (part.meta.y & 1u) == 0u ? part.arc.z : 0.0f;
+  /* A negative length marks a loop: explicit curves still address its full
+   * domain, while the legacy open-end taper remains disabled. */
+  float path_length = (part.meta.y & 1u) == 0u ? part.arc.z : -part.arc.z;
   uint seed = part.meta.x + uint(brush.options.z);
   float radius = brush.tip.x * width_scale * part.arc.w * 0.5f;
   radius *= 1.0f - brush.variation.z * line_noise(seed);
@@ -129,11 +149,25 @@ void main()
     angle -= (float(random) / 32768.0f - 1.0f) * 3.1415927410125732f;
   }
   GeometryLineInstanceData instance_data;
+  float3 position_a, position_b;
+  float4 field_color_a, field_color_b;
+  float field_width_a, field_width_b, field_opacity_a, field_opacity_b;
+  line_fields(brush, part, s0, s0, 1, position_a, field_color_a, field_width_a, field_opacity_a);
+  line_fields(brush, part, s1, s1, 1, position_b, field_color_b, field_width_b, field_opacity_b);
+  /* Re-evaluate source fields at the X-remapped source location. */
+  float3 unused_position;
+  line_fields(brush, part, s0, position_a.x, 2, unused_position, field_color_a, field_width_a, field_opacity_a);
+  line_fields(brush, part, s1, position_b.x, 2, unused_position, field_color_b, field_width_b, field_opacity_b);
+  instance_data.field_color_a = field_color_a;
+  instance_data.field_color_b = field_color_b;
+  instance_data.field_parameters = float4(position_a.x, position_b.x, field_opacity_a, field_opacity_b);
   /* Raster Simple pressure is evaluated at the pixel's path projection. Baking it into
    * overlapping capsules lets a wider downstream cap fill an otherwise thin tip. */
   bool pixel_pressure = simple && raster_response && brush.curve_options.z != 0;
   instance_data.a = float4(a, pixel_pressure ? radius : line_scale_width(radius, line_brush_envelope(brush, part.range.z, s0, path_length, false), brush));
   instance_data.b = float4(b, pixel_pressure ? radius : line_scale_width(radius, line_brush_envelope(brush, part.range.z, s1, path_length, false), brush));
+  instance_data.a.w *= field_width_a / max(brush.tip.x, 1e-20f);
+  instance_data.b.w *= field_width_b / max(brush.tip.x, 1e-20f);
   instance_data.stroke = float4(s0, s1, path_length, angle);
   if (brush.maps.x >= 0.0f) {
     GeometryLineMapData map = line_maps[int(brush.maps.x)];

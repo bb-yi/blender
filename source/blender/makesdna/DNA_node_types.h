@@ -4622,6 +4622,9 @@ struct NodeGetBundleItem {
 
 /** Settings not represented by sockets in a scene-level geometry line graph. */
 struct NodeNPRLine {
+  /** Native Brush Closure pairing; unused by legacy brush nodes. */
+  int output_node_id = 0;
+  int _pad = 0;
   int mode = 0;
   int enabled = 1;
   int item_count = 1;

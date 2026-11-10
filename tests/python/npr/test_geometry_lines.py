@@ -1205,6 +1205,38 @@ def test_pencil_controls(directory):
     return {'pencil_curves_raster_coverage_endpoint_and_margin': 'passed'}
 
 
+def test_pencil_dash_caps(directory):
+    reset()
+    obj = mesh_object('Rounded Dash Stroke', [(-1.5, 0, 0), (1.5, 0, 0)], edges=[(0, 1)])
+    tree, source, brush, settings, output = setup_lines([obj], ('wire',), width=4)
+    brush.raster_size_response = True
+    set_value(brush, 'dashed', True)
+    set_value(brush, 'dash_length', 9)
+    set_value(brush, 'dash_space', 10)
+    _, dashed = render(directory, 'pencil_rounded_dash_caps')
+    # The first body ends at x=33. Its round cap covers x=34; the center
+    # between that cap and the next body at x=43 must remain transparent.
+    require(float(dashed[95, 34, 3]) > .9,
+            'Simple dash endpoints must retain the round coverage measured in Pencil')
+    require(float(dashed[95, 38, 3]) < .001,
+            'Round dash caps must preserve the remaining gap')
+    reset()
+    obj = mesh_object('Closed Curve Stroke', [(-1,-1,0),(1,-1,0),(1,1,0),(-1,1,0)],
+                      edges=[(0,1),(1,2),(2,3),(3,0)])
+    tree, source, brush, settings, output = setup_lines([obj], ('wire',), width=10)
+    brush.raster_size_response = True
+    set_value(settings, 'split_angle', 180)
+    _, full = render(directory, 'pencil_closed_curve_full')
+    brush.use_width_curve = True
+    for point in brush.width_curve.curves[0].points:
+        point.location.y = .25
+    brush.width_curve.update()
+    _, reduced = render(directory, 'pencil_closed_curve_reduced')
+    require(float(reduced[:,:,3].sum()) < float(full[:,:,3].sum()) * .4,
+            'Explicit width curves must also affect closed strokes, as in Pencil')
+    return {'pencil_simple_dash_round_caps': 'passed', 'pencil_closed_stroke_curves': 'passed'}
+
+
 def test_pencil_geometry(directory):
     scene=reset()
     foreground=mesh_object('Contour Foreground',[(-1,-1,0),(1,-1,0),(1,1,0),(-1,1,0)],faces=[(0,1,2,3)])
@@ -2535,8 +2567,12 @@ def test_surface_color_maps(directory):
     set_value(mapping,'uv_name','Gradient')
     image.pixels.foreach_set([1,0,0,.5]*2);image.update()
     _,alpha_blend=render(directory,'color_map_image_alpha')
-    require(float(np.max(np.abs(alpha_blend[120,96]-np.array([.25,.25,0,.5]))))<.002,
-            'Image alpha must weight the color blend without applying stroke opacity twice')
+    require(float(np.max(np.abs(alpha_blend[120,96]-np.array([.5,0,0,.5]))))<.002,
+            'Pencil Color Map must use image RGB independently of image alpha and stroke opacity')
+    image.pixels.foreach_set([1,0,0,0]*2);image.update()
+    _,clear_image=render(directory,'color_map_zero_image_alpha')
+    require(float(np.max(np.abs(clear_image-alpha_blend)))<.002,
+            'A zero image alpha must not discard valid RGB or change Pencil Color Map strength')
     image.pixels.foreach_set([.5,.5,.5,1]*2);image.update()
     tree.links.new(mapping.outputs[0],socket(brush,'width_map'))
     _,shared=render(directory,'color_and_width_shared_map')
@@ -2846,6 +2882,7 @@ def main():
         results.update(test_feedback(directory))
     if args.phase in ('pencil', 'all'):
         results.update(test_pencil_controls(directory))
+        results.update(test_pencil_dash_caps(directory))
         results.update(test_pencil_geometry(directory))
         results.update(test_stroke_orientation(directory))
         results.update(test_multiple_tip(directory))

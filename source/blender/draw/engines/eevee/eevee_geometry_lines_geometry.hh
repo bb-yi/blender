@@ -61,6 +61,8 @@ struct AlphaMask {
 
 struct Surface {
   uint64_t instance = 0;
+  uint32_t resource_id = 0;
+  uint32_t material_tag = 0;
   std::vector<int> rules;
   /** 0 = solid, 1 = ignore, 2 = alpha mask. */
   int occlusion = 0;
@@ -107,8 +109,8 @@ struct Geometry {
   std::vector<int> edge_faces;
   /** Corner data indexed by triangle * 3; absent mesh layers use non-finite coordinates. */
   std::map<UVMapKey, std::vector<float2>> style_uvs;
-  std::map<UVMapKey, std::vector<float3>> style_colors;
-  std::map<UVMapKey, std::vector<float3>> point_colors;
+  std::map<UVMapKey, std::vector<float4>> style_colors;
+  std::map<UVMapKey, std::vector<float4>> point_colors;
   uint64_t attributes_revision = 0;
   uint64_t revision = 0;
   uint64_t intersection_revision = 0;
