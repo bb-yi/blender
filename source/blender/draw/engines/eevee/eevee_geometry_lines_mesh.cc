@@ -572,7 +572,7 @@ struct GeometryBuilder::Impl {
         Surface surface;
         surface.instance = instance.identity;
         surface.resource_id = instance.resource_id;
-        surface.material_tag = material ? material->id.session_uid.uid_ : 0;
+        surface.material_tag = material ? material->id.session_uid : 0;
         for (int rule = 0; rule < int(graph->scopes.size()); rule++) {
           if (matches[rule] && material_matches(graph->scopes[rule], material)) {
             surface.rules.push_back(rule);

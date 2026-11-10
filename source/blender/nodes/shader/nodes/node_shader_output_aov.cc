@@ -52,7 +52,7 @@ static int node_shader_gpu_output_aov(GPUMaterial *mat,
   GPU_material_flag_set(mat, GPU_MATFLAG_AOV | GPU_MATFLAG_OBJECT_INFO);
   Material *material = GPU_material_get_material(mat);
   const ID *source = material ? DEG_get_original_id(&material->id) : nullptr;
-  const uint32_t identity = source ? source->session_uid.uid_ : 0;
+  const uint32_t identity = source ? source->session_uid : 0;
   const float material_tag[3] = {
       float(identity & 2047u), float((identity >> 11u) & 2047u), float(identity >> 22u)};
   /* Keep per-material identity in the uniform buffer, so otherwise identical

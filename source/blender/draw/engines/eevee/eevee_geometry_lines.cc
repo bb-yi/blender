@@ -24,6 +24,7 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_hash_c.hh"
 #include "BKE_image.hh"
+#include "BKE_image_gpu.hh"
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 #include "GPU_framebuffer.hh"
@@ -558,7 +559,7 @@ struct GeometryLineModule::Impl {
     for (const auto &rule : graph.occlusion) { if (rule.mode == 2) { add(rule.image); } }
     for (auto it = image_updates.begin(); it != image_updates.end();) {
       const auto found = std::find(referenced.begin(), referenced.end(), it->image);
-      if (found == referenced.end() || (*found)->id.session_uid.uid_ != it->session_uid) {
+      if (found == referenced.end() || (*found)->id.session_uid != it->session_uid) {
         it = image_updates.erase(it);
       }
       else { ++it; }
@@ -568,7 +569,7 @@ struct GeometryLineModule::Impl {
       auto it = std::find_if(image_updates.begin(), image_updates.end(),
                              [&](const ImageUpdate &item) { return item.image == image; });
       if (it == image_updates.end()) {
-        image_updates.push_back({image, image->id.session_uid.uid_, 0});
+        image_updates.push_back({image, image->id.session_uid, 0});
         it = image_updates.end() - 1;
         changed = true;
       }
@@ -1008,6 +1009,11 @@ struct GeometryLineModule::Impl {
     auto dynamic_color = [](const glines::Brush &brush) {
       return brush.color_map >= 0 || (brush.fields && brush.fields->color >= 0);
     };
+    auto image_texture = [&](blender::Image *image, ImageUser *user) {
+      gpu::Texture *texture = BKE_image_acquire_gpu_texture(image, user);
+      inst.manager->hold_texture(texture);
+      return texture;
+    };
     auto bind_fields = [&](draw::PassSimple &pass, const glines::Brush &brush) {
       pass.bind_ssbo("field_instructions", fields_buffer);
       pass.bind_ssbo("field_ramps", ramps_buffer);
@@ -1018,7 +1024,7 @@ struct GeometryLineModule::Impl {
       const char *names[] = {"field_image_0_tx", "field_image_1_tx", "field_image_2_tx", "field_image_3_tx"};
       for (int i = 0; i < LINE_FIELD_MAX_IMAGES; i++) {
         blender::Image *image = brush.fields && i < int(brush.fields->images.size()) ? brush.fields->images[i] : nullptr;
-        gpu::Texture *texture = image ? BKE_image_get_gpu_texture(image, &image_user) : nullptr;
+        gpu::Texture *texture = image ? image_texture(image, &image_user) : nullptr;
         pass.bind_texture(names[i], texture ? texture : transparent_tx.gpu_texture(),
                           GPUSamplerState(GPU_SAMPLER_FILTERING_LINEAR));
       }
@@ -1087,16 +1093,16 @@ struct GeometryLineModule::Impl {
         }
         ImageUser image_user = {};
         image_user.framenr = 1;
-        gpu::Texture *brush_texture = brush.image ? BKE_image_get_gpu_texture(brush.image, &image_user) : nullptr;
+        gpu::Texture *brush_texture = brush.image ? image_texture(brush.image, &image_user) : nullptr;
         if (!brush_texture) { brush_texture = white_tx; }
         gpu::Texture *tip = tip_texture(brush, range.brush);
         ImageUser color_user{};
         BKE_imageuser_default(&color_user);color_user.framenr=inst.scene->r.cfra;
         gpu::Texture *color_texture = brush.color_map >= 0 && graph.maps[brush.color_map].image ?
-            BKE_image_get_gpu_texture(graph.maps[brush.color_map].image, &color_user) : nullptr;
+            image_texture(graph.maps[brush.color_map].image, &color_user) : nullptr;
         if (!color_texture) { color_texture = transparent_tx; }
         gpu::Texture *brush_map_texture = brush.brush_map >= 0 && graph.maps[brush.brush_map].image ?
-            BKE_image_get_gpu_texture(graph.maps[brush.brush_map].image, &color_user) : nullptr;
+            image_texture(graph.maps[brush.brush_map].image, &color_user) : nullptr;
         if (!brush_map_texture) { brush_map_texture = white_tx; }
         for (int guide_pass = 0; guide_pass <= int(guides || mapped); guide_pass++) {
           if (guide_pass) { GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH); }
@@ -1322,10 +1328,10 @@ struct GeometryLineModule::Impl {
       BKE_imageuser_default(&image_user);
       image_user.framenr = inst.scene->r.cfra;
       gpu::Texture *width_map_texture = brush.width_map >= 0 && graph.maps[brush.width_map].image ?
-          BKE_image_get_gpu_texture(graph.maps[brush.width_map].image, &image_user) : nullptr;
+          image_texture(graph.maps[brush.width_map].image, &image_user) : nullptr;
       expand.bind_texture("width_map_tx", width_map_texture ? width_map_texture : white_tx.gpu_texture());
       gpu::Texture *distortion_texture = brush.distortion_map >= 0 && graph.maps[brush.distortion_map].image ?
-          BKE_image_get_gpu_texture(graph.maps[brush.distortion_map].image, &image_user) : nullptr;
+          image_texture(graph.maps[brush.distortion_map].image, &image_user) : nullptr;
       expand.bind_texture("distortion_map_tx", distortion_texture ? distortion_texture : transparent_tx.gpu_texture());
       expand.bind_ssbo("instances", instances_buffer);
       expand.push_constant("part_count", part_count);
