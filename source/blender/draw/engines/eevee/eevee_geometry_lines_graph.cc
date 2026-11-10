@@ -323,7 +323,7 @@ class Compiler {
     }
     if (node.flag & NODE_MUTED) {
       for (const bNodeInternalLink &link : node.internal_links()) {
-        if (link.tosock == socket) { return resolve(context, link.fromsock, depth + 1); }
+        if (link.out == socket) { return resolve(context, link.in, depth + 1); }
       }
       return {};
     }
