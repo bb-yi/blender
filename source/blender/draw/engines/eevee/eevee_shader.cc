@@ -1955,30 +1955,34 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const bool depth_offset_uses_light_access =
       has_depth_offset &&
       material_depth_offset_graph_uses_supported_light_access(gpumat, codegen_->depth_offset);
+  const bool supports_surface_light_access = geometry_type_has_surface(geometry_type) &&
+                                             ELEM(pipeline_type,
+                                                  MAT_PIPE_DEFERRED,
+                                                  MAT_PIPE_DEFERRED_NPR,
+                                                  MAT_PIPE_FORWARD,
+                                                  MAT_PIPE_BAKE_COLOR);
   const bool surface_graph_uses_glsl_light_access =
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) &&
+      supports_surface_light_access && pipeline_type != MAT_PIPE_DEFERRED_NPR &&
       (material_graph_uses_glsl_light_access(gpumat, codegen.surface) ||
        GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS));
   const bool npr_graph_uses_glsl_light_access =
+      supports_surface_light_access &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_BAKE_COLOR) &&
       material_graph_uses_glsl_light_access(gpumat, codegen.npr);
   const bool surface_pass_uses_glsl_light_access = surface_graph_uses_glsl_light_access ||
                                                    npr_graph_uses_glsl_light_access;
-  bool material_pass_uses_glsl_light_access =
-      surface_pass_uses_glsl_light_access ||
-      (ELEM(pipeline_type,
-            MAT_PIPE_DEFERRED,
-            MAT_PIPE_DEFERRED_NPR,
-            MAT_PIPE_FORWARD,
-            MAT_PIPE_BAKE_COLOR) &&
-       (material_graph_uses_glsl_light_access(gpumat, codegen.filter) ||
+  bool material_pass_uses_glsl_light_access = surface_pass_uses_glsl_light_access;
+  /* Extracted surface callbacks may be emitted in depth and shadow variants even when they
+   * aren't evaluated there. Keep their light helpers on the fallback path in those variants.
+   * The independently evaluated Depth Offset graph opts into direct lights separately. */
+  if (supports_surface_light_access) {
+    material_pass_uses_glsl_light_access |=
+        material_graph_uses_glsl_light_access(gpumat, codegen.filter) ||
         material_graph_uses_glsl_light_access(gpumat, codegen.thickness) ||
-        material_graph_uses_glsl_light_access(gpumat, codegen.volume)));
-  for (const GPUGraphOutput &graph : codegen.filter_outputs) {
-    material_pass_uses_glsl_light_access |= material_graph_uses_glsl_light_access(gpumat, graph);
-  }
-  for (const GPUGraphOutput &graph : codegen.material_functions) {
-    material_pass_uses_glsl_light_access |= material_graph_uses_glsl_light_access(gpumat, graph);
+        material_graph_uses_glsl_light_access(gpumat, codegen.volume);
+    for (const GPUGraphOutput &graph : codegen.material_functions) {
+      material_pass_uses_glsl_light_access |= material_graph_uses_glsl_light_access(gpumat, graph);
+    }
   }
   const bool uses_glsl_light_access = material_pass_uses_glsl_light_access ||
                                       depth_offset_uses_light_access;
@@ -2373,12 +2377,21 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   if (uses_glsl_light_access) {
     info.define("MAT_GLSL_LIGHT_ACCESS");
-    if (depth_offset_uses_light_access && pipeline_type != MAT_PIPE_BAKE_COLOR) {
-      info.define("LIGHT_ITER_FORCE_NO_CULLING");
+    if (depth_offset_uses_light_access) {
+      GPU_material_flag_set(gpumat, GPU_MATFLAG_DEPTH_OFFSET_LIGHT_ACCESS);
+      if (pipeline_type != MAT_PIPE_BAKE_COLOR) {
+        info.define("LIGHT_ITER_FORCE_NO_CULLING");
+      }
     }
 
     if (!has_shader_info_light_resources && !has_bsl_light_eval_resources) {
-      add_create_info_and_reserve(info, slots, "eevee_light_data");
+      /* NPR and bake still declare lights in their legacy entry-point infos. Native passes
+       * need the BSL table: an unused legacy declaration has no expansion point there. */
+      add_create_info_and_reserve(info,
+                                  slots,
+                                  ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_BAKE_COLOR) ?
+                                      "eevee_light_data" :
+                                      "eevee_LightRenderData");
     }
     if (material_pass_uses_glsl_light_access) {
       info.define("MAT_GLSL_LIGHT_SHADOW_ACCESS");

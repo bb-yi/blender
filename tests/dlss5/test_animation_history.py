@@ -18,6 +18,40 @@ OUT.mkdir(parents=True, exist_ok=True)
 HAS_PRE_FX = hasattr(bpy.context.view_layer, 'use_pass_pre_fx')
 
 
+def assert_light_driven_depth_guides(scene, tree, target):
+    # NR's separate EEVEE instance must see the same lights as the main render.
+    scene.frame_set(1)
+    scene.camera.data.dof.use_dof = False
+    light = bpy.data.lights.new('Depth Offset Sun', 'SUN')
+    light.energy = 2.0
+    scene.collection.objects.link(bpy.data.objects.new(light.name, light))
+    output = next(node for node in tree.nodes if node.type == 'OUTPUT_MATERIAL')
+    depths = []
+    for label, body in (
+        ('zero', 'return 0.0;'),
+        ('constant', 'return 0.5;'),
+        ('light', 'return glsl_light_count() > 0 ? 0.5 : 0.0;'),
+    ):
+        offset = tree.nodes.new('ShaderNodeGLSLFunction')
+        code = bpy.data.texts.new(f'depth_offset_{label}.glsl')
+        code.write(f'float offset_depth() {{ {body} }}')
+        offset.script = code
+        offset.function_name = 'offset_depth'
+        tree.links.new(offset.outputs['Result'], output.inputs['Depth Offset'])
+        directory = target / label
+        directory.mkdir(exist_ok=True)
+        os.environ['BLENDER_DLSS_NR_DUMP_INPUTS'] = str(directory)
+        bpy.ops.render.render()
+        assert scene.eevee.dlss5_render_status.startswith('Completed'), scene.eevee.dlss5_render_status
+        depth = np.fromfile(directory / '1_depth.f32', np.float32).reshape(128, 192)
+        assert np.isfinite(depth).all()
+        depths.append(depth[60:68, 92:100])
+        tree.nodes.remove(offset)
+    zero, constant, light_driven = depths
+    assert np.max(np.abs(zero - constant)) > 1e-5, 'Depth Offset must change NR input depth'
+    np.testing.assert_allclose(light_driven, constant, rtol=0, atol=1e-6)
+
+
 def child():
     import OpenImageIO as oiio
     from mathutils import Vector
@@ -59,6 +93,12 @@ def child():
     material.node_tree.links.new(noise.outputs['Color'],nodes.get('Principled BSDF').inputs['Base Color'])
     cube.data.materials.clear()
     cube.data.materials.append(material)
+    if scenario == 'outline_shell':
+        material.use_outline_shell_self_occlusion = True
+        shell = nodes.new('ShaderNodeOutputOutlineShell')
+        shell.inputs['Alpha'].default_value = 1
+        shell.inputs['Strength'].default_value = .05
+        s.frame_end = 1
     camera = s.camera
     camera.location = (3,-6,2.4)
     camera.rotation_euler = (Vector((0,0,0))-camera.location).to_track_quat('-Z','Y').to_euler()
@@ -68,6 +108,10 @@ def child():
     camera.data.dof.use_dof = True
     camera.data.dof.focus_object = cube
     camera.data.dof.aperture_fstop = 2
+    if scenario == 'depth_offset_light':
+        assert_light_driven_depth_guides(s, material.node_tree, target)
+        print('DLSS_HISTORY_CHILD_PASS', scenario, flush=True)
+        return
     if scenario == 'motion_blur':
         s.render.use_motion_blur = True
     expected_motion = {}
@@ -170,7 +214,7 @@ def child():
     for run in range(repeats):
         s.render.filepath = str(target / f'run{run}_')
         bpy.ops.render.render(animation=True)
-        for frame in range(1,6,s.frame_step):
+        for frame in range(s.frame_start, s.frame_end + 1, s.frame_step):
             image = oiio.ImageInput.open(str(target/f'run{run}_{frame:04}.exr'))
             assert image
             spec = image.spec()
@@ -232,7 +276,7 @@ else:
     reports = {'pre_fx_available': HAS_PRE_FX}
     scenarios = ['temporal', 'reset', 'cache_off', 'skip', 'camera', 'settings',
                  'layers', 'motion_blur', 'motion', 'compositor', 'backward',
-                 'missing_mask', 'small', 'guide_failure']
+                 'missing_mask', 'small', 'guide_failure', 'outline_shell', 'depth_offset_light']
     if HAS_PRE_FX:
         scenarios.append('prefx')
     selected = os.environ.get('DLSS_ANIMATION_SCENARIOS')
@@ -273,6 +317,10 @@ else:
             assert resets == ['1','1']+['0','0']*4,resets
         elif scenario == 'guide_failure':
             assert resets == ['1','0','1','0','0'],resets
+        elif scenario == 'outline_shell':
+            assert resets == ['1'], resets
+        elif scenario == 'depth_offset_light':
+            assert log.count('DLSS_GUIDE begin frame=1') == 3
         elif scenario in ('missing_mask','small'):
             assert not resets and 'DLSS_GUIDE begin' not in log,(scenario,resets)
         else:

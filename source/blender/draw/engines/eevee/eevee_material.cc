@@ -339,6 +339,7 @@ void MaterialModule::begin_sync()
   queued_textures_count = 0;
   queued_optimize_shaders_count = 0;
   has_time_dependent_materials_ = false;
+  guide_depth_uses_lights_ = false;
 
   material_override = DEG_get_evaluated(inst_.depsgraph, inst_.view_layer->mat_override);
 
@@ -584,6 +585,9 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                     blender_mat->id.name + 2);
   /* Returned material should be ready to be drawn. */
   BLI_assert(GPU_material_status(matpass.gpumat) == GPU_MAT_SUCCESS);
+  guide_depth_uses_lights_ |= inst_.is_dlss_guide_render &&
+                             GPU_material_flag_get(matpass.gpumat,
+                                                   GPU_MATFLAG_DEPTH_OFFSET_LIGHT_ACCESS);
 
   inst_.manager->register_material_resources(matpass.gpumat);
 

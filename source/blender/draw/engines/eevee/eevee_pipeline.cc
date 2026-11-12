@@ -302,6 +302,9 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
     pass.bind_resources(inst.velocity);
     pass.bind_resources(inst.sampling);
     pass.bind_resources(inst.render_textures);
+    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_DEPTH_OFFSET_LIGHT_ACCESS)) {
+      pass.bind_resources(inst.lights);
+    }
   };
 
   auto set_pass_state = [&](PassMain::Sub &pass, const bool write_prepass_attachments) {
@@ -819,6 +822,9 @@ PassMain::Sub *Prepass::add(const SurfaceDrawState &draw_state,
 
   PassMain::Sub &sub = subs_[hide_from_raycast][ztest_mode][cull_method][has_motion][write_id]->sub(
       GPU_material_get_name(gpumat));
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_DEPTH_OFFSET_LIGHT_ACCESS)) {
+    sub.bind_resources(inst_.lights);
+  }
   if (has_raycast) {
     /* NOTE: Bound per subpass since material textures could override these slots. */
     sub.bind_texture(RAYCAST_DEPTH_TEX_SLOT,

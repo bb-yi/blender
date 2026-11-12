@@ -10,6 +10,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import sys
 import time
 import unittest
@@ -112,12 +113,71 @@ def alpha_set(mat, value):
     mat.node_tree.nodes.get('Mix Shader').inputs[0].default_value = value
 
 
+def glsl_function(tree, return_type, body):
+    shader = tree.nodes.new('ShaderNodeGLSLFunction')
+    source = bpy.data.texts.new('outline_self_depth.glsl')
+    source.write(f'{return_type} evaluate() {{ {body} }}')
+    shader.script = source
+    shader.function_name = 'evaluate'
+    assert shader.parse_status == 'READY', shader.error_message
+    return shader
+
+
 class OutlineShellSelfOcclusionTest(unittest.TestCase):
     def setUp(self):
         self.scene = setup()
 
     def assert_color(self, actual, expected, tolerance=.035):
         self.assertLess(float(np.max(np.abs(np.asarray(actual) - expected))), tolerance)
+
+    def assert_no_compile_failures(self, shader):
+        self.assertFalse(shader.error_message, shader.error_message)
+        report = self.scene.eevee.performance_profiler_render_report
+        totals = re.search(r'Total requests=.* failed=(\d+)', report)
+        self.assertIsNotNone(totals, 'Missing material compilation telemetry')
+        self.assertEqual(totals.group(1), '0', totals.group(0))
+
+    def test_glsl_light_in_diffusion_callback(self):
+        self.scene.eevee.use_performance_profiler = True
+        mat = body_material('Light in diffusion', alpha=.5)
+        mat.use_outline_shell_self_occlusion = True
+        sphere(mat)
+        tree = mat.node_tree
+        shader = glsl_function(
+            tree, 'vec3',
+            'return glsl_light_count() > 0 ? vec3(0.1, 0.35, 0.8) : vec3(0.6, 0.15, 0.1);')
+        emission = next(n for n in tree.nodes if n.type == 'EMISSION')
+        mix = next(n for n in tree.nodes if n.type == 'MIX_SHADER')
+        diffusion = tree.nodes.new('ShaderNodeNPRSurfaceDiffusion')
+        tree.links.new(shader.outputs['Result'], emission.inputs['Color'])
+        tree.links.new(emission.outputs[0], diffusion.inputs['Shader'])
+        tree.links.new(diffusion.outputs[0], mix.inputs[2])
+        unlit = center(render('glsl_diffusion_no_light'))
+        self.assert_no_compile_failures(shader)
+        bpy.ops.object.light_add(type='SUN')
+        lit = center(render('glsl_diffusion_self'))
+        self.assert_no_compile_failures(shader)
+        self.assertGreater(float(lit[2] - unlit[2]), .2)
+        shell = next(n for n in tree.nodes if n.bl_idname == 'ShaderNodeOutputOutlineShell')
+        shell.inputs['Alpha'].default_value = 0
+        reference = center(render('glsl_diffusion_no_shell'))
+        self.assert_no_compile_failures(shader)
+        self.assert_color(lit, reference)
+
+    def test_glsl_light_in_depth_offset(self):
+        self.scene.eevee.use_performance_profiler = True
+        mat = body_material('Light in depth offset', alpha=0)
+        mat.use_outline_shell_self_occlusion = True
+        sphere(mat)
+        tree = mat.node_tree
+        output = next(n for n in tree.nodes if n.type == 'OUTPUT_MATERIAL')
+        shader = glsl_function(tree, 'float', 'return glsl_light_count() > 0 ? -3.0 : 0.0;')
+        tree.links.new(shader.outputs['Result'], output.inputs['Depth Offset'])
+        self.assert_color(center(render('glsl_depth_offset_no_light')), BACKGROUND)
+        self.assert_no_compile_failures(shader)
+        bpy.ops.object.light_add(type='SUN')
+        self.assertLess(float(center(render('glsl_depth_offset_light')).max()), .03)
+        self.assert_no_compile_failures(shader)
 
     def test_default_and_file_roundtrip(self):
         mat = body_material(alpha=0)

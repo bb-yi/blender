@@ -668,8 +668,17 @@
 - Node Wrangler 清理保留阶段、AOV 和灯光输出，并禁用不支持的图像混合操作。
 - Pencil+4 对齐已做实际渲染对照，但仍有随机、纹理笔刷聚合及连接等差异；闭包虚线是透明度遮罩，与独立圆帽虚线不同，不承诺全功能或逐像素完全一致。局部预览没有模型来源；材质 AOV 首期仅支持当前已完成的可见 Deferred 表面。
 
+## 2026-11-13 Blender 5.3.0 NPR Port
+
+#### 修复与改进
+
+- 修复 EEVEE 的 GLSL Function 灯光回调在描边壳自遮挡、深度和阴影通道报 `light_cull_buf` / `light_buf` 未声明的问题。保留 NPR Surface Diffusion 的表面着色。
+- 修复灯光驱动的 `Depth Offset` 在深度预通道缺少灯光缓冲、可能导致 Vulkan 崩溃的问题。DLSSNR 引导按需准备同视图的灯光数据，使引导深度与实际材质偏移一致。
+- 修复最终渲染同时启用 DLSSNR 和描边壳 `Self Occlusion` 时绑定空 Hi-Z 纹理导致的崩溃。两个开关可以同时使用。
+
 # TODO
 
+- [×] 修复 `DLSSNR` 与描边壳 `Self Occlusion` 同时开启时的最终渲染崩溃（5.3.0 NPR，`2cdc3a319259`，Vulkan）。引导通道现在会在提交自遮挡深度前初始化 Hi-Z 纹理引用，避免 `GPU_texture_bind_ex` 读取空指针。回归确认两个开关同时开启时能出图且 DLSSNR 完成。使用旧版时可在「渲染属性 → DLSS5」将模式设为 `Off`，保留描边壳自遮挡。
 - [ ] 提高阴影分辨率
 - [ ] 材质debug器,显示信息
 - [×] 曲面细分着色器

@@ -556,6 +556,7 @@ class MaterialModule {
  private:
   Instance &inst_;
   bool has_time_dependent_materials_ = false;
+  bool guide_depth_uses_lights_ = false;
 
   Map<MaterialKey, Material> material_map_;
   Map<const blender::Material *, MaterialNodeTreeInfo> node_tree_info_;
@@ -586,6 +587,11 @@ class MaterialModule {
   bool has_time_dependent_materials() const
   {
     return has_time_dependent_materials_;
+  }
+
+  bool guide_depth_uses_lights() const
+  {
+    return guide_depth_uses_lights_;
   }
   int npr_material_count() const;
   int raycast_material_count() const;

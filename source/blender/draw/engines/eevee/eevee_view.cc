@@ -135,6 +135,11 @@ void ShadingView::render_dlss_guides(Film &film)
   }
   RenderBuffers &buffers = inst_.render_buffers;
   buffers.acquire(extent_);
+  /* The shell depth pass binds Hi-Z before any depth pyramid has been generated. */
+  inst_.hiz_buffer.set_source(&buffers.depth_tx);
+  if (inst_.materials.guide_depth_uses_lights()) {
+    inst_.lights.set_view(main_view_, extent_);
+  }
   const bool raycast = inst_.pipelines.has_raycast;
   const bool normals = raycast || inst_.outline.enabled() ||
                        inst_.lights.needs_front_light_shader();

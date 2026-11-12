@@ -177,13 +177,14 @@ vec3 typed_remap(vec3 color, float strength, out float mask)
 | glsl_ambient_lighting() | Shader Info 的 Ambient Lighting，即 probe/环境间接漫反射；不含反射/完整间接总和，Filter/World 不作保证 |
 | glsl_view_matrix() / glsl_projection_matrix() / glsl_view_projection_matrix()，以及各自 glsl_*_matrix_inverse() | 当前 draw 的视图/投影状态，含 overscan/crop/TAA jitter；Surface/NPR/Filter，顶点与片元阶段 |
 | glsl_model_matrix() / glsl_model_matrix_inverse() / glsl_model_view_matrix() / glsl_model_view_projection_matrix() / glsl_normal_matrix() | 当前物体变换，Surface/NPR；Filter 模型矩阵回退单位阵，normal_matrix 是 object→world 法线变换 |
-| glsl_light_count() / glsl_light_get(i) / glsl_light_shadow(i, N) | 仅普通 Eevee 物体材质的 Deferred/Forward 直接光与阴影；不用于 Filter/NPR/World，不负责 probe/volume/indirect |
+| glsl_light_count() / glsl_light_get(i) / glsl_light_shadow(i, N) | Eevee 物体材质的 Deferred、Forward 和 NPR 表面直接光与阴影；不用于 Filter/World，不负责探针、体积或间接光 |
 
 World 应显式传入如 Texture Coordinate.Normal 的方向；不要从材质域可创建节点推断所有 helper 都可用。
+Depth Offset 可以用 `glsl_light_count()` 和 `glsl_light_get(i)` 读取直接光数据。深度先于表面光照计算，因此不要在 Depth Offset 中读取阴影或间接光。
 
 ### GLSLLight 与 Lightgroup ID
 
-`glsl_light_get(i)` 的 i 是**当前着色点局部可见列表序号**，不是稳定场景编号。按灯光属性里的整数 Lightgroup ID 筛选时比较 `light.lightgroup_id`；0 表示第 0 组，同组可有多盏灯。
+`glsl_light_get(i)` 的 i 是**本次着色求值的灯光列表序号**，不是稳定场景编号。按灯光属性里的整数 Lightgroup ID 筛选时比较 `light.lightgroup_id`；0 表示第 0 组，同组可有多盏灯。
 
 | 字段 | 语义 |
 | --- | --- |
