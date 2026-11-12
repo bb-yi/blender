@@ -155,8 +155,6 @@ enum eGPUMaterialFlag : uint64_t {
   GPU_MATFLAG_LIGHTPROBE_ACCESS = (1 << 30),
   /* Signals the material needs Eevee direct-light resources for GLSL Function helper access. */
   GPU_MATFLAG_GLSL_LIGHT_ACCESS = (1u << 31),
-  /* The active depth-offset graph samples the direct-light buffers in depth passes. */
-  GPU_MATFLAG_DEPTH_OFFSET_LIGHT_ACCESS = (1ull << 35),
 };
 ENUM_OPERATORS(eGPUMaterialFlag);
 

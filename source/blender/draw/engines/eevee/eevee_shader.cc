@@ -2377,11 +2377,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   if (uses_glsl_light_access) {
     info.define("MAT_GLSL_LIGHT_ACCESS");
-    if (depth_offset_uses_light_access) {
-      GPU_material_flag_set(gpumat, GPU_MATFLAG_DEPTH_OFFSET_LIGHT_ACCESS);
-      if (pipeline_type != MAT_PIPE_BAKE_COLOR) {
-        info.define("LIGHT_ITER_FORCE_NO_CULLING");
-      }
+    if (depth_offset_uses_light_access && pipeline_type != MAT_PIPE_BAKE_COLOR) {
+      info.define("LIGHT_ITER_FORCE_NO_CULLING");
     }
 
     if (!has_shader_info_light_resources && !has_bsl_light_eval_resources) {

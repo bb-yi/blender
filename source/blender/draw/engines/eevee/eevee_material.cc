@@ -33,6 +33,18 @@
 
 namespace blender::eevee {
 
+bool material_depth_offset_uses_lights(GPUMaterial *gpumat)
+{
+  if (!GPU_material_has_depth_offset_output(gpumat) ||
+      !GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))
+  {
+    return false;
+  }
+  /* The compiled interface also works for materials that hit the shader pass cache. */
+  gpu::Shader *shader = GPU_material_get_shader(gpumat);
+  return shader && GPU_shader_get_ssbo_binding(shader, "light_cull_buf") >= 0;
+}
+
 bool material_tessellation_settings_get(blender::Material *mat,
                                         ShaderTessellationSettings &r_settings)
 {
@@ -585,9 +597,16 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                     blender_mat->id.name + 2);
   /* Returned material should be ready to be drawn. */
   BLI_assert(GPU_material_status(matpass.gpumat) == GPU_MAT_SUCCESS);
-  guide_depth_uses_lights_ |= inst_.is_dlss_guide_render &&
-                             GPU_material_flag_get(matpass.gpumat,
-                                                   GPU_MATFLAG_DEPTH_OFFSET_LIGHT_ACCESS);
+  if (inst_.is_dlss_guide_render && !guide_depth_uses_lights_ &&
+      ELEM(pipeline_type,
+           MAT_PIPE_PREPASS_DEFERRED,
+           MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+           MAT_PIPE_PREPASS_FORWARD,
+           MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+           MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH))
+  {
+    guide_depth_uses_lights_ = material_depth_offset_uses_lights(matpass.gpumat);
+  }
 
   inst_.manager->register_material_resources(matpass.gpumat);
 

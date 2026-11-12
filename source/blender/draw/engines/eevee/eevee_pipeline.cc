@@ -302,7 +302,7 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
     pass.bind_resources(inst.velocity);
     pass.bind_resources(inst.sampling);
     pass.bind_resources(inst.render_textures);
-    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_DEPTH_OFFSET_LIGHT_ACCESS)) {
+    if (material_depth_offset_uses_lights(gpumat)) {
       pass.bind_resources(inst.lights);
     }
   };
@@ -822,7 +822,7 @@ PassMain::Sub *Prepass::add(const SurfaceDrawState &draw_state,
 
   PassMain::Sub &sub = subs_[hide_from_raycast][ztest_mode][cull_method][has_motion][write_id]->sub(
       GPU_material_get_name(gpumat));
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_DEPTH_OFFSET_LIGHT_ACCESS)) {
+  if (material_depth_offset_uses_lights(gpumat)) {
     sub.bind_resources(inst_.lights);
   }
   if (has_raycast) {

@@ -58,6 +58,7 @@ static inline bool geometry_type_is_mesh(eMaterialGeometry geometry_type)
 bool material_tessellation_settings_get(blender::Material *mat,
                                         ShaderTessellationSettings &r_settings);
 bool material_output_has_depth_offset(bNodeTree *nodetree);
+bool material_depth_offset_uses_lights(GPUMaterial *gpumat);
 
 /** Evaluated node-tree properties. Owned by one MaterialModule sync, never shared across frames.
  */

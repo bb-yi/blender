@@ -18,35 +18,43 @@ OUT.mkdir(parents=True, exist_ok=True)
 HAS_PRE_FX = hasattr(bpy.context.view_layer, 'use_pass_pre_fx')
 
 
-def assert_light_driven_depth_guides(scene, tree, target):
-    # NR's separate EEVEE instance must see the same lights as the main render.
-    scene.frame_set(1)
+def configure_light_driven_depth_guides(scene, cube, tree, target):
+    # Animate the input across separate syncs so this also covers a shared shader pass.
+    scene.frame_end = 3
+    scene.camera.animation_data_clear()
     scene.camera.data.dof.use_dof = False
+    cube.animation_data_clear()
+    cube.data.shape_keys.animation_data_clear()
     light = bpy.data.lights.new('Depth Offset Sun', 'SUN')
     light.energy = 2.0
     scene.collection.objects.link(bpy.data.objects.new(light.name, light))
+    offset = tree.nodes.new('ShaderNodeGLSLFunction')
+    code = bpy.data.texts.new('depth_offset_light.glsl')
+    code.write('float offset_depth(float mode) {\n'
+               '  if (mode < 0.5) { return 0.0; }\n'
+               '  if (mode < 1.5) { return 0.5; }\n'
+               '  return glsl_light_count() > 0 ? 0.5 : 0.0;\n'
+               '}\n')
+    offset.script = code
+    offset.function_name = 'offset_depth'
+    socket = offset.inputs[0]
+    for frame in range(1, 4):
+        socket.default_value = frame - 1
+        socket.keyframe_insert('default_value', frame=frame)
     output = next(node for node in tree.nodes if node.type == 'OUTPUT_MATERIAL')
-    depths = []
-    for label, body in (
-        ('zero', 'return 0.0;'),
-        ('constant', 'return 0.5;'),
-        ('light', 'return glsl_light_count() > 0 ? 0.5 : 0.0;'),
-    ):
-        offset = tree.nodes.new('ShaderNodeGLSLFunction')
-        code = bpy.data.texts.new(f'depth_offset_{label}.glsl')
-        code.write(f'float offset_depth() {{ {body} }}')
-        offset.script = code
-        offset.function_name = 'offset_depth'
-        tree.links.new(offset.outputs['Result'], output.inputs['Depth Offset'])
-        directory = target / label
-        directory.mkdir(exist_ok=True)
-        os.environ['BLENDER_DLSS_NR_DUMP_INPUTS'] = str(directory)
-        bpy.ops.render.render()
-        assert scene.eevee.dlss5_render_status.startswith('Completed'), scene.eevee.dlss5_render_status
-        depth = np.fromfile(directory / '1_depth.f32', np.float32).reshape(128, 192)
-        assert np.isfinite(depth).all()
-        depths.append(depth[60:68, 92:100])
-        tree.nodes.remove(offset)
+    tree.links.new(offset.outputs['Result'], output.inputs['Depth Offset'])
+    directory = target / 'inputs'
+    directory.mkdir(exist_ok=True)
+    os.environ['BLENDER_DLSS_NR_DUMP_INPUTS'] = str(directory)
+
+
+def assert_light_driven_depth_guides(target):
+    depths = [
+        np.fromfile(target / 'inputs' / f'{frame}_depth.f32', np.float32)
+        .reshape(128, 192)[60:68, 92:100]
+        for frame in range(1, 4)
+    ]
+    assert np.isfinite(depths).all()
     zero, constant, light_driven = depths
     assert np.max(np.abs(zero - constant)) > 1e-5, 'Depth Offset must change NR input depth'
     np.testing.assert_allclose(light_driven, constant, rtol=0, atol=1e-6)
@@ -109,9 +117,7 @@ def child():
     camera.data.dof.focus_object = cube
     camera.data.dof.aperture_fstop = 2
     if scenario == 'depth_offset_light':
-        assert_light_driven_depth_guides(s, material.node_tree, target)
-        print('DLSS_HISTORY_CHILD_PASS', scenario, flush=True)
-        return
+        configure_light_driven_depth_guides(s, cube, material.node_tree, target)
     if scenario == 'motion_blur':
         s.render.use_motion_blur = True
     expected_motion = {}
@@ -265,6 +271,8 @@ def child():
             measured[frame] = dict(expected=[dx,dy],actual=motion[y,x].tolist())
         assert measured[3]['actual'][0] < -.1, measured
         (target/'motion.json').write_text(json.dumps(measured,indent=2),encoding='utf-8')
+    if scenario == 'depth_offset_light':
+        assert_light_driven_depth_guides(target)
     np.savez_compressed(target/'pixels.npz',**arrays)
     print('DLSS_HISTORY_CHILD_PASS',scenario,flush=True)
 
@@ -320,7 +328,7 @@ else:
         elif scenario == 'outline_shell':
             assert resets == ['1'], resets
         elif scenario == 'depth_offset_light':
-            assert log.count('DLSS_GUIDE begin frame=1') == 3
+            assert resets == ['1', '0', '0'], resets
         elif scenario in ('missing_mask','small'):
             assert not resets and 'DLSS_GUIDE begin' not in log,(scenario,resets)
         else:
