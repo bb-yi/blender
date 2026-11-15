@@ -1218,6 +1218,11 @@ if((WITH_CYCLES OR WITH_GPU_RENDER_TESTS) AND TEST_SRC_DIR_EXISTS)
       eevee_light_shader_output_regressions
       --python ${CMAKE_CURRENT_LIST_DIR}/npr/test_eevee_light_shader_output_regressions.py
     )
+    add_blender_test(
+      eevee_native_sun_shadow
+      --python ${CMAKE_CURRENT_LIST_DIR}/npr/test_eevee_native_sun_shadow.py
+      -- ${TEST_OUT_DIR}/eevee_native_sun_shadow
+    )
     if(WITH_GPU_RENDER_TESTS_HEADED)
       add_gpu_render_tests(overlay "overlay_render_tests.py" "overlay")
     endif()

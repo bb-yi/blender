@@ -156,7 +156,7 @@ ShadowRayDirectional shadow_ray_generate_directional(LightData light,
                                                      float3 lP,
                                                      float texel_radius,
                                                      float receiver_pixel_size,
-                                                     float soft_shadow_scale = 1.0f)
+                                                     float soft_shadow_scale)
 {
   float clip_near = orderedIntBitsToFloat(light.clip_near);
   /* Assumed to be non-null. */
@@ -505,8 +505,18 @@ float shadow_eval(ShadowRenderData &srd,
   float3 N_bias = (is_transmission && !is_facing_light) ? reflect(Ng, L) : Ng;
 
   /* Shadow map texel radius at the receiver position. */
+  [[resource_table]] const Uniform &uni = srd.uniforms;
+  [[resource_table]] const draw::View &views = srd.views;
   float texel_radius = shadow_texel_radius_at_position(
-      srd.uniforms, srd.views, light, is_directional, P);
+      uni, views, light, is_directional, P);
+  /* Match the clipmap footprint used when tagging receiver pages. Soft shadow strength
+   * changes the ray angle, independently of the receiver's clipmap level. */
+  const ViewMatrices receiver_view = views.get(0);
+  float receiver_pixel_size =
+      is_directional ? shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
+                                               receiver_view.is_perspective(),
+                                               receiver_view.z_distance(P)) :
+                       0.0f;
 
   if (is_transmission && !is_facing_light) {
     /* Ideally, we should bias using the chosen ray direction. In practice, this conflict with our
@@ -542,7 +552,7 @@ float shadow_eval(ShadowRenderData &srd,
     bool has_hit;
     if (is_directional) {
       ShadowRayDirectional clip_ray = shadow_ray_generate_directional(
-          light, random_ray_2d, lP, texel_radius, soft_shadow_scale);
+          light, random_ray_2d, lP, texel_radius, receiver_pixel_size, soft_shadow_scale);
       has_hit = shadow_map_trace(srd, clip_ray, ray_step_count, random_shadow_3d.z);
     }
     else {
@@ -646,8 +656,7 @@ float shadow_eval_stable([[resource_table]] ShadowRenderData &srd,
     bool has_hit;
     if (is_directional) {
       ShadowRayDirectional clip_ray = shadow_ray_generate_directional(
-          light, ray_tap, lP, texel_radius,
-          receiver_pixel_size);
+          light, ray_tap, lP, texel_radius, receiver_pixel_size, 1.0f);
       has_hit = shadow_map_trace(srd, clip_ray, stable_step_count, 0.5f);
     }
     else {
@@ -734,8 +743,7 @@ float shadow_eval_seeded([[resource_table]] ShadowRenderData &srd,
     bool has_hit;
     if (is_directional) {
       ShadowRayDirectional clip_ray = shadow_ray_generate_directional(
-          light, random_ray_2d, lP, texel_radius,
-          receiver_pixel_size);
+          light, random_ray_2d, lP, texel_radius, receiver_pixel_size, 1.0f);
       has_hit = shadow_map_trace(srd, clip_ray, ray_step_count, random_shadow_3d.z);
     }
     else {
@@ -908,8 +916,7 @@ float3 shadow_caster_classification_seeded_ex([[resource_table]] ShadowRenderDat
     ShadowCasterTraceResult trace_result;
     if (is_directional) {
       ShadowRayDirectional clip_ray = shadow_ray_generate_directional(
-          light, random_ray_2d, lP, texel_radius,
-          receiver_pixel_size);
+          light, random_ray_2d, lP, texel_radius, receiver_pixel_size, 1.0f);
       trace_result = shadow_trace_caster_id(srd, clip_ray, safe_step_count, random_shadow_3d.z);
     }
     else {
