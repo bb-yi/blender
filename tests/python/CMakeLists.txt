@@ -967,6 +967,9 @@ if(WITH_GPU_RENDER_TESTS)
     tessellation_default_coordinates
     filter_stage_pool
     eevee_resource_lifetime
+    eevee_native_light_accumulation_animation
+    eevee_probe_shader_compilation
+    eevee_deferred_refraction_light_passes
     render_texture_updates
     render_texture_performance
     render_texture_layers

@@ -162,8 +162,10 @@ static bool material_needs_front_light_shader_resources(const GPUMaterial *gpuma
                                                         const eClosureBits closure_bits)
 {
   /* The raw GLSL light flag is an early registration hint. The precise evaluated-light marker is
-   * only available after the material create info has been amended. */
+   * only available after the material create info has been amended. Native Light Accumulation
+   * also uses the front light shader resources through the hybrid LightEvalIterator. */
   return (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0 ||
+         GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHTING) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
          GPU_material_has_glsl_light_shader_eval(gpumat) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);

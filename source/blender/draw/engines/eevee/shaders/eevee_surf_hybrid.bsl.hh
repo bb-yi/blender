@@ -207,6 +207,7 @@ void surf_hybrid_impl([[resource_table]] KernelGlobals &kg,
   render_passes.store_color(
       out_texel, uni.uniform_buf.render_pass.emission_id, float4(sd.emission, 1.0f));
 
+  bool has_light_passes = false;
   if (pipe.use_lighting_nodes) [[static_branch]] {
     float light_sample_rcp = safe_rcp(float(sd.light_accum.light_accumulation_count));
     sd.light_accum.diffuse_color *= light_sample_rcp;
@@ -219,6 +220,7 @@ void surf_hybrid_impl([[resource_table]] KernelGlobals &kg,
     if (uni.uniform_buf.render_pass.diffuse_light_id >= 0 &&
         uni.uniform_buf.render_pass.diffuse_color_id >= 0)
     {
+      has_light_passes = true;
       render_passes.store_color(out_texel,
                                 uni.uniform_buf.render_pass.diffuse_light_id,
                                 float4(sd.light_accum.diffuse_light, 1.0f));
@@ -233,6 +235,7 @@ void surf_hybrid_impl([[resource_table]] KernelGlobals &kg,
     if (uni.uniform_buf.render_pass.specular_light_id >= 0 &&
         uni.uniform_buf.render_pass.specular_color_id >= 0)
     {
+      has_light_passes = true;
       render_passes.store_color(
           out_texel,
           uni.uniform_buf.render_pass.specular_light_id,
@@ -333,6 +336,12 @@ void surf_hybrid_impl([[resource_table]] KernelGlobals &kg,
   srt.write_header_data(out_texel, GBUF_NPR_DIRECT_GAIN_LAYER, rgb9e5_encode(npr_direct_gains));
   gbuf.header = npr_header.raw();
 #endif
+
+  if (has_light_passes) {
+    gbuffer::Header header = gbuffer::Header::from_data(gbuf.header);
+    header.mark_hybrid_light_passes();
+    gbuf.header = header.raw();
+  }
 
   /* Output header and first closure using frame-buffer attachment. */
   frag_out.gbuf_header = gbuf.header;

@@ -349,30 +349,43 @@ static bool compile_ex(shaderc::Compiler &compiler,
     shader_module.combined_sources = shader_module.original_sources;
   }
 
-  /* The cached SPIR-V binary contains an injected OpString, which depends on the shader name.
-   * Include the name in the cache key so an entry is only reused for an identical result. This
-   * also invalidates older caches that stored the SPIR-V without the injected OpString. */
-  const std::string hash_extra = std::string("op_string:") + full_name;
-
-  if (read_spirv_from_disk(shader_module, hash_extra)) {
-    return true;
-  }
-
-  shaderc::CompileOptions options;
   bool do_optimize = true;
-  if (VKBackend::get().device.extensions_get().spirv_1_4) {
-    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_2);
-    options.SetTargetSpirv(shaderc_spirv_version_1_4);
-  }
-  else {
-    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1);
-  }
   if (G.debug & G_DEBUG_GPU_RENDERDOC) {
     do_optimize = false;
   }
   /* WORKAROUND: Qualcomm driver can crash when handling optimized SPIR-V. */
   if (GPU_type_matches(GPU_DEVICE_QUALCOMM, GPU_OS_ANY, GPU_DRIVER_ANY)) {
     do_optimize = false;
+  }
+  /* The SPIR-V optimizer crashes when optimizing probe lighting with the shared shadow tracer.
+   * The planar variant faults in shaderc; the sphere variant takes minutes to optimize. Keep
+   * their generated shader and shadow sampling intact, and let the driver optimize the SPIR-V.
+   * Other material and lighting shaders still use the normal offline optimization pipeline. */
+  if (stage == shaderc_fragment_shader &&
+      ELEM(shader.name_get(), "eevee_deferred_sphere_eval", "eevee_deferred_planar_eval"))
+  {
+    do_optimize = false;
+  }
+
+  /* The cached SPIR-V binary contains an injected OpString, which depends on the shader name.
+   * Include the name in the cache key so an entry is only reused for an identical result. This
+   * also invalidates older caches that stored the SPIR-V without the injected OpString.
+   * Keep unoptimized results separate so an old optimized probe binary cannot bypass the
+   * workaround above. */
+  const std::string hash_extra = std::string("op_string:") + full_name +
+                                 (do_optimize ? "" : ":unoptimized-v1");
+
+  if (read_spirv_from_disk(shader_module, hash_extra)) {
+    return true;
+  }
+
+  shaderc::CompileOptions options;
+  if (VKBackend::get().device.extensions_get().spirv_1_4) {
+    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_2);
+    options.SetTargetSpirv(shaderc_spirv_version_1_4);
+  }
+  else {
+    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1);
   }
   options.SetOptimizationLevel(do_optimize ? shaderc_optimization_level_performance :
                                              shaderc_optimization_level_zero);

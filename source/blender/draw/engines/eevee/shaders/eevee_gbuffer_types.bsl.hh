@@ -324,14 +324,16 @@ struct Header {
   static constexpr int GBUFFER_HEADER_BITS_PER_BIN = 4;
 
  private:
+  static constexpr uint HYBRID_LIGHT_PASSES_BIT = 1u << 29u;
+
   /**
    * Bit packed header.
    *
    *  Use Object ID
    *    |
    *    |Use Surface Depth
-   *    | |
-   * |  v v |       UNUSED       |       Geometric normal      |       UNUSED      |
+   *    | | |Hybrid Light Passes
+   * |  v v v |     UNUSED       |       Geometric normal      |       UNUSED      |
    * |....|....|....|....|....|....|....|....|....|....|....|....|....|....|....|....|
    *   31   30   29   28   27   26   25   24   23   22   21   20   19   18   17   16
    *
@@ -359,7 +361,16 @@ struct Header {
 
   bool is_empty() const
   {
-    return this->header_ == 0;
+    return (this->header_ & ~HYBRID_LIGHT_PASSES_BIT) == 0u;
+  }
+
+  bool has_hybrid_light_passes() const
+  {
+    return flag_test(this->header_, HYBRID_LIGHT_PASSES_BIT);
+  }
+  void mark_hybrid_light_passes()
+  {
+    this->header_ |= HYBRID_LIGHT_PASSES_BIT;
   }
 
   void closure_set(uint bin, GBufferMode mode)
@@ -513,7 +524,7 @@ struct Header {
 
   uchar normal_len() const
   {
-    if (this->header_ == 0u) {
+    if (this->is_empty()) {
       return 0;
     }
     /* Count implicit first layer. */

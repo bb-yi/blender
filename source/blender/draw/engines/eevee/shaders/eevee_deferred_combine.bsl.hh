@@ -111,16 +111,24 @@ void combine_frag([[resource_table]] Combine &srt,
   }
 
   float sum_weight = 0.0f;
-  float3 diffuse_color =
-      render_passes.load_color(texel, uni.uniform_buf.render_pass.diffuse_color_id).rgb;
-  float3 diffuse_direct =
-      render_passes.load_color(texel, uni.uniform_buf.render_pass.diffuse_light_id).rgb;
+  float3 diffuse_color = float3(0.0f);
+  float3 diffuse_direct = float3(0.0f);
   float3 diffuse_indirect = float3(0.0f);
-  float3 specular_color =
-      render_passes.load_color(texel, uni.uniform_buf.render_pass.specular_color_id).rgb;
-  float3 specular_direct =
-      render_passes.load_color(texel, uni.uniform_buf.render_pass.specular_light_id).rgb;
+  float3 specular_color = float3(0.0f);
+  float3 specular_direct = float3(0.0f);
   float3 specular_indirect = float3(0.0f);
+  /* Only a hybrid material with lighting nodes has written these values for this surface.
+   * At other pixels the shared render-pass images can still contain a previous layer. */
+  if (gbuf.header.has_hybrid_light_passes()) {
+    diffuse_color =
+        render_passes.load_color(texel, uni.uniform_buf.render_pass.diffuse_color_id).rgb;
+    diffuse_direct =
+        render_passes.load_color(texel, uni.uniform_buf.render_pass.diffuse_light_id).rgb;
+    specular_color =
+        render_passes.load_color(texel, uni.uniform_buf.render_pass.specular_color_id).rgb;
+    specular_direct =
+        render_passes.load_color(texel, uni.uniform_buf.render_pass.specular_light_id).rgb;
+  }
   float3 out_direct = diffuse_direct + specular_direct;
   float3 out_indirect = float3(0.0f);
   float3 average_normal = float3(0.0f);
