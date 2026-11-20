@@ -21,9 +21,9 @@
 
 #ifdef RNA_RUNTIME
 
-#  include "BLI_listbase.h"
-#  include "BLI_string.h"
-#  include "BLI_string_utf8.h"
+#  include "BLI_listbase.hh"
+#  include "BLI_string.hh"
+#  include "BLI_string_utf8.hh"
 
 #  include "BKE_text.h"
 
@@ -82,7 +82,7 @@ static void rna_Text_current_line_index_set(PointerRNA *ptr, int value)
   Text *text = static_cast<Text *>(ptr->data);
   TextLine *line = static_cast<TextLine *>(BLI_findlink(&text->lines, value));
   if (line == nullptr) {
-    line = static_cast<TextLine *>(text->lines.last);
+    line = text->lines.last();
   }
   text->curl = line;
   text->curc = 0;
@@ -99,7 +99,7 @@ static void rna_Text_select_end_line_index_set(PointerRNA *ptr, int value)
   Text *text = static_cast<Text *>(ptr->data);
   TextLine *line = static_cast<TextLine *>(BLI_findlink(&text->lines, value));
   if (line == nullptr) {
-    line = static_cast<TextLine *>(text->lines.last);
+    line = text->lines.last();
   }
   text->sell = line;
   text->selc = 0;

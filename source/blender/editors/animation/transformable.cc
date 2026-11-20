@@ -6,15 +6,28 @@
  * \ingroup edanimation
  */
 
-#include "BLI_math_rotation.h"
-#include "BLI_string.h"
+#include <fmt/format.h>
 
+#include "BLI_math_matrix.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string.hh"
+
+#include "DNA_action_types.h"
 #include "DNA_object_types.h"
+
+#include "BKE_action.hh"
+#include "BKE_armature.hh"
+#include "BKE_context.hh"
+#include "BKE_object.hh"
 
 #include "ANIM_rna.hh"
 
 #include "RNA_access.hh"
 #include "RNA_prototypes.hh"
+
+#include "DEG_depsgraph_query.hh"
 
 #include "ED_anim_transformable.hh"
 
@@ -97,6 +110,33 @@ Array<float> property_interpolated(const Span<float> a, const Span<float> b, con
   return interpolated;
 }
 
+Vector<ed::AnimTransformable> selected_transformables_from_context(bContext &C)
+{
+  Vector<ed::AnimTransformable> transformables;
+  Vector<PointerRNA> pointers;
+  switch (CTX_data_mode_enum(&C)) {
+    case CTX_MODE_OBJECT: {
+      CTX_data_selected_objects(&C, &pointers);
+      for (PointerRNA &ptr : pointers) {
+        transformables.append(ed::AnimTransformable(*id_cast<Object *>(ptr.owner_id)));
+      }
+      break;
+    }
+    case CTX_MODE_POSE: {
+      CTX_data_selected_pose_bones(&C, &pointers);
+      for (PointerRNA &ptr : pointers) {
+        transformables.append(
+            {*id_cast<Object *>(ptr.owner_id), *static_cast<bPoseChannel *>(ptr.data)});
+      }
+      break;
+    }
+
+    default:
+      break;
+  }
+  return transformables;
+}
+
 /* Since there can be more than one representation of rotation data, they are stored in an array.
  * The enum is the index into that array. */
 enum RotationModeIndices : uint8_t {
@@ -107,7 +147,8 @@ enum RotationModeIndices : uint8_t {
   ROT_IDX_MAX_ENUM,
 };
 
-Rotation Rotation::converted_to_mode(const eRotationModes mode) const
+Rotation Rotation::converted_to_mode(const eRotationModes mode,
+                                     const Rotation *reference_euler) const
 {
   if (mode == this->mode) {
     return *this;
@@ -129,6 +170,8 @@ Rotation Rotation::converted_to_mode(const eRotationModes mode) const
       break;
   }
 
+  normalize_qt(quat);
+
   Rotation converted;
   converted.mode = mode;
   switch (mode) {
@@ -143,13 +186,38 @@ Rotation Rotation::converted_to_mode(const eRotationModes mode) const
       break;
 
     default:
-      /* TODO (christoph): pass in a reference rotation for the conversion to euler. */
       BLI_assert(mode <= ROT_MODE_ZYX);
       converted.values.reinitialize(3);
-      quat_to_eulO(converted.values.data(), mode, quat);
+      if (reference_euler) {
+        BLI_assert(reference_euler->mode >= ROT_MODE_EUL);
+        quat_to_compatible_eulO(
+            converted.values.data(), reference_euler->values.data(), mode, quat);
+      }
+      else {
+        quat_to_eulO(converted.values.data(), mode, quat);
+      }
       break;
   }
   return converted;
+}
+
+void Rotation::mirror()
+{
+  switch (mode) {
+    /* Both Axis-Angle and Quaternion have their x-y-z values on array index 1, 2 and 3. Since we
+     * are mirroring on the y-z plane we need to invert those two axes. */
+    case ROT_MODE_AXISANGLE:
+    case ROT_MODE_QUAT:
+      values[2] *= -1;
+      values[3] *= -1;
+      break;
+
+    default:
+      BLI_assert(mode <= ROT_MODE_ZYX);
+      values[1] *= -1;
+      values[2] *= -1;
+      break;
+  }
 }
 
 Rotation identity_rotation(const eRotationModes mode)
@@ -240,18 +308,22 @@ AnimTransformable::AnimTransformable(Object &owner_id, bPoseChannel &pchan)
     : type_(AnimTransformable::Type::POSE_BONE),
       owner_id_(&owner_id.id),
       data_(&pchan),
+      fcurve_group_name_(pchan.name),
+      name_(pchan.name),
       location_({pchan.loc, 3}),
       rotation_mode_(&pchan.rotmode),
       scale_({pchan.scale, 3})
 {
   build_rotations_array(rotations_, pchan.eul, pchan.quat, pchan.rotAxis, &pchan.rotAngle);
-  rna_path_from_id_ = animrig::get_pose_bone_rna_path(pchan);
+  rna_path_from_id_ = blender::animrig::get_pose_bone_rna_path(pchan);
 }
 
 AnimTransformable::AnimTransformable(Object &obj)
     : type_(AnimTransformable::Type::OBJECT),
       owner_id_(&obj.id),
       data_(&obj),
+      fcurve_group_name_("Object Transforms"),
+      name_(&obj.id.name[2]),
       location_({obj.loc, 3}),
       rotation_mode_(reinterpret_cast<eRotationModes *>(&obj.rotmode)),
       scale_({obj.scale, 3})
@@ -264,6 +336,12 @@ template<> bPoseChannel *AnimTransformable::data<bPoseChannel *>() const
 {
   BLI_assert(type_ == Type::POSE_BONE);
   return static_cast<bPoseChannel *>(data_);
+}
+
+template<> Object *AnimTransformable::data<Object *>() const
+{
+  BLI_assert(type_ == Type::OBJECT);
+  return static_cast<Object *>(data_);
 }
 
 StringRefNull AnimTransformable::rna_path() const
@@ -281,16 +359,32 @@ std::string AnimTransformable::rna_path_to_property(const PropertyType prop_type
       property_name = "location";
       break;
     case PropertyType::ROTATION:
-      property_name = animrig::get_rotation_mode_path(*rotation_mode_);
+      property_name = blender::animrig::get_rotation_mode_path(*rotation_mode_);
       break;
     case PropertyType::SCALE:
       property_name = "scale";
       break;
   }
+  return this->rna_path_to_property(property_name);
+}
+
+std::string AnimTransformable::rna_path_to_property(const StringRef property_name) const
+{
   if (rna_path_from_id_.empty()) {
-    return std::string(property_name);
+    return property_name;
   }
   return fmt::format("{}.{}", rna_path_from_id_, property_name);
+}
+
+std::string AnimTransformable::rna_path_to_rotation(const eRotationModes rotation_mode) const
+{
+  StringRefNull property_name = blender::animrig::get_rotation_mode_path(rotation_mode);
+  return this->rna_path_to_property(property_name);
+}
+
+std::string AnimTransformable::rna_path_to_rotation_mode() const
+{
+  return this->rna_path_to_property("rotation_mode");
 }
 
 TransformFloats AnimTransformable::get_property(const PropertyType prop_type) const
@@ -322,6 +416,7 @@ void AnimTransformable::set_property(const PropertyType prop_type,
 
     case PropertyType::ROTATION: {
       const TransformFloatPtrs *rotation_array = get_rotation_array_from_mode(*rotation_mode_);
+      BLI_assert(rotation_array->size() == values.size());
       if (rotation_array->size() > values.size()) {
         /* Trying to set a rotation with different mode. Use `set_rotation` instead. */
         BLI_assert_unreachable();
@@ -422,9 +517,14 @@ const TransformFloatPtrs *AnimTransformable::get_rotation_array_from_mode(
 
 Rotation AnimTransformable::get_rotation() const
 {
+  return get_rotation_for_mode(*rotation_mode_);
+}
+
+Rotation AnimTransformable::get_rotation_for_mode(const eRotationModes mode) const
+{
   Rotation rotation;
-  rotation.mode = *rotation_mode_;
-  const TransformFloatPtrs *rotations_array = get_rotation_array_from_mode(rotation.mode);
+  rotation.mode = mode;
+  const Array<float *> *rotations_array = get_rotation_array_from_mode(mode);
   BLI_assert(rotations_array != nullptr);
   rotation.values = copy_pointers_to_values(*rotations_array);
   return rotation;
@@ -451,6 +551,11 @@ void AnimTransformable::set_rotation(const Rotation &rotation)
 eRotationModes AnimTransformable::get_rotation_mode() const
 {
   return *rotation_mode_;
+}
+
+void AnimTransformable::set_rotation_mode(const eRotationModes mode)
+{
+  *rotation_mode_ = mode;
 }
 
 void AnimTransformable::blend_rotation_to(const Rotation &target,
@@ -506,6 +611,69 @@ void AnimTransformable::blend_rotation_to(const Rotation &target,
   for (const int i : result.index_range()) {
     *(*rotations_array)[i] = result[i];
   }
+}
+
+float4x4 AnimTransformable::get_world_space(const Depsgraph &depsgraph) const
+{
+  ID *evaluated_id = DEG_get_evaluated_id(&depsgraph, this->owner_id_);
+  BLI_assert(evaluated_id);
+  switch (this->type_) {
+    case AnimTransformable::Type::POSE_BONE: {
+      Object *ob_eval = id_cast<Object *>(evaluated_id);
+      bPoseChannel *pose_bone_eval = BKE_pose_channel_find_name(ob_eval->pose, this->name_.data());
+      if (!pose_bone_eval) {
+        BLI_assert_unreachable();
+        break;
+      }
+      return ob_eval->object_to_world() * float4x4(pose_bone_eval->pose_mat);
+    }
+    case AnimTransformable::Type::OBJECT: {
+      Object *ob_eval = id_cast<Object *>(evaluated_id);
+      return ob_eval->object_to_world();
+    }
+  }
+
+  BLI_assert_unreachable();
+  return float4x4::identity();
+}
+
+float4x4 AnimTransformable::world_to_local(const Depsgraph &depsgraph,
+                                           const float4x4 &world_matrix) const
+{
+  ID *evaluated_id = DEG_get_evaluated_id(&depsgraph, this->owner_id_);
+  BLI_assert(evaluated_id);
+  switch (this->type_) {
+    case AnimTransformable::Type::POSE_BONE: {
+      Object *ob_eval = id_cast<Object *>(evaluated_id);
+      bPoseChannel *pose_bone_eval = BKE_pose_channel_find_name(ob_eval->pose, this->name_.data());
+      if (!pose_bone_eval) {
+        BLI_assert_unreachable();
+        break;
+      }
+      Bone *bone = pose_bone_eval->bone_get(*ob_eval);
+      float4x4 object_local = ob_eval->world_to_object() * world_matrix;
+      float4x4 bone_local = float4x4::identity();
+      /* The function docstring tells me I (Christoph) cannot use this function the way I am using
+       * it here. But it works. Either I am missing an edge case, or the description is wrong. */
+      BKE_armature_mat_pose_to_bone({pose_bone_eval, bone}, object_local.ptr(), bone_local.ptr());
+      return bone_local;
+    }
+
+    case AnimTransformable::Type::OBJECT: {
+      Object *ob_eval = id_cast<Object *>(evaluated_id);
+      float4x4 parent_matrix = float4x4::identity();
+      if (ob_eval->parent) {
+        parent_matrix = math::invert(float4x4(ob_eval->parentinv)) *
+                        ob_eval->parent->world_to_object();
+      }
+
+      float4x4 delta_matrix = BKE_object_delta_matrix_get(*ob_eval);
+      return math::invert(delta_matrix) * parent_matrix * world_matrix;
+    }
+  }
+
+  BLI_assert_unreachable();
+  return float4x4::identity();
 }
 
 }  // namespace blender::ed

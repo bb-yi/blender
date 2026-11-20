@@ -189,7 +189,10 @@ struct GBuffer {
   }
 
   /* Bind the GBuffer frame-buffer correctly using the correct workarounds. */
-  void bind(Framebuffer &gbuffer_fb, bool clear_combined = false, bool clear_stencil = true)
+  void bind(Framebuffer &gbuffer_fb,
+            bool clear_combined = false,
+            bool clear_stencil = true,
+            bool layer_coverage = false)
   {
     /* Workaround a Metal bug that is only showing up on ATI/Intel GPUs. */
     if (GPU_type_matches(
@@ -208,6 +211,18 @@ struct GBuffer {
     }
 
     GPULoadOp combined_load_action = clear_combined ? GPU_LOADACTION_CLEAR : GPU_LOADACTION_LOAD;
+
+    if (layer_coverage) {
+      GPU_framebuffer_bind_ex(gbuffer_fb,
+                              {{GPU_LOADACTION_LOAD, GPU_STOREACTION_STORE},
+                               {combined_load_action, GPU_STOREACTION_STORE, {0}},
+                               {GPU_LOADACTION_CLEAR, GPU_STOREACTION_STORE, {0}},
+                               {GPU_LOADACTION_DONT_CARE, GPU_STOREACTION_STORE},
+                               {GPU_LOADACTION_DONT_CARE, GPU_STOREACTION_STORE},
+                               {GPU_LOADACTION_DONT_CARE, GPU_STOREACTION_STORE},
+                               {GPU_LOADACTION_LOAD, GPU_STOREACTION_STORE}});
+      return;
+    }
 
     GPU_framebuffer_bind_ex(
         gbuffer_fb,

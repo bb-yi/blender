@@ -4,7 +4,7 @@
 
 #ifdef GPU_SHADER
 #  pragma once
-#  include "BLI_utildefines_variadic.h"
+#  include "BLI_utildefines_variadic.hh"
 
 #  include "gpu_shader_compat.hh"
 
@@ -47,7 +47,6 @@ DEFINE("CREATE_INFO_eevee_LightEvalIterator")
 DEFINE("LIGHT_SHADER_TEXTURE_EVAL")
 DEFINE("LIGHT_ITER_FORCE_NO_CULLING")
 COMPILATION_CONSTANT(bool, light_iter_force_no_culling, true)
-BUILTINS(BuiltinBits::NO_PREPROCESSOR)
 PUSH_CONSTANT(int, surface_cull_mode)
 FRAGMENT_OUT(0, float4, out_color)
 SAMPLER(EEVEE_BAKE_PRIMITIVE_TEX_SLOT, isampler2D, bake_primitive_tx)
@@ -61,7 +60,6 @@ ADDITIONAL_INFO(eevee_utility_texture)
 ADDITIONAL_INFO(eevee_light_data)
 ADDITIONAL_INFO(eevee_shadow_data)
 ADDITIONAL_INFO(eevee_shadow_caster_data)
-FRAGMENT_SOURCE("eevee_surf_bake_color_frag.glsl")
 GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_bake_light_shader_surface)

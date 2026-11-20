@@ -13,8 +13,8 @@
 
 #pragma once
 
-#include "draw_aabb_lib.glsl"
-#include "draw_intersect_lib.glsl"
+#include "draw_aabb.bsl.hh"
+#include "draw_intersect.bsl.hh"
 #include "eevee_light_iter.bsl.hh"
 #include "eevee_light_lib.bsl.hh"
 #include "eevee_shadow_page_ops.bsl.hh"
@@ -24,9 +24,9 @@
 namespace eevee::shadow {
 
 struct TagUsageBounds {
-  [[resource_table]] srt_t<LightRenderData> light_data;
-  [[resource_table]] srt_t<TileMaps> tilemaps;
-  [[resource_table]] srt_t<Tiles> tiles;
+  [[resource_table]] LightRenderData light_data;
+  [[resource_table]] TileMaps tilemaps;
+  [[resource_table]] Tiles tiles;
   [[storage(5, read)]] const ObjectBounds (&bounds_buf)[];
   [[storage(6, read)]] const uint (&resource_ids_buf)[];
 };
@@ -69,7 +69,7 @@ void tag_usage_bounds_directional([[resource_table]] TagUsageBounds &srt,
   }
 
   float3 lP = light_world_to_local_direction(light, receiver_center);
-  LightSunData sun = light.sun();
+  LightSunData sun = light.sun;
   int min_level = sun.clipmap_lod_max;
   int max_level = sun.clipmap_lod_min;
 

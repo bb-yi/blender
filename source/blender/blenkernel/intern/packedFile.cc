@@ -31,11 +31,14 @@
 #include "DNA_vfont_types.h"
 #include "DNA_volume_types.h"
 
-#include "BLI_fileops.h"
-#include "BLI_listbase.h"
+#include "BLI_fileops.hh"
+#include "BLI_listbase.hh"
+#include "BLI_fileops.hh"
+#include "BLI_hash_md5.hh"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_bake_geometry_nodes_modifier.hh"
 #include "BKE_bake_geometry_nodes_modifier_pack.hh"
@@ -45,6 +48,7 @@
 #include "BKE_main.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
+#include "BKE_node_tree_update.hh"
 #include "BKE_packedFile.hh"
 #include "BKE_report.hh"
 #include "BKE_sound.hh"
@@ -224,6 +228,83 @@ int BKE_packedfile_read(PackedFile *pf, void *data, int size)
   return size;
 }
 
+static int pack_compositor_luts(Main *bmain, ReportList *reports)
+{
+  int count = 0;
+  FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+    if (!ID_IS_EDITABLE(owner_id)) {
+      continue;
+    }
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy != CMP_NODE_LUT) {
+        continue;
+      }
+      auto &settings = *static_cast<NodeCompositorLUT *>(node.storage);
+      if (settings.packed_file || !settings.filepath[0]) {
+        continue;
+      }
+      char filepath[FILE_MAX];
+      STRNCPY(filepath, settings.filepath);
+      BLI_path_abs(filepath, ID_BLEND_PATH(bmain, owner_id));
+      const size_t size = BLI_file_size(filepath);
+      if (!BLI_path_extension_check_n(
+              filepath, ".cube", ".png", ".exr", ".tif", ".tiff", nullptr) ||
+          size == 0 || size > 64 * 1024 * 1024)
+      {
+        BKE_reportf(reports, RPT_ERROR, "Unable to pack LUT '%s': invalid file or size", filepath);
+        continue;
+      }
+      settings.packed_file = BKE_packedfile_new(reports, filepath, BKE_main_blendfile_path(bmain));
+      if (settings.packed_file) {
+        unsigned char digest[16];
+        BLI_hash_md5_buffer(static_cast<const char *>(settings.packed_file->data),
+                            settings.packed_file->size,
+                            digest);
+        BLI_hash_md5_to_hexdigest(digest, settings.packed_hash);
+        BKE_ntree_update_tag_node_property(ntree, &node);
+        DEG_id_tag_update(&ntree->id, ID_RECALC_NTREE_OUTPUT);
+        count++;
+      }
+    }
+  }
+  FOREACH_NODETREE_END;
+  return count;
+}
+
+static void unpack_compositor_luts(Main *bmain, ReportList *reports, ePF_FileStatus how)
+{
+  FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+    if (!ID_IS_EDITABLE(owner_id)) {
+      continue;
+    }
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy != CMP_NODE_LUT) {
+        continue;
+      }
+      auto &settings = *static_cast<NodeCompositorLUT *>(node.storage);
+      if (!settings.packed_file) {
+        continue;
+      }
+      char *filepath = BKE_packedfile_unpack_to_file(reports,
+                                                     BKE_main_blendfile_path(bmain),
+                                                     settings.filepath,
+                                                     settings.filepath,
+                                                     settings.packed_file,
+                                                     how);
+      if (filepath) {
+        BKE_packedfile_free(settings.packed_file);
+        settings.packed_file = nullptr;
+        settings.packed_hash[0] = '\0';
+        STRNCPY(settings.filepath, filepath);
+        MEM_delete(filepath);
+        BKE_ntree_update_tag_node_property(ntree, &node);
+        DEG_id_tag_update(&ntree->id, ID_RECALC_NTREE_OUTPUT);
+      }
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
 PackedFileCount BKE_packedfile_count_all(Main *bmain)
 {
   Image *ima;
@@ -234,31 +315,25 @@ PackedFileCount BKE_packedfile_count_all(Main *bmain)
   PackedFileCount count;
 
   /* let's check if there are packed files... */
-  for (ima = static_cast<Image *>(bmain->images.first); ima;
-       ima = static_cast<Image *>(ima->id.next))
-  {
+  for (ima = bmain->images.first(); ima; ima = static_cast<Image *>(ima->id.next)) {
     if (BKE_image_has_packedfile(ima) && !ID_IS_LINKED(ima)) {
       count.individual_files++;
     }
   }
 
-  for (vf = static_cast<VFont *>(bmain->fonts.first); vf; vf = static_cast<VFont *>(vf->id.next)) {
+  for (vf = bmain->fonts.first(); vf; vf = static_cast<VFont *>(vf->id.next)) {
     if (vf->packedfile && !ID_IS_LINKED(vf)) {
       count.individual_files++;
     }
   }
 
-  for (sound = static_cast<bSound *>(bmain->sounds.first); sound;
-       sound = static_cast<bSound *>(sound->id.next))
-  {
+  for (sound = bmain->sounds.first(); sound; sound = static_cast<bSound *>(sound->id.next)) {
     if (sound->packedfile && !ID_IS_LINKED(sound)) {
       count.individual_files++;
     }
   }
 
-  for (volume = static_cast<Volume *>(bmain->volumes.first); volume;
-       volume = static_cast<Volume *>(volume->id.next))
-  {
+  for (volume = bmain->volumes.first(); volume; volume = static_cast<Volume *>(volume->id.next)) {
     if (volume->packedfile && !ID_IS_LINKED(volume)) {
       count.individual_files++;
     }
@@ -270,6 +345,11 @@ PackedFileCount BKE_packedfile_count_all(Main *bmain)
     }
 
     for (const bNode &node : ntree->nodes) {
+      if (node.type_legacy == CMP_NODE_LUT &&
+          static_cast<const NodeCompositorLUT *>(node.storage)->packed_file)
+      {
+        count.individual_files++;
+      }
       const NodeShaderGLSLFunction *storage = glsl_function_external_source_storage(&node);
       if (storage != nullptr && storage->packed_source != nullptr) {
         count.individual_files++;
@@ -331,7 +411,7 @@ PackedFile *BKE_packedfile_new_from_memory(const void *mem,
   BLI_assert(mem != nullptr);
   if (!sharing_info) {
     /* Assume we are the only owner of that memory currently. */
-    sharing_info = implicit_sharing::info_for_mem_free(const_cast<void *>(mem));
+    sharing_info = implicit_sharing::info_for_mem_free(static_cast<const std::byte *>(mem));
   }
 
   PackedFile *pf = MEM_new<PackedFile>("PackedFile");
@@ -403,9 +483,7 @@ void BKE_packedfile_pack_all(Main *bmain, ReportList *reports, bool verbose)
   Volume *volume;
   int tot = 0;
 
-  for (ima = static_cast<Image *>(bmain->images.first); ima;
-       ima = static_cast<Image *>(ima->id.next))
-  {
+  for (ima = bmain->images.first(); ima; ima = static_cast<Image *>(ima->id.next)) {
     if (BKE_image_has_packedfile(ima) == false && ID_IS_EDITABLE(ima)) {
       if (ELEM(ima->source, IMA_SRC_FILE, IMA_SRC_TILED)) {
         BKE_image_packfiles(reports, ima, ID_BLEND_PATH(bmain, &ima->id));
@@ -420,9 +498,7 @@ void BKE_packedfile_pack_all(Main *bmain, ReportList *reports, bool verbose)
     }
   }
 
-  for (vfont = static_cast<VFont *>(bmain->fonts.first); vfont;
-       vfont = static_cast<VFont *>(vfont->id.next))
-  {
+  for (vfont = bmain->fonts.first(); vfont; vfont = static_cast<VFont *>(vfont->id.next)) {
     if (vfont->packedfile == nullptr && ID_IS_EDITABLE(vfont) &&
         BKE_vfont_is_builtin(vfont) == false)
     {
@@ -432,9 +508,7 @@ void BKE_packedfile_pack_all(Main *bmain, ReportList *reports, bool verbose)
     }
   }
 
-  for (sound = static_cast<bSound *>(bmain->sounds.first); sound;
-       sound = static_cast<bSound *>(sound->id.next))
-  {
+  for (sound = bmain->sounds.first(); sound; sound = static_cast<bSound *>(sound->id.next)) {
     if (sound->packedfile == nullptr && ID_IS_EDITABLE(sound)) {
       sound->packedfile = BKE_packedfile_new(
           reports, sound->filepath, BKE_main_blendfile_path(bmain));
@@ -442,9 +516,7 @@ void BKE_packedfile_pack_all(Main *bmain, ReportList *reports, bool verbose)
     }
   }
 
-  for (volume = static_cast<Volume *>(bmain->volumes.first); volume;
-       volume = static_cast<Volume *>(volume->id.next))
-  {
+  for (volume = bmain->volumes.first(); volume; volume = static_cast<Volume *>(volume->id.next)) {
     if (volume->packedfile == nullptr && ID_IS_EDITABLE(volume)) {
       volume->packedfile = BKE_packedfile_new(
           reports, volume->filepath, BKE_main_blendfile_path(bmain));
@@ -453,6 +525,7 @@ void BKE_packedfile_pack_all(Main *bmain, ReportList *reports, bool verbose)
   }
 
   tot += pack_glsl_function_external_sources(bmain, reports);
+  tot += pack_compositor_luts(bmain, reports);
 
   for (Object &object : bmain->objects) {
     if (ID_IS_LINKED(&object)) {
@@ -685,7 +758,7 @@ static void unpack_generate_paths(const char *filepath,
      * a file extension based on the file magic. */
     if (id_type == ID_IM) {
       Image *ima = id_cast<Image *>(id);
-      ImagePackedFile *imapf = static_cast<ImagePackedFile *>(ima->packedfiles.last);
+      ImagePackedFile *imapf = ima->packedfiles.last();
       if (imapf != nullptr && imapf->packedfile != nullptr) {
         const PackedFile *pf = imapf->packedfile;
         enum eImbFileType ftype = eImbFileType(
@@ -816,8 +889,8 @@ int BKE_packedfile_unpack_image(Main *bmain,
   int ret_value = RET_ERROR;
 
   if (ima != nullptr) {
-    while (ima->packedfiles.last) {
-      ImagePackedFile *imapf = static_cast<ImagePackedFile *>(ima->packedfiles.last);
+    while (ima->packedfiles.last()) {
+      ImagePackedFile *imapf = ima->packedfiles.last();
       char *new_file_path = BKE_packedfile_unpack(
           bmain, reports, id_cast<ID *>(ima), imapf->filepath, imapf->packedfile, how);
 
@@ -893,9 +966,7 @@ int BKE_packedfile_unpack_all_libraries(Main *bmain, ReportList *reports)
   char *newname;
   int ret_value = RET_ERROR;
 
-  for (lib = static_cast<Library *>(bmain->libraries.first); lib;
-       lib = static_cast<Library *>(lib->id.next))
-  {
+  for (lib = bmain->libraries.first(); lib; lib = static_cast<Library *>(lib->id.next)) {
     if (lib->packedfile && lib->filepath[0]) {
 
       newname = BKE_packedfile_unpack_to_file(reports,
@@ -927,9 +998,7 @@ void BKE_packedfile_pack_all_libraries(Main *bmain, ReportList *reports)
   /* Only allow libraries with relative paths (to avoid issues when unpacking, a limitation that we
    * might want to lift since the "relativeness" does not really ensure sanity significantly more).
    */
-  for (lib = static_cast<Library *>(bmain->libraries.first); lib;
-       lib = static_cast<Library *>(lib->id.next))
-  {
+  for (lib = bmain->libraries.first(); lib; lib = static_cast<Library *>(lib->id.next)) {
     /* Exception to the above: essential assets have an absolute path and should not prevent to
      * operator from continuing. */
     if (BLI_path_contains(asset_system::essentials_directory_path().c_str(), lib->filepath)) {
@@ -946,9 +1015,7 @@ void BKE_packedfile_pack_all_libraries(Main *bmain, ReportList *reports)
     return;
   }
 
-  for (lib = static_cast<Library *>(bmain->libraries.first); lib;
-       lib = static_cast<Library *>(lib->id.next))
-  {
+  for (lib = bmain->libraries.first(); lib; lib = static_cast<Library *>(lib->id.next)) {
     /* Do not really pack essential assets though (see above). */
     if (BLI_path_contains(asset_system::essentials_directory_path().c_str(), lib->filepath)) {
       continue;
@@ -966,37 +1033,32 @@ void BKE_packedfile_unpack_all(Main *bmain, ReportList *reports, enum ePF_FileSt
   bSound *sound;
   Volume *volume;
 
-  for (ima = static_cast<Image *>(bmain->images.first); ima;
-       ima = static_cast<Image *>(ima->id.next))
-  {
+  for (ima = bmain->images.first(); ima; ima = static_cast<Image *>(ima->id.next)) {
     if (BKE_image_has_packedfile(ima) && !ID_IS_LINKED(ima)) {
       BKE_packedfile_unpack_image(bmain, reports, ima, how);
     }
   }
 
-  for (vf = static_cast<VFont *>(bmain->fonts.first); vf; vf = static_cast<VFont *>(vf->id.next)) {
+  for (vf = bmain->fonts.first(); vf; vf = static_cast<VFont *>(vf->id.next)) {
     if (vf->packedfile && !ID_IS_LINKED(vf)) {
       BKE_packedfile_unpack_vfont(bmain, reports, vf, how);
     }
   }
 
-  for (sound = static_cast<bSound *>(bmain->sounds.first); sound;
-       sound = static_cast<bSound *>(sound->id.next))
-  {
+  for (sound = bmain->sounds.first(); sound; sound = static_cast<bSound *>(sound->id.next)) {
     if (sound->packedfile && !ID_IS_LINKED(sound)) {
       BKE_packedfile_unpack_sound(bmain, reports, sound, how);
     }
   }
 
-  for (volume = static_cast<Volume *>(bmain->volumes.first); volume;
-       volume = static_cast<Volume *>(volume->id.next))
-  {
+  for (volume = bmain->volumes.first(); volume; volume = static_cast<Volume *>(volume->id.next)) {
     if (volume->packedfile && !ID_IS_LINKED(volume)) {
       BKE_packedfile_unpack_volume(bmain, reports, volume, how);
     }
   }
 
   unpack_glsl_function_external_sources(bmain, reports, how);
+  unpack_compositor_luts(bmain, reports, how);
 
   for (Object &object : bmain->objects) {
     if (ID_IS_LINKED(&object)) {
@@ -1093,9 +1155,8 @@ void BKE_packedfile_blend_write(BlendWriter *writer, const PackedFile *pf)
   if (pf == nullptr) {
     return;
   }
-  BLO_write_shared(writer, pf->data, pf->size, pf->sharing_info, [&]() {
-    writer->write_raw(pf->size, pf->data);
-  });
+  writer->write_shared(
+      pf->data, pf->size, pf->sharing_info, [&]() { writer->write_raw(pf->size, pf->data); });
   writer->write_struct(pf);
 }
 
@@ -1112,7 +1173,9 @@ void BKE_packedfile_blend_read(BlendDataReader *reader, PackedFile **pf_p, Strin
     BLO_read_array_and_validate_size(
         reader, reinterpret_cast<std::byte **>(const_cast<void **>(&pf->data)), &pf->size);
     /* Do not create an implicit sharing if read data pointer is `nullptr`. */
-    return pf->data ? implicit_sharing::info_for_mem_free(const_cast<void *>(pf->data)) : nullptr;
+    return pf->data ?
+               implicit_sharing::info_for_mem_free(static_cast<const std::byte *>(pf->data)) :
+               nullptr;
   });
   if (pf->data == nullptr) {
     /* We cannot allow a #PackedFile with a nullptr data field,

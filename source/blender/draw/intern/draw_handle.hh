@@ -23,7 +23,7 @@
 #include "draw_shader_shared.hh"
 
 /* random */
-#include "BLI_hash.h"
+#include "BLI_hash_c.hh"
 
 /* find_rgba_attribute */
 #include "GPU_material.hh"
@@ -46,6 +46,8 @@ namespace blender {
 struct DupliCacheManager;
 
 namespace draw {
+
+static constexpr uint64_t LIGHT_LINK_MASK_ALL = ~uint64_t(0);
 
 /**
  * Index for getting a specific resource from the Draw Manager resource arrays.
@@ -279,6 +281,21 @@ class ObjectRef {
     return duplis_ != nullptr;
   }
 
+  /** Read-only evaluated instance identity for geometry-dependent render modules. */
+  const DupliObject *dupli_object(int instance_index = 0) const
+  {
+    if (duplis_) {
+      return (*duplis_)[instance_index];
+    }
+    BLI_assert(instance_index == 0);
+    return dupli_object_;
+  }
+
+  const Object *dupli_parent() const
+  {
+    return dupli_parent_;
+  }
+
   int instances_count() const
   {
     if (duplis_) {
@@ -319,28 +336,74 @@ class ObjectRef {
     return dupli_object_->random_id * (1.0f / float(0xFFFFFFFF));
   }
 
-  bool find_rgba_attribute(const GPUUniformAttr &attr, int instance_index, float r_value[4]) const
+  bool find_rgba_attribute(const char *name,
+                           bool use_dupli,
+                           int instance_index,
+                           float r_value[4]) const
   {
     if (instance_index != 0) {
       BLI_assert(is_range());
-      if (attr.use_dupli) {
+      if (use_dupli) {
         /* If requesting instance data, check the parent particle system and object. */
         return BKE_object_dupli_find_rgba_attribute(
-            object, (*duplis_)[instance_index], dupli_parent_, attr.name, r_value);
+            object, (*duplis_)[instance_index], dupli_parent_, name, r_value);
       }
     }
 
     /* If requesting instance data, check the parent particle system and object. */
-    if (attr.use_dupli) {
+    if (use_dupli) {
       return BKE_object_dupli_find_rgba_attribute(
-          object, dupli_object_, dupli_parent_, attr.name, r_value);
+          object, dupli_object_, dupli_parent_, name, r_value);
     }
-    return BKE_object_dupli_find_rgba_attribute(object, nullptr, nullptr, attr.name, r_value);
+    return BKE_object_dupli_find_rgba_attribute(object, nullptr, nullptr, name, r_value);
+  }
+
+  bool find_rgba_attribute(const GPUUniformAttr &attr, int instance_index, float r_value[4]) const
+  {
+    return find_rgba_attribute(attr.name, attr.use_dupli, instance_index, r_value);
   }
 
   LightLinking *light_linking() const
   {
     return dupli_parent_ ? dupli_parent_->light_linking : object->light_linking;
+  }
+
+  uint64_t get_light_set_membership() const
+  {
+    const LightLinking *light_linking = object->light_linking;
+    return (light_linking) ? light_linking->runtime.light_set_membership : LIGHT_LINK_MASK_ALL;
+  }
+
+  uint8_t get_receiver_light_set() const
+  {
+    if (dupli_parent_) {
+      const LightLinking *parent_light_linking = dupli_parent_->light_linking;
+      if (parent_light_linking && parent_light_linking->runtime.receiver_light_set) {
+        return parent_light_linking->runtime.receiver_light_set;
+      }
+    }
+
+    const LightLinking *light_linking = object->light_linking;
+    return (light_linking) ? light_linking->runtime.receiver_light_set : 0;
+  }
+
+  uint64_t get_shadow_set_membership() const
+  {
+    const LightLinking *light_linking = object->light_linking;
+    return (light_linking) ? light_linking->runtime.shadow_set_membership : LIGHT_LINK_MASK_ALL;
+  }
+
+  uint8_t get_blocker_shadow_set() const
+  {
+    if (dupli_parent_) {
+      const LightLinking *parent_light_linking = dupli_parent_->light_linking;
+      if (parent_light_linking && parent_light_linking->runtime.blocker_shadow_set) {
+        return parent_light_linking->runtime.blocker_shadow_set;
+      }
+    }
+
+    const LightLinking *light_linking = object->light_linking;
+    return (light_linking) ? light_linking->runtime.blocker_shadow_set : 0;
   }
 
   uint recalc_flags(uint64_t last_update) const
@@ -413,18 +476,13 @@ class ObjectRef {
       return false;
     }
 
-    if (object->base_flag & BASE_FROM_DUPLI) {
-      /* TODO: Is this code reachable? */
-      return false;
-    }
-
     if (dupli_parent_->runtime->sculpt_session &&
         (dupli_parent_->runtime->sculpt_session->mode_type == OB_MODE_SCULPT))
     {
       return true;
     }
 
-    if (ob_mode & (OB_MODE_ALL_PAINT | OB_MODE_ALL_PAINT_GPENCIL)) {
+    if (ob_mode & (OB_MODE_ALL_PAINT_MESH | OB_MODE_ALL_PAINT_GPENCIL)) {
       return true;
     }
 
@@ -521,6 +579,34 @@ class ObjectKey {
     sub_key_ = key;
     hash_value_ = get_default_hash(ob_);
     hash_value_ = get_default_hash(hash_value_, get_default_hash(sub_key_));
+  }
+
+  /* Compare persistent object/instance identity, never addresses or hash-map order. */
+  bool stable_less_than(const ObjectKey &other) const
+  {
+    const auto uid = [](const Object *object) -> uint32_t {
+      if (object == nullptr) {
+        return 0;
+      }
+      return object->id.orig_id ? object->id.orig_id->session_uid : object->id.session_uid;
+    };
+    if (uid(ob_) != uid(other.ob_)) {
+      return uid(ob_) < uid(other.ob_);
+    }
+    if (uid(parent_) != uid(other.parent_)) {
+      return uid(parent_) < uid(other.parent_);
+    }
+    if (parent_ && other.parent_) {
+      for (int i : IndexRange(MAX_DUPLI_RECUR)) {
+        if (id_[i] != other.id_[i]) {
+          return id_[i] < other.id_[i];
+        }
+        if (id_[i] == std::numeric_limits<int>::max()) {
+          break;
+        }
+      }
+    }
+    return sub_key_ < other.sub_key_;
   }
 
   uint64_t hash() const

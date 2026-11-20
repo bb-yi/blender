@@ -11,11 +11,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_armature_types.h"
 #include "DNA_curve_types.h"
@@ -56,16 +56,17 @@
 
 namespace blender::ed::object {
 
-static int return_editmesh_indexar(BMEditMesh *em,
+static int return_editmesh_indexar(Mesh &mesh,
                                    int *r_indexar_num,
                                    int **r_indexar,
                                    float r_cent[3])
 {
+  BMesh *bm = BKE_editmesh_bmesh_get_for_write(&mesh);
   BMVert *eve;
   BMIter iter;
   int *index, nr, indexar_num = 0;
 
-  BM_ITER_MESH (eve, &iter, em->bm, BM_VERTS_OF_MESH) {
+  BM_ITER_MESH (eve, &iter, bm, BM_VERTS_OF_MESH) {
     if (BM_elem_flag_test(eve, BM_ELEM_SELECT)) {
       indexar_num++;
     }
@@ -79,7 +80,7 @@ static int return_editmesh_indexar(BMEditMesh *em,
   nr = 0;
   zero_v3(r_cent);
 
-  BM_ITER_MESH (eve, &iter, em->bm, BM_VERTS_OF_MESH) {
+  BM_ITER_MESH (eve, &iter, bm, BM_VERTS_OF_MESH) {
     if (BM_elem_flag_test(eve, BM_ELEM_SELECT)) {
       *index = nr;
       index++;
@@ -93,12 +94,12 @@ static int return_editmesh_indexar(BMEditMesh *em,
   return indexar_num;
 }
 
-static bool return_editmesh_vgroup(Object *obedit, BMEditMesh *em, char *r_name, float r_cent[3])
+static bool return_editmesh_vgroup(Object *obedit, Mesh &mesh, char *r_name, float r_cent[3])
 {
+  BMesh *bm = BKE_editmesh_bmesh_get_for_write(&mesh);
   const int active_index = BKE_object_defgroup_active_index_get(obedit);
-  const int cd_dvert_offset = active_index ?
-                                  CustomData_get_offset(&em->bm->vdata, CD_MDEFORMVERT) :
-                                  -1;
+  const int cd_dvert_offset = active_index ? CustomData_get_offset(&bm->vdata, CD_MDEFORMVERT) :
+                                             -1;
 
   if (cd_dvert_offset != -1) {
     const int defgrp_index = active_index - 1;
@@ -109,7 +110,7 @@ static bool return_editmesh_vgroup(Object *obedit, BMEditMesh *em, char *r_name,
     BMIter iter;
 
     /* find the vertices */
-    BM_ITER_MESH (eve, &iter, em->bm, BM_VERTS_OF_MESH) {
+    BM_ITER_MESH (eve, &iter, bm, BM_VERTS_OF_MESH) {
       dvert = static_cast<MDeformVert *>(BM_ELEM_CD_GET_VOID_P(eve, cd_dvert_offset));
 
       if (BKE_defvert_find_weight(dvert, defgrp_index) > 0.0f) {
@@ -133,6 +134,7 @@ static void select_editbmesh_hook(Object *ob, HookModifierData *hmd)
 {
   Mesh *mesh = id_cast<Mesh *>(ob->data);
   BMEditMesh *em = mesh->runtime->edit_mesh.get();
+  BMesh *bm = BKE_editmesh_bmesh_get_for_write(mesh);
   BMVert *eve;
   BMIter iter;
   int index = 0, nr = 0;
@@ -141,9 +143,9 @@ static void select_editbmesh_hook(Object *ob, HookModifierData *hmd)
     return;
   }
 
-  BM_ITER_MESH (eve, &iter, em->bm, BM_VERTS_OF_MESH) {
+  BM_ITER_MESH (eve, &iter, bm, BM_VERTS_OF_MESH) {
     if (nr == hmd->indexar[index]) {
-      BM_vert_select_set(em->bm, eve, true);
+      BM_vert_select_set(bm, eve, true);
       if (index < hmd->indexar_num - 1) {
         index++;
       }
@@ -152,7 +154,7 @@ static void select_editbmesh_hook(Object *ob, HookModifierData *hmd)
     nr++;
   }
 
-  EDBM_select_flush_from_verts(em, true);
+  EDBM_select_flush_from_verts(bm, em->selectmode, true);
 }
 
 static int return_editlattice_indexar(Lattice *editlatt,
@@ -341,11 +343,11 @@ static bool object_hook_index_array(Main *bmain,
 
       BMEditMesh *em = mesh->runtime->edit_mesh.get();
 
-      BKE_editmesh_looptris_and_normals_calc(em);
+      BKE_editmesh_looptris_and_normals_calc(em, BKE_editmesh_bmesh_get_for_write(mesh));
 
       /* check selected vertices first */
-      if (return_editmesh_indexar(em, r_indexar_num, r_indexar, r_cent) == 0) {
-        return return_editmesh_vgroup(obedit, em, r_name, r_cent);
+      if (return_editmesh_indexar(*mesh, r_indexar_num, r_indexar, r_cent) == 0) {
+        return return_editmesh_vgroup(obedit, *mesh, r_name, r_cent);
       }
       return true;
     }
@@ -423,7 +425,7 @@ static void object_hook_from_context(
   Object *ob;
   HookModifierData *hmd;
 
-  if (ptr->data) { /* if modifier context is available, use that */
+  if (*ptr) { /* if modifier context is available, use that */
     ob = id_cast<Object *>(ptr->owner_id);
     hmd = static_cast<HookModifierData *>(ptr->data);
   }
@@ -569,7 +571,7 @@ static int add_hook_object(const bContext *C,
       STRNCPY_UTF8(hmd->subtarget, arm->act_bone->name);
 
       pchan_act = BKE_pose_channel_active_if_bonecoll_visible(ob);
-      if (LIKELY(pchan_act)) {
+      if (pchan_act) [[likely]] {
         invert_m4_m4(pose_mat, pchan_act->pose_mat);
         mul_v3_m4v3(cent, ob->object_to_world().ptr(), pchan_act->pose_mat[3]);
         mul_v3_m4v3(cent, obedit->world_to_object().ptr(), cent);
@@ -731,7 +733,7 @@ static const EnumPropertyItem *hook_mod_itemf(bContext *C,
     return rna_enum_dummy_NULL_items;
   }
 
-  for (a = 0, md = static_cast<ModifierData *>(ob->modifiers.first); md; md = md->next, a++) {
+  for (a = 0, md = ob->modifiers.first(); md; md = md->next, a++) {
     if (md->type == eModifierType_Hook) {
       tmp.value = a;
       tmp.icon = ICON_HOOK;

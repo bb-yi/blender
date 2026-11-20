@@ -22,15 +22,15 @@
 
 #include "BLI_kdtree.hh"
 #include "BLI_lasso_2d.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_vector.hh"
-#include "BLI_rand.h"
-#include "BLI_rect.h"
-#include "BLI_task.h"
-#include "BLI_time.h"
-#include "BLI_utildefines.h"
+#include "BLI_rand_c.hh"
+#include "BLI_rect.hh"
+#include "BLI_task_c.hh"
+#include "BLI_time.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -313,7 +313,7 @@ static PTCacheEdit *pe_get_current(Depsgraph *depsgraph, Scene *scene, Object *o
 
   /* in the case of only one editable thing, set pset->edittype accordingly */
   if (pidlist.is_single()) {
-    pid = static_cast<PTCacheID *>(pidlist.first);
+    pid = pidlist.first();
     switch (pid->type) {
       case PTCACHE_TYPE_PARTICLES:
         pset->edittype = PE_TYPE_PARTICLES;
@@ -327,7 +327,7 @@ static PTCacheEdit *pe_get_current(Depsgraph *depsgraph, Scene *scene, Object *o
     }
   }
 
-  for (pid = static_cast<PTCacheID *>(pidlist.first); pid; pid = pid->next) {
+  for (pid = pidlist.first(); pid; pid = pid->next) {
     if (pset->edittype == PE_TYPE_PARTICLES && pid->type == PTCACHE_TYPE_PARTICLES) {
       ParticleSystem *psys = static_cast<ParticleSystem *>(pid->calldata);
 
@@ -1681,8 +1681,6 @@ void PE_update_object(Depsgraph *depsgraph, Scene *scene, Object *ob, int usefla
 /* -------------------------------------------------------------------- */
 /** \name Edit Selections
  * \{ */
-
-/*-----selection callbacks-----*/
 
 static void select_key(PEData *data, int point_index, int key_index, bool /*is_inside*/)
 {
@@ -3552,8 +3550,8 @@ static void PE_mirror_x(Depsgraph *depsgraph, Scene *scene, Object *ob, int tagg
 
   /* NOTE: In case psys uses Mesh tessface indices, we mirror final Mesh itself, not orig mesh.
    * Avoids an (impossible) mesh -> orig -> mesh tessface indices conversion. */
-  mirrorfaces = mesh_get_x_mirror_faces(
-      ob, nullptr, use_dm_final_indices ? psmd_eval->mesh_final : nullptr);
+  mirrorfaces = mesh_get_x_mirror_faces(ob,
+                                        use_dm_final_indices ? psmd_eval->mesh_final : nullptr);
 
   if (!edit->mirror_cache) {
     PE_update_mirror_cache(ob, psys);
@@ -5346,8 +5344,7 @@ void PE_create_particle_edit(
       psys_copy_particles(psys, psys_eval);
     }
 
-    totpoint = psys ? psys->totpart :
-                      int((static_cast<PTCacheMem *>(cache->mem_cache.first))->totpoint);
+    totpoint = psys ? psys->totpart : int((cache->mem_cache.first())->totpoint);
 
     edit = MEM_new_zeroed<PTCacheEdit>("PE_create_particle_edit");
     edit->points = MEM_new_array_zeroed<PTCacheEditPoint>(totpoint, "PTCacheEditPoints");
@@ -5449,10 +5446,7 @@ static bool particle_edit_toggle_poll(bContext *C)
 
 static void free_all_psys_edit(Object *object)
 {
-  for (ParticleSystem *psys = static_cast<ParticleSystem *>(object->particlesystem.first);
-       psys != nullptr;
-       psys = psys->next)
-  {
+  for (ParticleSystem *psys = object->particlesystem.first(); psys != nullptr; psys = psys->next) {
     if (psys->edit != nullptr) {
       BLI_assert(psys->free_edit != nullptr);
       psys->free_edit(psys->edit);
@@ -5464,7 +5458,7 @@ static void free_all_psys_edit(Object *object)
 
 bool ED_object_particle_edit_mode_supported(const Object *ob)
 {
-  return (ob->particlesystem.first || BKE_modifiers_findby_type(ob, eModifierType_Cloth) ||
+  return (ob->particlesystem.first() || BKE_modifiers_findby_type(ob, eModifierType_Cloth) ||
           BKE_modifiers_findby_type(ob, eModifierType_Softbody));
 }
 

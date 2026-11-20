@@ -5,9 +5,9 @@
 #pragma once
 
 #include "BLI_array.hh"
-#include "BLI_math_mpq.hh"
-#include "BLI_math_vector_mpq_types.hh"
+#include "BLI_enum_flags.hh"
 #include "BLI_math_vector_types.hh"
+#include "BLI_offset_indices.hh"
 #include "BLI_vector.hh"
 
 namespace blender {
@@ -95,6 +95,28 @@ enum CDT_output_type {
   CDT_CONSTRAINTS_VALID_BMESH_WITH_HOLES_NONZERO,
 };
 
+/** What original ids do we need to track and return? Use this in a flags bitmask.  */
+enum CDT_ids_needed_type {
+  /** Do not require original id maps at all. */
+  CDT_NO_ORIG_IDS = 0,
+  /** Require  new vertices -> original ones. */
+  CDT_ORIG_VERTS = (1 << 0),
+  /** Require new vertices that result from edge intersections -> intersecting edges.  */
+  CDT_INTERSECTED_EDGES = (1 << 1),
+  /** Require new edges -> original ones (maybe part of original faces). */
+  CDT_ORIG_EDGES = (1 << 2),
+  /** Require new faces -> original ones. */
+  CDT_ORIG_FACES = (1 << 3),
+  /** If set, include CW faces (going outward) when CDT_ORIG_FACES is set, else don't. */
+  CDT_CW_ORIG_FACES = (1 << 4),
+  /**
+   * If set, in any of the previous requirements that produce lists, we only need one
+   * representative value in the list.
+   */
+  CDT_ONLY_ONE_ORIG = (1 << 5)
+};
+ENUM_OPERATORS(CDT_ids_needed_type)
+
 namespace meshintersect {
 
 /**
@@ -108,7 +130,7 @@ namespace meshintersect {
  *
  * The edges are given by pairs of vertex indices.
  * The faces are given as groups of vertex indices, in counterclockwise order
- * when original face ids are required (`need_ids`) or for #CDT_CONSTRAINTS_VALID_BMESH.
+ * when original face ids are required (#CDT_ORIG_FACES) or for #CDT_CONSTRAINTS_VALID_BMESH.
  * `*_NONZERO` outputs use the orientation as the winding, even-odd filling ignores it.
  *
  * The edges implied by the faces are automatically added
@@ -145,17 +167,19 @@ namespace meshintersect {
  * instead, since this code will not work correctly if it is not allowed
  * to merge "too near" vertices.
  *
- * Normally the output will contain mappings from outputs to inputs.
- * If this is not needed, set need_ids to false and the execution may be much
- * faster in some circumstances.
+ * Normally the output will not contain mappings from outputs to inputs,
+ * which leads to faster execution.
+ * If some output mappings are needed, set the need_ids mask to the
+ * OR of the required CDT_ids_needed_type values.
  */
 template<typename T> class CDT_input {
  public:
-  Array<VecBase<T, 2>> vert;
-  Array<std::pair<int, int>> edge;
-  Array<Vector<int>> face;
+  Span<VecBase<T, 2>> vert;
+  Span<int2> edge;
+  OffsetIndices<int> face_offsets;
+  Span<int> face_vert_indices;
   T epsilon{0};
-  bool need_ids{true};
+  CDT_ids_needed_type needed_ids{CDT_NO_ORIG_IDS};
 };
 
 /**
@@ -187,7 +211,7 @@ template<typename T> class CDT_input {
 template<typename T> class CDT_result {
  public:
   Array<VecBase<T, 2>> vert;
-  Array<std::pair<int, int>> edge;
+  Array<int2> edge;
   Array<Vector<int>> face;
   /* The orig vectors are only populated if the need_ids input field is true. */
   /** For each output vert, which input verts correspond to it? */
@@ -202,18 +226,20 @@ template<typename T> class CDT_result {
    *      and "b" will be a position within that face.
    */
   Array<Vector<uint32_t>> edge_orig;
+  /**
+   * For each output vert, if the output vert is an intersection,
+   * which original edges were intersected?
+   * Note: Indices follow the same encoding as edge_orig (see above).
+   */
+  Array<int2> intersected_edges_orig;
   /** For each output face, which original faces does it overlap? */
   Array<Vector<uint32_t>> face_orig;
   /** Used to encode edge_orig (see above). */
   uint32_t face_edge_offset;
 };
 
-CDT_result<double> delaunay_2d_calc(const CDT_input<double> &input, CDT_output_type output_type);
-
-#ifdef WITH_GMP
-CDT_result<mpq_class> delaunay_2d_calc(const CDT_input<mpq_class> &input,
-                                       CDT_output_type output_type);
-#endif
+template<typename T>
+CDT_result<T> delaunay_2d_calc(const CDT_input<T> &input, CDT_output_type output_type);
 
 }  // namespace meshintersect
 }  // namespace blender

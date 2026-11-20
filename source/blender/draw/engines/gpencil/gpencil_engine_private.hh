@@ -8,8 +8,8 @@
 
 #pragma once
 
-#include "BLI_bitmap.h"
-#include "BLI_memblock.h"
+#include "BLI_bitmap.hh"
+#include "BLI_memblock.hh"
 
 #include "DNA_shader_fx_types.h"
 #include "DRW_render.hh"
@@ -42,6 +42,22 @@ struct View3D;
 #define GPENCIL_VBO_BLOCK_SIZE 128
 
 #define GP_MAX_MASKBITS 256
+
+#define GPENCIL_SIMPLIFY(scene) \
+  ((scene->r.mode & R_SIMPLIFY) && (scene->r.simplify_gpencil & SIMPLIFY_GPENCIL_ENABLE))
+#define GPENCIL_SIMPLIFY_ONPLAY(playing) \
+  (((playing == true) && (scene->r.simplify_gpencil & SIMPLIFY_GPENCIL_ON_PLAY)) || \
+   ((scene->r.simplify_gpencil & SIMPLIFY_GPENCIL_ON_PLAY) == 0))
+#define GPENCIL_SIMPLIFY_FILL(scene, playing) \
+  ((GPENCIL_SIMPLIFY_ONPLAY(playing) && GPENCIL_SIMPLIFY(scene) && \
+    (scene->r.simplify_gpencil & SIMPLIFY_GPENCIL_FILL)))
+#define GPENCIL_SIMPLIFY_FX(scene, playing) \
+  ((GPENCIL_SIMPLIFY_ONPLAY(playing) && GPENCIL_SIMPLIFY(scene) && \
+    (scene->r.simplify_gpencil & SIMPLIFY_GPENCIL_FX)))
+#define GPENCIL_SIMPLIFY_TINT(scene) \
+  (GPENCIL_SIMPLIFY(scene) && (scene->r.simplify_gpencil & SIMPLIFY_GPENCIL_TINT))
+#define GPENCIL_SIMPLIFY_AA(scene) \
+  (GPENCIL_SIMPLIFY(scene) && (scene->r.simplify_gpencil & SIMPLIFY_GPENCIL_AA))
 
 namespace draw::gpencil {
 

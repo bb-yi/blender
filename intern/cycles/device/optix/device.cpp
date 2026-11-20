@@ -28,8 +28,11 @@
 
 CCL_NAMESPACE_BEGIN
 
-bool device_optix_init()
+bool device_optix_init(bool *r_meets_driver_requirement)
 {
+  if (r_meets_driver_requirement) {
+    *r_meets_driver_requirement = true;
+  }
 #ifdef WITH_OPTIX
   if (OPTIX_FUNCTION_TABLE_SYMBOL.optixDeviceContextCreate != nullptr) {
     /* Already initialized function table. */
@@ -46,6 +49,9 @@ bool device_optix_init()
   if (result == OPTIX_ERROR_UNSUPPORTED_ABI_VERSION) {
     LOG_WARNING << "OptiX initialization failed because the installed NVIDIA driver is too old. "
                    "Please update to the latest driver first!";
+    if (r_meets_driver_requirement) {
+      *r_meets_driver_requirement = false;
+    }
     return false;
   }
   if (result != OPTIX_SUCCESS) {
@@ -78,6 +84,9 @@ void device_optix_info(const vector<DeviceInfo> &cuda_devices, vector<DeviceInfo
 
     info.type = DEVICE_OPTIX;
     info.id += "_OptiX";
+
+    info.use_hardware_raytracing = true;
+
 #  if defined(WITH_OSL) && defined(OSL_USE_OPTIX) && \
       (OSL_VERSION_MINOR >= 13 || OSL_VERSION_MAJOR > 1)
     info.has_osl = true;

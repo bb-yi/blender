@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #pragma once
 
 #include "DNA_node_types.h"
@@ -15,7 +19,7 @@
 #include "RNA_prototypes.hh"
 
 #include "BLI_function_ref.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "BKE_screen.hh"
 

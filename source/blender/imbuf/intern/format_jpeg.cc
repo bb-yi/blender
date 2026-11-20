@@ -10,14 +10,16 @@
 #include <algorithm>
 #include <csetjmp>
 #include <cstdio>
+#include <limits>
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_fileops.h"
-#include "BLI_listbase.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_fileops.hh"
+#include "BLI_listbase.hh"
+#include "BLI_math_base.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_idprop.hh"
 
@@ -424,8 +426,7 @@ static ImBuf *ibJpegImageFromCinfo(jpeg_decompress_struct *cinfo,
            * the information when we write
            * it back to disk.
            */
-          IMB_metadata_ensure(&ibuf->metadata);
-          IMB_metadata_set_field(ibuf->metadata, "None", str);
+          IMB_metadata_set_field(ibuf->metadata_for_write(), "None", str);
           ibuf->flags |= ImBufFlags::Metadata;
           MEM_delete(str);
           goto next_stamp_marker;
@@ -450,8 +451,7 @@ static ImBuf *ibJpegImageFromCinfo(jpeg_decompress_struct *cinfo,
 
         *value = '\0'; /* need finish the key string */
         value++;
-        IMB_metadata_ensure(&ibuf->metadata);
-        IMB_metadata_set_field(ibuf->metadata, key, value);
+        IMB_metadata_set_field(ibuf->metadata_for_write(), key, value);
         ibuf->flags |= ImBufFlags::Metadata;
         MEM_delete(str);
       next_stamp_marker:
@@ -627,12 +627,12 @@ static void write_jpeg(jpeg_compress_struct *cinfo, ImBuf *ibuf)
   memset(neogeo_word, 0, sizeof(*neogeo_word));
   neogeo_word->quality = ibuf->foptions.quality;
   jpeg_write_marker(cinfo, 0xe1, reinterpret_cast<JOCTET *>(neogeo), 10);
-  if (ibuf->metadata) {
+  if (ibuf->metadata()) {
 
     /* Static storage array for the short metadata. */
     char static_text[1024];
     const size_t static_text_size = ARRAY_SIZE(static_text);
-    for (IDProperty &prop : ibuf->metadata->data.group) {
+    for (IDProperty &prop : ibuf->metadata()->data.group) {
       if (prop.type == IDP_STRING) {
         size_t text_len;
         if (STREQ(prop.name, "None")) {
@@ -737,6 +737,29 @@ static void write_jpeg(jpeg_compress_struct *cinfo, ImBuf *ibuf)
   MEM_delete(row_pointer[0]);
 }
 
+/**
+ * Round the pixels-per-meter density to the 16 bit integers JFIF stores.
+ *
+ * \return The relative error introduced by rounding or a dummy (maximum) value
+ * when the result is outside the range JFIF supports.
+ */
+static double jpeg_density_from_ppm(const double ppm[2],
+                                    const double unit_scale,
+                                    UINT16 r_density[2])
+{
+  double error = 0.0;
+  for (int i = 0; i < 2; i++) {
+    const double density = ppm[i] * unit_scale;
+    const double density_round = math::round(density);
+    if (!(density_round >= 1.0 && density_round <= double(std::numeric_limits<UINT16>::max()))) {
+      return std::numeric_limits<double>::max();
+    }
+    r_density[i] = UINT16(density_round);
+    error += math::abs(density_round - density) / density;
+  }
+  return error;
+}
+
 static int init_jpeg(FILE *outfile, jpeg_compress_struct *cinfo, ImBuf *ibuf)
 {
   int quality;
@@ -778,6 +801,31 @@ static int init_jpeg(FILE *outfile, jpeg_compress_struct *cinfo, ImBuf *ibuf)
 
   cinfo->dct_method = JDCT_FLOAT;
   jpeg_set_quality(cinfo, quality, true);
+
+  /* JFIF stores the density as integers in either dots per inch or centimeter.
+   * Use whichever unit rounds with the least error. */
+  if (ibuf->ppm[0] > 0.0 && ibuf->ppm[1] > 0.0) {
+    /* The JFIF unit code & the size of the unit in meters. */
+    struct Unit {
+      UINT8 code;
+      double scale;
+    };
+    const Unit units[] = {
+        {1, 0.0254}, /* Inches. */
+        {2, 0.01},   /* Centimeters. */
+    };
+    double error_best = std::numeric_limits<double>::max();
+    for (const Unit &unit : units) {
+      UINT16 density[2];
+      const double error_test = jpeg_density_from_ppm(ibuf->ppm, unit.scale, density);
+      if (error_test < error_best) {
+        error_best = error_test;
+        cinfo->density_unit = unit.code;
+        cinfo->X_density = density[0];
+        cinfo->Y_density = density[1];
+      }
+    }
+  }
 
   return 0;
 }

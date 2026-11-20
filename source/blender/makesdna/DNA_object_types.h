@@ -10,7 +10,7 @@
 #pragma once
 
 #include "BLI_enum_flags.hh"
-#include "BLI_math_constants.h"
+#include "BLI_math_constants.hh"
 #include "BLI_math_matrix_types.hh"
 
 #include "DNA_object_enums.h"
@@ -567,7 +567,7 @@ struct Object {
   /** Transformation settings and transform locks. */
   eObject_TransFlag transflag = {};
   eObject_ProtectFlag protectflag = OB_LOCK_ROT4D;
-  eObject_Axis trackflag = OB_POSX, upflag = OB_POSY;
+  eObject_Axis trackflag = OB_POSY, upflag = OB_POSZ;
   /** Used for DopeSheet filtering settings (expanded/collapsed). */
   eObject_NlaFlag nlaflag = {};
 
@@ -608,7 +608,9 @@ struct Object {
   /** Current deformation group, NOTE: index starts at 1. */
   DNA_DEPRECATED unsigned short actdef = 0;
   /** Current face map, NOTE: index starts at 1. */
-  char _pad2[2] = {};
+  /** Opt this object's Forward surfaces into NPR refraction background layers. */
+  char use_npr_refraction_background = false;
+  char _pad2[1] = {};
   /** Object color (in most cases the material color is used for drawing). */
   float color[4] = {1, 1, 1, 1};
 

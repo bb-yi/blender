@@ -8,6 +8,8 @@
 
 #include "node_geometry_util.hh"
 
+#include <fmt/format.h>
+
 namespace blender::nodes::node_geo_rename_attribute_cc {
 
 enum class RenameMode {
@@ -65,7 +67,8 @@ static void node_geo_exec(GeoNodeExecParams params)
   Mutex failures_lock;
   Map<std::string, std::string> failures;
   geometry::foreach_real_geometry(geometry_set, [&](GeometrySet &geometry) {
-    for (const auto type : {
+    for (const auto type :
+         {
              GeometryComponent::Type::Mesh,
              GeometryComponent::Type::PointCloud,
              GeometryComponent::Type::Curve,

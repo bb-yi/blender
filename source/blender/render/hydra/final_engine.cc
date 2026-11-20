@@ -11,9 +11,9 @@
 #include "DNA_layer_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_time.h"
-#include "BLI_timecode.h"
+#include "BLI_listbase.hh"
+#include "BLI_time.hh"
+#include "BLI_timecode.hh"
 
 #include "BKE_lib_id.hh"
 
@@ -44,7 +44,7 @@ void FinalEngine::render()
   int width = image_res[0] * border[2];
   int height = image_res[1] * border[3];
 
-  pxr::GfCamera camera = gf_camera(scene_->camera, image_res, border);
+  pxr::GfCamera camera = gf_camera(camera_object(), image_res, border);
 
   free_camera_delegate_->SetCamera(camera);
   render_task_delegate_->set_viewport(pxr::GfVec4d(0, 0, width, height));
@@ -53,7 +53,7 @@ void FinalEngine::render()
   }
 
   RenderResult *rr = RE_engine_get_result(bl_engine_);
-  RenderLayer *rlayer = static_cast<RenderLayer *>(rr->layers.first);
+  RenderLayer *rlayer = rr->layers.first();
   for (RenderPass &rpass : rlayer->passes) {
     pxr::TfToken *aov_token = aov_tokens_.lookup_ptr(rpass.name);
     if (!aov_token) {
@@ -100,6 +100,14 @@ void FinalEngine::render()
 
   update_render_result(width, height, view_layer->name);
   render_task_delegate_->unbind();
+}
+
+const Object *FinalEngine::camera_object() const
+{
+  if (bl_engine_->camera_override) {
+    return DEG_get_evaluated(depsgraph_, bl_engine_->camera_override);
+  }
+  return scene_->camera;
 }
 
 void FinalEngine::set_render_setting(const std::string &key, const pxr::VtValue &val)

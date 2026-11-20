@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "draw_command_shared.hh"
 #include "draw_view.bsl.hh"
 #include "eevee_defines.hh"
 #include "eevee_gbuffer_read.bsl.hh"
@@ -11,10 +12,10 @@
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_subsurface_shared.hh"
 #include "gpu_shader_codegen_lib.glsl"
-#include "gpu_shader_math_angle_lib.glsl"
-#include "gpu_shader_math_matrix_construct_lib.glsl"
-#include "gpu_shader_math_vector_safe_lib.glsl"
-#include "gpu_shader_shared_exponent_lib.glsl"
+#include "gpu_shader_math_angle.bsl.hh"
+#include "gpu_shader_math_matrix_construct.bsl.hh"
+#include "gpu_shader_math_vector_safe.bsl.hh"
+#include "gpu_shader_shared_exponent.bsl.hh"
 
 namespace eevee::subsurface {
 
@@ -34,7 +35,7 @@ struct Setup {
 
   [[sampler(2)]] sampler2DDepth depth_tx;
 
-  [[image(0, read, DEFERRED_RADIANCE_FORMAT)]] const uimage2D direct_light_img;
+  [[image(0, read, DEFERRED_RADIANCE_FORMAT)]] const uimage2DArray direct_light_img;
   [[image(1, read, RAYTRACE_RADIANCE_FORMAT)]] const image2D indirect_light_img;
   [[image(2, write, SUBSURFACE_OBJECT_ID_FORMAT)]] uimage2D object_id_img;
   [[image(3, write, SUBSURFACE_RADIANCE_FORMAT)]] image2DArray radiance_img;
@@ -73,7 +74,8 @@ void setup_main([[resource_table]] Setup &srt,
       (cl.npr.diffusion.w > 0.0f && reduce_max(cl.npr.diffusion.xyz) > 0.0f) :
       cl.type == CLOSURE_BSSRDF_BURLEY_ID;
   if (enabled) {
-    float3 direct = rgb9e5_decode(imageLoadFast(srt.direct_light_img, texel).r);
+    int direct_bin = surface_diffusion ? srt.diffusion_bin : 0;
+    float3 direct = rgb9e5_decode(imageLoadFast(srt.direct_light_img, int3(texel, direct_bin)).r);
     float3 indirect = imageLoadFast(srt.indirect_light_img, texel).rgb;
 
     ClosureSubsurface closure = to_closure_subsurface(cl);
@@ -176,7 +178,7 @@ struct Convolve {
   [[sampler(3)]] sampler2DDepth depth_tx;
   [[sampler(4)]] usampler2D object_id_tx;
 
-  [[image(0, write, DEFERRED_RADIANCE_FORMAT)]] uimage2D out_direct_light_img;
+  [[image(0, write, DEFERRED_RADIANCE_FORMAT)]] uimage2DArray out_direct_light_img;
   [[image(1, write, RAYTRACE_RADIANCE_FORMAT)]] image2D out_indirect_light_img;
   [[image(2, write, UINT_32)]] uimage2DArray npr_header_img;
 
@@ -230,7 +232,7 @@ void convolve_main([[resource_table]] Convolve &srt,
                    [[work_group_id]] const uint3 group_id,
                    [[local_invocation_id]] const uint3 local_thread_id)
 {
-  constexpr uint tile_size = SUBSURFACE_GROUP_SIZE;
+  constexpr uint tile_size = uint(SUBSURFACE_GROUP_SIZE);
   uint2 tile_coord = unpackUvec2x16(srt.tiles_coord_buf[group_id.x]);
   int2 texel = int2(local_thread_id.xy + tile_coord * tile_size);
 
@@ -285,7 +287,7 @@ void convolve_main([[resource_table]] Convolve &srt,
 
   /* Do not rotate too much to avoid too much cache misses. */
   float golden_angle = M_PI * (3.0f - sqrt(5.0f));
-  float theta = interleaved_gradient_noise(float2(texel), 0, 0.0f) * golden_angle;
+  float theta = random::interleaved_gradient(float2(texel), 0, 0.0f) * golden_angle;
 
   float2x2 sample_space = from_scale(sample_scale) * from_rotation(AngleRadian{theta});
 
@@ -347,7 +349,7 @@ void convolve_main([[resource_table]] Convolve &srt,
   }
 
   /* Put result in direct diffuse. */
-  imageStoreFast(srt.out_direct_light_img, texel, uint4(rgb9e5_encode(accum_radiance)));
+  imageStoreFast(srt.out_direct_light_img, int3(texel, 0), uint4(rgb9e5_encode(accum_radiance)));
   /* Note that if we don't use split radiance, this clears the indirect pass since its content has
    * been merged and convolved with direct light.*/
   imageStoreFast(srt.out_indirect_light_img, texel, float4(accum_radiance_indirect, 0.0f));

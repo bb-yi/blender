@@ -1,7 +1,7 @@
 #pragma once
 
-#include "draw_math_geom_lib.glsl"
-#include "gpu_shader_math_vector_safe_lib.glsl"
+#include "draw_math_geom.bsl.hh"
+#include "gpu_shader_math_vector_safe.bsl.hh"
 
 struct HardwareEnvironmentVisibilityData {
   float3 average_direction;

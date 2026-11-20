@@ -20,6 +20,7 @@ set(INC_SYS
 
 set(SRC
   node_filter_graph_tree.cc
+  node_npr_line_tree.cc
   nodes/node_filter_graph_nodes.cc
   nodes/node_shader_add_shader.cc
   nodes/node_shader_ambient_occlusion.cc
@@ -74,8 +75,12 @@ set(SRC
   nodes/node_shader_input_aov.cc
   nodes/node_shader_invert.cc
   nodes/node_shader_layer_weight.cc
-  nodes/node_shader_light_info.cc
+  nodes/node_shader_npr_light_info.cc
+  nodes/node_shader_light_accumulation.cc
+  nodes/node_shader_light_evaluation.cc
   nodes/node_shader_light_falloff.cc
+  nodes/node_shader_light_info.cc
+  nodes/node_shader_light_iter_internal.cc
   nodes/node_shader_light_path.cc
   nodes/node_shader_map_range.cc
   nodes/node_shader_mapping.cc
@@ -96,8 +101,10 @@ set(SRC
   nodes/node_shader_portal_out.cc
   nodes/node_shader_render_texture.cc
   nodes/node_shader_render_info.cc
+  nodes/node_shader_stencil_value.cc
   nodes/node_shader_world_environment.cc
   nodes/node_shader_light_probe_color.cc
+  nodes/node_shader_planar_probe.cc
   nodes/node_shader_world_to_tangent.cc
   nodes/node_shader_basis_transform.cc
   nodes/node_shader_sdf_primitive.cc
@@ -126,9 +133,11 @@ set(SRC
   nodes/node_shader_sepcomb_color.cc
   nodes/node_shader_sepcomb_xyz.cc
   nodes/node_shader_shader_to_rgb.cc
+  nodes/node_shader_shadow_raycast.cc
   nodes/node_shader_squeeze.cc
   nodes/node_shader_subsurface_scattering.cc
   nodes/node_shader_tangent.cc
+  nodes/node_shader_tessellation_control.cc
   nodes/node_shader_twirl.cc
   nodes/node_shader_water_ripples.cc
   nodes/node_shader_tex_brick.cc
@@ -164,6 +173,9 @@ set(SRC
   node_shader_register.cc
   node_shader_tree.cc
   node_shader_util.cc
+
+  # Preserve existing Unity batches when adding the new node.
+  nodes/node_shader_draw_info.cc
 
   node_shader_register.hh
   node_shader_util.hh
@@ -226,7 +238,7 @@ endif()
 blender_add_lib(bf_nodes_shader "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 add_library(bf::nodes::shader ALIAS bf_nodes_shader)
 
-set_source_files_properties(nodes/node_shader_npr_surface_diffusion.cc nodes/node_shader_npr_rim.cc
+set_source_files_properties(node_npr_line_tree.cc nodes/node_shader_npr_surface_diffusion.cc nodes/node_shader_npr_rim.cc
   PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 blender_set_target_unity_build(bf_nodes_shader 10)
 

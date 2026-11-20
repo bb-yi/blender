@@ -9,8 +9,8 @@
 #include <array>
 #include <cstring>
 
-#include "BLI_ghash.h"
-#include "BLI_utildefines.h"
+#include "BLI_ghash.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -95,6 +95,11 @@ static bool id_type_is_valid(const IDTypeInfo &id_type)
     return false;
   }
   if (id_type.foreach_working_space_color == id_type.InvalidPointer<IDTypeForeachColorFunction>())
+  {
+    return false;
+  }
+  if (id_type.foreach_asset_weak_reference ==
+      id_type.InvalidPointer<IDTypeForeachAssetWeakReferenceFunction>())
   {
     return false;
   }

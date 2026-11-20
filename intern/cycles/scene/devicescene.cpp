@@ -38,6 +38,9 @@ DeviceScene::DeviceScene(Device *device)
       attributes_float4(device, "attributes_float4", MEM_GLOBAL),
       attributes_uchar4(device, "attributes_uchar4", MEM_GLOBAL),
       attributes_normal(device, "attributes_normal", MEM_GLOBAL),
+      attributes_quaternion(device, "attributes_quaternion", MEM_GLOBAL),
+      attributes_spherical_harmonics_rest(
+          device, "attributes_spherical_harmonics_rest", MEM_GLOBAL),
       light_distribution(device, "light_distribution", MEM_GLOBAL),
       lights(device, "lights", MEM_GLOBAL),
       light_background_marginal_cdf(device, "light_background_marginal_cdf", MEM_GLOBAL),
@@ -58,8 +61,17 @@ DeviceScene::DeviceScene(Device *device)
       volume_tree_root_ids(device, "volume_tree_root_ids", MEM_GLOBAL),
       volume_step_size(device, "volume_step_size", MEM_GLOBAL),
       image_textures(device, "image_textures", MEM_GLOBAL),
-      image_texture_tile_descriptors(device, "image_texture_tile_descriptors", MEM_GLOBAL),
-      image_texture_tile_access_state(device, "image_texture_tile_access_state", MEM_GLOBAL),
+      /* These are read-write for the texture cache, so need to be per device
+       * and without host fallback to avoid race conditions between devices
+       * sharing the same memory. */
+      image_texture_tile_descriptors(device,
+                                     "image_texture_tile_descriptors",
+                                     MEM_GLOBAL,
+                                     MEM_FLAG_PER_DEVICE | MEM_FLAG_NO_HOST_FALLBACK),
+      image_texture_tile_access_state(device,
+                                      "image_texture_tile_access_state",
+                                      MEM_GLOBAL,
+                                      MEM_FLAG_PER_DEVICE | MEM_FLAG_NO_HOST_FALLBACK),
       image_texture_udims(device, "image_texture_udims", MEM_GLOBAL)
 {
   memset((void *)&data, 0, sizeof(data));

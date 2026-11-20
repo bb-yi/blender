@@ -9,12 +9,12 @@
 #include <algorithm>
 #include <cstdlib>
 
-#include "BLI_math_base.h"
-#include "BLI_math_color_blend.h"
-#include "BLI_math_vector.h"
-#include "BLI_rect.h"
+#include "BLI_math_base_c.hh"
+#include "BLI_math_color_blend.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_rect.hh"
 #include "BLI_task.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
@@ -474,17 +474,12 @@ void IMB_crop(ImBuf *ibuf, const int2 &rect_pos, const int2 &rect_size)
     return;
   }
 
-  const ColorSpace *byte_colorspace = ibuf->byte_buffer.colorspace;
-  const ColorSpace *float_colorspace = ibuf->float_buffer.colorspace;
-
   if (const uchar *byte_data = ibuf->byte_data()) {
     ibuf->assign_byte_data(create_cropped_buffer(byte_data, src_size, rect_pos, rect_size));
-    ibuf->byte_buffer.colorspace = byte_colorspace;
   }
   if (const float *float_data = ibuf->float_data()) {
     ibuf->assign_float_data(
         create_cropped_buffer(float_data, src_size, ibuf->channels, rect_pos, rect_size));
-    ibuf->float_buffer.colorspace = float_colorspace;
   }
 
   ibuf->x = rect_size.x;
@@ -652,6 +647,8 @@ using IMB_blend_func = void (*)(uchar *dst, const uchar *src1, const uchar *src2
 using IMB_blend_func_float = void (*)(float *dst, const float *src1, const float *src2);
 
 void IMB_rectblend(ImBuf *dbuf,
+                   uint8_t *dbuf_byte_data,
+                   float *dbuf_float_data,
                    const ImBuf *obuf,
                    const ImBuf *sbuf,
                    ushort *dmask,
@@ -704,16 +701,15 @@ void IMB_rectblend(ImBuf *dbuf,
     return;
   }
 
-  const bool do_char = (sbuf && sbuf->byte_data() && dbuf->byte_data() && obuf->byte_data());
-  const bool do_float = (sbuf && sbuf->float_data() && dbuf->float_data() && obuf->float_data());
+  const bool do_char = (sbuf && sbuf->byte_data() && dbuf_byte_data && obuf->byte_data());
+  const bool do_float = (sbuf && sbuf->float_data() && dbuf_float_data && obuf->float_data());
 
   if (do_char) {
-    drect = reinterpret_cast<uint *>(dbuf->byte_data_for_write()) + size_t(desty) * dbuf->x +
-            destx;
+    drect = reinterpret_cast<uint *>(dbuf_byte_data) + size_t(desty) * dbuf->x + destx;
     orect = reinterpret_cast<const uint *>(obuf->byte_data()) + size_t(origy) * obuf->x + origx;
   }
   if (do_float) {
-    drectf = dbuf->float_data_for_write() + (size_t(desty) * dbuf->x + destx) * 4;
+    drectf = dbuf_float_data + (size_t(desty) * dbuf->x + destx) * 4;
     orectf = obuf->float_data() + (size_t(origy) * obuf->x + origx) * 4;
   }
 
@@ -1135,8 +1131,18 @@ void IMB_rectblend_threaded(ImBuf *dbuf,
                             IMB_BlendMode mode,
                             bool accumulate)
 {
+  if (dbuf == nullptr || obuf == nullptr) {
+    return;
+  }
+
+  /* Acquire mutable data pointers outside of parallel loop. */
+  uint8_t *dbuf_byte_data = dbuf->byte_data_for_write();
+  float *dbuf_float_data = dbuf->float_data_for_write();
+
   threading::parallel_for(IndexRange(height), 16, [&](const IndexRange y_range) {
     IMB_rectblend(dbuf,
+                  dbuf_byte_data,
+                  dbuf_float_data,
                   obuf,
                   sbuf,
                   dmask,

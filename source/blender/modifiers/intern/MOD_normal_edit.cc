@@ -10,12 +10,12 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
-#include "BLI_bitmap.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_bitmap.hh"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_vector.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BLT_translation.hh"
 
@@ -653,8 +653,7 @@ static void offset_panel_draw(const bContext * /*C*/, Panel *panel)
 
   int mode = RNA_enum_get(ptr, "mode");
   PointerRNA target_ptr = RNA_pointer_get(ptr, "target");
-  bool needs_object_offset = (mode == MOD_NORMALEDIT_MODE_RADIAL &&
-                              RNA_pointer_is_null(&target_ptr)) ||
+  bool needs_object_offset = (mode == MOD_NORMALEDIT_MODE_RADIAL && !target_ptr) ||
                              (mode == MOD_NORMALEDIT_MODE_DIRECTIONAL &&
                               RNA_boolean_get(ptr, "use_direction_parallel"));
 

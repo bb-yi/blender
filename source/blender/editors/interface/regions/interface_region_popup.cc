@@ -19,10 +19,10 @@
 
 #include "BLF_api.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_math_vector.h"
-#include "BLI_rect.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_rect.hh"
+#include "BLI_utildefines.hh"
 #include "BLI_vector_set.hh"
 
 #include "BKE_context.hh"
@@ -684,7 +684,7 @@ Block *popup_block_refresh(bContext *C, PopupBlockHandle *handle, ARegion *butre
   const BlockHandleCreateFunc handle_create_func = handle->popup_create_vars.handle_create_func;
   void *arg = handle->popup_create_vars.arg;
 
-  Block *block_old = static_cast<Block *>(region->runtime->uiblocks.first);
+  Block *block_old = region->runtime->uiblocks.first();
 
   handle->refresh = (block_old != nullptr);
 
@@ -931,6 +931,12 @@ PopupBlockHandle *popup_block_create(bContext *C,
                                      const bool can_refresh)
 {
   wmWindow *window = CTX_wm_window(C);
+
+  /* Needed for the splash popup which may be called before the DPI is set, see #161001. */
+  if (window->runtime && window->runtime->ghostwin) {
+    WM_window_dpi_set_userdef(window);
+  }
+
   Button *activebut = context_active_but_get(C);
 
   /* disable tooltips from buttons below */
@@ -946,6 +952,7 @@ PopupBlockHandle *popup_block_create(bContext *C,
   /* store context for operator */
   handle->ctx_area = CTX_wm_area(C);
   handle->ctx_region = CTX_wm_region(C);
+  handle->ctx_region_popup = CTX_wm_region_popup(C);
   handle->can_refresh = can_refresh;
 
   /* store vars to refresh popup (RGN_REFRESH_UI) */

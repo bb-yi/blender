@@ -18,6 +18,8 @@ const char *GLLogParser::parse_line(const char *source_combined,
 {
   /* Skip ERROR: or WARNING:. */
   log_line = skip_severity_prefix(log_line, log_item);
+  const bool has_severity_prefix = log_item.severity != Severity::Unknown;
+  bool has_three_fields = false;
   log_line = skip_separators(log_line, "(: ");
 
   /* Parse error line & char numbers. */
@@ -33,6 +35,7 @@ const char *GLLogParser::parse_line(const char *source_combined,
     }
     /* There can be a 3rd number (case of mesa driver). */
     if (at_any(log_line, "(:") && at_number(&log_line[1])) {
+      has_three_fields = true;
       log_item.cursor.source = log_item.cursor.row;
       log_item.cursor.row = log_item.cursor.column;
       log_item.cursor.column = parse_number(log_line + 1, &error_line_number_end);
@@ -40,14 +43,14 @@ const char *GLLogParser::parse_line(const char *source_combined,
     }
   }
 
-  if ((log_item.cursor.row != -1) && (log_item.cursor.column != -1)) {
-    if (GPU_type_matches(GPU_DEVICE_NVIDIA, GPU_OS_ANY, GPU_DRIVER_OFFICIAL)) {
-      /* source:row */
-      log_item.cursor.source = log_item.cursor.row;
-      log_item.cursor.row = log_item.cursor.column;
-      log_item.cursor.column = -1;
-    }
-    else if (GPU_type_matches(GPU_DEVICE_ATI, GPU_OS_UNIX, GPU_DRIVER_OFFICIAL)) {
+  if (!has_three_fields && log_item.cursor.row != -1 && log_item.cursor.column != -1) {
+    /* A severity prefix and source zero identify source:row regardless of the GPU vendor.
+     * Keep the platform fallback for ambiguous legacy two-field line:column logs. Three-field
+     * source:row:column logs have already been normalized above. */
+    if (has_severity_prefix || log_item.cursor.row == 0 ||
+        GPU_type_matches(GPU_DEVICE_NVIDIA, GPU_OS_ANY, GPU_DRIVER_OFFICIAL) ||
+        GPU_type_matches(GPU_DEVICE_ATI, GPU_OS_UNIX, GPU_DRIVER_OFFICIAL))
+    {
       /* source:row */
       log_item.cursor.source = log_item.cursor.row;
       log_item.cursor.row = log_item.cursor.column;

@@ -66,9 +66,8 @@ def draw_km(display_keymaps, kc, km, children, layout, level):
 
     layout.context_pointer_set("keymap", km)
 
-    col = _indented_layout(layout, level)
-
-    row = col.row(align=True)
+    subcol = _indented_layout(layout, level)
+    row = subcol.row(align=True)
     row.prop(km, "show_expanded_children", text="", emboss=False)
     row.label(text=km.name, text_ctxt=i18n_contexts.id_windowmanager)
 
@@ -85,6 +84,7 @@ def draw_km(display_keymaps, kc, km, children, layout, level):
         del subrow
 
     if km.show_expanded_children:
+        col = layout.column()
         if children:
             # Put the Parent key map's entries in a 'global' sub-category
             # equal in hierarchy to the other children categories
@@ -100,7 +100,7 @@ def draw_km(display_keymaps, kc, km, children, layout, level):
 
         # Key Map items
         if km.show_expanded_items:
-            kmi_level = level + 3 if children else level + 1
+            kmi_level = level + 2 if children else level + 1
             for kmi in km.keymap_items:
                 draw_kmi(display_keymaps, kc, km, kmi, col, kmi_level)
 
@@ -156,7 +156,7 @@ def draw_kmi(display_keymaps, kc, km, kmi, layout, level):
             row.label(text="(Unassigned)")
         else:
             row.alert = True
-            row.label(text=rpt_("{:s} (unavailable)").format(kmi.idname), icon='WARNING_LARGE', translate=False)
+            row.label(text=rpt_("{:s} (unavailable)").format(kmi.idname), icon='STATUS_WARNING', translate=False)
 
     row = split.row()
     row.prop(kmi, "map_type", text="")
@@ -195,7 +195,7 @@ def draw_kmi(display_keymaps, kc, km, kmi, layout, level):
 
         box = col.box()
 
-        split = box.split(factor=0.4)
+        split = box.split(factor=box.property_split_factor)
         sub = split.row()
 
         if km.is_modal:
@@ -567,7 +567,7 @@ def draw_keymaps(context, layout):
 
     # layout.context_pointer_set("keyconfig", wm.keyconfigs.active)
     # row.operator("preferences.keyconfig_remove", text="", icon='X')
-    rowsub = row.split(factor=0.4, align=True)
+    rowsub = row.split(factor=row.property_split_factor, align=True)
     # postpone drawing into rowsub, so we can set alert!
 
     layout.separator()

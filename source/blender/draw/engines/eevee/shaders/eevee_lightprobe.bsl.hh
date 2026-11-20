@@ -8,17 +8,17 @@
 #include "eevee_lightprobe_sphere.bsl.hh"
 #include "eevee_lightprobe_volume.bsl.hh"
 #include "eevee_sampling_lib.bsl.hh"
-#include "eevee_spherical_harmonics.bsl.hh"
 #include "eevee_subsurface_lib.bsl.hh"
 #include "eevee_thickness_lib.bsl.hh"
 #include "gpu_shader_codegen_lib.glsl"
+#include "gpu_shader_math_spherical_harmonics.bsl.hh"
 
 namespace eevee {
 
 struct LightprobeRenderData {
-  [[resource_table]] srt_t<LightprobeSphereRenderData> spheres;
-  [[resource_table]] srt_t<LightprobeVolumeRenderData> volumes;
-  [[resource_table]] srt_t<Sampling> sampling;
+  [[resource_table]] LightprobeSphereRenderData spheres;
+  [[resource_table]] LightprobeVolumeRenderData volumes;
+  [[resource_table]] Sampling sampling;
 
   /**
    * Return cached light-probe data at P.
@@ -26,16 +26,12 @@ struct LightprobeRenderData {
    */
   LightProbeSample load(float2 screen_texel, float3 P, float3 Ng, float3 V) const
   {
-    [[resource_table]] const Sampling samp = sampling;
-    [[resource_table]] const LightprobeVolumeRenderData &lp_volumes = volumes;
-    [[resource_table]] const LightprobeSphereRenderData &lp_spheres = spheres;
-
-    float noise = interleaved_gradient_noise(screen_texel, 0.0f, 0.0f);
-    noise = fract(noise + samp.rng_1D_get(SAMPLING_LIGHTPROBE));
+    float noise = random::interleaved_gradient(screen_texel, 0.0f, 0.0f);
+    noise = fract(noise + sampling.rng_1D_get(SAMPLING_LIGHTPROBE));
 
     LightProbeSample result;
-    result.volume_irradiance = lp_volumes.sample_probe(samp, P, V, Ng);
-    result.spherical_id = lp_spheres.select_probe(P, noise);
+    result.volume_irradiance = volumes.sample_probe(sampling, P, V, Ng);
+    result.spherical_id = spheres.select_probe(P, noise);
     return result;
   }
 
@@ -44,17 +40,15 @@ struct LightprobeRenderData {
                         float3 L,
                         float perceptual_roughness) const
   {
-    [[resource_table]] const LightprobeSphereRenderData &lp_spheres = spheres;
-
     /* Avoid over-blurring diffuse. */
     perceptual_roughness = min(0.6f, perceptual_roughness);
     float lod = lightprobe::sphere::roughness_to_lod(perceptual_roughness);
-    float3 radiance_sh = lp_spheres.spherical_sample_normalized_with_parallax(samp, P, L, lod);
+    float3 radiance_sh = spheres.spherical_sample_normalized_with_parallax(samp, P, L, lod);
     return radiance_sh;
   }
 
   /* TODO: Port that inside a BSSDF file. */
-  float3 eval([[resource_table]] const UtilityTexture &util_tx,
+  float3 eval(const UtilityTexture &util_tx,
               LightProbeSample samp,
               ClosureSubsurface cl,
               float3 /*P*/,
@@ -70,16 +64,13 @@ struct LightprobeRenderData {
   float3 eval(
       LightProbeSample samp, ClosureUndetermined cl, float3 P, float3 V, Thickness thickness) const
   {
-    [[resource_table]] const LightprobeSphereRenderData &lp_spheres = spheres;
-
     if (closure_is_npr_reflection(cl)) {
-      [[resource_table]] const Sampling &rng = sampling;
       float3x3 frame = closure_reflection_frame(cl);
       float3 Vt = V * frame;
       float2 alpha = bxdf_ggx_anisotropic_axes(cl.data.x, cl.data.y);
-      float2 noise = fract(rng.rng_2D_get(SAMPLING_RAYTRACE_U) +
-                           float2(interleaved_gradient_noise(P.xy, 0.0f, P.z),
-                                  interleaved_gradient_noise(P.yz, 1.0f, P.x)));
+      float2 noise = fract(sampling.rng_2D_get(SAMPLING_RAYTRACE_U) +
+                           float2(random::interleaved_gradient(P.xy, 0.0f, P.z),
+                                  random::interleaved_gradient(P.yz, 1.0f, P.x)));
       float3 radiance = float3(0.0f);
       float weight_sum = 0.0f;
       for (int i = 0; i < 8; i++) {
@@ -90,7 +81,7 @@ struct LightprobeRenderData {
           float weight = bxdf_ggx_anisotropic_eval(ray.direction, Vt, alpha).weight;
           /* The distribution is integrated by the directions. Do not blur it a second time or
            * replace a rough anisotropic lobe by directionless volume-probe SH. */
-          radiance += lp_spheres.spherical_sample_normalized_with_parallax(
+          radiance += spheres.spherical_sample_normalized_with_parallax(
                           samp, P, frame * float3(ray.direction), 0.0f) * weight;
           weight_sum += weight;
         }
@@ -103,7 +94,7 @@ struct LightprobeRenderData {
     float lod = lightprobe::sphere::roughness_to_lod(ray.perceptual_roughness);
     float fac = lightprobe::sphere::roughness_to_mix_fac(ray.perceptual_roughness);
 
-    float3 radiance_cube = lp_spheres.spherical_sample_normalized_with_parallax(
+    float3 radiance_cube = spheres.spherical_sample_normalized_with_parallax(
         samp, P, ray.dominant_direction, lod);
     float3 radiance_sh = samp.volume_irradiance.evaluate_lambert(ray.dominant_direction).rgb;
     return mix(radiance_cube, radiance_sh, fac);

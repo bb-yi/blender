@@ -10,7 +10,7 @@
 
 #include <cstring> /* XXX: `memcpy`. */
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "BKE_action.hh" /* XXX: BKE_pose_channel_find_name */
 #include "BKE_idtype.hh"
@@ -114,6 +114,46 @@ bool DEG_id_type_updated(const Depsgraph *graph, short id_type)
   return deg_graph->id_type_updated[BKE_idtype_idcode_to_index(id_type)] != 0;
 }
 
+bool DEG_is_evaluating_time_update(const Depsgraph *graph)
+{
+  const deg::Depsgraph *deg_graph = reinterpret_cast<const deg::Depsgraph *>(graph);
+  if (!deg_graph->is_evaluating) {
+    return false;
+  }
+  const int sources = deg_graph->evaluation_update_sources |
+                      deg_graph->pending_update_sources.load(std::memory_order_relaxed);
+  return sources == deg::DEG_UPDATE_SOURCE_TIME;
+}
+
+bool DEG_material_eval_profile_enabled(const Depsgraph *graph)
+{
+  return reinterpret_cast<const deg::Depsgraph *>(graph)->material_eval_profile_enabled;
+}
+
+void DEG_material_eval_profile_add(Depsgraph *graph, const int reason, uint64_t nanoseconds)
+{
+  deg::Depsgraph *dg = reinterpret_cast<deg::Depsgraph *>(graph);
+  if (!dg->material_eval_profile_enabled) {
+    return;
+  }
+  BLI_assert(reason >= 0 && reason < 14);
+  dg->material_eval_reasons[reason].fetch_add(1, std::memory_order_relaxed);
+  dg->material_eval_state_nanoseconds.fetch_add(nanoseconds, std::memory_order_relaxed);
+}
+
+DEGMaterialEvalStats DEG_material_eval_profile_get(const Depsgraph *graph)
+{
+  const deg::Depsgraph *dg = reinterpret_cast<const deg::Depsgraph *>(graph);
+  DEGMaterialEvalStats stats;
+  if (dg->material_eval_profile_enabled) {
+    for (int i = 0; i < 14; i++) {
+      stats.reasons[i] = dg->material_eval_reasons[i].load(std::memory_order_relaxed);
+    }
+    stats.state_nanoseconds = dg->material_eval_state_nanoseconds.load(std::memory_order_relaxed);
+  }
+  return stats;
+}
+
 bool DEG_id_type_any_updated(const Depsgraph *graph)
 {
   const deg::Depsgraph *deg_graph = reinterpret_cast<const deg::Depsgraph *>(graph);
@@ -126,6 +166,33 @@ bool DEG_id_type_any_updated(const Depsgraph *graph)
   }
 
   return false;
+}
+
+bool DEG_id_is_user_modified(const Depsgraph *graph, const ID *id)
+{
+  const deg::Depsgraph *deg_graph = reinterpret_cast<const deg::Depsgraph *>(graph);
+  const deg::IDNode *id_node = deg_graph->find_id_node(deg::get_original_id(id));
+  if (id_node == nullptr) {
+    return false;
+  }
+  return id_node->is_user_modified;
+}
+
+bool DEG_scene_component_is_user_modified(const Depsgraph *graph,
+                                          const Scene *scene,
+                                          const eDepsSceneComponentType component_type)
+{
+  const deg::Depsgraph *deg_graph = reinterpret_cast<const deg::Depsgraph *>(graph);
+  const deg::IDNode *id_node = deg_graph->find_id_node(deg::get_original_id(&scene->id));
+  if (id_node == nullptr) {
+    return false;
+  }
+  const deg::ComponentNode *component_node = id_node->find_component(
+      deg::nodeTypeFromSceneComponent(component_type));
+  if (component_node == nullptr) {
+    return false;
+  }
+  return component_node->is_user_modified;
 }
 
 bool DEG_id_type_any_exists(const Depsgraph *depsgraph, short id_type)
@@ -298,15 +365,11 @@ bool DEG_is_original_id(const ID *id)
    * All the data-blocks which are created by copy-on-evaluation mechanism will have will be tagged
    * with ID_TAG_COPIED_ON_EVAL tag. Those data-blocks can not be original.
    *
-   * Modifier stack evaluation might create special data-blocks which have all the modifiers
-   * applied, and those will be tagged with ID_TAG_COPIED_ON_EVAL_FINAL_RESULT. Such data-blocks
-   * can not be original as well.
-   *
    * Localization is usually happening from evaluated data-block, or will have some special pointer
    * magic which will make them to act as evaluated.
    *
    * NOTE: We consider ID evaluated if ANY of those flags is set. We do NOT require ALL of them. */
-  if (id->tag & (ID_TAG_COPIED_ON_EVAL | ID_TAG_COPIED_ON_EVAL_FINAL_RESULT | ID_TAG_LOCALIZED)) {
+  if (id->tag & (ID_TAG_COPIED_ON_EVAL | ID_TAG_LOCALIZED)) {
     return false;
   }
   return true;

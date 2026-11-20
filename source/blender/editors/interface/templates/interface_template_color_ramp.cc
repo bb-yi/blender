@@ -10,8 +10,8 @@
 #include "BKE_context.hh"
 #include "BKE_library.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_rect.h"
+#include "BLI_listbase.hh"
+#include "BLI_rect.hh"
 #include "BLI_string_ref.hh"
 
 #include "BLT_translation.hh"
@@ -425,7 +425,7 @@ static void template_color_ramp_ex(Layout *layout,
   }
 
   const PointerRNA cptr = RNA_property_pointer_get(ptr, prop);
-  if (!cptr.data || !RNA_struct_is_a(cptr.type, RNA_ColorRamp)) {
+  if (!cptr || !RNA_struct_is_a(cptr.type, RNA_ColorRamp)) {
     return;
   }
 

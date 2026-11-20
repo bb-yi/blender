@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "BLI_math_rotation.h"
+#include "BLI_math_rotation_c.hh"
 
 #include "BLT_translation.hh"
 
@@ -51,10 +51,10 @@ static const EnumPropertyItem light_parameter_subtypes[] = {
 #  include "MEM_guardedalloc.h"
 
 #  include "BLI_math_matrix_types.hh"
-#  include "BLI_listbase.h"
-#  include "BLI_string.h"
-#  include "BLI_string_utf8.h"
-#  include "BLI_math_vector.h"
+#  include "BLI_listbase.hh"
+#  include "BLI_string.hh"
+#  include "BLI_string_utf8.hh"
+#  include "BLI_math_vector_c.hh"
 
 #  include "BKE_context.hh"
 #  include "BKE_global.hh"
@@ -161,7 +161,7 @@ static void light_parameter_layout_update(Main *bmain, Light *light)
   if (bmain) {
     FOREACH_NODETREE_BEGIN (bmain, tree, owner) {
       for (bNode &node : tree->nodes) {
-        if (node.type_legacy != SH_NODE_LIGHT_INFO || !node.id) {
+        if (node.type_legacy != SH_NODE_NPR_LIGHT_INFO || !node.id) {
           continue;
         }
         const Object *object = reinterpret_cast<const Object *>(node.id);
@@ -754,7 +754,7 @@ static void rna_def_light(BlenderRNA *brna)
   RNA_def_property_deprecated(prop,
                               "Unused but kept for compatibility reasons. Setting the property "
                               "has no effect, and getting it always returns True.",
-                              510,
+                              501,
                               600);
 
   /* common */

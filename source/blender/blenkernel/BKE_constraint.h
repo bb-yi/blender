@@ -50,7 +50,7 @@ struct bConstraintOb {
   short type;
   /**
    * Rotation order for constraint owner
-   * (as defined in #eEulerRotationOrders in BLI_math_rotation.h).
+   * (as defined in #eEulerRotationOrders in BLI_math_rotation_c.hh).
    */
   short rotOrder;
 };
@@ -223,6 +223,7 @@ struct bConstraint *BKE_constraints_active_get(ListBaseT<bConstraint> *list);
  * Set the given constraint as the active one (clearing all the others).
  */
 void BKE_constraints_active_set(ListBaseT<bConstraint> *list, struct bConstraint *con);
+bool BKE_constraint_has_influence(const struct bConstraint *con);
 struct bConstraint *BKE_constraints_find_name(ListBaseT<bConstraint> *list, const char *name);
 
 /**

@@ -157,6 +157,10 @@ class CPPType : NonCopyable, NonMovable {
   bool is_copy_assignable = false;
   bool is_move_assignable = false;
 
+  /** Comes from `T::base_type`. */
+  const CPPType *base_type = nullptr;
+  /** Comes from `T::generic_type`. */
+  const CPPType *generic_type = nullptr;
   /**
    * An index that is assigned when the type is registered. Each #CPPtype has a unique index.
    * While the pointer of a #CPPType is also unique, sometimes it's easier to work with an index
@@ -230,6 +234,11 @@ class CPPType : NonCopyable, NonMovable {
    * `BLI_CPP_TYPE_REGISTER`.
    */
   template<typename T> static const CPPType &get();
+  /**
+   * Version of `CPPType::get` that can be used before type registration code is called.
+   * The returned CPPType may not be constructed yet, but the pointer is valid already.
+   */
+  template<typename T> static const CPPType *get_pre_register();
 
   /**
    * Returns the name of the type for debugging purposes. This name should not be used as
@@ -436,8 +445,10 @@ class CPPType : NonCopyable, NonMovable {
 namespace detail {
 /**
  * Global static variable that contains the #CPPType for a given type after it has been registered
- * with #BLI_CPP_TYPE_REGISTER. This should generally be accessed through #CPPType::get<T>. */
+ * with #BLI_CPP_TYPE_REGISTER. This should generally be accessed through #CPPType::get<T>.
+ */
 template<typename T> inline TypedBuffer<CPPType> cpp_type_impl{};
+template<typename T> inline bool is_cpp_type_registered = false;
 }  // namespace detail
 
 /**
@@ -469,12 +480,18 @@ inline bool operator!=(const CPPType &a, const CPPType &b)
 
 template<typename T> inline const CPPType &CPPType::get()
 {
-  const CPPType &type = detail::cpp_type_impl<std::decay_t<T>>.ref();
+  using DecayT = std::decay_t<T>;
   /* Should have been initialized by #BLI_CPP_TYPE_REGISTER.
    * If this is hit in test code, make sure the test calls `register_cpp_types` (for blenlib
    * tests) or `BKE_cpp_types_init` (for general tests). */
-  BLI_assert(type.size > 0);
+  BLI_assert(detail::is_cpp_type_registered<DecayT>);
+  const CPPType &type = detail::cpp_type_impl<DecayT>.ref();
   return type;
+}
+
+template<typename T> inline const CPPType *CPPType::get_pre_register()
+{
+  return detail::cpp_type_impl<std::decay_t<T>>.ptr();
 }
 
 inline StringRefNull CPPType::name() const
@@ -771,10 +788,10 @@ template<typename... Types, typename Fn> inline bool CPPType::to_static_type_try
      * list. */
     int max_type_index = 0;
     ((max_type_index = std::max(max_type_index, CPPType::get<Types>().type_index)), ...);
-    Array<Callback, 0> callback_array(max_type_index + 1, nullptr);
+    Array<Callback, 0> array(max_type_index + 1, nullptr);
     /* Using call_with_type_impl_ instead of a lambda due to an MSVC bug.  */
-    ((callback_array[CPPType::get<Types>().type_index] = call_with_type_impl_<Types, Fn_>), ...);
-    return callback_array;
+    ((array[CPPType::get<Types>().type_index] = call_with_type_impl_<Types, Fn_>), ...);
+    return array;
   }();
 
   if (this->type_index >= callback_array.size()) {

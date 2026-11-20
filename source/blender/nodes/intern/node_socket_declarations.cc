@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #include "NOD_bundle_type.hh"
 #include "NOD_geometry_nodes_closure_signature.hh"
 #include "NOD_socket_declarations.hh"
@@ -10,9 +14,9 @@
 #include "BKE_lib_id.hh"
 #include "BKE_node_runtime.hh"
 
-#include "BLI_math_vector.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 
 namespace blender::nodes::decl {
 
@@ -829,6 +833,12 @@ BundleBuilder &BundleBuilder::pass_through_input_index(const std::optional<int> 
   return *this;
 }
 
+BundleBuilder &BundleBuilder::signature(std::shared_ptr<const BundleSignature> signature)
+{
+  decl_->signature = std::move(signature);
+  return *this;
+}
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -1093,6 +1103,7 @@ bNodeSocket &Custom::build(bNodeTree &ntree, bNode &node) const
 {
   bNodeSocket &socket = *bke::node_add_socket(
       ntree, node, this->in_out, idname_, this->identifier.ref(), this->name.ref());
+  this->set_common_flags(socket);
   if (this->init_socket_fn) {
     this->init_socket_fn(node, socket, "interface");
   }
@@ -1104,9 +1115,9 @@ bool Custom::matches(const bNodeSocket &socket) const
   if (!this->matches_common_data(socket)) {
     return false;
   }
-  if (socket.type != SOCK_CUSTOM) {
-    return false;
-  }
+  /* Custom declarations also wrap built-in socket types, e.g. on reroutes. The
+   * declared idname identifies the type; requiring SOCK_CUSTOM would refresh
+   * unchanged sockets and invalidate downstream outputs on every link edit. */
   if (socket.typeinfo->idname != idname_) {
     return false;
   }

@@ -11,12 +11,12 @@
 
 #include <fmt/format.h>
 
-#include "BLI_fileops.h"
-#include "BLI_listbase.h"
+#include "BLI_fileops.hh"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_appdir.hh"
 #include "BKE_blendfile.hh"
@@ -171,7 +171,7 @@ static WorkSpaceLayout *workspace_change_get_new_layout(Main *bmain,
   else {
     layout_new = BKE_workspace_active_layout_for_workspace_get(win->workspace_hook, workspace_new);
     if (!layout_new) {
-      layout_new = static_cast<WorkSpaceLayout *>(workspace_new->layouts.first);
+      layout_new = workspace_new->layouts.first();
     }
   }
 
@@ -245,8 +245,8 @@ WorkSpace *ED_workspace_duplicate(WorkSpace *workspace_old, Main *bmain, wmWindo
 
   /* Try to keep active the layout from the new workspace matching the current active one from
    * the old workspace. */
-  WorkSpaceLayout *layout_old = static_cast<WorkSpaceLayout *>(workspace_old->layouts.first);
-  WorkSpaceLayout *layout_new = static_cast<WorkSpaceLayout *>(workspace_new->layouts.first);
+  WorkSpaceLayout *layout_old = workspace_old->layouts.first();
+  WorkSpaceLayout *layout_new = workspace_new->layouts.first();
   for (; layout_old && layout_new; layout_old = layout_old->next, layout_new = layout_new->next) {
     if (layout_old == layout_active_old) {
       win->workspace_hook->temp_layout_store = layout_new;

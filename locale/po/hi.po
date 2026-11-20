@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.2.0 LTS Release Candidate (b'3d8c46ac31f4')\n"
+"Project-Id-Version: Blender 5.3.0 Release Candidate (b'f78a5e153839')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-07-13 07:34+0000\n"
+"POT-Creation-Date: 2026-11-09 09:34+0000\n"
 "PO-Revision-Date: 2025-12-04 22:18+0000\n"
 "Last-Translator: Jackson Zheng <business.jackson.zheng@gmail.com>\n"
 "Language-Team: Hindi <https://translate.blender.org/projects/blender-ui/ui/hi/>\n"
@@ -556,6 +556,14 @@ msgid "Window Managers"
 msgstr "खिडकी प्रबंधक"
 
 
+msgid "Dirty"
+msgstr "गंदे"
+
+
+msgid "Path"
+msgstr "पथ"
+
+
 msgid "Goal"
 msgstr "लक्ष्य"
 
@@ -843,20 +851,12 @@ msgid "Quality"
 msgstr "गुणवत्ता"
 
 
-msgid "Display"
-msgstr "प्रदर्शित करें"
-
-
 msgid "Curve"
 msgstr "वक्र"
 
 
 msgid "Gamma"
 msgstr "गामा"
-
-
-msgid "View"
-msgstr "दृश्य"
 
 
 msgid "RGB"
@@ -1042,6 +1042,10 @@ msgstr "विभक्त करें"
 
 msgid "Plane"
 msgstr "समतल"
+
+
+msgid "View"
+msgstr "दृश्य"
 
 
 msgid "Radius"
@@ -1801,10 +1805,6 @@ msgid "Z-Up"
 msgstr "Z-ऊर्ध्व"
 
 
-msgid "Path"
-msgstr "पथ"
-
-
 msgid "Flush"
 msgstr "फ्लश"
 
@@ -1907,10 +1907,6 @@ msgstr "उत्पन्न चौड़ाई"
 
 msgid "Generated image width"
 msgstr "उत्पन्न छवि चौड़ाई"
-
-
-msgid "Dirty"
-msgstr "गंदे"
 
 
 msgid "Single image file"
@@ -2151,6 +2147,10 @@ msgstr "गुच्छ"
 
 msgid "Damp"
 msgstr "आद्र"
+
+
+msgid "Display"
+msgstr "प्रदर्शित करें"
 
 
 msgid "Steps"
@@ -2478,14 +2478,6 @@ msgid "Timer"
 msgstr "कालक"
 
 
-msgid "Press"
-msgstr "प्रेस"
-
-
-msgid "Click"
-msgstr "क्लिक करें"
-
-
 msgid "Paths"
 msgstr "पथ"
 
@@ -2586,16 +2578,16 @@ msgid "Placement"
 msgstr "नियोजन"
 
 
+msgid "Enable Bone Options"
+msgstr "हड्डी विकल्प को सक्षम करें"
+
+
 msgid "Merge"
 msgstr "विलय करें"
 
 
 msgid "Show/Hide"
 msgstr "छुपाएँ / दिखाएँ"
-
-
-msgid "Math"
-msgstr "गणित"
 
 
 msgid "Names"
@@ -2606,16 +2598,20 @@ msgid "Bone Roll"
 msgstr "हड्डी पंजी"
 
 
+msgid "Math"
+msgstr "गणित"
+
+
 msgid "Snap"
 msgstr "स्नैप"
 
 
-msgid "Import"
-msgstr "आयात करें"
-
-
 msgid "Mirror"
 msgstr "दर्पण"
+
+
+msgid "Import"
+msgstr "आयात करें"
 
 
 msgid "UV"
@@ -2656,10 +2652,6 @@ msgstr "कुंजीयन"
 
 msgid "Toggle Bone Options"
 msgstr "हड्डी विकल्प बंद/बुझ"
-
-
-msgid "Enable Bone Options"
-msgstr "हड्डी विकल्प को सक्षम करें"
 
 
 msgid "Basic"
@@ -3007,10 +2999,6 @@ msgid "Correlation"
 msgstr "सहसंबंध"
 
 
-msgid "Quarter"
-msgstr "तिमाही"
-
-
 msgid "Select Anchor"
 msgstr "लंगर का चयन करें"
 
@@ -3033,10 +3021,6 @@ msgstr "प्रारम्भ"
 
 msgid "NLA Track is locked"
 msgstr "अरैखिक अनुप्राणन ट्रैक अवरोधित है"
-
-
-msgid "To"
-msgstr "करने के लिए"
 
 
 msgid "Keying Screen"
@@ -3065,10 +3049,6 @@ msgstr "बराबर"
 
 msgid "Bake"
 msgstr "भर्जन"
-
-
-msgid "Unknown"
-msgstr "अज्ञात"
 
 
 msgid "Warning"
@@ -4111,6 +4091,10 @@ msgid "Paste"
 msgstr "चिपकाएँ"
 
 
+msgid "Movie"
+msgstr "चलचित्र"
+
+
 msgid "Effect"
 msgstr "प्रभाव"
 
@@ -4298,12 +4282,12 @@ msgid "Wrap"
 msgstr "आच्छादन"
 
 
-msgid "Open a Blender file"
-msgstr "एक ब्लेंडर संचिका खोलें"
-
-
 msgid "Trusted Source"
 msgstr "विश्वसनीय स्रोत"
+
+
+msgid "Open a Blender file"
+msgstr "एक ब्लेंडर संचिका खोलें"
 
 
 msgid "Context"
@@ -4961,6 +4945,10 @@ msgid "Relationship Lines"
 msgstr "संबंध रेखाएँ"
 
 
+msgid "Press"
+msgstr "प्रेस"
+
+
 msgid "Cancel"
 msgstr "रद्द करें"
 
@@ -5101,11 +5089,6 @@ msgid "File:"
 msgstr "संचिका:"
 
 
-msgctxt "Operator"
-msgid "Apply"
-msgstr "लागू करें"
-
-
 msgid "Options:"
 msgstr "विकल्प:"
 
@@ -5155,6 +5138,10 @@ msgstr "स्थिति"
 msgctxt "Operator"
 msgid "Rotation"
 msgstr "घूर्णन"
+
+
+msgid "Unknown"
+msgstr "अज्ञात"
 
 
 msgid "After"
@@ -5397,6 +5384,11 @@ msgstr "निर्माण"
 
 
 msgctxt "Operator"
+msgid "Text"
+msgstr "पाठ"
+
+
+msgctxt "Operator"
 msgid "Delete Keyframes..."
 msgstr "अनुबोधक चिन्हों मिटाएँ..."
 
@@ -5414,11 +5406,6 @@ msgstr "दाईं ओर"
 msgctxt "Operator"
 msgid "Color"
 msgstr "रंग"
-
-
-msgctxt "Operator"
-msgid "Text"
-msgstr "पाठ"
 
 
 msgctxt "Operator"
@@ -5629,8 +5616,8 @@ msgstr "सब से हटाएँ"
 
 
 msgctxt "Operator"
-msgid "Quick Edit"
-msgstr "त्वरित संपादन"
+msgid "Apply"
+msgstr "लागू करें"
 
 
 msgid ", cannot have single-frame paths"
@@ -5872,20 +5859,8 @@ msgid "OK"
 msgstr "ठीक है"
 
 
-msgid "Movie"
-msgstr "चलचित्र"
-
-
 msgid "Pos"
 msgstr "पीओएस"
-
-
-msgid "H"
-msgstr "एच"
-
-
-msgid "S"
-msgstr "एस"
 
 
 msgid "Delete points"
@@ -6359,22 +6334,6 @@ msgid "Scale: %s : %s : %s%s %s"
 msgstr "प्रमाण: %s : %s : %s%s %s"
 
 
-msgid "Time: +%s %s"
-msgstr "समय: +%s %s"
-
-
-msgid "Time: %s %s"
-msgstr "समय: %s %s"
-
-
-msgid "Time: +%.3f %s"
-msgstr "समय: +%.3f %s"
-
-
-msgid "Time: %.3f %s"
-msgstr "समय: %.3f %s"
-
-
 msgid "Roll: %s"
 msgstr "पंजी: %s"
 
@@ -6448,6 +6407,10 @@ msgid "Fac"
 msgstr "एफ़एसी"
 
 
+msgid "S"
+msgstr "एस"
+
+
 msgid "Old"
 msgstr "पुराने"
 
@@ -6482,6 +6445,10 @@ msgstr "डब्ल्यु३"
 
 msgid "W4"
 msgstr "डब्ल्यु4"
+
+
+msgid "H"
+msgstr "एच"
 
 
 msgid "Strips must be the same length"

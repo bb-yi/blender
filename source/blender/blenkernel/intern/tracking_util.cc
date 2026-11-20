@@ -15,13 +15,13 @@
 
 #include "DNA_movieclip_types.h"
 
-#include "BLI_ghash.h"
-#include "BLI_listbase.h"
-#include "BLI_math_color.h"
-#include "BLI_math_vector.h"
-#include "BLI_string.h"
+#include "BLI_ghash.hh"
+#include "BLI_listbase.hh"
+#include "BLI_math_color_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string.hh"
 #include "BLI_string_utils.hh"
-#include "BLI_threads.h"
+#include "BLI_threads.hh"
 
 #include "BLT_translation.hh"
 
@@ -146,7 +146,7 @@ void tracks_map_merge(TracksMap *map, MovieTracking *tracking)
   }
 
   /* move all tracks, which aren't operating */
-  track = static_cast<MovieTrackingTrack *>(old_tracks->first);
+  track = old_tracks->first();
   while (track) {
     MovieTrackingTrack *next = track->next;
     BLI_addtail(&new_tracks, track);
@@ -154,7 +154,7 @@ void tracks_map_merge(TracksMap *map, MovieTracking *tracking)
   }
 
   /* now move all tracks which are currently operating and keep their names unique */
-  track = static_cast<MovieTrackingTrack *>(tracks.first);
+  track = tracks.first();
   while (track) {
     MovieTrackingTrack *next = track->next;
 

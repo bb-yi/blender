@@ -53,7 +53,7 @@ static int node_shader_gpu_scene_color(GPUMaterial *mat,
                         in,
                         out,
                         GPU_constant(&use_explicit_vector),
-                        GPU_constant(&scene_source));
+                        GPU_constant(&scene_source), GPU_kernel_globals(), GPU_shading_data());
 }
 
 static bool node_add_ui_poll(const bContext *C)

@@ -10,13 +10,14 @@
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
 
 #include "BKE_appdir.hh"
 #include "BKE_blender_copybuffer.hh"
 #include "BKE_blendfile.hh"
 #include "BKE_context.hh"
+#include "BKE_lib_id.hh"
 #include "BKE_report.hh"
 
 #include "BLO_readfile.hh"
@@ -35,7 +36,7 @@
 #include "view3d_navigate.hh"
 
 #ifdef WIN32
-#  include "BLI_math_base.h" /* M_PI */
+#  include "BLI_math_base_c.hh" /* M_PI */
 #endif
 
 namespace blender {
@@ -67,6 +68,26 @@ static wmOperatorStatus view3d_copybuffer_exec(bContext *C, wmOperator *op)
 
   /* context, selection, could be generalized */
   CTX_DATA_BEGIN (C, Object *, ob, selected_objects) {
+    if (ID_IS_LINKED(&ob->id)) {
+      /* Direct link/append of linked IDs is not supported currently, so neither is their
+       * copy/pasting. */
+      BKE_reportf(op->reports,
+                  RPT_INFO,
+                  "Cannot copy the linked object '%s' to the internal clipboard",
+                  BKE_id_name(ob->id));
+      continue;
+    }
+    if (ID_IS_PACKED(&ob->id)) {
+      /* Direct link/append of packed IDs is not supported currently, so neither is their
+       * copy/pasting. */
+      /* NOTE: In practice, always shadowed currently by the more general check on linked status
+       * above. */
+      BKE_reportf(op->reports,
+                  RPT_INFO,
+                  "Cannot copy the linked packed object '%s' to the internal clipboard",
+                  BKE_id_name(ob->id));
+      continue;
+    }
     ID *ob_id_copy = copybuffer.id_add(
         &ob->id,
         PartialWriteContext::IDAddOptions{
@@ -93,7 +114,7 @@ static wmOperatorStatus view3d_copybuffer_exec(bContext *C, wmOperator *op)
   }
 
   if (num_copied == 0) {
-    BKE_report(op->reports, RPT_INFO, "No objects selected to copy");
+    BKE_report(op->reports, RPT_INFO, "No valid selected objects to copy");
     return OPERATOR_CANCELLED;
   }
 
@@ -192,6 +213,8 @@ void view3d_operatortypes()
   WM_operatortype_append(VIEW3D_OT_move);
   WM_operatortype_append(VIEW3D_OT_zoom);
   WM_operatortype_append(VIEW3D_OT_zoom_camera_1_to_1);
+  WM_operatortype_append(VIEW3D_OT_view_roll_set);
+  WM_operatortype_append(VIEW3D_OT_view_flip);
   WM_operatortype_append(VIEW3D_OT_dolly);
 #ifdef WITH_INPUT_NDOF
   WM_operatortype_append(VIEW3D_OT_ndof_orbit_zoom);

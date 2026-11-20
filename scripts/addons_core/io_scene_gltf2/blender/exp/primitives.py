@@ -56,15 +56,16 @@ def gather_primitives(
     """
     primitives = []
 
-    blender_primitives, addional_materials_udim = __gather_cache_primitives(
+    blender_primitives, additional_materials_udim = __gather_cache_primitives(
         materials, blender_data, uuid_for_skined_data, vertex_groups, modifiers, export_settings)
 
-    for internal_primitive, udim_material in zip(blender_primitives, addional_materials_udim):
+    for internal_primitive, udim_material in zip(blender_primitives, additional_materials_udim):
 
         if udim_material is None:  # classic case, not an udim material
             # We already call this function, in order to retrieve uvmap info, if any
             # So here, only the cache will be used
-            base_material, material_info = get_base_material(internal_primitive['material'], materials, export_settings)
+            _, base_material, material_info = get_base_material(
+                internal_primitive['material'], materials, export_settings)
 
             # Now, we can retrieve the real material, by checking attributes and active maps
             blender_mat = get_material_from_idx(internal_primitive['material'], materials, export_settings)
@@ -77,6 +78,7 @@ def gather_primitives(
                 export_settings)
         else:
             # UDIM case
+            blender_mat = None
             base_material, material_info, unique_material_id, tile = udim_material
             material = get_final_material(
                 blender_data,
@@ -88,6 +90,9 @@ def gather_primitives(
 
             # Force change name of material to get the tile number in the name
             material.name = material.name + "." + tile
+
+        if blender_mat is not None:
+            export_settings['material_identifiers'][id(blender_mat)]['gltf'] = material
 
         primitive = gltf2_io.MeshPrimitive(
             attributes=internal_primitive['attributes'],
@@ -144,7 +149,7 @@ def __gather_cache_primitives(
 
     if type(blender_data).__name__ == "PointCloud":
         # Point clouds
-        blender_primitives = pointcloud.gather_point_cloud(blender_data, export_settings)
+        blender_primitives = pointcloud.gather_point_cloud(blender_data, materials, export_settings)
         additional_materials_udim = [None] * len(blender_primitives)
         shared_attributes = None
 
@@ -342,7 +347,9 @@ def __gather_extensions(blender_data,
     # Material idx is the slot idx. Retrieve associated variant, if any
     mapping = []
     variants_idx_in_use = []
-    for i in [v for v in blender_data.gltf2_variant_mesh_data if v.material_slot_index == material_idx]:
+    blender_element_reference = blender_data['gltf2_original_mesh'] \
+        if 'gltf2_original_mesh' in blender_data.keys() else blender_data
+    for i in [v for v in blender_element_reference.gltf2_variant_mesh_data if v.material_slot_index == material_idx]:
         variants = []
         for idx, v in enumerate(i.variants):
             if v.variant.variant_idx in [o.variant.variant_idx for o in i.variants[:idx]]:
@@ -371,7 +378,7 @@ def __gather_extensions(blender_data,
         if len(variants) > 0:
             if i.material:
                 export_settings['current_paths'] = {}  # Used for KHR_animation_pointer.
-                base_material, material_info = gather_material(
+                _, base_material, material_info = gather_material(
                     i.material,
                     export_settings
                 )
@@ -388,6 +395,10 @@ def __gather_extensions(blender_data,
                     base_material,
                     material_info["uv_info"],
                     export_settings)
+
+                # Make sure to store material in export settings, to be able to retrieve it later for animation pointer
+                export_settings['material_identifiers'][id(i.material)] = {}
+                export_settings['material_identifiers'][id(i.material)]['blender'] = i.material
             else:
                 mat = None
 

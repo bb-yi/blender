@@ -74,6 +74,14 @@ endfunction()
 
 if(WITH_UI_TESTS)
   set(_blender_headless_env_vars "BLENDER_BIN=${TEST_BLENDER_EXE}")
+  if(UNIX AND NOT APPLE)
+    if(WITH_GHOST_DBUS)
+      # Don't use the desktop session bus, system preferences shouldn't influence test behavior.
+      list(APPEND _blender_headless_env_vars
+        "DBUS_SESSION_BUS_ADDRESS=/dev/null"
+      )
+    endif()
+  endif()
   if(WITH_UI_TESTS_HEADLESS)
 
     # Currently only WAYLAND is supported, support for others may be added later.
@@ -250,6 +258,21 @@ add_blender_test(
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_disk_file_hash_service_test.py
 )
 
+# Blender is launched by the script so each test controls the command-line arguments & preferences
+# `add_blender_test` hard-codes these arguments which isn't compatible with the tests,
+# see `TEST_BLENDER_EXE_PARAMS`.
+add_python_test(
+  script_blend_autoexec_cli
+  ${CMAKE_CURRENT_LIST_DIR}/bl_blend_autoexec_cli.py
+  --blender "${TEST_BLENDER_EXE}"
+)
+
+# OpenColorIO config of projects found when opening blend files.
+add_blender_test(
+  script_ocio_config
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_ocio_config_tests.py
+)
+
 # test running operators doesn't segfault under various conditions
 if(WITH_TESTS_EXPERIMENTAL)
   add_blender_test(
@@ -373,34 +396,39 @@ add_blender_test(
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_pyapi_annotations.py
 )
 
-add_blender_test(
-  script_pyapi_blf_buffer
-  --python ${CMAKE_CURRENT_LIST_DIR}/bl_pyapi_blf.py
-  --
-  --mode=BUFFER
-)
-
-# TODO: investigate if this can be supported, as the GPU can be used for rendering.
-# Requires `gpu.init()`, not available for the build-bots for the default environment.
-if(FALSE)
+if(TEST_OPENIMAGEIO_TOOL_EXISTS)
   add_blender_test(
-    script_pyapi_blf_gpu
+    script_pyapi_blf_buffer
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_pyapi_blf.py
     --
-    --mode=GPU
+    --mode=BUFFER
+    --oiiotool "${OPENIMAGEIO_TOOL}"
+  )
+
+  # TODO: investigate if this can be supported, as the GPU can be used for rendering.
+  # Requires `gpu.init()`, not available for the build-bots for the default environment.
+  if(FALSE)
+    add_blender_test(
+      script_pyapi_blf_gpu
+      --python ${CMAKE_CURRENT_LIST_DIR}/bl_pyapi_blf.py
+      --
+      --mode=GPU
+      --oiiotool "${OPENIMAGEIO_TOOL}"
+    )
+  endif()
+
+  add_blender_test(
+    script_pyapi_blf_vfont
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_pyapi_blf.py
+    --
+    --mode=VFONT
+    --oiiotool "${OPENIMAGEIO_TOOL}"
+    # Use Workbench render instead of simple GPU rasterization.
+    # Most build-bots systems fail with `gpu.init()` otherwise this could be avoided.
+    # Ideally it could be removed eventually as it's slower.
+    --use-vfont-render
   )
 endif()
-
-add_blender_test(
-  script_pyapi_blf_vfont
-  --python ${CMAKE_CURRENT_LIST_DIR}/bl_pyapi_blf.py
-  --
-  --mode=VFONT
-  # Use Workbench render instead of simple GPU rasterization.
-  # Most build-bots systems fail with `gpu.init()` otherwise this could be avoided.
-  # Ideally it could be removed eventually as it's slower.
-  --use-vfont-render
-)
 
 
 # Build RST documentation & PYI stubs (without building the full HTML docs).
@@ -653,6 +681,14 @@ if(TEST_SRC_DIR_EXISTS)
     --run-all-tests
   )
 
+  if(WITH_MOD_FLUID)
+    add_blender_test(
+      physics_fluid_cache
+      ${TEST_SRC_DIR}/render/motion_blur/fluid_motion_blur.blend
+      --python ${TEST_PYTHON_DIR}/physics_fluid_cache.py
+    )
+  endif()
+
   add_blender_test(
     deform_modifiers
     ${TEST_SRC_DIR}/modeling/deform_modifiers.blend
@@ -677,6 +713,12 @@ if(TEST_SRC_DIR_EXISTS)
     --python ${TEST_PYTHON_DIR}/physics_particle_system.py
     --
     --run-all-tests
+  )
+
+  add_blender_test(
+    physics_particle_legacy_texture_uv
+    ${TEST_SRC_DIR}/physics/particle_legacy_texture_uv.blend
+    --python ${TEST_PYTHON_DIR}/physics_particle_legacy_texture_uv.py
   )
 
   add_blender_test(
@@ -726,6 +768,18 @@ add_blender_test(
 )
 
 add_blender_test(
+  bl_animation_context_markers
+  --python ${TEST_PYTHON_DIR}/bl_animation_context_markers.py
+)
+
+add_blender_test(
+  bl_animation_copy_paste
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_animation_copy_paste.py
+  --
+  --testdir "${TEST_SRC_DIR}/animation"
+)
+
+add_blender_test(
   bl_animation_rename
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_animation_rename.py
 )
@@ -768,6 +822,13 @@ if(TEST_SRC_DIR_EXISTS)
     --
     --testdir "${TEST_SRC_DIR}/animation"
     --output-dir "${TEST_OUT_DIR}/bl_animation_action"
+  )
+
+  add_blender_test(
+    bl_animation_convert
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_animation_convert.py
+    --
+    --testdir "${TEST_SRC_DIR}/animation"
   )
 
   add_blender_test(
@@ -890,12 +951,79 @@ endif()
 # RENDER TESTS
 # ------------------------------------------------------------------------------
 
+if(WITH_GPU_RENDER_TESTS)
+  # Self-contained NPR material regressions. Keep user data and generated fixtures isolated.
+  set(npr_material_tests
+    planar_probe
+    glsl_sampler_cube
+    glsl_sampler_failure_memory
+    filter_free_resolution
+    filter_legacy_resolution
+    glsl_relative_image_cold_load
+    glsl_group_callback_capture
+    glsl_group_sampler_capture
+    glsl_static_sampler_branches
+    render_info_stages
+    tessellation_default_coordinates
+    filter_stage_pool
+    eevee_resource_lifetime
+    eevee_native_light_accumulation_animation
+    eevee_probe_shader_compilation
+    eevee_deferred_refraction_light_passes
+    shader_info_pcf_radius
+    shader_info_shadow_methods
+    render_texture_updates
+    render_texture_performance
+    render_texture_layers
+    outline_controls
+    outline_performance
+    outline_visibility
+    vulkan_failure_recovery
+  )
+  foreach(backend IN ITEMS opengl vulkan)
+    string(TOUPPER "${backend}" backend_upper)
+    if(WITH_${backend_upper}_BACKEND AND (backend STREQUAL "opengl" OR WITH_GPU_RENDER_TESTS_VULKAN))
+      foreach(test IN LISTS npr_material_tests)
+        if(test STREQUAL "vulkan_failure_recovery" AND NOT backend STREQUAL "vulkan")
+          continue()
+        endif()
+        set(test_name "npr_${test}_${backend}")
+        set(test_output "${TEST_OUT_DIR}/${test_name}")
+        file(MAKE_DIRECTORY
+          "${test_output}/user/config"
+          "${test_output}/user/scripts"
+          "${test_output}/user/datafiles"
+          "${test_output}/user/extensions"
+        )
+        set(test_environment
+          "BLENDER_TEST_OUTPUT_DIR=${test_output}"
+          "BLENDER_USER_RESOURCES=${test_output}/user"
+          "BLENDER_USER_CONFIG=${test_output}/user/config"
+          "BLENDER_USER_SCRIPTS=${test_output}/user/scripts"
+          "BLENDER_USER_DATAFILES=${test_output}/user/datafiles"
+          "BLENDER_USER_EXTENSIONS=${test_output}/user/extensions"
+        )
+        if(test STREQUAL "vulkan_failure_recovery")
+          list(APPEND test_environment "NPR_FAILURE_TEST_OUT=${test_output}")
+        endif()
+        add_blender_test_impl(${test_name} "${test_environment}" "${TEST_BLENDER_EXE}"
+          ${TEST_BLENDER_EXE_PARAMS}
+          "${TEST_BLENDER_EXE_PARAMS_NO_THUMB}"
+          --gpu-backend ${backend}
+          --python ${CMAKE_CURRENT_LIST_DIR}/npr/test_${test}.py
+        )
+      endforeach()
+    endif()
+  endforeach()
+endif()
+
 if((WITH_CYCLES OR WITH_GPU_RENDER_TESTS) AND TEST_SRC_DIR_EXISTS)
   set(render_tests
     attributes
     camera
     colorspace
     bsdf
+    gsplat
     hair
     image_colorspace
     image_data_types
@@ -971,7 +1099,16 @@ if((WITH_CYCLES OR WITH_GPU_RENDER_TESTS) AND TEST_SRC_DIR_EXISTS)
     list(APPEND workbench_tests grease_pencil)
   endif()
 
+  set(gpu_render_tests ${render_tests})
+  # Remove cycles specific tests.
+  list(FILTER gpu_render_tests EXCLUDE REGEX light_group|shadow_catcher|denoise|guiding|reports)
+
+  # Add EEVEE specific tests.
+  set(eevee_tests ${gpu_render_tests};lighting_nodes)
+
   list(SORT render_tests)
+  list(SORT gpu_render_tests)
+  list(SORT eevee_tests)
   list(SORT workbench_tests)
 
   # Cycles
@@ -1038,9 +1175,6 @@ if((WITH_CYCLES OR WITH_GPU_RENDER_TESTS) AND TEST_SRC_DIR_EXISTS)
   endif()
 
   if(WITH_GPU_RENDER_TESTS)
-    list(APPEND gpu_render_tests ${render_tests})
-    list(FILTER gpu_render_tests EXCLUDE REGEX light_group|shadow_catcher|denoise|guiding|reports)
-
     function(add_gpu_render_tests name script render_tests)
       if(WITH_OPENGL_BACKEND)
         foreach(render_test ${render_tests})
@@ -1083,11 +1217,16 @@ if((WITH_CYCLES OR WITH_GPU_RENDER_TESTS) AND TEST_SRC_DIR_EXISTS)
       endif()
     endfunction()
 
-    add_gpu_render_tests(eevee "eevee_render_tests.py" "${gpu_render_tests}")
+    add_gpu_render_tests(eevee "eevee_render_tests.py" "${eevee_tests}")
     add_gpu_render_tests(workbench "workbench_render_tests.py" "${workbench_tests}")
     add_blender_test(
       eevee_light_shader_output_regressions
       --python ${CMAKE_CURRENT_LIST_DIR}/npr/test_eevee_light_shader_output_regressions.py
+    )
+    add_blender_test(
+      eevee_native_sun_shadow
+      --python ${CMAKE_CURRENT_LIST_DIR}/npr/test_eevee_native_sun_shadow.py
+      -- ${TEST_OUT_DIR}/eevee_native_sun_shadow
     )
     if(WITH_GPU_RENDER_TESTS_HEADED)
       add_gpu_render_tests(overlay "overlay_render_tests.py" "overlay")
@@ -1265,10 +1404,15 @@ if(TEST_SRC_DIR_EXISTS)
     mesh/split_edges
     mesh/triangulate
     points
+    simulation
     texture
     utilities
     vector
   )
+
+  if(WITH_AUDASPACE AND WITH_FFTW3)
+    list(APPEND geo_node_tests sound)
+  endif()
 
   if(WITH_GMP)
     list(APPEND geo_node_tests mesh/boolean)
@@ -1294,15 +1438,6 @@ if(TEST_SRC_DIR_EXISTS)
     endforeach()
   endforeach()
 
-  file(GLOB files "${TEST_SRC_DIR}/modeling/geometry_nodes/simulation/*.blend")
-  foreach(file ${files})
-    get_filename_component(filename ${file} NAME_WE)
-    add_blender_test(
-      geo_node_simulation_test_${filename}
-      ${file}
-      --python ${TEST_PYTHON_DIR}/geo_node_sim_test.py
-    )
-  endforeach()
 endif()
 
 # ------------------------------------------------------------------------------
@@ -1375,6 +1510,14 @@ if(WITH_USD AND TEST_SRC_DIR_EXISTS)
     --testdir "${TEST_SRC_DIR}/usd"
     --outdir "${TEST_OUT_DIR}/io_usd"
   )
+
+  # The collection IO tests need USD
+  add_blender_test(
+    io_collections
+    --python ${CMAKE_CURRENT_LIST_DIR}/io_collections_test.py
+    --
+    --testdir "${TEST_SRC_DIR}/io_tests/io_collections"
+  )
 endif()
 
 if(TEST_SRC_DIR_EXISTS)
@@ -1444,6 +1587,16 @@ if(WITH_IO_STL AND TEST_SRC_DIR_EXISTS)
     --
     --testdir "${TEST_SRC_DIR}/io_tests/stl"
     --outdir "${TEST_OUT_DIR}/io_stl"
+  )
+endif()
+
+if(WITH_IO_GREASE_PENCIL AND TEST_SRC_DIR_EXISTS)
+  add_blender_test(
+    io_grease_pencil_svg_import
+    --python ${CMAKE_CURRENT_LIST_DIR}/io_grease_pencil_svg_import_test.py
+    --
+    --testdir "${TEST_SRC_DIR}/io_tests/svg"
+    --outdir "${TEST_OUT_DIR}/io_grease_pencil_svg"
   )
 endif()
 
@@ -1665,6 +1818,18 @@ if(TEST_SRC_DIR_EXISTS)
   )
 
   add_blender_test(
+    bl_texture_paint_undo
+    --python ${CMAKE_CURRENT_LIST_DIR}/sculpt_paint/texture_paint_undo_test.py
+  )
+
+  add_blender_test(
+    bl_grease_pencil_paint_tests
+    --python ${CMAKE_CURRENT_LIST_DIR}/sculpt_paint/grease_pencil_paint_tests.py
+    --
+    --testdir "${TEST_SRC_DIR}/grease_pencil"
+  )
+
+  add_blender_test(
     bl_sculpt_brush_curve_presets
     --python ${CMAKE_CURRENT_LIST_DIR}/sculpt_paint/brush_strength_curves_test.py
     --
@@ -1697,6 +1862,14 @@ if(WITH_UI_TESTS)
   # `"${TEST_PYTHON_EXE}" "${CMAKE_CURRENT_LIST_DIR}/ui_simulate/run.py" --list-tests`
   # list explicitly so changes bisecting/updated are sure to re-run CMake.
   set(_ui_tests
+    test_editor_types.test_open_editor_types
+    test_search_in_editors.test_properties_search
+    test_search_in_editors.test_outliner_search
+    test_search_in_editors.test_dopesheet_search
+    test_search_in_editors.test_graph_editor_search
+    test_search_in_editors.test_file_browser_search
+    test_operator_poll.test_operator_search_poll_gating
+    test_operator_poll.test_operator_poll_sweep
     test_sculpt.asset_shelf_brush_selection
     test_sculpt.face_set_expand
     test_sculpt.face_set_gestures
@@ -1706,13 +1879,19 @@ if(WITH_UI_TESTS)
     test_sculpt.trim_gestures
     test_sculpt.primitive_tool_add
     test_tools.sculpt_mode_toolbar
+    test_transform.view3d_mesh_edit_snap_to_self
+    test_transform.view3d_mesh_edit_snap_to_self_shape_key
     test_undo.compositor_make_group
     test_undo.text_editor_edit_mode_mix
     test_undo.text_editor_simple
     test_undo.view3d_edit_mode_multi_window
+    test_undo.view3d_font_edit_mode_object_mix
     test_undo.view3d_font_edit_mode_simple
+    test_undo.view3d_mesh_edit_mode_object_mix
+    test_undo.view3d_mesh_edit_shape_key
     test_undo.view3d_mesh_edit_separate
     test_undo.view3d_mesh_particle_edit_mode_simple
+    test_undo.view3d_multi_mode_undo_history
     test_undo.view3d_multi_mode_multi_window
     test_undo.view3d_multi_mode_select
     test_undo.view3d_particle_edit_undo_from_texture_paint
@@ -1720,9 +1899,9 @@ if(WITH_UI_TESTS)
     test_undo.view3d_sculpt_dyntopo_simple
     test_undo.view3d_sculpt_dyntopo_stroke_toggle
     test_undo.view3d_sculpt_with_memfile_step
+    test_undo.view3d_sculpt_with_empty_memfile_step
     test_undo.view3d_sculpt_trim
     test_undo.view3d_simple
-    test_undo.view3d_texture_paint_complex
     test_undo.view3d_texture_paint_simple
     test_workspace.sanity_check_general
     test_workspace.sanity_check_2d_animation
@@ -1741,6 +1920,82 @@ if(WITH_UI_TESTS)
     test_render.interactive_rendering_eevee
     test_render.animation_rendering_and_player
     test_bpy_types.unregister_referenced_type
+    test_drag_interactions.view3d_object_drag
+    test_drag_interactions.viewport_navigation_drags
+    test_drag_interactions.node_single_drag
+    test_drag_interactions.node_multiple_drag
+    test_drag_interactions.dopesheet_keyframe_drag
+    test_drag_interactions.graph_editor_drag
+    test_drag_interactions.uv_editor_drag
+    test_drag_interactions.image_editor_pan
+    test_drop_interactions.view3d_drop_world
+    test_drop_interactions.view3d_drop_world_session_uid
+    test_drop_interactions.view3d_drop_world_cancel
+    test_drop_interactions.ui_drop_material_slot
+    test_drop_interactions.scene_drop_scene_asset
+    test_drop_interactions.scene_drop_scene_asset_cancel
+    test_drop_interactions.scene_drop_scene_asset_child_window
+    test_drop_interactions.file_browser_drop_folder
+    test_sequencer.compositor_modifier_mask_with_single_input
+    test_menu_search_and_exec.view3d_add
+    test_menu_search_and_exec.modifier_add
+    test_menu_search_and_exec.sequencer_add
+    test_menu_search_and_exec.sequencer_modifier_add
+    test_menu_search_and_exec.shader_node_add
+    test_menu_search_and_exec.compositor_node_add
+    test_menu_search_and_exec.geometry_node_add
+    test_menu_search_and_exec.node_swap_search
+    test_menu_search_and_exec.grease_pencil_layer_search
+    test_pie_menus.test_object_mode_pie_edit
+    test_pie_menus.test_snap_pie_cursor_to_world_origin
+    test_pie_menus.test_pivot_pie_cursor
+    test_pie_menus.test_orientation_pie_cursor
+    test_pie_menus.test_shading_pie_solid
+    test_pie_menus.test_view_pie_camera
+    test_pie_menus.test_transform_gizmo_pie_show_gizmos
+    test_pie_menus.test_shading_ex_pie_toggle_overlays
+    test_pie_menus.test_proportional_editing_falloff_pie_sphere
+    test_pie_menus.test_sculpt_automasking_pie_topology
+    test_pie_menus.test_graph_editor_pivot_pie_cursor
+    test_pie_menus.test_graph_editor_view_pie_view_all
+    test_pie_menus.test_dopesheet_snap_pie_current_frame
+    test_pie_menus.test_dopesheet_view_pie_view_all
+    test_pie_menus.test_sequencer_pivot_pie_cursor
+    test_pie_menus.test_nla_snap_pie_current_frame
+    test_pie_menus.test_nla_view_pie_view_all
+    test_pie_menus.test_image_pivot_pie_cursor
+    test_pie_menus.test_image_view_pie_view_all
+    test_pie_menus.test_filebrowser_view_pie_list_horizontal
+    test_pie_menus.test_clip_pivot_pie_cursor
+    test_pie_menus.test_clip_marker_pie_affine
+    test_pie_menus.test_clip_solving_pie_tripod_solver
+    test_pie_menus.test_clip_view_pie_view_all
+    test_pie_menus.test_anim_keyframe_insert_pie_location
+    test_pie_menus.test_weight_paint_vgroup_lock_pie
+    test_button_input.test_string_buttons_interactions
+    test_tool_activation.view3d
+    test_tool_activation.image_editor
+    test_tool_activation.node_editor
+    test_tool_activation.sequencer
+    test_modifiers_constraints_draw.modifiers_constraints_draw
+    test_preferences_draw_all.test_preferences_draw_all
+    test_info_reports.test_info_report_selection_modes
+    test_info_reports.test_info_report_delete
+    test_info_reports.test_info_report_operator_poll
+    test_object_type_visibility.visibility_by_own_type
+    test_object_type_visibility.selectability_by_instancer_type
+    test_object_type_visibility.pose_bone_select_with_armature_unselectable
+    test_object_type_visibility.edit_mode_element_select_with_type_unselectable
+    test_object_type_visibility.generated_geometry_by_object_type
+    test_object_type_visibility.instanced_light_by_own_type
+    test_object_type_visibility.nested_instances_by_own_type
+    test_blend_autoexec.pref_enabled_drop_blend_file_untrusted
+    test_blend_autoexec.pref_enabled_drop_blend_file_trusted
+    test_blend_autoexec.pref_enabled_open_file_selector_trusted
+    test_blend_autoexec.pref_enabled_open_file_selector_untrusted
+    test_blend_autoexec.pref_disabled_open_file_selector
+    test_blend_autoexec.pref_disabled_drop_blend_file
+    test_blend_autoexec.pref_disabled_drop_blend_file_trusted_source
   )
   foreach(ui_test ${_ui_tests})
     add_blender_test_ui(
@@ -1752,6 +2007,55 @@ if(WITH_UI_TESTS)
     )
   endforeach()
   unset(_ui_tests)
+
+  # The command line overriding the preference can't be set from within a test.
+  set(_ui_tests_enable_autoexec
+    test_blend_autoexec.pref_disabled_drop_blend_file_enable_autoexec
+    test_blend_autoexec.pref_enabled_drop_blend_file_untrusted_enable_autoexec
+    test_blend_autoexec.pref_disabled_drop_blend_file_trusted_source_enable_autoexec
+    test_blend_autoexec.pref_disabled_open_file_selector_enable_autoexec
+    test_blend_autoexec.pref_enabled_open_file_selector_untrusted_enable_autoexec
+    test_blend_autoexec.pref_disabled_drop_blend_file_trusted_source_next_enable_autoexec
+  )
+  foreach(ui_test ${_ui_tests_enable_autoexec})
+    add_blender_test_ui(
+      "${ui_test}"
+      --enable-autoexec
+      --enable-event-simulate
+      --python "${CMAKE_CURRENT_LIST_DIR}/ui_simulate/run_blender_setup.py"
+      --
+      --tests "${ui_test}"
+    )
+  endforeach()
+  unset(_ui_tests_enable_autoexec)
+
+  set(_ui_tests_disable_autoexec
+    test_blend_autoexec.pref_enabled_drop_blend_file_disable_autoexec
+    test_blend_autoexec.pref_enabled_drop_blend_file_trusted_source_disable_autoexec
+    test_blend_autoexec.pref_enabled_drop_blend_file_untrusted_trusted_source_disable_autoexec
+    test_blend_autoexec.pref_enabled_open_file_selector_disable_autoexec
+    test_blend_autoexec.pref_enabled_drop_blend_file_trusted_source_next_disable_autoexec
+  )
+  foreach(ui_test ${_ui_tests_disable_autoexec})
+    add_blender_test_ui(
+      "${ui_test}"
+      --disable-autoexec
+      --enable-event-simulate
+      --python "${CMAKE_CURRENT_LIST_DIR}/ui_simulate/run_blender_setup.py"
+      --
+      --tests "${ui_test}"
+    )
+  endforeach()
+  unset(_ui_tests_disable_autoexec)
+
+  # test_open_editor_types opens many areas, each needing its own GLContext.
+  # The number of available context is limit by driver and not queryable.
+  if(WITH_OPENGL_BACKEND)
+    set_tests_properties(
+      ui_opengl_test_editor_types.test_open_editor_types
+      PROPERTIES DISABLED TRUE
+    )
+  endif()
 endif()
 
 

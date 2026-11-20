@@ -10,9 +10,9 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <thread>
 
-#include "BLI_task.h"
-#include "BLI_threads.h"
+#include "BLI_threads.hh"
 #include "BLI_utility_mixins.hh"
 #include "BLI_vector.hh"
 
@@ -33,10 +33,6 @@ namespace blender::gpu {
 class VKBackend;
 
 struct VKExtensions {
-  /** Does the device support VkPhysicalDeviceVulkan12Features::shaderOutputViewportIndex. */
-  bool shader_output_viewport_index = false;
-  /** Does the device support VkPhysicalDeviceVulkan12Features::shaderOutputLayer. */
-  bool shader_output_layer = false;
   /**
    * Does the device support
    * VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR::fragmentShaderBarycentric.
@@ -66,11 +62,6 @@ struct VKExtensions {
 
   /** VK_KHR_maintenance4 */
   bool maintenance4 = false;
-
-  /**
-   * Does the device support logic ops.
-   */
-  bool logic_ops = false;
 
   /**
    * Does the device support VK_EXT_memory_priority
@@ -103,20 +94,36 @@ struct VKExtensions {
   bool vertex_input_dynamic_state = false;
 
   /**
+   * Does the device support VK_EXT_provoking_vertex
+   */
+  bool provoking_vertex = false;
+
+  /**
    * Does the device support VK_EXT_host_image_copy
    */
   bool host_image_copy = false;
 
   /**
-   * Nuru: does the device support hardware ray tracing
-   * (VK_KHR_acceleration_structure + VK_KHR_ray_query + buffer device address).
+   * Does the device support VK_EXT_shader_viewport_index_layer.
    */
-  bool hardware_raytracing = false;
+  bool shader_viewport_index_layer = false;
 
   /**
-   * Nuru: VK_NV_device_diagnostic_checkpoints, only set when the wedge diagnostic is requested
-   * via `BLENDER_VULKAN_CHECKPOINTS=1` (see `vk_diagnostic_checkpoints_requested`).
+   * Does the device support VK_KHR_spirv_1_4.
    */
+  bool spirv_1_4 = false;
+
+  /**
+   * Does the device support VkPhysicalDeviceFeatures::multiDrawIndirect.
+   * When false, multi_draw_indirect is emulated with individual draw calls.
+   */
+  bool multi_draw_indirect = false;
+
+  /**
+   * Device supports `shaderClipDistance` feature.
+   */
+  bool shader_clip_distance = false;
+  bool hardware_raytracing = false;
   bool diagnostic_checkpoints = false;
 
   /** Log enabled features and extensions. */
@@ -136,6 +143,20 @@ struct VKWorkarounds {
    * Certain Intel GPUs show visual artifacts with texture pool usage.
    */
   bool no_texture_pool = false;
+
+  /**
+   * Some Qualcomm drivers keep command-buffer-local state written by `vkCmdSetViewport` across
+   * command buffer resets.
+   *
+   * When set, viewports and scissors are baked into the pipeline as static state and
+   * `vkCmdSetViewport`/`vkCmdSetScissor` are never used.
+   */
+  bool static_viewport_scissor = false;
+
+  /**
+   * Legacy AMD drivers do not perform sRGB conversions when clearing attachments.
+   */
+  bool missing_srgb_clear_conversion = false;
 
   /** Log enabled workarounds. */
   void log() const;
@@ -177,13 +198,14 @@ class VKDevice : public NonCopyable {
   bool is_initialized_ = false;
 
   /**
-   * Task pool for render graph submission.
+   * Render graph submission thread.
    *
-   * Multiple threads in Blender can build a render graph. Building the command buffer for a render
-   * graph is faster when doing it in serial. Submission pool ensures that only one task is
-   * building at a time (background_serial).
+   * Multiple threads in Blender can build a render graph. All submitted
+   * render graphs are queued and consumed one at a time by this thread.
    */
-  TaskPool *submission_pool_ = nullptr;
+  std::thread submission_thread_;
+  std::atomic<bool> submission_thread_should_exit_ = false;
+
   /**
    * All created render graphs.
    */
@@ -197,15 +219,11 @@ class VKDevice : public NonCopyable {
    * Must be externally synced by orphaned_data.mutex_get()
    */
   TimelineValue timeline_value_ = 0;
-  /**
-   * Nuru: timeline of the last render-graph submission that reached `vkQueueSubmit` on the
-   * submission runner thread. Lets external direct queue submissions (hardware ray tracing)
-   * wait until all previously enqueued graph work is actually on the queue, preserving
-   * CPU-record order on the GPU queue.
-   */
   std::atomic<TimelineValue> queue_submitted_timeline_ = 0;
   std::mutex queue_submitted_mutex_;
   std::condition_variable queue_submitted_condition_;
+  /** First submission/synchronization failure. A failed device requires a restart. */
+  std::atomic<VkResult> submission_error_{VK_SUCCESS};
 
   VKSamplers samplers_;
   VKDescriptorSetLayouts descriptor_set_layouts_;
@@ -234,10 +252,16 @@ class VKDevice : public NonCopyable {
   VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT
       vk_physical_device_graphics_pipeline_library_properties_ = {
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT};
+  VkPhysicalDeviceAccelerationStructurePropertiesKHR
+      vk_physical_device_acceleration_structure_properties_ = {
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
   /** Features support. */
   VkPhysicalDeviceFeatures vk_physical_device_features_ = {};
   VkPhysicalDeviceVulkan11Features vk_physical_device_vulkan_11_features_ = {};
-  VkPhysicalDeviceVulkan12Features vk_physical_device_vulkan_12_features_ = {};
+  VkPhysicalDeviceAccelerationStructureFeaturesKHR
+      vk_physical_device_acceleration_structure_features_ = {
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+      };
   Array<VkExtensionProperties> device_extensions_;
 
   /** Functions of vk_ext_debugutils for this device/instance. */
@@ -266,56 +290,7 @@ class VKDevice : public NonCopyable {
   /** Buffer to bind to unbound resource locations. */
   VKBuffer dummy_buffer;
 
-  /**
-   * This struct contains the functions pointer to extension provided functions.
-   */
-  struct {
-    /* Extension: VK_KHR_dynamic_rendering */
-    PFN_vkCmdBeginRendering vkCmdBeginRendering = nullptr;
-    PFN_vkCmdEndRendering vkCmdEndRendering = nullptr;
-
-    /* Extension: VK_EXT_debug_utils */
-    PFN_vkCmdBeginDebugUtilsLabelEXT vkCmdBeginDebugUtilsLabel = nullptr;
-    PFN_vkCmdEndDebugUtilsLabelEXT vkCmdEndDebugUtilsLabel = nullptr;
-    PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectName = nullptr;
-    PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessenger = nullptr;
-    PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessenger = nullptr;
-
-    /* Extension: VK_EXT_extended_dynamic_state */
-    PFN_vkCmdSetFrontFace vkCmdSetFrontFace = nullptr;
-
-    /* Extension: VK_EXT_vertex_input_dynamic_state */
-    PFN_vkCmdSetVertexInputEXT vkCmdSetVertexInput = nullptr;
-
-    /* Extension: VK_KHR_external_memory_fd */
-    PFN_vkGetMemoryFdKHR vkGetMemoryFd = nullptr;
-
-    /* Extension: VK_EXT_host_image_copy */
-    PFN_vkCopyMemoryToImageEXT vkCopyMemoryToImage = nullptr;
-    PFN_vkTransitionImageLayoutEXT vkTransitionImageLayout = nullptr;
-
-    /* Extension: VK_KHR_maintenance4 */
-    PFN_vkGetDeviceImageMemoryRequirements vkGetDeviceImageMemoryRequirements = nullptr;
-    PFN_vkGetDeviceBufferMemoryRequirements vkGetDeviceBufferMemoryRequirements = nullptr;
-
-#ifdef _WIN32
-    /* Extension: VK_KHR_external_memory_win32 */
-    PFN_vkGetMemoryWin32HandleKHR vkGetMemoryWin32Handle = nullptr;
-#endif
-
-    /* Nuru extension: VK_KHR_acceleration_structure */
-    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizes = nullptr;
-    PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructure = nullptr;
-    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructure = nullptr;
-    PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructures = nullptr;
-    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddress =
-        nullptr;
-
-    /* Nuru extension: VK_NV_device_diagnostic_checkpoints (wedge diagnostic, env-gated). */
-    PFN_vkCmdSetCheckpointNV vkCmdSetCheckpoint = nullptr;
-    PFN_vkGetQueueCheckpointDataNV vkGetQueueCheckpointData = nullptr;
-
-  } functions;
+  VolkDeviceTable functions = {};
 
   VKMemoryPools vma_pools;
 
@@ -356,19 +331,21 @@ class VKDevice : public NonCopyable {
     return vk_physical_device_graphics_pipeline_library_properties_;
   }
 
+  inline const VkPhysicalDeviceAccelerationStructurePropertiesKHR &
+  physical_device_acceleration_structure_properties_get()
+  {
+    return vk_physical_device_acceleration_structure_properties_;
+  }
+
   const VkPhysicalDeviceFeatures &physical_device_features_get() const
   {
     return vk_physical_device_features_;
   }
 
-  const VkPhysicalDeviceVulkan11Features &physical_device_vulkan_11_features_get() const
+  inline const VkPhysicalDeviceAccelerationStructureFeaturesKHR &
+  physical_device_acceleration_structure_features_get() const
   {
-    return vk_physical_device_vulkan_11_features_;
-  }
-
-  const VkPhysicalDeviceVulkan12Features &physical_device_vulkan_12_features_get() const
-  {
-    return vk_physical_device_vulkan_12_features_;
+    return vk_physical_device_acceleration_structure_features_;
   }
 
   VkInstance instance_get() const
@@ -384,18 +361,6 @@ class VKDevice : public NonCopyable {
   uint32_t queue_family_get() const
   {
     return vk_queue_family_;
-  }
-
-  /* Nuru: direct queue access for the hardware ray-tracing submission path. Lock
-   * `queue_mutex_get()` for the duration of any `vkQueueSubmit` made outside the render graph. */
-  VkQueue queue_get() const
-  {
-    return vk_queue_;
-  }
-
-  std::mutex &queue_mutex_get()
-  {
-    return *queue_mutex_;
   }
 
   inline VmaAllocator mem_allocator_get() const
@@ -453,16 +418,17 @@ class VKDevice : public NonCopyable {
     return extensions_;
   }
 
-  std::string glsl_vertex_patch_get() const;
+  std::string glsl_vertex_patch_get(bool use_ray_query) const;
   std::string glsl_geometry_patch_get() const;
-  std::string glsl_fragment_patch_get() const;
-  std::string glsl_compute_patch_get() const;
-  shader::GeneratedSource extensions_define(StringRefNull stage_define) const;
+  std::string glsl_fragment_patch_get(bool use_ray_query) const;
+  std::string glsl_compute_patch_get(bool use_ray_query) const;
+  shader::GeneratedSource extensions_define(StringRefNull stage_define, bool use_ray_query) const;
+  uint32_t glsl_patch_version_get(bool use_ray_query) const;
 
   /* -------------------------------------------------------------------- */
   /** \name Render graph
    * \{ */
-  static void submission_runner(TaskPool *__restrict pool, void *task_data);
+  static void submission_runner(VKDevice *device);
   render_graph::VKRenderGraph *render_graph_new();
 
   TimelineValue render_graph_submit(render_graph::VKRenderGraph *render_graph,
@@ -476,85 +442,45 @@ class VKDevice : public NonCopyable {
                                     VkFence signal_fence,
                                     uint64_t wait_semaphore_value,
                                     uint64_t signal_semaphore_value);
-  void wait_for_timeline(TimelineValue timeline);
-  /**
-   * Nuru: block until the submission runner thread has handed every render-graph submission with
-   * a timeline up to and including `timeline` to `vkQueueSubmit`. Unlike
-   * `RenderGraphFlushFlags::WAIT_FOR_SUBMISSION` this also covers submissions enqueued by earlier
-   * flushes (including flushes of empty graphs which enqueue nothing themselves).
-   */
-  void wait_for_submission_timeline(TimelineValue timeline);
-  /**
-   * Nuru: chain an external direct queue submission (hardware ray tracing) into the device
-   * timeline. Returns the timeline value the external submission must SIGNAL and writes the
-   * value it must WAIT on into `r_wait_value`. Subsequent render-graph submissions claim later
-   * timeline values and wait on this one, so the GPU serializes the external command buffer
-   * against graph work in both directions without any CPU-side waits. Without this chaining,
-   * same-queue submissions may overlap execution: both Xid 109 checkpoint captures show the
-   * GPU wedging on the first graph node (a dispatch, then a plain buffer copy) immediately
-   * after an external `Trace.HardwareLighting` batch completes.
-   */
+  bool wait_for_timeline(TimelineValue timeline);
+  bool wait_queue_idle();
+
+  bool wait_for_submission_timeline(TimelineValue timeline);
   TimelineValue external_timeline_chain_acquire(TimelineValue *r_wait_value);
-  /**
-   * Nuru: record that the external submission owning `value` reached `vkQueueSubmit`. External
-   * submissions claim timeline values through the call above, and an empty-graph flush can
-   * return such a value from `render_graph_submit`; without this publication
-   * `wait_for_submission_timeline` on that value would wait forever (the runner only publishes
-   * values it submitted itself).
-   */
   void external_timeline_chain_submitted(TimelineValue value);
-  /** Semaphore handle for external submissions chained via the call above. */
+  void diagnostic_checkpoints_dump();
+  VkQueue queue_get() const
+  {
+    return vk_queue_;
+  }
+  std::mutex &queue_mutex_get()
+  {
+    return *queue_mutex_;
+  }
   VkSemaphore timeline_semaphore_get() const
   {
     return vk_timeline_semaphore_;
   }
-  /**
-   * Nuru: latest claimed timeline value (graphs and chained externals). Waiting on it via
-   * `wait_for_timeline` drains every Vulkan submission claimed so far, e.g. to hand the GPU
-   * to a CUDA interop burst without leaving Vulkan channels to starve.
-   */
-  TimelineValue claimed_timeline_get()
-  {
-    std::scoped_lock lock(orphaned_data.mutex_get());
-    return timeline_value_;
-  }
-  /**
-   * Nuru: latest timeline value that actually reached `vkQueueSubmit` (graphs and chained
-   * externals). Safe to wait on while holding the queue mutex: completion needs no further
-   * submissions.
-   */
   TimelineValue queue_submitted_timeline_value() const
   {
     return queue_submitted_timeline_.load(std::memory_order_acquire);
   }
-  void wait_queue_idle();
-  /**
-   * Nuru: wedge diagnostic. When `VK_NV_device_diagnostic_checkpoints` is active (see
-   * `vk_diagnostic_checkpoints_requested`), retrieve and print the last started/completed
-   * checkpoint markers from the queue. Call on `VK_ERROR_DEVICE_LOST` or wedged fence waits.
-   * Prints at most once per process; no-op when the diagnostic is inactive.
-   */
-  void diagnostic_checkpoints_dump();
+
+  VkResult submission_error_get() const
+  {
+    return submission_error_.load();
+  }
+  bool submission_failed() const
+  {
+    return submission_error_get() != VK_SUCCESS;
+  }
+  /** Log the first failure only. Never substitute a successful completion timeline. */
+  void submission_error_set(VkResult result, const char *operation, TimelineValue timeline = 0);
 
   /**
    * Retrieve the last finished submission timeline.
    */
-  TimelineValue submission_finished_timeline_get() const
-  {
-    BLI_assert(vk_timeline_semaphore_ != VK_NULL_HANDLE);
-    TimelineValue current_timeline;
-    VkResult result = vkGetSemaphoreCounterValue(
-        vk_device_, vk_timeline_semaphore_, &current_timeline);
-    UNUSED_VARS(result);
-    BLI_assert_msg(
-        result == VK_SUCCESS && current_timeline != UINT64_MAX,
-        "Potential driver crash has happened. Several drivers will report UINT64_MAX when "
-        "requesting a counter value of an timeline semaphore right after/during a driver reset. "
-        "If this happen we should investigate what makes the driver crash. In the past this has "
-        "been detected on QUALCOMM and NVIDIA drivers. The result code of the call is "
-        "VK_SUCCESS.");
-    return current_timeline;
-  }
+  bool submission_finished_timeline_get(TimelineValue &r_timeline);
 
   /** \} */
 
@@ -596,8 +522,8 @@ class VKDevice : public NonCopyable {
   void init_physical_device_features();
   void init_physical_device_extensions();
   void init_debug_callbacks();
-  void init_submission_pool();
-  void deinit_submission_pool();
+  void init_submission_thread();
+  void deinit_submission_thread();
   /**
    * Initialize the functions struct with extension specific function pointer.
    */

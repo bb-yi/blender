@@ -8,10 +8,10 @@
 #include "eevee_sampling_lib.bsl.hh"
 #include "eevee_shadow_shared.hh"
 #include "eevee_uniform.bsl.hh"
-#include "gpu_shader_math_fast_lib.glsl"
-#include "gpu_shader_math_matrix_construct_lib.glsl"
-#include "gpu_shader_math_matrix_lib.glsl"
-#include "gpu_shader_math_matrix_projection_lib.glsl"
+#include "gpu_shader_math_fast.bsl.hh"
+#include "gpu_shader_math_matrix.bsl.hh"
+#include "gpu_shader_math_matrix_construct.bsl.hh"
+#include "gpu_shader_math_matrix_projection.bsl.hh"
 
 namespace eevee::light {
 
@@ -26,7 +26,7 @@ struct Resources {
   [[storage(2, read_write)]] ShadowTileMapData (&tilemaps_buf)[];
   [[storage(3, read_write)]] ShadowTileMapClip (&tilemaps_clip_buf)[];
 
-  [[resource_table]] srt_t<Uniform> uniforms;
+  [[resource_table]] Uniform uniforms;
 
   void orthographic_sync(int tilemap_id,
                          Transform object_to_world,
@@ -86,16 +86,15 @@ struct Resources {
 
   void cascade_sync(LightData &light)
   {
-    [[resource_table]] const Uniform &uni = uniforms;
-    int level_min = light.sun().clipmap_lod_min;
-    int level_max = light.sun().clipmap_lod_max;
+    int level_min = light.sun.clipmap_lod_min;
+    int level_max = light.sun.clipmap_lod_max;
     int level_range = level_max - level_min;
     int level_len = level_range + 1;
 
-    float3 ws_camera_position = uni.uniform_buf.camera.viewinv[3].xyz;
-    float3 ws_camera_forward = uni.uniform_buf.camera.viewinv[2].xyz;
-    float camera_clip_near = uni.uniform_buf.camera.clip_near;
-    float camera_clip_far = uni.uniform_buf.camera.clip_far;
+    float3 ws_camera_position = uniforms.uniform_buf.camera.viewinv[3].xyz;
+    float3 ws_camera_forward = uniforms.uniform_buf.camera.viewinv[2].xyz;
+    float camera_clip_near = uniforms.uniform_buf.camera.clip_near;
+    float camera_clip_far = uniforms.uniform_buf.camera.clip_far;
 
     /* All tile-maps use the first level size. */
     float level_size = shadow_directional_coverage_get(level_min);
@@ -138,30 +137,29 @@ struct Resources {
 
     float2 clipmap_origin = float2(origin_offset) * tile_size;
 
-    LightSunData sun_data = light.sun();
+    LightSunData sun_data = light.sun;
     /* Used as origin for the clipmap_base_offset trick. */
     sun_data.clipmap_origin = clipmap_origin;
     /* Number of levels is limited to 32 by `clipmap_level_range()` for this reason. */
     sun_data.clipmap_base_offset_pos = base_offset_pos;
     sun_data.clipmap_base_offset_neg = int2(0);
 
-    light.sun() = sun_data;
+    light.sun = sun_data;
   }
 
   void clipmap_sync(LightData &light)
   {
-    [[resource_table]] const Uniform &uni = uniforms;
-    float3 ws_camera_position = uni.uniform_buf.camera.viewinv[3].xyz;
-    float3 ws_camera_backward = uni.uniform_buf.camera.viewinv[2].xyz;
+    float3 ws_camera_position = uniforms.uniform_buf.camera.viewinv[3].xyz;
+    float3 ws_camera_backward = uniforms.uniform_buf.camera.viewinv[2].xyz;
     float3 ws_clipmap_focus = ws_camera_position -
-                              ws_camera_backward * light.sun().focus_distance;
+                              ws_camera_backward * light.sun.focus_distance;
     float3 ws_clipmap_center = mix(
-        ws_camera_position, ws_clipmap_focus, clamp(light.sun().focus_blend, 0.0f, 1.0f));
+        ws_camera_position, ws_clipmap_focus, clamp(light.sun.focus_blend, 0.0f, 1.0f));
     float3 ls_clipmap_center = transform_direction_transposed(light.object_to_world,
                                                               ws_clipmap_center);
 
-    int level_min = light.sun().clipmap_lod_min;
-    int level_max = light.sun().clipmap_lod_max;
+    int level_min = light.sun.clipmap_lod_min;
+    int level_max = light.sun.clipmap_lod_max;
     int level_len = level_max - level_min + 1;
 
     float2 clipmap_origin;
@@ -201,14 +199,14 @@ struct Resources {
     light.object_to_world.y.w = ls_clipmap_center.y;
     light.object_to_world.z.w = ls_clipmap_center.z;
 
-    LightSunData sun_data = light.sun();
+    LightSunData sun_data = light.sun;
     /* Used as origin for the clipmap_base_offset trick. */
     sun_data.clipmap_origin = clipmap_origin;
     /* Number of levels is limited to 32 by `clipmap_level_range()` for this reason. */
     sun_data.clipmap_base_offset_pos = pos_offset;
     sun_data.clipmap_base_offset_neg = neg_offset;
 
-    light.sun() = sun_data;
+    light.sun = sun_data;
   }
 
   void cubeface_sync(int tilemap_id,
@@ -292,12 +290,15 @@ void shadow_setup_main([[resource_table]] Resources &srt,
     return;
   }
 
+  bool use_jitter = (light.flags & LIGHT_USE_SHADOW_JITTER) != 0 &&
+                    uni.uniform_buf.shadow.use_jitter;
+
   if (is_sun_light(light.type)) {
     /* Distant lights. */
 
-    if (light.shadow_jitter && uni.uniform_buf.shadow.use_jitter) {
+    if (use_jitter) {
       /* TODO(fclem): Remove atan here. We only need the cosine of the angle. */
-      float shape_angle = atan_fast(light.sun().shape_radius);
+      float shape_angle = atan_fast(light.sun.shape_radius);
 
       /* Reverse to that first sample is straight up. */
       float2 rand = 1.0f - sampling.rng_2D_get(SAMPLING_SHADOW_I);
@@ -305,7 +306,7 @@ void shadow_setup_main([[resource_table]] Resources &srt,
 
       shadow_direction = transform_direction(light.object_to_world, shadow_direction);
 
-      if (light.sun().shadow_angle == 0.0f) {
+      if (light.sun.shadow_angle == 0.0f) {
         /* The shape is a point. There is nothing to jitter.
          * `shape_radius` is clamped to a minimum for precision reasons, so `shadow_angle` is
          * set to 0 only when the light radius is also 0 to detect this case. */
@@ -326,22 +327,22 @@ void shadow_setup_main([[resource_table]] Resources &srt,
     /* Local lights. */
     float3 position_on_light = float3(0.0f);
 
-    if (light.shadow_jitter && uni.uniform_buf.shadow.use_jitter) {
+    if (use_jitter) {
       float3 rand = sampling.rng_3D_get(SAMPLING_SHADOW_I);
 
       if (is_area_light(light.type)) {
         float2 point_on_unit_shape = (light.type == LIGHT_RECT) ? rand.xy * 2.0f - 1.0f :
                                                                   sample_disk(rand.xy);
-        position_on_light = float3(point_on_unit_shape * light.area().size, 0.0f);
+        position_on_light = float3(point_on_unit_shape * light.area.size, 0.0f);
       }
       else {
-        if (light.local().local.shadow_radius == 0.0f) {
+        if (light.local.local.shadow_radius == 0.0f) {
           /* The shape is a point. There is nothing to jitter.
            * `shape_radius` is clamped to a minimum for precision reasons, so `shadow_radius` is
            * set to 0 only when the light radius is also 0 to detect this case. */
         }
         else {
-          position_on_light = sample_ball(rand) * light.local().local.shape_radius;
+          position_on_light = sample_ball(rand) * light.local.local.shape_radius;
         }
       }
     }
@@ -352,9 +353,9 @@ void shadow_setup_main([[resource_table]] Resources &srt,
           light.tilemap_index + i, light.object_to_world, eCubeFace(i), position_on_light);
     }
 
-    LightLocalData local_data = light.local();
+    LightLocalData local_data = light.local;
     local_data.local.shadow_position = position_on_light;
-    light.local() = local_data;
+    light.local = local_data;
   }
 
   srt.light_buf[l_idx] = light;

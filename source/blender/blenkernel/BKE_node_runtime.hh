@@ -26,6 +26,7 @@
 #include "BKE_node_tree_interface.hh"
 
 #include "NOD_socket_usage_inference_fwd.hh"
+#include "NOD_warning.hh"
 
 namespace blender {
 
@@ -33,8 +34,16 @@ struct bNode;
 struct bNodeSocket;
 struct bNodeTree;
 
+struct bNodeInternalLink {
+  bNodeSocket *in = nullptr;
+  bNodeSocket *out = nullptr;
+
+  friend bool operator==(const bNodeInternalLink &a, const bNodeInternalLink &b) = default;
+};
+
 namespace nodes {
 struct EvalDependencies;
+struct GLSLBundleLowering;
 struct GeneratedTreeSrnaData;
 class NodeDeclaration;
 struct GeometryNodesLazyFunctionGraphInfo;
@@ -74,6 +83,32 @@ using NodeIDVectorSet = CustomIDVectorSet<bNode *, NodeIDGetter>;
 struct NodeLinkError {
   std::string tooltip;
 };
+
+/** A root shader tree owns this revision; group nodes only hold weak references to it. */
+struct ShaderNodeCompileContext {
+  struct Message {
+    uint32_t tree_uid;
+    int32_t node_id;
+    std::string signature;
+    std::string text;
+  };
+  Mutex mutex;
+  bool valid = true;
+  Map<uint64_t, std::string> signatures;
+  struct Snapshot {
+    std::weak_ptr<const void> owner;
+    uint64_t sync_epoch = 0;
+    Map<std::string, Vector<Message>> variants;
+  };
+  Map<std::string, Snapshot> snapshots;
+};
+
+std::shared_ptr<ShaderNodeCompileContext> shader_node_compile_context_get(bNodeTree &tree);
+void shader_node_compile_context_invalidate(bNodeTree &tree);
+void shader_node_compile_reference_add(bNodeTree &tree,
+                                       int32_t node_id,
+                                       const std::shared_ptr<ShaderNodeCompileContext> &context);
+VectorSet<std::string> shader_node_compile_errors(const bNode &node, StringRef signature);
 
 struct GLSLIntChoiceItem {
   int value = 0;
@@ -142,6 +177,9 @@ class bNodeTreeRuntime : NonCopyable, NonMovable {
    */
   uint8_t runtime_flag = 0;
 
+  /** Protect from recursive updates of node trees, see #BKE_ntree_update_without_main. */
+  bool is_updating = false;
+
   /**
    * Contains a number increased for each node-tree update.
    * Store a state variable in the #NestedTreePreviews structure to compare if they differ.
@@ -170,6 +208,10 @@ class bNodeTreeRuntime : NonCopyable, NonMovable {
   std::shared_ptr<nodes::GeneratedTreeSrnaData> geometry_nodes_srna_data;
   /** Contains RNA types generated for the compositor strip modifier interface. */
   std::shared_ptr<nodes::GeneratedTreeSrnaData> compositor_nodes_srna_data;
+  /** Contains RNA types generated for the compositor effect strip interface. */
+  std::shared_ptr<nodes::GeneratedTreeSrnaData> compositor_effect_nodes_srna_data;
+  /** Contains RNA types generated for the scene compositor effect interface. */
+  std::shared_ptr<nodes::GeneratedTreeSrnaData> scene_compositor_effect_srna_data;
 
   /** Information about usage of anonymous attributes within the group. */
   std::unique_ptr<node_tree_reference_lifetimes::ReferenceLifetimesInfo> reference_lifetimes_info;
@@ -206,10 +248,12 @@ class bNodeTreeRuntime : NonCopyable, NonMovable {
 
   /**
    * Error messages for shading nodes. Those don't have more contextual information yet. Maps
-   * #bNode::identifier to error messages.
+   * #bNode::identifier to warnings.
    */
-  Map<int32_t, VectorSet<std::string>> shader_node_errors;
+  Map<int32_t, VectorSet<nodes::NodeWarning>> shader_node_errors;
   Mutex shader_node_errors_mutex;
+  std::shared_ptr<ShaderNodeCompileContext> shader_compile_context;
+  Map<int32_t, Vector<std::weak_ptr<ShaderNodeCompileContext>>> shader_compile_references;
 
   /**
    * Protects access to all topology cache variables below. This is necessary so that the cache can
@@ -376,6 +420,9 @@ class bNodeRuntime : NonCopyable, NonMovable {
   /** The original node in the tree (for localized tree). */
   bNode *original = nullptr;
 
+  /** GLSL struct leaf bindings. Localized shader trees only; never serialized. */
+  std::shared_ptr<const nodes::GLSLBundleLowering> glsl_bundle_lowering;
+
   /** Calculated bounding box of node in the view space of the node editor (including UI scale). */
   rctf draw_bounds{};
 
@@ -392,7 +439,7 @@ class bNodeRuntime : NonCopyable, NonMovable {
   float anim_ofsx;
 
   /** List of cached internal links (input to output), for muted nodes and operators. */
-  Vector<bNodeLink> internal_links;
+  Vector<bNodeInternalLink> internal_links;
 
   /** Eagerly maintained cache of the node's index in the tree. */
   int index_in_tree = -1;
@@ -896,6 +943,11 @@ inline bool bNode::is_muted() const
   return this->flag & NODE_MUTED;
 }
 
+inline bool bNode::is_selected() const
+{
+  return this->flag & NODE_SELECT;
+}
+
 inline bool bNode::is_reroute() const
 {
   return this->type_legacy == NODE_REROUTE;
@@ -936,7 +988,7 @@ inline bool bNode::is_type(const UString query_idname) const
   return this->typeinfo->is_type(query_idname);
 }
 
-inline Span<bNodeLink> bNode::internal_links() const
+inline Span<bNodeInternalLink> bNode::internal_links() const
 {
   return this->runtime->internal_links;
 }

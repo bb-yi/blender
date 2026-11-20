@@ -7,7 +7,7 @@
 
 /* Independent rotating depth taps. Threshold is a minimum view-space gap,
  * never a normalization gain. Foreground taps cannot cancel other directions. */
-float npr_v2_depth_rim(float width_px,
+float npr_v2_depth_rim(KernelGlobals &kg, ShadingData &sd, float width_px,
                        float depth_threshold,
                        float softness,
                        float angle_degrees,
@@ -22,21 +22,21 @@ float npr_v2_depth_rim(float width_px,
   /* Hardware depth is affine across a projected triangle, including perspective.
    * Use the receiver's slope, not depth derivatives from neighboring objects. */
   /* EEVEE raster depth is reverse-Z, while HiZ is already converted back. */
-  float receiver_depth = 1.0f - gl_FragCoord.z;
+  float receiver_depth = 1.0f - sd.frag_co.z;
   float2 depth_gradient = float2(dFdx(receiver_depth), dFdy(receiver_depth));
   if (!(width_px > 0.0f) || !(arc_length > 0.0f)) {
     return 0.0f;
   }
-  int2 depth_extent = textureSize(hiz_tx, 0);
-  int2 view_extent = int2(uniform_buf.film.render_extent);
-  int2 center_pixel = int2(gl_FragCoord.xy);
+  int2 depth_extent = eevee_hiz_extent_get();
+  int2 view_extent = int2(eevee_uniform_data_get().film.render_extent);
+  int2 center_pixel = int2(sd.frag_co.xy);
   if (any(lessThan(center_pixel, int2(0))) ||
       any(greaterThanEqual(center_pixel, view_extent)) ||
       any(greaterThan(view_extent, depth_extent)))
   {
     return 0.0f;
   }
-  float center_depth = texelFetch(hiz_tx, center_pixel, 0).r;
+  float center_depth = eevee_hiz_fetch(center_pixel);
   if (!(center_depth >= 0.0f && center_depth < 1.0f)) {
     return 0.0f;
   }
@@ -45,7 +45,7 @@ float npr_v2_depth_rim(float width_px,
   float half_arc = saturate(arc_length) * 0.5f;
   float arc_transition = min(saturate(arc_softness) * 0.5f, half_arc);
   float angle_turns = angle_degrees / 360.0f;
-  float rotation = sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
+  float rotation = eevee_sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
   float rim = 0.0f;
   for (int axis = 0; axis < 8; axis++) {
     float turns = (float(axis) + rotation) * 0.125f;
@@ -64,18 +64,18 @@ float npr_v2_depth_rim(float width_px,
     int2 tap_step = int2(round(direction * max(1.0f, width_px / float(n_samples))));
     for (int i = 1; i <= n_samples; i++) {
       float reach = float(i) / float(n_samples);
-      int2 pixel = int2(floor(gl_FragCoord.xy + direction * (width_px * reach)));
+      int2 pixel = int2(floor(sd.frag_co.xy + direction * (width_px * reach)));
       /* Off-screen and padded HiZ texels are not background geometry. */
       if (any(lessThan(pixel, int2(0))) || any(greaterThanEqual(pixel, view_extent))) {
         continue;
       }
-      float sample_depth = texelFetch(hiz_tx, pixel, 0).r;
+      float sample_depth = eevee_hiz_fetch(pixel);
       bool background = sample_depth >= 1.0f;
       float predicted_depth = center_depth + dot(depth_gradient, float2(pixel - center_pixel));
       bool edge = background;
       if (!background && predicted_depth >= 0.0f && predicted_depth < 1.0f) {
-        float predicted_z = drw_depth_screen_to_view(predicted_depth);
-        float sample_z = drw_depth_screen_to_view(sample_depth);
+        float predicted_z = kg.view_matrices_get(sd).depth_screen_to_view(predicted_depth);
+        float sample_z = kg.view_matrices_get(sd).depth_screen_to_view(sample_depth);
         float tolerance = max(1e-5f, abs(predicted_z) * 1e-5f);
         float gap = predicted_z - sample_z;
         /* A tangent prediction over the whole radius also responds to smooth
@@ -87,16 +87,16 @@ float npr_v2_depth_rim(float width_px,
             all(lessThan(prior2, view_extent)) &&
             all(greaterThanEqual(prior, int2(0))) && all(lessThan(prior, view_extent)))
         {
-          float d1 = texelFetch(hiz_tx, prior, 0).r;
-          float d2 = texelFetch(hiz_tx, prior2, 0).r;
+          float d1 = eevee_hiz_fetch(prior);
+          float d2 = eevee_hiz_fetch(prior2);
           float local_prediction = 2.0f * d1 - d2;
           if (d1 < 1.0f && d2 < 1.0f && local_prediction >= 0.0f &&
               local_prediction < 1.0f)
           {
-            gap = min(gap, drw_depth_screen_to_view(local_prediction) - sample_z);
+            gap = min(gap, kg.view_matrices_get(sd).depth_screen_to_view(local_prediction) - sample_z);
             /* A smooth curved surface changes slope gradually. A finite
              * discontinuity must exceed that local depth trend as well. */
-            float trend = abs(drw_depth_screen_to_view(d1) - drw_depth_screen_to_view(d2));
+            float trend = abs(kg.view_matrices_get(sd).depth_screen_to_view(d1) - kg.view_matrices_get(sd).depth_screen_to_view(d2));
             if (gap <= 2.0f * trend) {
               gap = 0.0f;
             }

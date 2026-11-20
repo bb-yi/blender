@@ -6,9 +6,11 @@
  * \ingroup imbuf
  */
 
+#include "BLI_map.hh"
+#include "BLI_mutex.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_threads.h"
-#include "BLI_utildefines.h"
+#include "BLI_threads.hh"
+#include "BLI_utildefines.hh"
 
 #include "CLG_log.h"
 #include "DNA_scene_types.h"
@@ -21,13 +23,14 @@
 #include <mutex>
 
 #ifdef WITH_FFMPEG
-#  include "BLI_string.h"
+#  include "BLI_string.hh"
 
 extern "C" {
 #  include "ffmpeg_compat.h"
 #  include <libavcodec/avcodec.h>
 #  include <libavdevice/avdevice.h>
 #  include <libavformat/avformat.h>
+#  include <libavutil/hwcontext.h>
 #  include <libavutil/log.h>
 }
 #endif
@@ -47,7 +50,7 @@ static char ffmpeg_last_error_buffer[1024];
 #  endif
 
 static size_t ffmpeg_log_to_buffer(char *buffer,
-                                   const size_t buffer_size,
+                                   const size_t buffer_maxncpy,
                                    const char *format,
                                    va_list arg)
 {
@@ -55,7 +58,7 @@ static size_t ffmpeg_log_to_buffer(char *buffer,
   size_t n;
 
   va_copy(args_cpy, arg);
-  n = BLI_vsnprintf(buffer, buffer_size, format, args_cpy);
+  n = BLI_vsnprintf(buffer, buffer_maxncpy, format, args_cpy);
   va_end(args_cpy);
 
   return n;
@@ -579,6 +582,27 @@ int MOV_thread_count()
   return std::min(BLI_system_thread_count(), 16);
 }
 
+static Mutex hw_device_lock;
+static Map<AVHWDeviceType, AVBufferRef *> hw_devices;
+
+AVBufferRef *ffmpeg_hw_device_get(const AVHWDeviceType device_type)
+{
+  std::lock_guard lock(hw_device_lock);
+  return hw_devices.lookup_or_add_cb(device_type, [&]() {
+    AVBufferRef *hw_device_ctx = nullptr;
+    const int ret = av_hwdevice_ctx_create(&hw_device_ctx, device_type, nullptr, nullptr, 0);
+    if (ret < 0) {
+      char error_str[AV_ERROR_MAX_STRING_SIZE];
+      av_make_error_string(error_str, AV_ERROR_MAX_STRING_SIZE, ret);
+      CLOG_INFO(&LOG,
+                "ffmpeg: couldn't create %s decoding device: %s",
+                av_hwdevice_get_type_name(device_type),
+                error_str);
+    }
+    return hw_device_ctx;
+  });
+}
+
 #endif /* WITH_FFMPEG */
 
 bool MOV_is_movie_file(const char *filepath)
@@ -603,14 +627,14 @@ void MOV_init()
 
   ffmpeg_last_error_buffer[0] = '\0';
 
-  if (CLOG_CHECK(&LOG, CLG_LEVEL_INFO)) {
-    av_log_set_level(AV_LOG_INFO);
+  if (CLOG_CHECK(&LOG, CLG_LEVEL_TRACE)) {
+    av_log_set_level(AV_LOG_TRACE);
   }
   else if (CLOG_CHECK(&LOG, CLG_LEVEL_DEBUG)) {
     av_log_set_level(AV_LOG_DEBUG);
   }
-  else if (CLOG_CHECK(&LOG, CLG_LEVEL_TRACE)) {
-    av_log_set_level(AV_LOG_TRACE);
+  else if (CLOG_CHECK(&LOG, CLG_LEVEL_INFO)) {
+    av_log_set_level(AV_LOG_INFO);
   }
 
   /* set separate callback which could store last error to report to UI */
@@ -622,6 +646,11 @@ void MOV_exit()
 {
 #ifdef WITH_FFMPEG
   ffmpeg_sws_exit();
+  std::lock_guard lock(hw_device_lock);
+  for (AVBufferRef *&hw_device_ctx : hw_devices.values()) {
+    av_buffer_unref(&hw_device_ctx);
+  }
+  hw_devices.clear();
 #endif
 }
 

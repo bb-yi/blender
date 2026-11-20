@@ -7,14 +7,16 @@
  * \ingroup bke
  */
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 
-#include "BLI_compiler_attrs.h"
+#include "BLI_compiler_attrs.hh"
 #include "BLI_enum_flags.hh"
 #include "BLI_map.hh"
 #include "BLI_math_vector_types.hh"
+#include "BLI_set.hh"
 #include "BLI_string_ref.hh"
 #include "BLI_vector.hh"
 
@@ -55,7 +57,6 @@ struct Menu;
 struct Panel;
 struct PanelType;
 struct PanelCategoryDyn;
-struct RegionDrawCB;
 struct Scene;
 struct ScrArea;
 struct ScrAreaMap;
@@ -77,7 +78,6 @@ struct wmNotifier;
 struct wmTimer;
 struct wmWindow;
 struct wmWindowManager;
-struct RegionDrawCB;
 struct PanelType;
 struct HeaderType;
 struct ARegionType;
@@ -105,6 +105,8 @@ struct SpaceType {
   int spaceid;
   /** Icon lookup for menus. */
   int iconid;
+  /** Size of the #SpaceLink derived struct. */
+  int struct_size;
 
   /**
    * Initial allocation, after this WM will call init() too.
@@ -126,6 +128,12 @@ struct SpaceType {
 
   /** Refresh context, called after file-reads, #ED_area_tag_refresh(). */
   void (*refresh)(const bContext *C, ScrArea *area);
+
+  /** Called before the regions of this area are redrawn. */
+  void (*draw_pre)(const bContext *C, ScrArea *area);
+
+  /** Called after the regions of this area are redrawn. */
+  void (*draw_post)(const bContext *C, ScrArea *area);
 
   /** After a spacedata copy, an init should result in exact same situation. */
   SpaceLink *(*duplicate)(SpaceLink *sl);
@@ -230,12 +238,16 @@ enum class ARegionTypeFlag {
    * region.
    */
   UsePanelCategoryTabs = (1 << 1),
-
   /**
    * When using panel categories, this hides the sidebar tab where there is only one category
    * active.
    */
   HideSinglePanelCategories = (1 << 2),
+  /**
+   * Use panel categories region search, adds a button on top of the region which allows
+   * searching.
+   */
+  UsePanelCategoriesSearch = (1 << 3),
 };
 ENUM_OPERATORS(ARegionTypeFlag)
 
@@ -245,6 +257,90 @@ enum ARegionDrawLockFlags {
   REGION_DRAW_LOCK_RENDER = (1 << 0),
   REGION_DRAW_LOCK_BAKING = (1 << 1),
   REGION_DRAW_LOCK_ALL = (REGION_DRAW_LOCK_RENDER | REGION_DRAW_LOCK_BAKING)
+};
+
+/**
+ * Result of #ARegionType::cursor_ime, describing what should happen to the region's IME session.
+ * Ending a session cancels composition, discarding text the user has entered but not committed,
+ * so a temporary lack of position must *not* end it.
+ *
+ * A `std::nullopt` result means the region isn't editing text, end the session.
+ */
+enum class ARegionIMECursorState : int8_t {
+  /**
+   * The callback filled in its #ARegionIMECursor, (re)position the IME popup.
+   */
+  PositionSet,
+  /**
+   * No usable position right now, e.g. scrolling or the current-frame off a text strip:
+   * keep the session until it returns.
+   */
+  PositionPending,
+};
+
+/**
+ * The cursor position & size to display.
+ * See #ARegionType::cursor_ime for details.
+ */
+struct ARegionIMECursor {
+  /**
+   * Region relative, positions the candidate window & the composition preview.
+   *
+   * The width may be zero but the height should match the cursor size.
+   */
+  rcti rect = {0, 0, 0, 0};
+  /** The size the editor draws text at, so the preview matches it. */
+  int font_size = 0;
+};
+
+/** Enum for Action Zone Edges. Which edge of area is action zone. */
+enum AZEdge : int {
+  /** Region located on the left, _right_ edge is action zone.
+   * Region minimized to the top left */
+  AE_RIGHT_TO_TOPLEFT,
+  /** Region located on the right, _left_ edge is action zone.
+   * Region minimized to the top right */
+  AE_LEFT_TO_TOPRIGHT,
+  /** Region located at the bottom, _top_ edge is action zone.
+   * Region minimized to the bottom right */
+  AE_TOP_TO_BOTTOMRIGHT,
+  /** Region located at the top, _bottom_ edge is action zone.
+   * Region minimized to the top left */
+  AE_BOTTOM_TO_TOPLEFT,
+};
+
+enum AZScrollDirection {
+  AZ_SCROLL_VERT,
+  AZ_SCROLL_HOR,
+};
+
+/** For editing areas/regions. */
+struct AZone {
+  AZone *next, *prev;
+  ARegion *region;
+  int type;
+
+  union {
+    /** Region-AZone, which of the edges (only for #AZONE_REGION). */
+    AZEdge edge;
+    AZScrollDirection direction;
+  };
+  /** For drawing. */
+  short x1, y1, x2, y2;
+  /** For clip. */
+  rcti rect;
+  /** For fade in/out. */
+  float alpha;
+};
+
+/** Custom drawing callback registered for a region type, see #ED_region_draw_cb_activate. */
+struct RegionDrawCB {
+  RegionDrawCB *next, *prev;
+
+  void (*draw)(const bContext *, ARegion *, void *);
+  void *customdata;
+
+  int type;
 };
 
 struct ARegionType {
@@ -317,21 +413,19 @@ struct ARegionType {
   void (*on_view2d_changed)(const bContext *C, ARegion *region);
 
   /**
-   * Return the IME cursor (caret) rectangle in region-relative coordinates,
-   * or nullopt if IME should not be active in this region
-   * (e.g. during navigation, or when no text is being edited).
+   * Report the IME cursor so the candidate window can be positioned,
+   * see #ARegionIMECursorState for the results.
    *
-   * The rectangle's lower-left corner positions the IME candidate window, while its size
-   * lets the OS keep the candidate window clear of the caret line.
+   * On #ARegionIMECursorState::PositionSet, `r_cursor->rect` is the region-relative cursor:
+   * used to position the IME popup. Otherwise `r_cursor` is left untouched.
    *
    * Called on region activation and after each draw (when `ARegionRuntime::do_ime` is set)
    * to position the IME candidate window.
-   * The caller converts to window coordinates and calls `WM_window_IME_begin`/`end`.
-   *
-   * \note A zero width/height is acceptable when the caret extent isn't well defined in region
-   * space (e.g. 3D text, whose caret may be rotated), in which case only the corner is used.
    */
-  std::optional<rcti> (*cursor_ime)(wmWindow *win, const ScrArea *area, const ARegion *region);
+  std::optional<ARegionIMECursorState> (*cursor_ime)(wmWindow *win,
+                                                     const ScrArea *area,
+                                                     const ARegion *region,
+                                                     ARegionIMECursor *r_cursor);
 
   ARegionTypeFlag flag;
 
@@ -527,6 +621,12 @@ enum class ARegionQuadviewIndex : uint8_t {
   TopRight = 4,
 };
 
+enum ARegionRuntimeFlag : uint8_t {
+  /** Move redo panel in +Y direction to avoid overlapping with other UI elements, see: #62258 */
+  HUD_PADDING = (1 << 0),
+};
+ENUM_OPERATORS(ARegionRuntimeFlag)
+
 struct ARegionRuntime {
   /** Callbacks for this region type. */
   struct ARegionType *type;
@@ -567,6 +667,9 @@ struct ARegionRuntime {
   /** Blend in/out. */
   wmTimer *regiontimer = nullptr;
 
+  /** For calling after building a blocks. */
+  Vector<std::function<void(const bContext &C, ui::Block &Block)>> post_block_layout_fns;
+
   wmDrawBuffer *draw_buffer = nullptr;
 
   /** Panel categories runtime. */
@@ -588,6 +691,10 @@ struct ARegionRuntime {
 
   /** Dummy panel used in popups so they can support layout panels. */
   Panel *popup_block_panel = nullptr;
+  ARegionRuntimeFlag flag = {};
+
+  std::string search_filter;
+  Set<std::string> categories_search_match;
 };
 
 }  // namespace bke
@@ -788,6 +895,8 @@ void BKE_spacetypes_free();
 
 bool BKE_regiontype_uses_categories(const ARegionType *region_type);
 bool BKE_regiontype_uses_category_tabs(const ARegionType *region_type);
+bool BKE_regiontype_uses_panel_categories_search(const ARegionType *region_type);
+bool BKE_region_panel_categories_search_filter_visible(const ARegion *region);
 
 /* Space-data. */
 
@@ -904,9 +1013,13 @@ ARegion *BKE_screen_find_region_in_space(const bScreen *screen,
     ATTR_NONNULL(1, 2);
 /**
  * \note used to get proper RNA paths for spaces (editors).
+ * \note This handles both normal screen areas, and global areas that are owned by the window.
  */
-std::optional<std::string> BKE_screen_path_from_screen_to_space(const PointerRNA *ptr);
-std::optional<std::string> BKE_screen_path_from_screen_to_area(const PointerRNA *ptr);
+std::optional<std::string> BKE_screen_path_to_space(const PointerRNA *ptr);
+/**
+ * \note This handles both normal screen areas, and global areas that are owned by the window.
+ */
+std::optional<std::string> BKE_screen_path_to_area(const PointerRNA *ptr);
 /**
  * \note Using this function is generally a last resort, you really want to be
  * using the context when you can - campbell
@@ -957,8 +1070,12 @@ void BKE_screen_area_map_free(ScrAreaMap *area_map) ATTR_NONNULL();
  */
 void BKE_screen_copy_data(bScreen *screen_dst, const bScreen *screen_src);
 
+/** \return True if the edge defined by a1 and a2 is equal to the edge defined by b1 and b2. */
+bool BKE_screen_scredge_equals(const ScrVert *a1,
+                               const ScrVert *a2,
+                               const ScrVert *b1,
+                               const ScrVert *b2);
 ScrEdge *BKE_screen_find_edge(const bScreen *screen, ScrVert *v1, ScrVert *v2);
-void BKE_screen_sort_scrvert(ScrVert **v1, ScrVert **v2);
 void BKE_screen_remove_double_scrverts(bScreen *screen);
 void BKE_screen_remove_double_scredges(bScreen *screen);
 void BKE_screen_remove_unused_scredges(bScreen *screen);

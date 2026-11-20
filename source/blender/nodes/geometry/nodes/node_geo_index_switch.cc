@@ -5,6 +5,7 @@
 #include <fmt/format.h>
 
 #include "node_geometry_util.hh"
+#include "shader/node_shader_util.hh"
 
 #include "UI_interface_c.hh"
 #include "UI_interface_layout.hh"
@@ -149,6 +150,7 @@ static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 
 static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 {
+  layout.prop(ptr, "data_type", UI_ITEM_NONE, "", ICON_NONE);
   bNode &node = *static_cast<bNode *>(ptr->data);
   NodeIndexSwitch &storage = node_storage(node);
   if (ui::Layout *panel = layout.panel(C, "index_switch_items", false, IFACE_("Items"))) {
@@ -198,11 +200,29 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
   }
   else {
     const eNodeSocketDatatype other_type = params.other_socket().type;
+    int value_weight = 0;
     if (params.node_tree().typeinfo->validate_link(other_type, SOCK_INT)) {
       params.add_item(IFACE_("Index"), [](LinkSearchOpParams &params) {
         bNode &node = params.add_node("GeometryNodeIndexSwitch"_ustr);
         params.update_and_connect_available_socket(node, "Index"_ustr);
       });
+      /* Make sure the index input comes first in the search for integer sockets. */
+      value_weight--;
+    }
+
+    bke::bNodeTreeType &tree_type = *params.node_tree().typeinfo;
+    bke::bNodeSocketType *socket_type = bke::node_socket_type_find_static(other_type);
+    if (socket_type &&
+        (!tree_type.valid_socket_type || tree_type.valid_socket_type(&tree_type, socket_type)))
+    {
+      params.add_item(
+          IFACE_("Value"),
+          [](LinkSearchOpParams &params) {
+            bNode &node = params.add_node("GeometryNodeIndexSwitch"_ustr);
+            node_storage(node).data_type = params.socket.type;
+            params.update_and_connect_available_socket(node, "0"_ustr);
+          },
+          value_weight);
     }
   }
 }
@@ -317,10 +337,10 @@ class LazyFunctionForIndexSwitchNode : public LazyFunction {
   {
     SocketValueVariant index_variant = params.get_input<SocketValueVariant>(0);
     if (index_variant.is_context_dependent_field() && can_be_field_) {
-      this->execute_field(index_variant.get<Field<int>>(), params);
+      this->execute_field(index_variant.ensure_type<Field<int>>(), params);
     }
     else {
-      this->execute_single(index_variant.get<int>(), params);
+      this->execute_single(index_variant.ensure_type<int>(), params);
     }
   }
 
@@ -379,7 +399,7 @@ class LazyFunctionForIndexSwitchNode : public LazyFunction {
     GField output_field(FieldOperation::from(std::move(switch_fn), std::move(input_fields)));
 
     void *output_ptr = params.get_output_data_ptr(0);
-    SocketValueVariant::ConstructIn(output_ptr, std::move(output_field));
+    SocketValueVariant::construct_in(output_ptr, std::move(output_field));
     params.output_set(0);
   }
 };
@@ -487,7 +507,7 @@ static void register_node()
 {
   static bke::bNodeType ntype;
 
-  geo_cmp_node_type_base(&ntype, "GeometryNodeIndexSwitch"_ustr, GEO_NODE_INDEX_SWITCH);
+  common_node_type_base(&ntype, "GeometryNodeIndexSwitch"_ustr, GEO_NODE_INDEX_SWITCH);
   ntype.ui_name = "Index Switch";
   ntype.ui_description = "Choose between an arbitrary number of values with an index";
   ntype.enum_name_legacy = "INDEX_SWITCH";

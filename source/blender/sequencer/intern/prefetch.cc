@@ -18,12 +18,12 @@
 #include "DNA_sequence_types.h"
 #include "DNA_space_types.h"
 
-#include "BLI_threads.h"
+#include "BLI_threads.hh"
 
 #include "IMB_imbuf.hh"
 
 #include "BKE_anim_data.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_context.hh"
 #include "BKE_global.hh"
 #include "BKE_layer.hh"
@@ -327,8 +327,7 @@ static void seq_prefetch_update_area(PrefetchJob *pfjob)
 void prefetch_stop_all()
 {
   /* TODO(Richard): Use wm_jobs for prefetch, or pass main. */
-  for (Scene *scene = static_cast<Scene *>(G.main->scenes.first); scene;
-       scene = static_cast<Scene *>(scene->id.next))
+  for (Scene *scene = G.main->scenes.first(); scene; scene = static_cast<Scene *>(scene->id.next))
   {
     prefetch_stop(scene);
   }
@@ -506,10 +505,11 @@ static bool strip_renders_scene_strip(const Scene *scene,
   }
 
   /* Recurse on all strips in the meta strip `seqbase`. */
-  if (strip->type == STRIP_TYPE_META &&
-      seqbase_renders_scene_strip(scene, &strip->channels, &strip->seqbase, frame, state))
-  {
-    return true;
+  if (strip->type == STRIP_TYPE_META) {
+    int meta_frame = give_frame_index(scene, strip, frame) + strip->content_start();
+    if (seqbase_renders_scene_strip(scene, &strip->channels, &strip->seqbase, meta_frame, state)) {
+      return true;
+    }
   }
 
   /* Recurse on all strips in the sequencer-input scene strip `seqbase`. */
@@ -687,7 +687,7 @@ void seq_prefetch_start(const RenderData *context, float timeline_frame)
 {
   Scene *scene = context->scene;
   Editing *ed = scene->ed;
-  bool has_strips = bool(ed->current_strips()->first);
+  bool has_strips = bool(ed->current_strips()->first());
 
   if (!context->is_prefetch_render) {
     bool playing = context->is_playing;

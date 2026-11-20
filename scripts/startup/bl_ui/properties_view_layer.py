@@ -146,6 +146,7 @@ class VIEWLAYER_PT_eevee_layer_passes_data(ViewLayerButtonsPanel, Panel):
 
         col = layout.column()
         col.prop(view_layer, "use_pass_combined")
+        col.prop(view_layer, "use_pass_pre_fx")
         col.prop(view_layer, "use_pass_z")
         col.prop(view_layer, "use_pass_mist")
         col.prop(view_layer, "use_pass_normal")
@@ -157,6 +158,25 @@ class VIEWLAYER_PT_eevee_layer_passes_data(ViewLayerButtonsPanel, Panel):
         sub = col.column()
         sub.active = scene.eevee.use_outline
         sub.prop(view_layer_eevee, "use_pass_outline", text="Outline")
+        sub = col.column()
+        sub.active = scene.eevee.use_geometry_lines
+        sub.prop(view_layer_eevee, "use_geometry_lines", text="Geometry Lines")
+        sub.prop(view_layer_eevee, "use_pass_geometry_line", text="Geometry Line Pass")
+
+        view_layer_eevee = view_layer.eevee
+        prefs = context.preferences
+        use_debug = prefs.view.show_developer_ui
+        if use_debug:
+            col = layout.column(heading="Denoising", align=True)
+            col.prop(view_layer_eevee, "denoising_store_passes", text="Denoising Data")
+            sub = col.column()
+            sub.active = view_layer_eevee.denoising_store_passes
+            sub.prop(
+                view_layer_eevee,
+                "denoising_pass_use_albedo_roughness_weighting",
+                text="Albedo Roughness Weighting")
+        else:
+            col.prop(view_layer_eevee, "denoising_store_passes", text="Denoising Data")
 
 
 class VIEWLAYER_PT_workbench_layer_passes_data(ViewLayerButtonsPanel, Panel):
@@ -240,7 +260,7 @@ class ViewLayerAOVPanelHelper(ViewLayerButtonsPanel):
         if aov and context.engine == 'BLENDER_EEVEE':
             layout.prop(aov, "use_sr_nearest")
         if aov and not aov.is_valid:
-            layout.label(text="Conflicts with another render pass with the same name", icon='ERROR')
+            layout.label_multiline(text="Conflicts with another render pass with the same name", icon='STATUS_ERROR')
 
 
 class VIEWLAYER_PT_layer_passes_aov(ViewLayerAOVPanelHelper, Panel):

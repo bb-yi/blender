@@ -6,9 +6,9 @@
  * \ingroup edinterface
  */
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_string_ref.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "BKE_context.hh"
 #include "BKE_scene.hh"
@@ -32,7 +32,7 @@ namespace blender::ui {
 
 void template_cache_file_velocity(Layout *layout, PointerRNA *fileptr)
 {
-  if (RNA_pointer_is_null(fileptr)) {
+  if (!*fileptr) {
     return;
   }
 
@@ -45,7 +45,7 @@ void template_cache_file_velocity(Layout *layout, PointerRNA *fileptr)
 
 void template_cache_file_time_settings(Layout *layout, PointerRNA *fileptr)
 {
-  if (RNA_pointer_is_null(fileptr)) {
+  if (!*fileptr) {
     return;
   }
 
@@ -97,7 +97,7 @@ uiListType *UI_UL_cache_file_layers()
 
 void template_uilist_flags(Layout *layout, const bContext *C, PointerRNA *fileptr)
 {
-  if (RNA_pointer_is_null(fileptr)) {
+  if (!*fileptr) {
     return;
   }
 
@@ -164,7 +164,7 @@ void template_cache_file(Layout *layout,
                          PointerRNA *ptr,
                          const StringRefNull propname)
 {
-  if (!ptr->data) {
+  if (!*ptr) {
     return;
   }
 

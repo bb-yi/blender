@@ -255,7 +255,7 @@ class RENDER_PT_stamp_note(RenderOutputButtonsPanel, Panel):
         rd = context.scene.render
 
         layout.active = rd.use_stamp_note
-        layout.prop(rd, "stamp_note_text", text="")
+        layout.textbox(rd, "stamp_note_text", text="")
 
 
 class RENDER_PT_stamp_burn(RenderOutputButtonsPanel, Panel):
@@ -450,7 +450,7 @@ class RENDER_PT_output_pixel_density(RenderOutputButtonsPanel, Panel):
         layout.prop(rd, "ppm_factor", text="Pixels")
         layout.active = rd.save_output
 
-        row = layout.split(factor=0.4)
+        row = layout.split(factor=layout.property_split_factor)
         row.alignment = 'RIGHT'
         row.label(text="Unit")
         row.menu("RENDER_MT_pixeldensity_presets", text=pixeldensity_label_text)
@@ -551,7 +551,7 @@ class RENDER_PT_encoding_video(RenderOutputButtonsPanel, Panel):
 
         # HDR compatibility
         if view_settings.is_hdr and (not needs_codec or ffmpeg.codec not in {'H265', 'AV1'}):
-            layout.label(text="HDR needs H.265 or AV1", icon='ERROR')
+            layout.label(text="HDR needs H.265 or AV1", icon='STATUS_ERROR')
 
         # Color depth. List of codecs needs to be in sync with
         # `IMB_ffmpeg_valid_bit_depths` in source code.
@@ -561,10 +561,10 @@ class RENDER_PT_encoding_video(RenderOutputButtonsPanel, Panel):
 
         # HDR compatibility
         if view_settings.is_hdr and image_settings.color_depth not in {'10', '12'}:
-            layout.label(text="HDR needs 10 or 12 bits", icon='ERROR')
+            layout.label(text="HDR needs 10 or 12 bits", icon='STATUS_ERROR')
 
         # Color space
-        split = layout.split(factor=0.4)
+        split = layout.split(factor=layout.property_split_factor)
         col = split.column()
         col.alignment = 'RIGHT'
         col.label(text="Color Space")

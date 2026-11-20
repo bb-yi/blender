@@ -26,9 +26,9 @@
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_threads.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_threads.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -63,26 +63,26 @@ static CLG_LogRef LOG = {"context"};
 /* struct */
 
 struct bContext {
-  int thread;
+  int thread = 0;
 
   /* windowmanager context */
   struct {
-    wmWindowManager *manager;
-    wmWindow *window;
-    WorkSpace *workspace;
-    bScreen *screen;
-    ScrArea *area;
-    ARegion *region;
-    ARegion *region_popup;
-    wmGizmoGroup *gizmo_group;
-    const bContextStore *store;
+    wmWindowManager *manager = nullptr;
+    wmWindow *window = nullptr;
+    WorkSpace *workspace = nullptr;
+    bScreen *screen = nullptr;
+    ScrArea *area = nullptr;
+    ARegion *region = nullptr;
+    ARegion *region_popup = nullptr;
+    wmGizmoGroup *gizmo_group = nullptr;
+    const bContextStore *store = nullptr;
 
     /* Operator poll. */
     /**
-     * Store the reason the poll function fails (static string, not allocated).
-     * For more advanced formatting use `operator_poll_msg_dyn_params`.
+     * Store the reason the poll function fails.
+     * For more advanced or dynamic formatting, use `operator_poll_msg_dyn_params`.
      */
-    const char *operator_poll_msg;
+    std::optional<std::string> operator_poll_msg = {};
     /**
      * Store values to dynamically to create the string (called when a tool-tip is shown).
      */
@@ -91,22 +91,26 @@ struct bContext {
 
   /* data context */
   struct {
-    Main *main;
-    Scene *scene;
+    Main *main = nullptr;
+    Scene *scene = nullptr;
 
-    int recursion;
+    int recursion = 0;
+
+    /** Flag to disallow using the UI context for data retrieval. */
+    bool ui_data_access_deny = false;
+
     /** True if python is initialized. */
-    bool py_init;
-    void *py_context;
+    bool py_init = false;
+    void *py_context = nullptr;
     /**
      * If we need to remove members, do so in a copy
      * (keep this to check if the copy needs freeing).
      */
-    void *py_context_orig;
+    void *py_context_orig = nullptr;
     /** Logging control flags (access, hide_missing). */
-    CTX_LogFlag log_flag;
+    CTX_LogFlag log_flag = {};
     /** Optional flag to disallow writing via RNA. */
-    const bool *rna_disallow_writes;
+    const bool *rna_disallow_writes = nullptr;
   } data;
 };
 
@@ -114,23 +118,21 @@ struct bContext {
 
 bContext *CTX_create()
 {
-  bContext *C = MEM_new_zeroed<bContext>(__func__);
+  bContext *C = MEM_new<bContext>(__func__);
   return C;
 }
 
 bContext *CTX_copy(const bContext *C)
 {
-  bContext *newC = MEM_new_zeroed<bContext>(__func__);
-  *newC = *C;
-
-  memset(&newC->wm.operator_poll_msg_dyn_params, 0, sizeof(newC->wm.operator_poll_msg_dyn_params));
-
+  bContext *newC = MEM_new<bContext>(__func__, *C);
+  /* This may contain a dynamically allocated data, which cannot be shallow-copied, reset. */
+  newC->wm.operator_poll_msg_dyn_params = {};
   return newC;
 }
 
 void CTX_free(bContext *C)
 {
-  /* This may contain a dynamically allocated message, free. */
+  /* This may contain a dynamically allocated data, free. */
   CTX_wm_operator_poll_msg_clear(C);
 
   MEM_delete(C);
@@ -303,12 +305,13 @@ static std::string ctx_result_brief_repr(const bContextDataResult &result)
 {
   switch (result.type) {
     case ContextDataType::Pointer:
-      if (result.ptr.data) {
-        const char *rna_type_name = result.ptr.type ? RNA_struct_identifier(result.ptr.type) :
-                                                      "Unknown";
+      if (result.ptr) {
+        const char *rna_type_name = result.ptr.has_type() ?
+                                        RNA_struct_identifier(result.ptr.type) :
+                                        "Unknown";
         /* Try to get the name property if it exists. */
         std::string member_name;
-        if (result.ptr.type) {
+        if (result.ptr.has_type()) {
           PropertyRNA *name_prop = RNA_struct_name_property(result.ptr.type);
           if (name_prop) {
             char name_buf[256];
@@ -330,14 +333,10 @@ static std::string ctx_result_brief_repr(const bContextDataResult &result)
                              member_name,
                              reinterpret_cast<uintptr_t>(result.ptr.data));
         }
-        else {
-          return fmt::format(
-              "<{} at 0x{:x}>", rna_type_name, reinterpret_cast<uintptr_t>(result.ptr.data));
-        }
+        return fmt::format(
+            "<{} at 0x{:x}>", rna_type_name, reinterpret_cast<uintptr_t>(result.ptr.data));
       }
-      else {
-        return "None";
-      }
+      return "None";
 
     case ContextDataType::Collection:
       return fmt::format("[{} item(s)]", result.list.size());
@@ -351,20 +350,17 @@ static std::string ctx_result_brief_repr(const bContextDataResult &result)
       }
 
     case ContextDataType::Property:
-      if (result.prop && result.ptr.data) {
+      if (result.prop && result.ptr) {
         const char *prop_name = RNA_property_identifier(result.prop);
-        const char *rna_type_name = result.ptr.type ? RNA_struct_identifier(result.ptr.type) :
-                                                      "Unknown";
+        const char *rna_type_name = result.ptr.has_type() ?
+                                        RNA_struct_identifier(result.ptr.type) :
+                                        "Unknown";
         if (result.index >= 0) {
           return fmt::format("<Property({}.{}[{}])>", rna_type_name, prop_name, result.index);
         }
-        else {
-          return fmt::format("<Property({}.{})>", rna_type_name, prop_name);
-        }
+        return fmt::format("<Property({}.{})>", rna_type_name, prop_name);
       }
-      else {
-        return "<Property(None)>";
-      }
+      return "<Property(None)>";
 
     case ContextDataType::Int64:
       if (result.int_value.has_value()) {
@@ -433,12 +429,12 @@ static void *ctx_wm_python_context_get(const bContext *C,
   bool found_member = false;
 
 #ifdef WITH_PYTHON
-  if (UNLIKELY(CTX_py_dict_get(C))) {
+  if (CTX_py_dict_get(C)) [[unlikely]] {
     bContextDataResult result{};
     if (BPY_context_member_get(const_cast<bContext *>(C), member, &result)) {
       found_member = true;
 
-      if (result.ptr.data) {
+      if (result.ptr) {
         if (RNA_struct_is_a(result.ptr.type, member_type)) {
           return_data = result.ptr.data;
         }
@@ -502,8 +498,9 @@ static eContextResult ctx_data_get(bContext *C, const char *member, bContextData
   }
 #endif
 
-  /* Don't allow UI context access from non-main threads. */
-  if (!BLI_thread_is_main()) {
+  /* Don't allow UI context access from non-main threads or when access has been explicitly denied.
+   */
+  if (!BLI_thread_is_main() || C->data.ui_data_access_deny) {
     return CTX_RESULT_MEMBER_NOT_FOUND;
   }
 
@@ -658,14 +655,14 @@ PointerRNA CTX_data_pointer_get(const bContext *C, const char *member)
     return result.ptr;
   }
 
-  return PointerRNA_NULL;
+  return {};
 }
 
 PointerRNA CTX_data_pointer_get_type(const bContext *C, const char *member, StructRNA *type)
 {
   PointerRNA ptr = CTX_data_pointer_get(C, member);
 
-  if (ptr.data) {
+  if (ptr) {
     if (RNA_struct_is_a(ptr.type, type)) {
       return ptr;
     }
@@ -677,18 +674,18 @@ PointerRNA CTX_data_pointer_get_type(const bContext *C, const char *member, Stru
               RNA_struct_identifier(type));
   }
 
-  return PointerRNA_NULL;
+  return {};
 }
 
 PointerRNA CTX_data_pointer_get_type_silent(const bContext *C, const char *member, StructRNA *type)
 {
   PointerRNA ptr = CTX_data_pointer_get(C, member);
 
-  if (ptr.data && RNA_struct_is_a(ptr.type, type)) {
+  if (ptr && RNA_struct_is_a(ptr.type, type)) {
     return ptr;
   }
 
-  return PointerRNA_NULL;
+  return {};
 }
 
 Vector<PointerRNA> CTX_data_collection_get(const bContext *C, const char *member)
@@ -962,7 +959,7 @@ ScrArea *CTX_wm_area(const bContext *C)
 SpaceLink *CTX_wm_space_data(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
-  return (area) ? static_cast<SpaceLink *>(area->spacedata.first) : nullptr;
+  return (area) ? area->spacedata.first() : nullptr;
 }
 
 ARegion *CTX_wm_region(const bContext *C)
@@ -1004,7 +1001,7 @@ View3D *CTX_wm_view3d(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_VIEW3D) {
-    return static_cast<View3D *>(area->spacedata.first);
+    return area->spacedata.first_as<View3D>();
   }
   return nullptr;
 }
@@ -1026,7 +1023,7 @@ SpaceText *CTX_wm_space_text(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_TEXT) {
-    return static_cast<SpaceText *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceText>();
   }
   return nullptr;
 }
@@ -1035,7 +1032,7 @@ SpaceConsole *CTX_wm_space_console(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_CONSOLE) {
-    return static_cast<SpaceConsole *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceConsole>();
   }
   return nullptr;
 }
@@ -1044,7 +1041,7 @@ SpaceImage *CTX_wm_space_image(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_IMAGE) {
-    return static_cast<SpaceImage *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceImage>();
   }
   return nullptr;
 }
@@ -1053,7 +1050,7 @@ SpaceProperties *CTX_wm_space_properties(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_PROPERTIES) {
-    return static_cast<SpaceProperties *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceProperties>();
   }
   return nullptr;
 }
@@ -1062,7 +1059,7 @@ SpaceFile *CTX_wm_space_file(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_FILE) {
-    return static_cast<SpaceFile *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceFile>();
   }
   return nullptr;
 }
@@ -1071,7 +1068,7 @@ SpaceSeq *CTX_wm_space_seq(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_SEQ) {
-    return static_cast<SpaceSeq *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceSeq>();
   }
   return nullptr;
 }
@@ -1080,7 +1077,7 @@ SpaceOutliner *CTX_wm_space_outliner(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_OUTLINER) {
-    return static_cast<SpaceOutliner *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceOutliner>();
   }
   return nullptr;
 }
@@ -1089,7 +1086,7 @@ SpaceNla *CTX_wm_space_nla(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_NLA) {
-    return static_cast<SpaceNla *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceNla>();
   }
   return nullptr;
 }
@@ -1098,7 +1095,7 @@ SpaceNode *CTX_wm_space_node(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_NODE) {
-    return static_cast<SpaceNode *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceNode>();
   }
   return nullptr;
 }
@@ -1107,7 +1104,7 @@ SpaceGraph *CTX_wm_space_graph(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_GRAPH) {
-    return static_cast<SpaceGraph *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceGraph>();
   }
   return nullptr;
 }
@@ -1116,7 +1113,7 @@ SpaceAction *CTX_wm_space_action(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_ACTION) {
-    return static_cast<SpaceAction *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceAction>();
   }
   return nullptr;
 }
@@ -1125,7 +1122,7 @@ SpaceInfo *CTX_wm_space_info(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_INFO) {
-    return static_cast<SpaceInfo *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceInfo>();
   }
   return nullptr;
 }
@@ -1134,7 +1131,7 @@ SpaceUserPref *CTX_wm_space_userpref(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_USERPREF) {
-    return static_cast<SpaceUserPref *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceUserPref>();
   }
   return nullptr;
 }
@@ -1143,7 +1140,7 @@ SpaceClip *CTX_wm_space_clip(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_CLIP) {
-    return static_cast<SpaceClip *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceClip>();
   }
   return nullptr;
 }
@@ -1152,7 +1149,7 @@ SpaceTopBar *CTX_wm_space_topbar(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_TOPBAR) {
-    return static_cast<SpaceTopBar *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceTopBar>();
   }
   return nullptr;
 }
@@ -1161,7 +1158,16 @@ SpaceSpreadsheet *CTX_wm_space_spreadsheet(const bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
   if (area && area->spacetype == SPACE_SPREADSHEET) {
-    return static_cast<SpaceSpreadsheet *>(area->spacedata.first);
+    return area->spacedata.first_as<SpaceSpreadsheet>();
+  }
+  return nullptr;
+}
+
+SpaceProject *CTX_wm_space_project(const bContext *C)
+{
+  ScrArea *area = CTX_wm_area(C);
+  if (area && area->spacetype == SPACE_PROJECT) {
+    return area->spacedata.first_as<SpaceProject>();
   }
   return nullptr;
 }
@@ -1265,9 +1271,15 @@ void CTX_wm_operator_poll_msg_clear(bContext *C)
   params->free_fn = nullptr;
   params->user_data = nullptr;
 
-  C->wm.operator_poll_msg = nullptr;
+  C->wm.operator_poll_msg = {};
 }
 void CTX_wm_operator_poll_msg_set(bContext *C, const char *msg)
+{
+  CTX_wm_operator_poll_msg_clear(C);
+
+  C->wm.operator_poll_msg = msg ? std::make_optional(msg) : std::nullopt;
+}
+void CTX_wm_operator_poll_msg_set(bContext *C, const StringRef msg)
 {
   CTX_wm_operator_poll_msg_clear(C);
 
@@ -1293,7 +1305,7 @@ const char *CTX_wm_operator_poll_msg_get(bContext *C, bool *r_free)
   }
 
   *r_free = false;
-  return IFACE_(C->wm.operator_poll_msg);
+  return C->wm.operator_poll_msg ? IFACE_(C->wm.operator_poll_msg->c_str()) : nullptr;
 }
 
 /* data context */
@@ -1539,6 +1551,11 @@ void CTX_data_scene_set(bContext *C, Scene *scene)
     BPY_context_dict_clear_members_array(&C->data.py_context, C->data.py_context_orig, members, 1);
   }
 #endif
+}
+
+void CTX_data_ui_context_access_deny(bContext *C, bool deny)
+{
+  C->data.ui_data_access_deny = deny;
 }
 
 ToolSettings *CTX_data_tool_settings(const bContext *C)

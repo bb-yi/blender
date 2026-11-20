@@ -5,6 +5,8 @@
 #pragma once
 
 #include "gpu_shader_compat.hh"
+#include "gpu_shader_math_vector_compare.bsl.hh"
+#include "gpu_shader_math_vector_reduce.bsl.hh"
 
 float3 calc_barycentric_distances(float3 pos0, float3 pos1, float3 pos2)
 {
@@ -45,52 +47,53 @@ struct TextureHandle {
 
 #define TEXTURE_HANDLE_DEFAULT TextureHandle(0u, 0)
 
-#if defined(NPR_SHADER) || defined(MAT_FILTER)
-float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset);
-float4 TextureHandle_eval(TextureHandle tex);
-float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv);
-#  if defined(MAT_FILTER)
-bool TextureHandle_stores_transmittance_alpha(TextureHandle tex);
-bool TextureHandle_is_scene_depth(TextureHandle tex);
-#  endif
-#else
-float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
-{
-  return float4(0.0f);
-}
-
-float4 TextureHandle_eval(TextureHandle tex)
-{
-  return TextureHandle_eval(tex, float2(0.0f), false);
-}
-
-float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
-{
-  return TextureHandle_eval(tex, uv, false);
-}
-#endif
-
 /* Assumes GPU_VEC4 is color data, special case that needs luminance coefficients from OCIO. */
 #define float_from_float4(v, luminance_coefficients) dot(v.rgb, luminance_coefficients)
 #define float_from_float3(v) ((v.r + v.g + v.b) * (1.0f / 3.0f))
 #define float_from_float2(v) ((v.x + v.y) * (1.0f / 2.0f))
-#define float_from_TextureHandle(t, luminance_coefficients) \
-  float_from_float4(TextureHandle_eval(t), luminance_coefficients)
+#define float_from_TextureHandle(kg, sd, t, luminance_coefficients) \
+  float_from_float4(TextureHandle_eval(kg, sd, t), luminance_coefficients)
+#define float_from_int(v) float(v)
+#define float_from_bool(v) float(v)
 
 #define float2_from_float4(v) v.xy
 #define float2_from_float3(v) v.xy
 #define float2_from_float(v) float2(v)
-#define float2_from_TextureHandle(t) TextureHandle_eval(t).xy
+#define float2_from_TextureHandle(kg, sd, t) TextureHandle_eval(kg, sd, t).xy
+#define float2_from_int(v) float2(float(v))
+#define float2_from_bool(v) float2(float(v))
 
 #define float3_from_float4(v) v.rgb
 #define float3_from_float2(v) float3(v.xy, 0.0f)
 #define float3_from_float(v) float3(v)
-#define float3_from_TextureHandle(t) TextureHandle_eval(t).rgb
+#define float3_from_TextureHandle(kg, sd, t) TextureHandle_eval(kg, sd, t).rgb
+#define float3_from_int(v) float3(float(v))
+#define float3_from_bool(v) float3(float(v))
 
 #define float4_from_float3(v) float4(v, 1.0f)
 #define float4_from_float2(v) float4(v.xy, 0.0f, 1.0f)
 #define float4_from_float(v) float4(float3(v), 1.0f)
-#define float4_from_TextureHandle(t) TextureHandle_eval(t)
+#define float4_from_TextureHandle(kg, sd, t) TextureHandle_eval(kg, sd, t)
+#define float4_from_int(v) float4(float3(float(v)), 1.0f)
+#define float4_from_bool(v) float4(float3(float(v)), 1.0f)
+
+#define int_from_float(v) int(v)
+#define int_from_bool(v) int(v)
+#define int_from_float2(v) int(float_from_float2(v))
+#define int_from_float3(v) int_from_float(float_from_float3(v))
+/* Assumes GPU_VEC4 is color data, special case that needs luminance coefficients from OCIO. */
+#define int_from_float4(v, luminance_coefficients) int(dot(v.rgb, luminance_coefficients))
+#define int_from_TextureHandle(kg, sd, t, luminance_coefficients) \
+  int_from_float4(TextureHandle_eval(kg, sd, t), luminance_coefficients)
+
+#define bool_from_float(v) ((v) > 0.0f)
+#define bool_from_int(v) ((v) > 0)
+#define bool_from_float2(v) (!is_zero(v))
+#define bool_from_float3(v) (!is_zero(v))
+/* Assumes GPU_VEC4 is color data, special case that needs luminance coefficients from OCIO. */
+#define bool_from_float4(v, luminance_coefficients) (dot(v.rgb, luminance_coefficients) > 0.0f)
+#define bool_from_TextureHandle(kg, sd, t, luminance_coefficients) \
+  bool_from_float4(TextureHandle_eval(kg, sd, t), luminance_coefficients)
 
 #ifdef MAT_BAKE_COLOR
 #  define FrontFacing true
@@ -205,12 +208,22 @@ ClosureNPRDirect closure_npr_direct_default()
 
 struct ClosureUndetermined {
   packed_float3 color;
-  float weight;
   packed_float3 N;
   ClosureType type;
   /* Additional data different for each closure type. */
   packed_float4 data;
   ClosureNPRDirect npr;
+
+  float weight() const
+  {
+    float result = reduce_add(abs(color));
+#ifndef MAT_CAPTURE
+    if (npr.enabled) {
+      result = max(result, reduce_add(abs(color * npr.multiplier + npr.additive)));
+    }
+#endif
+    return result;
+  }
 };
 
 bool closure_has_transmission(const ClosureType closure)
@@ -218,6 +231,11 @@ bool closure_has_transmission(const ClosureType closure)
   return closure == CLOSURE_BSDF_TRANSLUCENT_ID ||
          closure == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID ||
          closure == CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID;
+}
+
+bool closure_has_surface_diffusion(ClosureUndetermined cl)
+{
+  return cl.npr.diffusion.w > 0.0f && reduce_max(cl.npr.diffusion.xyz) > 0.0f;
 }
 
 ClosureUndetermined closure_new(ClosureType type)
@@ -302,33 +320,28 @@ struct ClosureOcclusion {
 
 struct ClosureDiffuse {
   packed_float3 color;
-  float weight;
   packed_float3 N;
 };
 
 struct ClosureSubsurface {
   packed_float3 color;
-  float weight;
   packed_float3 N;
   packed_float3 sss_radius;
 };
 
 struct ClosureTranslucent {
   packed_float3 color;
-  float weight;
   packed_float3 N;
 };
 
 struct ClosureReflection {
   packed_float3 color;
-  float weight;
   packed_float3 N;
   float roughness;
 };
 
 struct ClosureRefraction {
   packed_float3 color;
-  float weight;
   packed_float3 N;
   float roughness;
   float ior;
@@ -336,7 +349,6 @@ struct ClosureRefraction {
 
 struct ClosureHair {
   packed_float3 color;
-  float weight;
   packed_float3 T;
   float offset;
   packed_float2 roughness;
@@ -344,29 +356,24 @@ struct ClosureHair {
 
 struct ClosureVolumeScatter {
   packed_float3 scattering;
-  float weight;
   float anisotropy;
 };
 
 struct ClosureVolumeAbsorption {
   packed_float3 absorption;
-  float weight;
 };
 
 struct ClosureEmission {
   packed_float3 emission;
-  float weight;
 };
 
 struct ClosureTransparency {
   packed_float3 transmittance;
-  float weight;
   float holdout;
 };
 
 struct ClosureThinRefraction {
   packed_float3 color;
-  float weight;
   packed_float3 N;
   float roughness;
 };
@@ -424,65 +431,18 @@ ClosureThinRefraction to_closure_thin_refraction(ClosureUndetermined cl)
   return closure;
 }
 
-struct GlobalData {
-  /** World position. */
-  packed_float3 P;
-  /** Surface Normal. Normalized, overridden by bump displacement. */
-  packed_float3 N;
-  /** Raw interpolated normal (non-normalized) data. */
-  packed_float3 Ni;
-  /** Geometric Normal. */
-  packed_float3 Ng;
-  /** Curve Tangent Space. */
-  packed_float3 curve_T, curve_B, curve_N;
-  /** Barycentric coordinates. */
-  packed_float2 barycentric_coords;
-  packed_float3 barycentric_dists;
-  /** Hair thickness in world space. */
-  float hair_diameter;
-  /** Index of the strand for per strand effects. */
-  int hair_strand_id;
-  /** Ray properties (approximation). */
-  float ray_depth;
-  float ray_length;
-  uchar ray_type;
-  /** Is hair. */
-  bool is_strand;
-};
-
-GlobalData g_data;
-
-#ifndef GPU_FRAGMENT_SHADER
-/* Stubs. */
-
-#  define dF_impl(a) (float3(0.0f))
-#  define dF_branch(a, b, c) (c = float2(0.0f))
-#  define dF_branch_incomplete(a, b, c) (c = float2(0.0f))
-
-#elif defined(GPU_FAST_DERIVATIVE) /* TODO(@fclem): User Option? */
-/* Fast derivatives */
-float3 dF_impl(float3 v)
-{
-  return float3(0.0f);
-}
-
-void dF_branch(float fn, float2 &result)
-{
-  /* NOTE: this function is currently unused, once it is used we need to check if
-   * `g_derivative_filter_width` needs to be applied. */
-  result.x = gpu_dfdx(fn) * derivative_scale_get();
-  result.y = gpu_dfdy(fn) * derivative_scale_get();
-}
-
-#else
-
 /* Offset of coordinates for evaluating bump node. Unit in pixel. */
 float g_derivative_filter_width = 0.0f;
 /* Precise derivatives */
 int g_derivative_flag = 0;
 
-float3 dF_impl(float3 v)
+float3 dF_impl([[maybe_unused]] float3 v)
 {
+#ifndef GPU_FRAGMENT_SHADER
+  return float3(0.0f);
+#elif defined(GPU_FAST_DERIVATIVE) /* TODO(@fclem): User Option? */
+  return float3(0.0f);
+#else
   if (g_derivative_flag > 0) {
     return gpu_dfdx(v) * g_derivative_filter_width;
   }
@@ -490,11 +450,37 @@ float3 dF_impl(float3 v)
     return gpu_dfdy(v) * g_derivative_filter_width;
   }
   return float3(0.0f);
+#endif
 }
 
+void dF_branch([[maybe_unused]] float fn, [[maybe_unused]] float filter_width, float2 &result)
+{
+#ifndef GPU_FRAGMENT_SHADER
+  result = float2(0.0f);
+#elif defined(GPU_FAST_DERIVATIVE) /* TODO(@fclem): User Option? */
+  result.x = gpu_dfdx(fn) * filter_width * derivative_scale_get(kg);
+  result.y = gpu_dfdy(fn) * filter_width * derivative_scale_get(kg);
+#else
+#endif
+}
+
+void dF_branch_incomplete([[maybe_unused]] float fn,
+                          [[maybe_unused]] float filter_width,
+                          float2 &result)
+{
+#ifndef GPU_FRAGMENT_SHADER
+  result = float2(0.0f);
+#elif defined(GPU_FAST_DERIVATIVE) /* TODO(@fclem): User Option? */
+  result.x = gpu_dfdx(fn) * filter_width * derivative_scale_get(kg);
+  result.y = gpu_dfdy(fn) * filter_width * derivative_scale_get(kg);
+  result += float2(fn);
+#endif
+}
+
+#if defined(GPU_FRAGMENT_SHADER) && !defined(GPU_FAST_DERIVATIVE)
 #  define dF_branch(fn, filter_width, result) \
     if (true) { \
-      g_derivative_filter_width = filter_width * derivative_scale_get(); \
+      g_derivative_filter_width = filter_width * derivative_scale_get(kg); \
       g_derivative_flag = 1; \
       result.x = (fn); \
       g_derivative_flag = -1; \
@@ -506,7 +492,7 @@ float3 dF_impl(float3 v)
 /* Used when the non-offset value is already computed elsewhere */
 #  define dF_branch_incomplete(fn, filter_width, result) \
     if (true) { \
-      g_derivative_filter_width = filter_width * derivative_scale_get(); \
+      g_derivative_filter_width = filter_width * derivative_scale_get(kg); \
       g_derivative_flag = 1; \
       result.x = (fn); \
       g_derivative_flag = -1; \

@@ -12,9 +12,9 @@
 #include "BLI_array.hh"
 #include "BLI_color.hh"
 #include "BLI_function_ref.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
-#include "BLI_math_color.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
+#include "BLI_math_color_c.hh"
 #include "BLI_vector.hh"
 
 #include "BLT_translation.hh"
@@ -296,7 +296,7 @@ static void transform_active_color(bContext *C,
   Object &obact = *CTX_data_active_object(C);
 
   /* Ensure valid sculpt state. */
-  BKE_sculpt_update_object_for_edit(CTX_data_ensure_evaluated_depsgraph(C), &obact, true);
+  BKE_sculptsession_update_for_edit(CTX_data_ensure_evaluated_depsgraph(C), &obact, true);
 
   bke::pbvh::Tree &pbvh = *bke::object::pbvh_get(obact);
 

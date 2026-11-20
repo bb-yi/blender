@@ -6,7 +6,7 @@
  * \ingroup gpu
  */
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "DNA_userdef_types.h"
 
@@ -35,20 +35,14 @@ Texture::Texture(const char *name)
     name_ = name;
   }
 
-  for (int i = 0; i < ARRAY_SIZE(fb_); i++) {
-    fb_[i] = nullptr;
-  }
-
   gpu_image_usage_flags_ = GPU_TEXTURE_USAGE_GENERAL;
 }
 
 Texture::~Texture()
 {
-  for (int i = 0; i < ARRAY_SIZE(fb_); i++) {
-    if (fb_[i] != nullptr) {
-      fb_[i]->attachment_remove(fb_attachment_[i]);
-    }
-  }
+  fb_attachments_.foreach_item(
+      [&](FrameBuffer *key, const GPUAttachmentType value) { key->attachment_remove(value); });
+  fb_attachments_.clear();
 
 #ifndef GPU_NO_USE_PY_REFERENCES
   if (this->py_ref) {
@@ -64,6 +58,7 @@ bool Texture::init_1D(int w, int layers, int mip_len, TextureFormat format)
   d_ = 0;
   int mip_len_max = 1 + floorf(log2f(w));
   mipmaps_ = min_ii(mip_len, mip_len_max);
+  mip_max_ = mip_min_ + mipmaps_ - 1;
   format_ = format;
   format_flag_ = to_format_flag(format);
   type_ = (layers > 0) ? GPU_TEXTURE_1D_ARRAY : GPU_TEXTURE_1D;
@@ -80,6 +75,7 @@ bool Texture::init_2D(int w, int h, int layers, int mip_len, TextureFormat forma
   d_ = layers;
   int mip_len_max = 1 + floorf(log2f(max_ii(w, h)));
   mipmaps_ = min_ii(mip_len, mip_len_max);
+  mip_max_ = mip_min_ + mipmaps_ - 1;
   format_ = format;
   format_flag_ = to_format_flag(format);
   type_ = (layers > 0) ? GPU_TEXTURE_2D_ARRAY : GPU_TEXTURE_2D;
@@ -96,6 +92,7 @@ bool Texture::init_3D(int w, int h, int d, int mip_len, TextureFormat format)
   d_ = d;
   int mip_len_max = 1 + floorf(log2f(std::max({w, h, d})));
   mipmaps_ = min_ii(mip_len, mip_len_max);
+  mip_max_ = mip_min_ + mipmaps_ - 1;
   format_ = format;
   format_flag_ = to_format_flag(format);
   type_ = GPU_TEXTURE_3D;
@@ -112,6 +109,7 @@ bool Texture::init_cubemap(int w, int layers, int mip_len, TextureFormat format)
   d_ = max_ii(1, layers) * 6;
   int mip_len_max = 1 + floorf(log2f(w));
   mipmaps_ = min_ii(mip_len, mip_len_max);
+  mip_max_ = mip_min_ + mipmaps_ - 1;
   format_ = format;
   format_flag_ = to_format_flag(format);
   type_ = (layers > 0) ? GPU_TEXTURE_CUBE_ARRAY : GPU_TEXTURE_CUBE;
@@ -143,39 +141,41 @@ bool Texture::init_view(Texture *src,
                         bool cube_as_array,
                         bool use_stencil)
 {
-  is_texture_view_ = true;
-  w_ = src->w_;
-  h_ = src->h_;
-  d_ = src->d_;
-  layer_start = min_ii(layer_start, src->layer_count() - 1);
-  layer_len = min_ii(layer_len, (src->layer_count() - layer_start));
-  switch (type) {
-    case GPU_TEXTURE_1D_ARRAY:
-      h_ = layer_len;
-      break;
-    case GPU_TEXTURE_CUBE_ARRAY:
-      BLI_assert(layer_len % 6 == 0);
-      ATTR_FALLTHROUGH;
-    case GPU_TEXTURE_2D_ARRAY:
-      d_ = layer_len;
-      break;
-    default:
-      BLI_assert(layer_len == 1 && layer_start == 0);
-      break;
-  }
-  mip_start = min_ii(mip_start, src->mipmaps_ - 1);
-  mip_len = min_ii(mip_len, (src->mipmaps_ - mip_start));
-  mipmaps_ = mip_len;
-  format_ = format;
-  format_flag_ = to_format_flag(format);
+  BLI_assert(source_texture_ == nullptr);
+  source_texture_ = src;
+  gpu_image_usage_flags_ = src->gpu_image_usage_flags_;
+  sampler_state = src->sampler_state;
+
+  int view_extent[3]{0, 0, 0};
+  src->mip_size_get(mip_start, view_extent);
+
+  view_layer_start_ = min_ii(layer_start, src->layer_count() - 1);
+
   type_ = type;
   if (cube_as_array) {
     BLI_assert(type_ & GPU_TEXTURE_CUBE);
     type_ = (type_ & ~GPU_TEXTURE_CUBE) | GPU_TEXTURE_2D_ARRAY;
   }
-  sampler_state = src->sampler_state;
-  gpu_image_usage_flags_ = src->gpu_image_usage_flags_;
-  return this->init_internal(src, mip_start, layer_start, use_stencil);
+
+  if (type & GPU_TEXTURE_ARRAY) {
+    view_extent[src->dimensions_count() - 1] = std::min(layer_len,
+                                                        (src->layer_count() - view_layer_start_));
+  }
+  else if (src->type_get() & GPU_TEXTURE_ARRAY) {
+    view_extent[src->dimensions_count()] = 0;
+  }
+
+  w_ = view_extent[0];
+  h_ = view_extent[1];
+  d_ = view_extent[2];
+
+  mip_min_ = min_ii(mip_start, src->mipmaps_ - 1);
+  mipmaps_ = min_ii(mip_len, (src->mipmaps_ - mip_min_));
+  mip_max_ = mip_min_ + mipmaps_ - 1;
+  format_ = format;
+  format_flag_ = to_format_flag(format);
+
+  return this->init_internal(src, use_stencil);
 }
 
 bool Texture::init_external_2D(const int w,
@@ -209,37 +209,22 @@ void Texture::usage_set(eGPUTextureUsage usage_flags)
 
 void Texture::attach_to(FrameBuffer *fb, GPUAttachmentType type)
 {
-  for (int i = 0; i < ARRAY_SIZE(fb_); i++) {
-    if (fb_[i] == fb) {
-      /* Already stores a reference */
-      if (fb_attachment_[i] != type) {
-        /* Ensure it's not attached twice to the same FrameBuffer. */
-        fb_[i]->attachment_remove(fb_attachment_[i]);
-        fb_attachment_[i] = type;
-      }
-      return;
-    }
+  GPUAttachmentType &current_type = fb_attachments_.lookup_or_add(fb, type);
+  if (current_type != type) {
+    fb->attachment_remove(current_type);
+    current_type = type;
   }
-  for (int i = 0; i < ARRAY_SIZE(fb_); i++) {
-    if (fb_[i] == nullptr) {
-      fb_attachment_[i] = type;
-      fb_[i] = fb;
-      return;
-    }
-  }
-  BLI_assert_msg(0, "GPU: Error: Texture: Not enough attachment");
 }
 
 void Texture::detach_from(FrameBuffer *fb)
 {
-  for (int i = 0; i < ARRAY_SIZE(fb_); i++) {
-    if (fb_[i] == fb) {
-      fb_[i]->attachment_remove(fb_attachment_[i]);
-      fb_[i] = nullptr;
-      return;
-    }
+  std::optional<GPUAttachmentType> type = fb_attachments_.pop_try(fb);
+  if (type.has_value()) {
+    fb->attachment_remove(*type);
   }
-  BLI_assert_msg(0, "GPU: Error: Texture: Framebuffer is not attached");
+  else {
+    BLI_assert_msg(0, "GPU: Error: Texture: Framebuffer is not attached");
+  };
 }
 
 void Texture::update(eGPUDataFormat format, const void *data)
@@ -595,12 +580,6 @@ void *GPU_texture_read(Texture *texture, eGPUDataFormat data_format, int mip_lev
   BLI_assert(texture);
   size_t size = texture->read_size_get(mip_level, data_format);
 
-  /* AMD Pro OpenGL drivers have a bug that write 8 bytes past buffer size
-   * if the texture is big. Note, this seemingly only affects cube map arrays. (see #66573) */
-  if (texture->type_get() == GPU_TEXTURE_CUBE_ARRAY) {
-    size += 8;
-  }
-
   void *data = MEM_new_uninitialized(size, __func__);
   GPU_texture_read(texture, data_format, mip_level, data);
   return data;
@@ -626,7 +605,15 @@ size_t Texture::read_size_get(int mip, eGPUDataFormat format) const
 
   size_t sample_len = extent[0] * std::max(1, extent[1]) * std::max(1, extent[2]);
   size_t sample_size = to_bytesize(format_, format);
-  return sample_len * sample_size;
+  size_t size = sample_len * sample_size;
+
+  /* AMD Pro OpenGL drivers have a bug that write 8 bytes past buffer size
+   * if the texture is big. Note, this seemingly only affects cube map arrays. (see #66573) */
+  if (type_ == GPU_TEXTURE_CUBE_ARRAY) {
+    size += 8;
+  }
+
+  return size;
 }
 
 size_t GPU_texture_read_size_get(const Texture *texture, eGPUDataFormat data_format, int mip_level)
@@ -655,11 +642,6 @@ void GPU_texture_clear(gpu::Texture *tex, eGPUDataFormat data_format, const void
       }
       break;
     case GPU_DATA_UINT:
-      for (int i : IndexRange(comp_len)) {
-        clear_data[i] = static_cast<const uint *>(data)[i];
-      }
-      break;
-    case GPU_DATA_UBYTE:
       for (int i : IndexRange(comp_len)) {
         clear_data[i] = static_cast<const uint *>(data)[i];
       }
@@ -1042,6 +1024,11 @@ bool GPU_texture_has_normalized_format(const gpu::Texture *texture)
 bool GPU_texture_has_signed_format(const gpu::Texture *texture)
 {
   return (texture->format_flag_get() & GPU_FORMAT_SIGNED) != 0;
+}
+
+bool GPU_texture_has_compressed_format(const gpu::Texture *texture)
+{
+  return (texture->format_flag_get() & GPU_FORMAT_COMPRESSED) != 0;
 }
 
 bool GPU_texture_is_cube(const gpu::Texture *texture)

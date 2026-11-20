@@ -8,7 +8,7 @@
  * Hardware scene lifecycle and dispatch, ported from Nuru c603d408e9f3.
  */
 
-#include "BLI_time.h"
+#include "BLI_time.hh"
 #include "GPU_context.hh"
 #include "GPU_debug.hh"
 #include "GPU_index_buffer.hh"
@@ -724,9 +724,9 @@ void RayTraceModule::render_hardware_shadows(View &view, gpu::Texture *depth_tx,
       p.wininv = view.wininv();
       p.full_resolution = extent;
       p.shadow_layer = light.hwrt_shadow_layer;
-      p.light_direction = math::normalize(float3(light.sun().direction));
+      p.light_direction = math::normalize(float3(light.sun.direction));
       p.normal_bias = std::max(5.0e-3f, light.filter_radius * 5.0e-3f);
-      p.shadow_angle = light.sun().shadow_angle;
+      p.shadow_angle = light.sun.shadow_angle;
       p.sample_count = sample_count;
       p.color_intensity = options.hardware_raytracing_shadow_color_intensity;
       p.shadow_transparency = options.hardware_raytracing_shadow_transparency;
@@ -747,16 +747,16 @@ void RayTraceModule::render_hardware_shadows(View &view, gpu::Texture *depth_tx,
       p.shadow_layer = light.hwrt_shadow_layer;
       p.light_type = uint32_t(light.type);
       p.light_position = light.position();
-      p.shadow_radius = light.local().local.shadow_radius;
+      p.shadow_radius = light.local.local.shadow_radius;
       p.light_x_axis = light.x_axis();
       p.light_y_axis = light.y_axis();
-      p.shadow_offset = light.x_axis() * light.local().local.shadow_position.x +
-                        light.y_axis() * light.local().local.shadow_position.y +
-                        light.z_axis() * light.local().local.shadow_position.z;
+      p.shadow_offset = light.x_axis() * light.local.local.shadow_position.x +
+                        light.y_axis() * light.local.local.shadow_position.y +
+                        light.z_axis() * light.local.local.shadow_position.z;
       if (is_area_light(light.type)) {
-        p.area_size_x = light.area().size.x;
-        p.area_size_y = light.area().size.y;
-        p.area_shadow_scale = light.area().shadow_scale;
+        p.area_size_x = light.area.size.x;
+        p.area_size_y = light.area.size.y;
+        p.area_shadow_scale = light.area.shadow_scale;
       }
       p.normal_bias = std::max(4.0e-3f, light.filter_radius * 4.0e-3f);
       p.sample_count = sample_count;
@@ -1032,9 +1032,9 @@ void RayTraceModule::render_hardware_hit_shadows(GPUHardwareRaytraceScene *scene
       p.tracing_resolution = extent;
       p.shadow_visibility_tx = hit.shadow_visibility;
       p.shadow_layer = light.hwrt_shadow_layer;
-      p.light_direction = math::normalize(float3(light.sun().direction));
+      p.light_direction = math::normalize(float3(light.sun.direction));
       p.normal_bias = std::max(5.0e-3f, light.filter_radius * 5.0e-3f);
-      p.shadow_angle = light.sun().shadow_angle;
+      p.shadow_angle = light.sun.shadow_angle;
       p.sample_count = sample_count;
       p.color_intensity = options.hardware_raytracing_shadow_color_intensity;
       p.shadow_transparency = options.hardware_raytracing_shadow_transparency;
@@ -1055,16 +1055,16 @@ void RayTraceModule::render_hardware_hit_shadows(GPUHardwareRaytraceScene *scene
       p.shadow_layer = light.hwrt_shadow_layer;
       p.light_type = uint32_t(light.type);
       p.light_position = light.position();
-      p.shadow_radius = light.local().local.shadow_radius;
+      p.shadow_radius = light.local.local.shadow_radius;
       p.light_x_axis = light.x_axis();
       p.light_y_axis = light.y_axis();
-      p.shadow_offset = light.x_axis() * light.local().local.shadow_position.x +
-                        light.y_axis() * light.local().local.shadow_position.y +
-                        light.z_axis() * light.local().local.shadow_position.z;
+      p.shadow_offset = light.x_axis() * light.local.local.shadow_position.x +
+                        light.y_axis() * light.local.local.shadow_position.y +
+                        light.z_axis() * light.local.local.shadow_position.z;
       if (is_area_light(light.type)) {
-        p.area_size_x = light.area().size.x;
-        p.area_size_y = light.area().size.y;
-        p.area_shadow_scale = light.area().shadow_scale;
+        p.area_size_x = light.area.size.x;
+        p.area_size_y = light.area.size.y;
+        p.area_shadow_scale = light.area.shadow_scale;
       }
       p.normal_bias = std::max(4.0e-3f, light.filter_radius * 4.0e-3f);
       p.sample_count = sample_count;
@@ -1201,23 +1201,23 @@ static GPUHardwareRaytraceFastGILightRecord hardware_fast_gi_light_record_from_l
       std::abs(light.color.x),
       std::abs(light.color.y),
       std::abs(light.color.z),
-      light.power[LIGHT_DIFFUSE]);
+      light.power_factor[LIGHT_DIFFUSE] * light.shape_power);
   record.direction_type = float4(0.0f, 0.0f, 1.0f, float(light.type));
   /* Nuru NIS: stable cluster id rides the spare spot lane for kernel-side multiplier lookup
    * (tree nodes carry their representative leaf's cluster in the same lane). */
   record.spot_size_inv.z = 0.0f; /* Neutral NIS: no learned cluster weights. */
   if (is_sun_light(light.type)) {
-    record.direction_type = float4(light.sun().direction, float(light.type));
-    record.attenuation_spot.x = light.sun().shape_radius;
+    record.direction_type = float4(light.sun.direction, float(light.type));
+    record.attenuation_spot.x = light.sun.shape_radius;
   }
   else {
-    record.attenuation_spot.x = light.local().local.shape_radius;
-    record.attenuation_spot.y = light.local().local.influence_radius_invsqr_surface;
+    record.attenuation_spot.x = light.local.local.shape_radius;
+    record.attenuation_spot.y = light.local.local.influence_radius_invsqr_surface;
     if (is_spot_light(light.type)) {
-      record.attenuation_spot.z = light.spot().spot_mul;
-      record.attenuation_spot.w = light.spot().spot_bias;
+      record.attenuation_spot.z = light.spot.spot_mul;
+      record.attenuation_spot.w = light.spot.spot_bias;
       record.spot_size_inv = float4(
-          light.spot().spot_size_inv.x, light.spot().spot_size_inv.y, 0.0f, 0.0f);
+          light.spot.spot_size_inv.x, light.spot.spot_size_inv.y, 0.0f, 0.0f);
     }
   }
   return record;

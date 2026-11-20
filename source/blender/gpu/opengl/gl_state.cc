@@ -8,8 +8,8 @@
 
 #include "BKE_global.hh"
 
-#include "BLI_math_base.h"
-#include "BLI_math_bits.h"
+#include "BLI_math_base_c.hh"
+#include "BLI_math_bits.hh"
 
 #include "GPU_capabilities.hh"
 
@@ -43,6 +43,9 @@ GLStateManager::GLStateManager()
 
   /* Limits. */
   glGetFloatv(GL_ALIASED_LINE_WIDTH_RANGE, line_width_range_);
+  /* Binding indices use the combined unit domain; per-stage sampler counts are separate. */
+  glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &texture_unit_count_);
+  texture_unit_count_ = min_ii(texture_unit_count_, int(ARRAY_SIZE(textures_)));
 
   /* Force update using default state. */
   current_ = ~state;
@@ -96,9 +99,7 @@ void GLStateManager::set_state(const GPUState &state)
   if (changed.culling_test != 0) {
     set_backface_culling(GPUFaceCullTest(state.culling_test));
   }
-  if (changed.logic_op_xor != 0) {
-    set_logic_op(state.logic_op_xor);
-  }
+
   if (changed.invert_facing != 0) {
     set_facing(state.invert_facing);
   }
@@ -327,17 +328,6 @@ void GLStateManager::set_clip_distances(const int new_dist_len, const int old_di
   }
 }
 
-void GLStateManager::set_logic_op(const bool enable)
-{
-  if (enable) {
-    glEnable(GL_COLOR_LOGIC_OP);
-    glLogicOp(GL_XOR);
-  }
-  else {
-    glDisable(GL_COLOR_LOGIC_OP);
-  }
-}
-
 void GLStateManager::set_facing(const bool invert)
 {
   glFrontFace((invert) ? GL_CW : GL_CCW);
@@ -509,7 +499,7 @@ void GLStateManager::set_blend(const GPUBlend value)
 
 void GLStateManager::texture_bind(Texture *tex_, GPUSamplerState sampler_state, int unit)
 {
-  BLI_assert(unit < GPU_max_textures());
+  BLI_assert(unit >= 0 && unit < texture_unit_count_);
   GLTexture *tex = static_cast<GLTexture *>(tex_);
   if (G.debug & G_DEBUG_GPU) {
     tex->check_feedback_loop();

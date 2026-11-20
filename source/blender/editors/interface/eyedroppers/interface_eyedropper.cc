@@ -9,8 +9,8 @@
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
 
-#include "BLI_math_color.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_color_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BKE_context.hh"
 #include "BKE_screen.hh"
@@ -25,8 +25,6 @@
 namespace blender::ui {
 
 /* -------------------------------------------------------------------- */
-/* Keymap
- */
 /** \name Modal Keymap
  * \{ */
 
@@ -88,9 +86,6 @@ wmKeyMap *eyedropper_colorband_modal_keymap(wmKeyConfig *keyconf)
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/* Utility Functions
- */
-
 /** \name Generic Shared Functions
  * \{ */
 
@@ -121,7 +116,7 @@ Button *eyedropper_get_property_button_under_mouse(bContext *C, const wmEvent *e
 
   Button *but = but_find_mouse_over(region, event);
 
-  if (ELEM(nullptr, but, but->rnapoin.data, but->rnaprop)) {
+  if (!but || !but->rnapoin || !but->rnaprop) {
     return nullptr;
   }
   return but;

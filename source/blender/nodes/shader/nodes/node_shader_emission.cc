@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "node_shader_util.hh"
 
 namespace blender {
@@ -31,9 +35,11 @@ static int node_shader_gpu_emission(GPUMaterial *mat,
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_EMISSION);
   if (node->custom1 == 1) {
-    return GPU_stack_link(mat, node, "node_npr_surface_color", in, out);
+    return GPU_stack_link(mat, node, "node_npr_surface_color", in, out,
+                          GPU_kernel_globals(), GPU_shading_data());
   }
-  return GPU_stack_link(mat, node, "node_emission", in, out);
+  return GPU_stack_link(
+      mat, node, "node_emission", in, out, GPU_kernel_globals(), GPU_shading_data());
 }
 
 NODE_SHADER_MATERIALX_BEGIN

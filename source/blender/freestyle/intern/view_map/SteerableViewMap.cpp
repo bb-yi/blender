@@ -18,8 +18,8 @@
 #include "../image/Image.h"
 #include "../image/ImagePyramid.h"
 
-#include "BLI_math_base.h"
-#include "BLI_sys_types.h"
+#include "BLI_math_base_c.hh"
+#include "BLI_sys_types.hh"
 
 #include "BKE_global.hh"
 
@@ -231,7 +231,7 @@ void SteerableViewMap::saveSteerableViewMap() const
   for (uint i = 0; i <= _nbOrientations; ++i) {
     if (_imagesPyramids[i] == nullptr) {
       cerr << "SteerableViewMap warning: orientation " << i
-           << " of steerable View Map whas not been computed yet" << endl;
+           << " of steerable View Map has not been computed yet" << endl;
       continue;
     }
     int ow = _imagesPyramids[i]->width(0);

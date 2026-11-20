@@ -15,6 +15,7 @@
 #include "BLI_function_ref.hh"
 
 #include "DNA_space_types.h"
+#include "DNA_workspace_types.h"
 #include "DNA_world_types.h"
 
 #include "GPU_matrix.hh"
@@ -132,6 +133,7 @@ struct State {
   const SpaceLink *space_data = nullptr;
   const ARegion *region = nullptr;
   const RegionView3D *rv3d = nullptr;
+  const bToolRef *active_tool = nullptr;
   DRWTextStore *dt = nullptr;
   View3DOverlay overlay = {};
   eSpace_Type space_type = SPACE_EMPTY;
@@ -445,8 +447,10 @@ class ShaderModule {
   }
 
   const SelectionType selection_type_;
-  /** TODO: Support clipping. This global state should be set by the overlay::Instance and switch
-   * to the shader variations that use clipping. */
+  /**
+   * TODO: Support clipping. This global state should be set by the overlay::Instance and switch
+   * to the shader variations that use clipping.
+   */
   const bool clipping_enabled_;
 
  public:
@@ -456,6 +460,7 @@ class ShaderModule {
   StaticShader attribute_viewer_mesh = shader_clippable("overlay_viewer_attribute_mesh");
   StaticShader attribute_viewer_pointcloud = shader_clippable(
       "overlay_viewer_attribute_pointcloud");
+  StaticShader attribute_viewer_gsplat = shader_clippable("overlay_viewer_attribute_gsplat");
   StaticShader attribute_viewer_curve = shader_clippable("overlay_viewer_attribute_curve");
   StaticShader attribute_viewer_curves = shader_clippable("overlay_viewer_attribute_curves");
   StaticShader background_fill = {"overlay_background"};
@@ -493,6 +498,7 @@ class ShaderModule {
   StaticShader outline_detect = {"overlay_outline_detect"};
   StaticShader outline_prepass_curves = shader_clippable("overlay_outline_prepass_curves");
   StaticShader outline_prepass_gpencil = shader_clippable("overlay_outline_prepass_gpencil");
+  StaticShader outline_prepass_gsplat = shader_clippable("overlay_outline_prepass_gsplat");
   StaticShader outline_prepass_mesh = shader_clippable("overlay_outline_prepass_mesh");
   StaticShader outline_prepass_pointcloud = shader_clippable("overlay_outline_prepass_pointcloud");
   StaticShader outline_prepass_wire = shader_clippable("overlay_outline_prepass_wire");
@@ -505,6 +511,7 @@ class ShaderModule {
   StaticShader paint_weight_fake_shading = shader_clippable("overlay_paint_weight_fake_shading");
   StaticShader particle_edit_vert = shader_clippable("overlay_edit_particle_point");
   StaticShader particle_edit_edge = shader_clippable("overlay_edit_particle_strand");
+  StaticShader gsplat_points = shader_clippable("overlay_edit_gsplat");
   StaticShader pointcloud_points = shader_clippable("overlay_edit_pointcloud");
   StaticShader sculpt_curves = shader_clippable("overlay_sculpt_curves_selection");
   StaticShader sculpt_curves_cage = shader_clippable("overlay_sculpt_curves_cage");
@@ -538,6 +545,7 @@ class ShaderModule {
   StaticShader depth_mesh = shader_selectable("overlay_depth_mesh");
   StaticShader depth_mesh_conservative = shader_selectable("overlay_depth_mesh_conservative");
   StaticShader depth_pointcloud = shader_selectable("overlay_depth_pointcloud");
+  StaticShader depth_gsplat = shader_selectable("overlay_depth_gsplat");
   StaticShader extra_shape = shader_selectable("overlay_extra");
   StaticShader extra_point = shader_selectable("overlay_extra_point");
   StaticShader extra_wire = shader_selectable("overlay_extra_wire");
@@ -556,6 +564,7 @@ class ShaderModule {
   StaticShader wireframe_points_with_radius = shader_selectable(
       "overlay_wireframe_points_with_radius");
   StaticShader wireframe_curve = shader_selectable("overlay_wireframe_curve");
+  StaticShader wireframe_gsplat = shader_selectable("overlay_wireframe_gsplat");
 
   StaticShader fluid_grid_lines_flags = shader_selectable_no_clip(
       "overlay_volume_gridlines_flags");
@@ -713,6 +722,7 @@ struct Resources : public select::SelectMap {
     shaders->depth_curves.ensure_compile_async();
     shaders->depth_grease_pencil.ensure_compile_async();
     shaders->depth_mesh.ensure_compile_async();
+    shaders->depth_gsplat.ensure_compile_async();
     shaders->depth_pointcloud.ensure_compile_async();
     shaders->extra_grid.ensure_compile_async();
     shaders->extra_ground_line.ensure_compile_async();
@@ -728,6 +738,7 @@ struct Resources : public select::SelectMap {
     shaders->fluid_velocity_needle.ensure_compile_async();
     shaders->fluid_velocity_streamline.ensure_compile_async();
     shaders->grid.ensure_compile_async();
+    shaders->gsplat_points.ensure_compile_async();
     shaders->image_plane_depth_bias.ensure_compile_async();
     shaders->lattice_points.ensure_compile_async();
     shaders->lattice_wire.ensure_compile_async();
@@ -747,6 +758,7 @@ struct Resources : public select::SelectMap {
     shaders->outline_detect.ensure_compile_async();
     shaders->outline_prepass_curves.ensure_compile_async();
     shaders->outline_prepass_gpencil.ensure_compile_async();
+    shaders->outline_prepass_gsplat.ensure_compile_async();
     shaders->outline_prepass_mesh.ensure_compile_async();
     shaders->outline_prepass_pointcloud.ensure_compile_async();
     shaders->outline_prepass_wire.ensure_compile_async();
@@ -812,7 +824,7 @@ struct Resources : public select::SelectMap {
       this->color_overlay_tx.wrap(this->color_overlay_alloc_tx);
       this->color_render_tx.wrap(this->color_render_alloc_tx);
 
-      this->line_tx.acquire_2d(int2(1, 1), gpu::TextureFormat::UNORM_8_8_8_8);
+      this->line_tx.acquire_2d(int2(1, 1), gpu::TextureFormat::UNORM_8_8);
       this->overlay_tx.acquire_2d(int2(1, 1), gpu::TextureFormat::SRGBA_8_8_8_8);
 
       this->overlay_fb.ensure(GPU_ATTACHMENT_TEXTURE(this->depth_target_tx));
@@ -823,7 +835,7 @@ struct Resources : public select::SelectMap {
     else {
       eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE |
                                GPU_TEXTURE_USAGE_ATTACHMENT;
-      this->line_tx.acquire_2d(render_size, gpu::TextureFormat::UNORM_8_8_8_8, usage);
+      this->line_tx.acquire_2d(render_size, gpu::TextureFormat::UNORM_8_8, usage);
       this->overlay_tx.acquire_2d(render_size, gpu::TextureFormat::SRGBA_8_8_8_8, usage);
 
       this->overlay_fb.ensure(GPU_ATTACHMENT_TEXTURE(this->depth_target_tx),
@@ -900,7 +912,7 @@ struct Resources : public select::SelectMap {
 
   const float4 &object_wire_color(const ObjectRef &ob_ref, ThemeColorID theme_id) const
   {
-    if (UNLIKELY(ob_ref.object->base_flag & BASE_FROM_SET)) {
+    if (ob_ref.object->base_flag & BASE_FROM_SET) [[unlikely]] {
       return theme.colors.wire;
     }
     switch (theme_id) {

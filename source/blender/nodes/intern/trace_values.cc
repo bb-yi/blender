@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #include "BLI_stack.hh"
 
 #include "NOD_geometry_nodes_bundle_signature.hh"
@@ -69,13 +73,15 @@ static Vector<SocketInContext> find_origin_sockets_through_contexts(
     SocketInContext start_socket,
     bke::ComputeContextCache &compute_context_cache,
     FunctionRef<bool(const SocketInContext &)> handle_possible_origin_socket_fn,
-    bool find_all);
+    bool find_all,
+    const FunctionRef<bool(const SocketInContext &, Span<std::string>)> *nested_fn = nullptr);
 
 static Vector<SocketInContext> find_target_sockets_through_contexts(
     const SocketInContext start_socket,
     bke::ComputeContextCache &compute_context_cache,
     const FunctionRef<bool(const SocketInContext &)> handle_possible_target_socket_fn,
-    const bool find_all)
+    const bool find_all,
+    const FunctionRef<bool(const SocketInContext &, Span<std::string>)> *nested_fn = nullptr)
 {
   using BundlePath = Vector<std::string, 0>;
 
@@ -85,10 +91,19 @@ static Vector<SocketInContext> find_target_sockets_through_contexts(
   };
 
   Stack<SocketToCheck> sockets_to_check;
-  Set<SocketInContext> added_sockets;
+  Set<std::pair<SocketInContext, std::string>> added_sockets;
 
   auto add_if_new = [&](const SocketInContext &socket, BundlePath bundle_path) {
-    if (added_sockets.add(socket)) {
+    if (bundle_path.size() > 32) {
+      return;
+    }
+    std::string path_key;
+    if (nested_fn) {
+      for (const std::string &key : bundle_path) {
+        path_key += std::to_string(key.size()) + ":" + key;
+      }
+    }
+    if (added_sockets.add({socket, std::move(path_key)})) {
       sockets_to_check.push({socket, std::move(bundle_path)});
     }
   };
@@ -104,14 +119,16 @@ static Vector<SocketInContext> find_target_sockets_through_contexts(
     const NodeInContext &node = socket.owner_node();
     if (socket->is_input()) {
       if (node->is_muted()) {
-        for (const bNodeLink &link : node->internal_links()) {
-          if (link.fromsock == socket.socket) {
-            add_if_new({socket.context, link.tosock}, bundle_path);
+        for (const bNodeInternalLink &link : node->internal_links()) {
+          if (link.in == socket.socket) {
+            add_if_new({socket.context, link.out}, bundle_path);
           }
         }
         continue;
       }
-      if (bundle_path.is_empty() && handle_possible_target_socket_fn(socket)) {
+      if ((bundle_path.is_empty() && handle_possible_target_socket_fn(socket)) ||
+          (!bundle_path.is_empty() && nested_fn && (*nested_fn)(socket, bundle_path)))
+      {
         found_targets.add(socket);
         if (!find_all) {
           break;
@@ -351,7 +368,8 @@ static Vector<SocketInContext> find_origin_sockets_through_contexts(
     const SocketInContext start_socket,
     bke::ComputeContextCache &compute_context_cache,
     const FunctionRef<bool(const SocketInContext &)> handle_possible_origin_socket_fn,
-    const bool find_all)
+    const bool find_all,
+    const FunctionRef<bool(const SocketInContext &, Span<std::string>)> *nested_fn)
 {
   using BundlePath = Vector<std::string, 0>;
 
@@ -361,10 +379,19 @@ static Vector<SocketInContext> find_origin_sockets_through_contexts(
   };
 
   Stack<SocketToCheck> sockets_to_check;
-  Set<SocketInContext> added_sockets;
+  Set<std::pair<SocketInContext, std::string>> added_sockets;
 
   auto add_if_new = [&](const SocketInContext &socket, BundlePath bundle_path) {
-    if (added_sockets.add(socket)) {
+    if (bundle_path.size() > 32) {
+      return;
+    }
+    std::string path_key;
+    if (nested_fn) {
+      for (const std::string &key : bundle_path) {
+        path_key += std::to_string(key.size()) + ":" + key;
+      }
+    }
+    if (added_sockets.add({socket, std::move(path_key)})) {
       sockets_to_check.push({socket, std::move(bundle_path)});
     }
   };
@@ -380,7 +407,9 @@ static Vector<SocketInContext> find_origin_sockets_through_contexts(
     const NodeInContext &node = socket.owner_node();
     const SocketDeclaration *socket_decl = socket->runtime->declaration;
     if (socket->is_input()) {
-      if (bundle_path.is_empty() && handle_possible_origin_socket_fn(socket)) {
+      if ((bundle_path.is_empty() && handle_possible_origin_socket_fn(socket)) ||
+          (!bundle_path.is_empty() && nested_fn && (*nested_fn)(socket, bundle_path)))
+      {
         found_origins.add(socket);
         if (!find_all) {
           break;
@@ -423,14 +452,16 @@ static Vector<SocketInContext> find_origin_sockets_through_contexts(
     }
     else {
       if (node->is_muted()) {
-        for (const bNodeLink &link : node->internal_links()) {
-          if (link.tosock == socket.socket) {
-            add_if_new({socket.context, link.fromsock}, bundle_path);
+        for (const bNodeInternalLink &link : node->internal_links()) {
+          if (link.out == socket.socket) {
+            add_if_new({socket.context, link.in}, bundle_path);
           }
         }
         continue;
       }
-      if (bundle_path.is_empty() && handle_possible_origin_socket_fn(socket)) {
+      if ((bundle_path.is_empty() && handle_possible_origin_socket_fn(socket)) ||
+          (!bundle_path.is_empty() && nested_fn && (*nested_fn)(socket, bundle_path)))
+      {
         found_origins.add(socket);
         if (!find_all) {
           break;
@@ -611,16 +642,43 @@ static Vector<SocketInContext> find_origin_sockets_through_contexts(
   return found_origins.extract_vector();
 }
 
+static bool append_declared_bundle_signature(LinkedBundleSignatures &result,
+                                             const SocketInContext &socket,
+                                             Span<std::string> reverse_path)
+{
+  const auto *decl = dynamic_cast<const decl::Bundle *>(socket->runtime->declaration);
+  if (!decl || !decl->signature) {
+    return false;
+  }
+  const BundleSignature *signature = decl->signature.get();
+  for (int i = reverse_path.size() - 1; i >= 0; i--) {
+    const auto *item = signature->items.lookup_key_ptr_as(reverse_path[i]);
+    if (!item || !item->nested) {
+      return true;
+    }
+    signature = item->nested.get();
+  }
+  result.items.append({*signature, true, socket});
+  return true;
+}
+
 LinkedBundleSignatures gather_linked_target_bundle_signatures(
     const ComputeContext *bundle_socket_context,
     const bNodeSocket &bundle_socket,
     bke::ComputeContextCache &compute_context_cache)
 {
   LinkedBundleSignatures result;
+  auto nested = [&](const SocketInContext &socket, Span<std::string> path) {
+    return append_declared_bundle_signature(result, socket, path);
+  };
+  const FunctionRef<bool(const SocketInContext &, Span<std::string>)> nested_callback = nested;
   find_target_sockets_through_contexts(
       {bundle_socket_context, &bundle_socket},
       compute_context_cache,
       [&](const SocketInContext &socket) {
+        if (append_declared_bundle_signature(result, socket, {})) {
+          return true;
+        }
         const bNode &node = socket->owner_node();
         if (socket->is_input() && node.is_type("NodeSeparateBundle"_ustr)) {
           const auto &storage = *static_cast<const NodeSeparateBundle *>(node.storage);
@@ -631,7 +689,8 @@ LinkedBundleSignatures gather_linked_target_bundle_signatures(
         }
         return false;
       },
-      true);
+      true,
+      &nested_callback);
   return result;
 }
 
@@ -641,10 +700,17 @@ LinkedBundleSignatures gather_linked_origin_bundle_signatures(
     bke::ComputeContextCache &compute_context_cache)
 {
   LinkedBundleSignatures result;
+  auto nested = [&](const SocketInContext &socket, Span<std::string> path) {
+    return append_declared_bundle_signature(result, socket, path);
+  };
+  const FunctionRef<bool(const SocketInContext &, Span<std::string>)> nested_callback = nested;
   find_origin_sockets_through_contexts(
       {bundle_socket_context, &bundle_socket},
       compute_context_cache,
       [&](const SocketInContext &socket) {
+        if (append_declared_bundle_signature(result, socket, {})) {
+          return true;
+        }
         const NodeInContext node = socket.owner_node();
         if (socket->is_output()) {
           if (node->is_type("NodeCombineBundle"_ustr)) {
@@ -670,6 +736,7 @@ LinkedBundleSignatures gather_linked_origin_bundle_signatures(
               if (!sub_signature.is_signature_definition) {
                 is_signature_definition = false;
               }
+              joined_signature.strict |= sub_signature.signature.strict;
               for (const BundleSignature::Item &item : sub_signature.signature.items) {
                 joined_signature.items.add(item);
               }
@@ -680,7 +747,8 @@ LinkedBundleSignatures gather_linked_origin_bundle_signatures(
         }
         return false;
       },
-      true);
+      true,
+      &nested_callback);
   return result;
 }
 
@@ -757,6 +825,15 @@ LinkedClosureSignatures gather_linked_origin_closure_signatures(
                                socket});
           return true;
         }
+        if (socket->is_output()) {
+          if (const auto *decl = dynamic_cast<const decl::Closure *>(socket->runtime->declaration))
+          {
+            if (decl->create_signature) {
+              result.items.append({(*decl->create_signature)(node), true, socket});
+              return true;
+            }
+          }
+        }
         return false;
       },
       true);
@@ -787,6 +864,33 @@ std::optional<NodeInContext> find_origin_index_menu_switch(
       },
       false);
   return result;
+}
+
+Vector<const bNodeSocket *> find_shader_closure_sources(const bNodeSocket &socket)
+{
+  socket.owner_tree().ensure_topology_cache();
+  bke::ComputeContextCache context_cache;
+  Vector<const bNodeSocket *> sources;
+  find_origin_sockets_through_contexts(
+      {nullptr, &socket},
+      context_cache,
+      [&](const SocketInContext &candidate) {
+        if (!candidate->is_output()) {
+          return false;
+        }
+        const bNode &node = candidate->owner_node();
+        if (node.is_type("ShaderNodeImageToClosure"_ustr) ||
+            node.is_type("NodeClosureOutput"_ustr) ||
+            node.is_type("ShaderNodeGLSLFunction"_ustr) ||
+            (node.is_group_input() && candidate.context == nullptr))
+        {
+          sources.append_non_duplicates(candidate.socket);
+          return true;
+        }
+        return false;
+      },
+      true);
+  return sources;
 }
 
 }  // namespace blender::nodes

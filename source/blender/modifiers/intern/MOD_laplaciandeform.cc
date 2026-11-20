@@ -6,12 +6,12 @@
  * \ingroup modifiers
  */
 
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
-#include "BLI_math_geom.h"
-#include "BLI_math_vector.h"
-#include "BLI_string.h"
-#include "BLI_utildefines_stack.h"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string.hh"
+#include "BLI_utildefines_stack.hh"
 
 #include "MEM_guardedalloc.h"
 
@@ -816,29 +816,31 @@ static void panel_register(ARegionType *region_type)
 
 static void blend_write(BlendWriter *writer, const ID *id_owner, const ModifierData *md)
 {
-  LaplacianDeformModifierData lmd = *reinterpret_cast<const LaplacianDeformModifierData *>(md);
-  const bool is_undo = BLO_write_is_undo(writer);
-
-  if (ID_IS_OVERRIDE_LIBRARY(id_owner) && !is_undo) {
+  const LaplacianDeformModifierData *lmd = reinterpret_cast<const LaplacianDeformModifierData *>(
+      md);
+  const bool is_undo = writer->is_undo();
+  const bool without_bind_data = ID_IS_OVERRIDE_LIBRARY(id_owner) && !is_undo &&
+                                 (md->flag & eModifierFlag_OverrideLibrary_Local) == 0;
+  if (without_bind_data) {
+    /* Modifier coming from linked data cannot be bound from an override, so we can remove all
+     * binding data, can save a significant amount of memory. */
     BLI_assert(!ID_IS_LINKED(id_owner));
-    const bool is_local = (md->flag & eModifierFlag_OverrideLibrary_Local) != 0;
-    if (!is_local) {
-      /* Modifier coming from linked data cannot be bound from an override, so we can remove all
-       * binding data, can save a significant amount of memory. */
-      lmd.verts_num = 0;
-      lmd.vertexco = nullptr;
-      lmd.vertexco_sharing_info = nullptr;
-    }
+    writer->write_struct(lmd, [](BlendStructWriter<LaplacianDeformModifierData> &struct_writer) {
+      struct_writer.shallow_data.verts_num = 0;
+      struct_writer.shallow_data.vertexco = nullptr;
+      struct_writer.shallow_data.vertexco_sharing_info = nullptr;
+    });
+    return;
   }
 
-  if (lmd.vertexco != nullptr) {
-    BLO_write_shared(
-        writer, lmd.vertexco, sizeof(float[3]) * lmd.verts_num, lmd.vertexco_sharing_info, [&]() {
-          writer->write_float3_array(lmd.verts_num, lmd.vertexco);
-        });
+  if (lmd->vertexco != nullptr) {
+    writer->write_shared(lmd->vertexco,
+                         sizeof(float[3]) * lmd->verts_num,
+                         lmd->vertexco_sharing_info,
+                         [&]() { writer->write_float3_array(lmd->verts_num, lmd->vertexco); });
   }
 
-  writer->write_struct_at_address(md, &lmd);
+  writer->write_struct(lmd);
 }
 
 static void blend_read(BlendDataReader *reader, ModifierData *md)

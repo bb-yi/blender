@@ -22,13 +22,17 @@ float3 weight_to_rgb(float t)
     /* Error color */
     return float3(1.0f, 0.0f, 1.0f);
   }
-  else {
-    return texture(weight_tx, t).rgb;
-  }
+  return texture(weight_tx, t).rgb;
 }
 
 void main()
 {
+  if (skip_unselected && selection <= 0.0f) {
+    /* Discard. */
+    gl_Position = float4(NAN_FLT);
+    return;
+  }
+
   float3 world_pos = drw_point_object_to_world(pos);
   gl_Position = drw_point_world_to_homogenous(world_pos);
 

@@ -19,11 +19,11 @@
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_dynstr.h"
+#include "BLI_dynstr.hh"
 #include "BLI_hash_mm3.hh"
-#include "BLI_listbase.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 
 #include "RE_pipeline.h"
 
@@ -321,7 +321,7 @@ void BKE_cryptomatte_matte_id_to_entries(NodeCryptomatte *node_storage, const ch
     std::string token;
     getline(ss, token, ',');
     /* Ignore empty tokens. */
-    if (token.length() > 0) {
+    if (!token.empty()) {
       size_t first = token.find_first_not_of(' ');
       size_t last = token.find_last_not_of(' ');
       if (first == std::string::npos || last == std::string::npos) {
@@ -613,7 +613,7 @@ StringRef CryptomatteStampDataCallbackData::extract_layer_hash(StringRefNull key
 
 void CryptomatteStampDataCallbackData::extract_layer_names(void *_data,
                                                            const char *propname,
-                                                           char *propvalue,
+                                                           char *propvalue,  // NOLINT
                                                            int /*propvalue_maxncpy*/)
 {
   CryptomatteStampDataCallbackData *data = static_cast<CryptomatteStampDataCallbackData *>(_data);
@@ -631,7 +631,7 @@ void CryptomatteStampDataCallbackData::extract_layer_names(void *_data,
 
 void CryptomatteStampDataCallbackData::extract_layer_manifest(void *_data,
                                                               const char *propname,
-                                                              char *propvalue,
+                                                              char *propvalue,  // NOLINT
                                                               int /*propvalue_maxncpy*/)
 {
   CryptomatteStampDataCallbackData *data = static_cast<CryptomatteStampDataCallbackData *>(_data);

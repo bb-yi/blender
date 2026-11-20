@@ -15,3 +15,10 @@ struct Uniform {
 };
 
 }  // namespace eevee
+
+/* Expose a value to legacy GLSL without relying on BSL's resource-table storage layout. */
+UniformData eevee_uniform_data_get()
+{
+  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
+  return uni.uniform_buf;
+}

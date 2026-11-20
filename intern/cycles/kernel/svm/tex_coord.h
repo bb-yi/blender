@@ -43,7 +43,7 @@ ccl_device_inline dual3 svm_texco_smooth_normal(KernelGlobals kg, const ccl_priv
       N = motion_triangle_smooth_normal(
           kg, sd->Ng, sd->object, sd->prim, sd->time, sd->u, sd->v, sd->du, sd->dv, N_x, N_y);
     }
-    if (sd->flag & SD_BACKFACING) {
+    if (sd->runtime_flag & SR_BACKFACING) {
       N = -N;
       N_x = -N_x;
       N_y = -N_y;
@@ -189,6 +189,15 @@ ccl_device_noinline int svm_node_tex_coord(KernelGlobals kg,
   return offset;
 }
 
+ccl_device_inline int svm_node_tex_coord_skip(const ccl_global SVMNodeTexCoord &ccl_restrict node,
+                                              int offset)
+{
+  if (node.texco_type == NODE_TEXCO_OBJECT_WITH_TRANSFORM) {
+    offset += sizeof(PackedTransform) / sizeof(uint);
+  }
+  return offset;
+}
+
 ccl_device_noinline int svm_node_tex_coord_derivative(
     KernelGlobals kg,
     ccl_private ShaderData *sd,
@@ -229,7 +238,7 @@ ccl_device_noinline void svm_node_normal_map(KernelGlobals kg,
     color.y = -color.y;
   }
 
-  const bool is_backfacing = (sd->flag & SD_BACKFACING) != 0;
+  const bool is_backfacing = (sd->runtime_flag & SR_BACKFACING) != 0;
   float3 N;
   float strength = stack_load(stack, node.strength);
   bool linear_interpolate_strength = false;

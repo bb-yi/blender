@@ -16,15 +16,16 @@
 
 #include "AS_asset_representation.hh"
 
-#include "BLI_fileops.h"
+#include "BLI_fileops.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
 #include "BKE_context.hh"
 #include "BKE_idprop.hh"
+#include "BKE_main.hh"
 #include "BKE_screen.hh"
 
 #include "ED_asset.hh"
@@ -112,7 +113,7 @@ static const char *shortcut_get_operator_property(bContext *C, Button *but, IDPr
 {
   if (but->optype) {
     /* Operator */
-    *r_prop = (but->opptr && but->opptr->data) ?
+    *r_prop = (but->opptr && *but->opptr) ?
                   IDP_CopyProperty(static_cast<IDProperty *>(but->opptr->data)) :
                   nullptr;
     return but->optype->idname;
@@ -130,12 +131,15 @@ static const char *shortcut_get_operator_property(bContext *C, Button *but, IDPr
       return "WM_OT_context_toggle";
     }
     if (rnaprop_type == PROP_ENUM) {
-      /* Enum */
-      *r_prop = shortcut_property_from_rna(C, but);
+      /* `is_enum_menu` is true for expanded enum properties. It's to add shortcut to individual
+       * enum item, see: !163600 */
+      const bool is_enum_menu = but->type == ButtonType::Menu;
+      *r_prop = is_enum_menu ? shortcut_property_from_rna(C, but) :
+                               shortcut_property_from_rna_for_enum(C, but, but);
       if (*r_prop == nullptr) {
         return nullptr;
       }
-      return "WM_OT_context_menu_enum";
+      return is_enum_menu ? "WM_OT_context_menu_enum" : "WM_OT_context_set_enum";
     }
   }
 
@@ -186,6 +190,37 @@ static void shortcut_free_operator_property(IDProperty *prop)
   }
 }
 
+/**
+ * Find the existing shortcut of a button. Besides the key-maps active in the button context, also
+ * look in the key-map that "Assign Shortcut" adds to. That key-map is not always active in the
+ * button context, for example Object Mode shortcuts assigned from the Properties editor.
+ */
+static wmKeyMapItem *shortcut_find(bContext *C,
+                                   const Button *but,
+                                   const char *idname,
+                                   IDProperty *prop,
+                                   const short include_mask,
+                                   const short exclude_mask,
+                                   wmKeyMap **r_km)
+{
+  if (wmKeyMapItem *kmi = WM_key_event_operator(
+          C, idname, but->opcontext, prop, include_mask, exclude_mask, r_km))
+  {
+    return kmi;
+  }
+
+  wmKeyMap *km = WM_keymap_guess_opname(C, idname);
+  if (km == nullptr) {
+    return nullptr;
+  }
+  wmKeyMapItem *kmi = WM_key_event_operator_from_keymap(
+      km, idname, prop, include_mask, exclude_mask);
+  if (kmi) {
+    *r_km = km;
+  }
+  return kmi;
+}
+
 static void but_shortcut_name_func(bContext *C, void *arg1, int /*event*/)
 {
   Button *but = static_cast<Button *>(arg1);
@@ -219,13 +254,7 @@ static Block *menu_change_shortcut(bContext *C, ARegion *region, void *arg)
   const char *idname = shortcut_get_operator_property(C, but, &prop);
 
   wmKeyMap *km;
-  wmKeyMapItem *kmi = WM_key_event_operator(C,
-                                            idname,
-                                            but->opcontext,
-                                            prop,
-                                            EVT_TYPE_MASK_HOTKEY_INCLUDE,
-                                            EVT_TYPE_MASK_HOTKEY_EXCLUDE,
-                                            &km);
+  wmKeyMapItem *kmi = shortcut_find(C, but, idname, prop, EVT_TYPE_MASK_ALL, 0, &km);
   U.runtime.is_dirty = true;
 
   BLI_assert(kmi != nullptr);
@@ -347,13 +376,7 @@ static void remove_shortcut_func(bContext *C, Button *but)
   const char *idname = shortcut_get_operator_property(C, but, &prop);
 
   wmKeyMap *km;
-  wmKeyMapItem *kmi = WM_key_event_operator(C,
-                                            idname,
-                                            but->opcontext,
-                                            prop,
-                                            EVT_TYPE_MASK_HOTKEY_INCLUDE,
-                                            EVT_TYPE_MASK_HOTKEY_EXCLUDE,
-                                            &km);
+  wmKeyMapItem *kmi = shortcut_find(C, but, idname, prop, EVT_TYPE_MASK_ALL, 0, &km);
   BLI_assert(kmi != nullptr);
 
   WM_keymap_remove_item(km, kmi);
@@ -400,7 +423,7 @@ static bUserMenuItem *but_user_menu_find(bContext *C, Button *but, bUserMenu *um
     /* NOTE(@ideasman42): It's highly unlikely this ever occurs since the path must be resolved
      * for this to be added in the first place, there might be some cases where manually
      * constructed RNA paths don't resolve and in this case a crash should be avoided. */
-    if (UNLIKELY(!member_id_data_path.has_value())) {
+    if (!member_id_data_path.has_value()) [[unlikely]] {
       /* Assert because this should never happen for typical usage. */
       BLI_assert_unreachable();
       return nullptr;
@@ -527,6 +550,17 @@ static bool but_menu_add_path_operators(Layout &layout, PointerRNA *ptr, Propert
 
   RNA_property_string_get(ptr, prop, filepath);
 
+  if (BLI_path_is_rel(filepath)) {
+    if (ptr->owner_id == nullptr) {
+      return false;
+    }
+    const char *base_path = ID_BLEND_PATH_FROM_GLOBAL(ptr->owner_id);
+    if (base_path[0] == '\0') {
+      return false;
+    }
+    BLI_path_abs(filepath, base_path);
+  }
+
   if (!BLI_exists(filepath)) {
     return false;
   }
@@ -594,7 +628,7 @@ bool popup_context_menu_for_button(bContext *C, Button *but, const wmEvent *even
       layout.separator();
     }
   }
-  else if (but->rnapoin.data && but->rnaprop) {
+  else if (but->rnapoin && but->rnaprop) {
     PointerRNA *ptr = &but->rnapoin;
     PropertyRNA *prop = but->rnaprop;
     const PropertyType type = RNA_property_type(prop);
@@ -1033,7 +1067,12 @@ bool popup_context_menu_for_button(bContext *C, Button *but, const wmEvent *even
   }
 
   /* Download online assets. */
-  if (but->optype && but->opptr && ed::asset::operator_asset_reference_props_is_set(*but->opptr)) {
+  if (but->optype &&
+      ((but->opptr && ed::asset::operator_asset_reference_props_is_set(*but->opptr)) ||
+       /* Node tools are special and store the asset reference in custom data. Allow them to
+        * display the download button as well. */
+       but->optype->flag & OPTYPE_NODE_TOOL))
+  {
     const asset_system::AssetRepresentation *asset = CTX_wm_asset(C);
     if (asset && asset->is_online_only()) {
       layout.op("ASSET_OT_assets_download", {}, ICON_DOWNLOAD);
@@ -1095,7 +1134,7 @@ bool popup_context_menu_for_button(bContext *C, Button *but, const wmEvent *even
 
   /* Pointer properties and string properties with
    * prop_search support jumping to target object/bone. */
-  if (but->rnapoin.data && but->rnaprop) {
+  if (but->rnapoin && but->rnaprop) {
     const PropertyType prop_type = RNA_property_type(but->rnaprop);
     if (((prop_type == PROP_POINTER) ||
          (prop_type == PROP_STRING && but->type == ButtonType::SearchMenu &&
@@ -1178,8 +1217,7 @@ bool popup_context_menu_for_button(bContext *C, Button *but, const wmEvent *even
 
     /* We want to know if this op has a shortcut, be it hotkey or not. */
     wmKeyMap *km;
-    wmKeyMapItem *kmi = WM_key_event_operator(
-        C, idname, but->opcontext, prop, EVT_TYPE_MASK_ALL, 0, &km);
+    wmKeyMapItem *kmi = shortcut_find(C, but, idname, prop, EVT_TYPE_MASK_ALL, 0, &km);
 
     /* We do have a shortcut, but only keyboard ones are editable that way... */
     if (kmi) {
@@ -1290,12 +1328,18 @@ bool popup_context_menu_for_button(bContext *C, Button *but, const wmEvent *even
 
   /* perhaps we should move this into (G.debug & G_DEBUG) - campbell */
   if (U.flag & USER_DEVELOPER_UI) {
-    if (block_is_menu(but->block) == false) {
-      layout.op("UI_OT_editsource",
-                std::nullopt,
-                ICON_NONE,
-                wm::OpCallContext::InvokeDefault,
-                UI_ITEM_NONE);
+    if (!block_is_menu(but->block) || (but->block->handle && but->block->handle->can_refresh)) {
+      Layout &sub = layout.column(true);
+      if (but->block->handle) {
+        PointerRNA region_ptr = RNA_pointer_create_discrete(
+            id_cast<ID *>(CTX_wm_screen(C)), RNA_Region, but->block->handle->region);
+        sub.context_ptr_set("popup_region", &region_ptr);
+      }
+      sub.op("UI_OT_editsource",
+             std::nullopt,
+             ICON_NONE,
+             wm::OpCallContext::InvokeDefault,
+             UI_ITEM_NONE);
     }
   }
 
@@ -1373,6 +1417,15 @@ int popup_context_menu_for_panel(bContext *C, ARegion *region, Panel *panel)
 
   PopupMenu *pup = popup_menu_begin(C, IFACE_("Sidebar"), ICON_NONE);
   Layout &layout = *popup_menu_layout(pup);
+
+  if (BKE_regiontype_uses_panel_categories_search(region->runtime->type)) {
+    layout.op("UI_OT_region_start_filter",
+              IFACE_("Search..."),
+              ICON_VIEWZOOM,
+              wm::OpCallContext::ExecDefault,
+              UI_ITEM_NONE);
+    layout.separator();
+  }
 
   if (has_panel_category && panel && panel_can_be_pinned(panel)) {
     char tmpstr[80];

@@ -28,8 +28,8 @@ LightProbeModule::LightProbeModule(Instance &inst) : inst_(inst)
   /* Initialize the world probe. */
   world_sphere_.clipping_distances = float2(1.0f, 10.0f);
   world_sphere_.world_to_probe_transposed = float3x4::identity();
-  world_sphere_.influence_shape = SHAPE_ELIPSOID;
-  world_sphere_.parallax_shape = SHAPE_ELIPSOID;
+  world_sphere_.influence_shape = SHAPE_ELLIPSOID;
+  world_sphere_.parallax_shape = SHAPE_ELLIPSOID;
   /* Full influence. */
   world_sphere_.influence_scale = 0.0f;
   world_sphere_.influence_bias = 1.0f;
@@ -186,7 +186,7 @@ void LightProbeModule::sync_sphere(const ObjectRef &ob_ref)
                                               influence_distance;
 
     auto to_eevee_shape = [](int bl_shape_type) {
-      return (bl_shape_type == LIGHTPROBE_SHAPE_BOX) ? SHAPE_CUBOID : SHAPE_ELIPSOID;
+      return (bl_shape_type == LIGHTPROBE_SHAPE_BOX) ? SHAPE_CUBOID : SHAPE_ELLIPSOID;
     };
     cube.influence_shape = to_eevee_shape(light_probe.attenuation_type);
     cube.parallax_shape = to_eevee_shape(use_custom_parallax ? light_probe.parallax_type :
@@ -211,6 +211,10 @@ void LightProbeModule::sync_planar(const ObjectRef &ob_ref)
 {
   PlanarProbe &plane = planar_map_.lookup_or_add_default(ObjectKey(ob_ref));
   plane.used = true;
+  plane.selection_key = ObjectKey(ob_ref);
+  const ID &original = ob_ref.object->id.orig_id ? *ob_ref.object->id.orig_id : ob_ref.object->id;
+  plane.object_uid = original.session_uid;
+  plane.is_instance = uint(ob_ref.is_dupli());
   if (inst_.get_recalc_flags(ob_ref) != 0 || plane.initialized == false) {
     const blender::LightProbe &light_probe = DRW_object_get_data_for_drawing<blender::LightProbe>(
         *ob_ref.object);

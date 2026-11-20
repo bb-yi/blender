@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "node_shader_util.hh"
 
 #include "UI_interface_layout.hh"
@@ -50,7 +54,8 @@ static int node_shader_gpu_bsdf_hair(GPUMaterial *mat,
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_DIFFUSE);
 
-  return GPU_stack_link(mat, node, "node_bsdf_hair", in, out);
+  return GPU_stack_link(
+      mat, node, "node_bsdf_hair", in, out, GPU_kernel_globals(), GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_bsdf_hair_cc

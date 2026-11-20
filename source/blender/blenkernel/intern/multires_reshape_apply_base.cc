@@ -13,7 +13,7 @@
 #include "DNA_mesh_types.h"
 
 #include "BLI_math_matrix.hh"
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_c.hh"
 
 #include "BKE_mesh.hh"
 #include "BKE_multires.hh"
@@ -23,6 +23,9 @@ namespace blender {
 
 void multires_reshape_apply_base_update_mesh_coords(MultiresReshapeContext *reshape_context)
 {
+  /* The original grids give the displacement to apply to the base mesh. */
+  BLI_assert(reshape_context->orig.mdisps != nullptr);
+
   Mesh *base_mesh = reshape_context->base_mesh;
   MutableSpan<float3> base_positions = base_mesh->vert_positions_for_write();
   /* Update the context in case the vertices were duplicated. */

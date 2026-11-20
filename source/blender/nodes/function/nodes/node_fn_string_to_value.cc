@@ -2,11 +2,12 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "fast_float.h"
 
 #include "node_function_util.hh"
+#include "node_shader_util.hh"
 
 #include "NOD_rna_define.hh"
 #include "NOD_socket_search_link.hh"
@@ -150,7 +151,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  fn_cmp_node_type_base(&ntype, "FunctionNodeStringToValue"_ustr);
+  common_node_type_base(&ntype, "FunctionNodeStringToValue"_ustr);
   ntype.ui_name = "String to Value";
   ntype.ui_description = "Derive a numeric value from a given string representation";
   ntype.nclass = NODE_CLASS_CONVERTER;

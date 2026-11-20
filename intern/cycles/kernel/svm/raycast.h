@@ -76,10 +76,7 @@ ccl_device bool svm_raycast(KernelGlobals kg,
     isect = local_isect.hits[0];
   }
   else {
-    /* Ray-trace, leaving out shadow opaque to avoid early exit. */
-    const PathRayVisibility visibility = PATH_RAY_VISIBILITY_ALL &
-                                         ~PATH_RAY_VISIBILITY_SHADOW_OPAQUE;
-    if (!scene_intersect(kg, &ray, visibility, &isect)) {
+    if (!scene_intersect(kg, &ray, PATH_RAY_VISIBILITY_RAYCAST, &isect)) {
       return false;
     }
   }
@@ -98,23 +95,23 @@ ccl_device_inline void svm_raycast_attr_eval_and_store(
   NodeAttributeOutputType type = NODE_ATTR_OUTPUT_FLOAT;
   const AttributeDescriptor desc = svm_node_attr_init(kg, &hit_sd, attribute_node, &type);
 
-  const float3 data = svm_node_attr_surface_eval<float3>(kg, &hit_sd, attribute_node, type, desc);
+  const float3 data = svm_node_attr_surface_eval<float3>(
+      kg, &hit_sd, stack, attribute_node, type, desc);
   svm_node_attr_store(type, stack, attribute_node.out_offset, data);
 }
 
-template<uint node_feature_mask, typename ConstIntegratorGenericState>
+template<uint64_t node_feature_mask, typename ConstIntegratorGenericState>
 #  if defined(__KERNEL_OPTIX__)
 ccl_device_inline
 #  else
 ccl_device_noinline
 #  endif
-    int
-    svm_node_raycast(KernelGlobals kg,
-                     ConstIntegratorGenericState state,
-                     ccl_private ShaderData *sd,
-                     ccl_private float *ccl_restrict stack,
-                     const ccl_global SVMNodeRaycast &ccl_restrict node,
-                     int offset)
+    int svm_node_raycast(KernelGlobals kg,
+                         ConstIntegratorGenericState state,
+                         ccl_private ShaderData *sd,
+                         ccl_private float *ccl_restrict stack,
+                         const ccl_global SVMNodeRaycast &ccl_restrict node,
+                         int offset)
 {
   const float distance = stack_load(stack, node.distance);
 
@@ -124,8 +121,7 @@ ccl_device_noinline
   float3 hit_position = make_float3(0.0f);
   float3 hit_normal = make_float3(0.0f);
 
-  IF_KERNEL_NODES_FEATURE(RAYTRACE)
-  {
+  IF_KERNEL_NODES_FEATURE (RAYTRACE) {
     const float3 position = stack_load(stack, node.position);
     const float3 direction = stack_load(stack, node.direction);
 

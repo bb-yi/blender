@@ -6,9 +6,9 @@
  * \ingroup bli
  */
 
-#include "BLI_timer.h"
-#include "BLI_listbase.h"
-#include "BLI_time.h"
+#include "BLI_timer.hh"
+#include "BLI_listbase.hh"
+#include "BLI_time.hh"
 
 #include "MEM_guardedalloc.h"
 
@@ -107,9 +107,7 @@ static void execute_functions_if_necessary()
 
 static void remove_tagged_functions()
 {
-  for (TimedFunction *timed_func = static_cast<TimedFunction *>(GlobalTimer.funcs.first);
-       timed_func;)
-  {
+  for (TimedFunction *timed_func = GlobalTimer.funcs.first(); timed_func;) {
     TimedFunction *next = timed_func->next;
     if (timed_func->tag_removal) {
       clear_user_data(timed_func);

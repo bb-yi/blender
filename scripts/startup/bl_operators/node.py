@@ -127,23 +127,6 @@ class NodeOperator:
         options={'SKIP_SAVE'},
     )
 
-    @classmethod
-    def description(cls, _context, properties):
-        from nodeitems_builtins import node_tree_group_type
-
-        nodetype = properties["type"]
-        if nodetype in node_tree_group_type.values():
-            for setting in properties.settings:
-                if setting.name == "node_tree":
-                    node_group = eval(setting.value)
-                    if node_group.description:
-                        return node_group.description
-        bl_rna = bpy.types.Node.bl_rna_get_subclass(nodetype)
-        if bl_rna is not None:
-            return tip_(bl_rna.description)
-        else:
-            return ""
-
     # Deselect all nodes in the tree.
     @staticmethod
     def deselect_nodes(context):
@@ -544,8 +527,27 @@ class NodeSwapOperator(NodeOperator):
             new_node.inputs[0].default_value = int(old_selector_value)
 
 
+class SingleNodeOperator:
+    @classmethod
+    def description(cls, _context, properties):
+        from nodeitems_builtins import node_tree_group_type
+
+        nodetype = properties["type"]
+        if nodetype in node_tree_group_type.values():
+            for setting in properties.settings:
+                if setting.name == "node_tree":
+                    node_group = eval(setting.value)
+                    if node_group.description:
+                        return node_group.description
+        bl_rna = bpy.types.Node.bl_rna_get_subclass(nodetype)
+        if bl_rna is not None:
+            return tip_(bl_rna.description)
+        else:
+            return ""
+
+
 # Simple basic operator for adding a node.
-class NODE_OT_add_node(NodeAddOperator, Operator):
+class NODE_OT_add_node(NodeAddOperator, SingleNodeOperator, Operator):
     """Add a node to the active tree"""
     bl_idname = "node.add_node"
     bl_label = "Add Node"
@@ -711,7 +713,7 @@ class NODE_OT_filter_pass_clear_material(Operator):
         return {'FINISHED'}
 
 
-class NODE_OT_swap_node(NodeSwapOperator, Operator):
+class NODE_OT_swap_node(NodeSwapOperator, SingleNodeOperator, Operator):
     """Replace the selected nodes with the specified type"""
     bl_idname = "node.swap_node"
     bl_label = "Swap Node"
@@ -1310,6 +1312,18 @@ class NodeInterfaceOperator():
             return False
         return True
 
+    @staticmethod
+    def clear_interface_selection(interface, keep_active=False):
+        for item in interface.items_tree:
+            item.select = False
+
+        if keep_active:
+            if active := interface.active:
+                active.select = True
+        else:
+            # Have no active item if `keep_active` is False.
+            interface.active_index = -1
+
 
 class NODE_OT_interface_item_new(NodeInterfaceOperator, Operator):
     """Add a new item to the interface"""
@@ -1370,12 +1384,14 @@ class NODE_OT_interface_item_new(NodeInterfaceOperator, Operator):
                 interface.move_to_parent(item, active_item, len(active_item.interface_items))
             else:
                 interface.move_to_parent(item, active_item.parent, active_pos + 1)
+
+        self.clear_interface_selection(interface, keep_active=True)
         interface.active = item
 
         return {'FINISHED'}
 
 
-class NODE_OT_interface_item_new_panel_toggle(Operator):
+class NODE_OT_interface_item_new_panel_toggle(NodeInterfaceOperator, Operator):
     '''Add a checkbox to the currently selected panel'''
     bl_idname = "node.interface_item_new_panel_toggle"
     bl_label = "New Panel Toggle"
@@ -1424,6 +1440,7 @@ class NODE_OT_interface_item_new_panel_toggle(Operator):
         interface.move_to_parent(item, active_panel, 0)
         item.is_panel_toggle = True
 
+        self.clear_interface_selection(interface, keep_active=True)
         return {'FINISHED'}
 
 
@@ -1453,6 +1470,7 @@ class NODE_OT_interface_item_duplicate(NodeInterfaceOperator, Operator):
             item_copy = interface.copy(item)
             interface.active = item_copy
 
+        self.clear_interface_selection(interface, keep_active=True)
         return {'FINISHED'}
 
 
@@ -1542,6 +1560,7 @@ class NODE_OT_interface_item_make_panel_toggle(NodeInterfaceOperator, Operator):
         # Make the panel active.
         interface.active = parent_panel
 
+        self.clear_interface_selection(interface, keep_active=True)
         return {'FINISHED'}
 
 
@@ -1590,6 +1609,7 @@ class NODE_OT_interface_item_unlink_panel_toggle(NodeInterfaceOperator, Operator
         # Make the socket active.
         interface.active = first_item
 
+        self.clear_interface_selection(interface, keep_active=True)
         return {'FINISHED'}
 
 
@@ -1701,6 +1721,87 @@ class NODE_OT_viewer_shortcut_get(Operator):
         return {'FINISHED'}
 
 
+class NODE_OT_add_display_lut(Operator):
+    """Add an AgX display conversion, editable LUT node, and output conversion"""
+    bl_idname = "node.add_display_lut"
+    bl_label = "Display LUT Setup (AgX)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    configure_output: BoolProperty(
+        name="Use Standard / sRGB Scene Output",
+        description="Configure scene output to avoid applying AgX a second time; affects the whole scene",
+        default=True,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        space = context.space_data
+        return (space is not None and space.type == 'NODE_EDITOR' and
+                space.tree_type == 'CompositorNodeTree' and space.edit_tree is not None and
+                space.edit_tree.is_editable)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        self.layout.label(text="Apply the LUT after an AgX view transform.")
+        self.layout.prop(self, "configure_output")
+
+    def execute(self, context):
+        tree = context.space_data.edit_tree
+
+        def conversion_group(name, display):
+            group = bpy.data.node_groups.new(name, 'CompositorNodeTree')
+            group.interface.new_socket(name="Image", in_out='INPUT', socket_type='NodeSocketColor')
+            group.interface.new_socket(name="Image", in_out='OUTPUT', socket_type='NodeSocketColor')
+            source = group.nodes.new('NodeGroupInput')
+            straight = group.nodes.new('CompositorNodePremulKey')
+            straight.inputs['Type'].default_value = 'To Straight'
+            convert = group.nodes.new('CompositorNodeConvertToDisplay' if display else
+                                      'CompositorNodeConvertColorSpace')
+            if display:
+                convert.display_settings.display_device = 'sRGB'
+                convert.view_settings.view_transform = 'AgX'
+                convert.view_settings.look = 'None'
+            else:
+                convert.from_color_space = 'sRGB'
+                # The default target is the scene_linear role, including custom working spaces.
+            premul = group.nodes.new('CompositorNodePremulKey')
+            premul.inputs['Type'].default_value = 'To Premultiplied'
+            target = group.nodes.new('NodeGroupOutput')
+            chain = (source, straight, convert, premul, target)
+            for index, node in enumerate(chain):
+                node.location = (index * 210, 0)
+            for before, after in zip(chain, chain[1:]):
+                group.links.new(before.outputs['Image'], after.inputs['Image'])
+            node = tree.nodes.new('CompositorNodeGroup')
+            node.node_tree = group
+            return node
+
+        before = conversion_group("Scene to AgX Display", True)
+        lut = tree.nodes.new('CompositorNodeLUT')
+        lut.preset = 'RAW'
+        after = conversion_group("sRGB Display to Working Space", False)
+        frame = tree.nodes.new('NodeFrame')
+        frame.label = "Display LUT - use Standard / sRGB scene output"
+        frame.location = context.space_data.cursor_location
+        for node, x in ((before, 0), (lut, 250), (after, 550)):
+            node.parent = frame
+            node.location = (x, 0)
+        tree.links.new(before.outputs['Image'], lut.inputs['Image'])
+        tree.links.new(lut.outputs['Image'], after.inputs['Image'])
+        for node in tree.nodes:
+            node.select = node == lut
+        tree.nodes.active = lut
+        if self.configure_output:
+            context.scene.display_settings.display_device = 'sRGB'
+            context.scene.view_settings.view_transform = 'Standard'
+            context.scene.view_settings.look = 'None'
+        else:
+            self.report({'INFO'}, "Display LUT setup expects Standard / sRGB scene output")
+        return {'FINISHED'}
+
+
 class NODE_FH_image_node(FileHandler):
     bl_idname = "NODE_FH_image_node"
     bl_label = "Image node"
@@ -1721,6 +1822,7 @@ classes = (
     NodeSetting,
 
     NODE_FH_image_node,
+    NODE_OT_add_display_lut,
 
     NODE_OT_add_node,
     NODE_OT_filter_material_new,

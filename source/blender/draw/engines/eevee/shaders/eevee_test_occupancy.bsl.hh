@@ -8,21 +8,21 @@
 #include "gpu_shader_test_lib.bsl.hh"
 
 [[compute, local_size(1)]]
-void eevee_test_occupancy_main([[resource_table]] const ShaderTestOutput & /*srt*/)
+void eevee_test_occupancy_main([[resource_table]] [[maybe_unused]] const ShaderTestOutput &srt)
 {
+  using occupancy::bit_from_depth;
+  using occupancy::bits_from_depth;
+  using occupancy::bitwise_or;
+  using occupancy::find_lsb;
+  using occupancy::occupancy_new;
+  using occupancy::resolve;
+  using occupancy::set_bits_high;
+  using occupancy::to_uint4;
+
+  using Bits = occupancy::Bits;
+
   TEST(eevee_occupancy, Occupancy)
   {
-    using occupancy::bit_from_depth;
-    using occupancy::bits_from_depth;
-    using occupancy::bitwise_or;
-    using occupancy::find_lsb;
-    using occupancy::occupancy_new;
-    using occupancy::resolve;
-    using occupancy::set_bits_high;
-    using occupancy::to_uint4;
-
-    using Bits = occupancy::Bits;
-
     Bits occup;
 
     /* bits_from_depth */

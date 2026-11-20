@@ -212,6 +212,8 @@ struct SpaceOutliner {
   eSpaceOutliner_StateFilter filter_state = SO_FILTER_OB_ALL;
   eSpaceOutliner_ShowRestrictFlag show_restrict_flags = {};
   short filter_id_type = 0;
+  eSpaceOutliner_SortMethod sort_method = SO_SORT_CUSTOM;
+  char _pad1[6] = {};
 
   ed::outliner::SpaceOutliner_Runtime *runtime = nullptr;
 };
@@ -600,7 +602,7 @@ struct FileDirEntry {
   int preview_icon_id = 0;
 
   eFileEntry_Flag flags = {};
-  /* eFileAttributes defined in BLI_fileops.h */
+  /* eFileAttributes defined in BLI_fileops.hh */
   int attributes = 0;
 };
 
@@ -730,7 +732,7 @@ struct SpaceText {
   eSpaceText_Flags flags = {};
 
   /** User preference, is font_size! */
-  short lheight = 0;
+  short line_height = 0;
 
   int tabnumber = 0;
 
@@ -949,7 +951,7 @@ struct SpaceConsole {
   /** Multiple consoles are possible, not just python. */
   char language[32] = "";
 
-  int lheight = 0;
+  int line_height = 0;
 
   /** Index into history of most recent up/down arrow keys. */
   int history_index = 0;
@@ -1302,6 +1304,22 @@ struct SpreadsheetRowFilter {
   float value_float4[4] = {};
   float value_color[4] = {};
   char _pad1[4] = {};
+};
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Blender Project
+ * \{ */
+
+struct SpaceProject {
+  SpaceLink *next = nullptr, *prev = nullptr;
+  /** Storage of regions for inactive spaces. */
+  ListBaseT<ARegion> regionbase = {nullptr, nullptr};
+  char spacetype = 0;
+  char link_flag = 0;
+  char _pad0[6] = {};
+  /* End 'SpaceLink' header. */
 };
 
 /** \} */

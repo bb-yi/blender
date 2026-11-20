@@ -162,7 +162,7 @@ static void foreach_ID_ref(UndoStep *us_p,
 
 void undosys_type_register(UndoType *ut)
 {
-  ut->name = "Edit Point Cloud";
+  ut->identifier = "EDIT_POINT_CLOUD";
   ut->poll = editable_pointcloud_in_edit_mode_poll;
   ut->step_encode = undo::step_encode;
   ut->step_decode = undo::step_decode;
@@ -170,7 +170,7 @@ void undosys_type_register(UndoType *ut)
 
   ut->step_foreach_ID_ref = undo::foreach_ID_ref;
 
-  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE;
+  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE | UNDOTYPE_FLAG_ENCODE_PRE_MEMFILE_SUPPORTED;
 
   ut->step_size = sizeof(undo::PointCloudUndoStep);
 }

@@ -7,7 +7,7 @@
  */
 
 #ifdef _MSC_VER
-/* This needs to be included first to prevent ffmpegs headers adding defines for various math
+/* This needs to be included first to prevent FFmpeg's headers adding defines for various math
  * constants leading to duplicate definitions. */
 #  include <cmath>
 #endif
@@ -22,8 +22,8 @@
 
 #  include "DNA_scene_types.h"
 
-#  include "BLI_string.h"
-#  include "BLI_utildefines.h"
+#  include "BLI_string.hh"
+#  include "BLI_utildefines.hh"
 
 #  include "BKE_report.hh"
 #  include "BKE_sound.hh"
@@ -208,7 +208,7 @@ AVStream *alloc_audio_stream(MovieWriter *context,
                              AVCodecID codec_id,
                              AVFormatContext *of,
                              char *error,
-                             int error_size,
+                             int error_maxncpy,
                              ReportList *reports)
 {
   AVStream *st;
@@ -388,7 +388,7 @@ AVStream *alloc_audio_stream(MovieWriter *context,
     char error_str[AV_ERROR_MAX_STRING_SIZE];
     av_make_error_string(error_str, AV_ERROR_MAX_STRING_SIZE, ret);
     CLOG_ERROR(&LOG, "Couldn't initialize audio codec: %s", error_str);
-    BLI_strncpy(error, ffmpeg_last_error(), error_size);
+    BLI_strncpy(error, ffmpeg_last_error(), error_maxncpy);
     avcodec_free_context(&c);
     context->audio_codec = nullptr;
     return nullptr;

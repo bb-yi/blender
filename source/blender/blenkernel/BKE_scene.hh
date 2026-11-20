@@ -3,12 +3,14 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
+#include <string>
+
 /** \file
  * \ingroup bke
  */
 
 #include "BLI_function_ref.hh"
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 #include "BKE_duplilist.hh"
 
@@ -26,6 +28,7 @@ struct Object;
 struct RenderData;
 struct Scene;
 struct SceneRenderView;
+struct SceneRenderTexture;
 struct ToolSettings;
 struct TransformOrientation;
 struct TransformOrientationSlot;
@@ -178,7 +181,8 @@ bool BKE_scene_validate_setscene(Main *bmain, Scene *sce);
 /**
  * Return fractional frame number taking into account sub-frames and time
  * remapping. This the time value used by animation, modifiers and physics
- * evaluation. */
+ * evaluation.
+ */
 float BKE_scene_ctime_get(const Scene *scene);
 /**
  * Convert integer frame number to fractional frame number taking into account
@@ -199,6 +203,12 @@ struct ScenePlaybackRange {
   /** The start frame is always less or equal the end frame. */
   int start_frame;
   int end_frame;
+
+  /** Check whether a given frame falls within this range (inclusive). */
+  bool contains(const int frame) const
+  {
+    return frame >= start_frame && frame <= end_frame;
+  }
 };
 
 /**
@@ -354,5 +364,9 @@ TransformOrientation *BKE_scene_transform_orientation_find(const Scene *scene, i
  */
 int BKE_scene_transform_orientation_get_index(const Scene *scene,
                                               const TransformOrientation *orientation);
+
+/** Stable Render Result pass identifier, independent of the entry's name or list position. */
+std::string BKE_scene_render_texture_pass_name(const SceneRenderTexture &render_texture);
+bool BKE_scene_render_texture_pass_is_value(const SceneRenderTexture &render_texture);
 
 }  // namespace blender

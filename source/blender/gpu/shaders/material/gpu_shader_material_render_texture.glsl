@@ -131,6 +131,7 @@ void node_render_texture_none(float3 vector,
 void node_render_texture(float3 vector,
                          float use_explicit_vector,
                          float render_texture_uid,
+                         ShadingData &sd,
                          float4 &color,
                          float &alpha,
                          float3 &camera_position,
@@ -153,7 +154,7 @@ void node_render_texture(float3 vector,
 
   float2 uv = (use_explicit_vector > 0.5f) ? vector.xy :
                                          render_texture_project_uv(render_texture_buf[slot].viewproj,
-                                                                   g_data.P);
+                                                                   sd.P);
 
   if (any(lessThan(uv, float2(0.0f))) || any(greaterThan(uv, float2(1.0f)))) {
     color = float4(0.0f);

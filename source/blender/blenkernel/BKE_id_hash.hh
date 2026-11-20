@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include <string>
 #include <variant>
 
@@ -26,6 +30,12 @@ struct DeepHashErrors {
    * A list of missing files paths in the case that the deep hashes could not be computed.
    */
   VectorSet<std::string> missing_files;
+
+  /**
+   * Files that exist, but do not contain the expected IDs (i.e. the given ID from that library was
+   * tagged as `ID_TAG_MISSING`).
+   */
+  VectorSet<std::string> missing_from_files;
 
   /**
    * Files that were modified since the linked ID was loaded. So the currently linked ID would not

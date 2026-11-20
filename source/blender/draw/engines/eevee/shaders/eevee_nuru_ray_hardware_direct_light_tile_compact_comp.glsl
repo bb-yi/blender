@@ -16,7 +16,7 @@ COMPUTE_SHADER_CREATE_INFO(eevee_ray_hardware_direct_light_tile_compact)
 
 #include "eevee_nuru_direct_light_lib.glsl"
 #include "gpu_shader_codegen_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_utildefines.bsl.hh"
 
 void main()
 {

@@ -21,6 +21,8 @@ def texture(
     forced_image=None
 ):
     """Creates nodes for a TextureInfo and hooks up the color/alpha outputs."""
+    texture_socket = None
+
     x, y = location
     pytexture = mh.gltf.data.textures[tex_info.index]
 
@@ -41,9 +43,9 @@ def texture(
 
     # Get image
     if forced_image is None:
-        source = get_source(mh, pytexture)
+        source, use_ktx_loader = get_source(mh, pytexture)
         if source is not None:
-            BlenderImage.create(mh.gltf, source)
+            BlenderImage.create(mh.gltf, source, use_ktx_loader)
             pyimg = mh.gltf.data.images[source]
             blender_image_name = pyimg.blender_image_name
             if blender_image_name:
@@ -159,6 +161,7 @@ def texture(
                                                                                               ] = (anim_idx, channel_idx)
 
     if needs_tex_transform:
+        texture_socket = uv_socket
         mapping = mh.node_tree.nodes.new('ShaderNodeMapping')
         mapping.location = x - 160, y + 30
         mapping.vector_type = 'POINT'
@@ -197,18 +200,35 @@ def texture(
     import_user_extensions('gather_import_texture_after_hook', mh.gltf, pytexture, mh.node_tree,
                            mh, tex_info, location, label, color_socket, alpha_socket, is_data)
 
+    return texture_socket
+
 
 def get_source(mh, pytexture):
     src = pytexture.source
+    use_ktx_loader = False
     try:
         webp_src = pytexture.extensions['EXT_texture_webp']['source']
     except Exception:
         webp_src = None
 
+    try:
+        ktx_src = pytexture.extensions['KHR_texture_basisu']['source']
+        use_ktx_loader = True
+    except Exception:
+        ktx_src = None
+
     if mh.gltf.import_settings['import_webp_texture']:
-        return webp_src if webp_src is not None else src
+        return webp_src, use_ktx_loader if webp_src is not None else (src, use_ktx_loader)
+    elif mh.gltf.import_settings['import_ktx_texture']:
+        return ktx_src, use_ktx_loader if ktx_src is not None else (src, use_ktx_loader)
     else:
-        return src if src is not None else webp_src
+        return (
+            src,
+            use_ktx_loader) if src is not None else (
+            webp_src,
+            use_ktx_loader) if webp_src is not None else (
+            ktx_src,
+            use_ktx_loader)
 
 
 def set_filtering(tex_img, pysampler):

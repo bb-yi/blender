@@ -12,7 +12,6 @@ from ..utils.nodes import (
     nw_check,
     nw_check_not_empty,
     nw_check_space_type,
-    get_nodes_links,
 )
 
 
@@ -38,7 +37,9 @@ class NODE_OT_delete_unused(Operator, NWBase):
                      'SPLITVIEWER', 'OUTPUT_FILE', 'LEVELS', 'OUTPUT_LIGHT',
                      'OUTPUT_WORLD', 'GROUP_INPUT', 'GROUP_OUTPUT', 'FRAME',
                      'WARNING']
-        if node.type in end_types:
+        if node.type in end_types or node.bl_idname in {
+                'EeveeFilterGraphNodeStageOutput', 'EeveeFilterGraphNodeAOVOutput',
+                'ShaderNodeEeveeLightShaderOutput', 'ShaderNodeOutputFilter', 'ShaderNodeNPR_Output'}:
             return False
 
         for output_socket in node.outputs:
@@ -52,10 +53,11 @@ class NODE_OT_delete_unused(Operator, NWBase):
         return (nw_check(cls, context)
                 and nw_check_not_empty(cls, context)
                 and nw_check_space_type(cls, context, {'ShaderNodeTree', 'CompositorNodeTree',
-                                        'TextureNodeTree', 'GeometryNodeTree'}))
+                                        'TextureNodeTree', 'GeometryNodeTree', 'EeveeFilterGraphNodeTree'}))
 
     def execute(self, context):
-        nodes, links = get_nodes_links(context)
+        tree = context.space_data.edit_tree
+        nodes = tree.nodes
 
         # Store selection
         selection = []
@@ -122,7 +124,8 @@ class NODE_OT_delete_unused(Operator, NWBase):
             self.report({'INFO'}, message)
 
         # Restore selection
-        nodes, links = get_nodes_links(context)
+        tree = context.space_data.edit_tree
+        nodes = tree.nodes
         for node in nodes:
             if node.name in selection:
                 node.select = True

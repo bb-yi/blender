@@ -65,12 +65,12 @@ struct [[host_shared]] DrawGroup {
     /* Ugly packing to support expanded draws without inflating the struct.
      * Makes vertex range restricted to smaller range for expanded draw. */
     uint32_t expand_prim_type : 4;
-    uint32_t expand_prim_len : 3;
-    uint32_t vertex_len : 25;
+    uint32_t vertex_len : 28;
 
     /** Needed to create the correct draw call. */
     gpu::Batch *gpu_batch;
-    uint64_t _cpu_pad0;
+    uint32_t expand_prim_len;
+    uint32_t _cpu_pad0;
   } desc;
 #else
   uint _cpu_reserved_1;
@@ -82,7 +82,9 @@ struct [[host_shared]] DrawGroup {
   uint _cpu_reserved_6;
 #endif
 };
+#ifndef GPU_SHADER
 BLI_STATIC_ASSERT_ALIGN(DrawGroup, 16)
+#endif
 
 /**
  * Representation of a future draw call inside a DrawGroup. This #DrawPrototype is then
@@ -104,4 +106,56 @@ struct [[host_shared]] DrawPrototype {
 
 #ifndef GPU_SHADER
 };  // namespace blender::draw::command
+
+namespace blender {
+#endif
+
+/* -------------------------------------------------------------------- */
+/** \name Indirect commands structures.
+ * \{ */
+
+/* Regular draw commands (no index buffer). */
+struct [[host_shared]] DrawCommandArray {
+  uint vertex_len;
+  uint instance_len;
+  uint vertex_first;
+  uint instance_first;
+
+  uint _pad0;
+  uint _pad1;
+  uint _pad2;
+  uint _pad3;
+};
+
+/* Indexed draw commands (with index buffer). */
+struct [[host_shared]] DrawCommandIndexed {
+  uint vertex_len;
+  uint instance_len;
+  uint vertex_first;
+  uint base_index;
+
+  uint instance_first;
+  uint _pad0;
+  uint _pad1;
+  uint _pad2;
+};
+
+struct [[host_shared]] DrawCommand {
+  union {
+    DrawCommandArray array;
+    DrawCommandIndexed indexed;
+  };
+};
+
+struct [[host_shared]] DispatchCommand {
+  uint num_groups_x;
+  uint num_groups_y;
+  uint num_groups_z;
+  uint _pad0;
+};
+
+/** \} */
+
+#if !defined(GPU_SHADER)
+}  // namespace blender
 #endif

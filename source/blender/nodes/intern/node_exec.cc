@@ -8,8 +8,8 @@
 
 #include "DNA_node_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_global.hh"
 #include "BKE_node_runtime.hh"
@@ -79,31 +79,19 @@ static void node_init_input_index(bNodeSocket *sock, int *index)
   }
 }
 
-static void node_init_output_index_muted(bNodeSocket *sock,
-                                         int *index,
-                                         const MutableSpan<bNodeLink> internal_links)
+static void node_init_output_index_muted(bNodeSocket *sock, int *index)
 {
-  const bNodeLink *link;
-  /* copy the stack index from internally connected input to skip the node */
-  for (bNodeLink &iter_link : internal_links) {
-    if (iter_link.tosock == sock) {
-      sock->stack_index = iter_link.fromsock->stack_index;
-      /* set the link pointer to indicate that this socket
-       * should not overwrite the stack value!
-       */
-      sock->link = &iter_link;
-      link = &iter_link;
-      break;
-    }
+  /* Copy the stack index from the internally connected input to skip the node. */
+  if (const bNodeSocket *internal_input = sock->runtime->internal_link_input) {
+    sock->stack_index = internal_input->stack_index;
+    return;
   }
-  /* if not internally connected, assign a new stack index anyway to avoid bad stack access */
-  if (!link) {
-    if (node_exec_socket_use_stack(sock)) {
-      sock->stack_index = (*index)++;
-    }
-    else {
-      sock->stack_index = -1;
-    }
+  /* If not internally connected, assign a new stack index anyway to avoid bad stack access. */
+  if (node_exec_socket_use_stack(sock)) {
+    sock->stack_index = (*index)++;
+  }
+  else {
+    sock->stack_index = -1;
   }
 }
 
@@ -127,6 +115,13 @@ static bNodeStack *setup_stack(bNodeStack *stack, bNodeTree *ntree, bNode *node,
 
   /* don't mess with remote socket stacks, these are initialized by other nodes! */
   if (sock->link && !(sock->link->flag & NODE_LINK_MUTED)) {
+    return ns;
+  }
+  /* Outputs of muted nodes forward the internally linked input's stack value. */
+  if (node->is_muted() && sock->runtime->internal_link_input != nullptr) {
+    return ns;
+  }
+  if (sock->is_output() && node->is_reroute()) {
     return ns;
   }
 
@@ -164,7 +159,7 @@ static Vector<bNode *> get_node_code_gen_order(bNodeTree &ntree)
   ntree.ensure_topology_cache();
   Vector<bNode *> nodes = ntree.toposort_left_to_right();
   const bke::bNodeTreeZones *zones = ntree.zones();
-  if (!zones) {
+  if (!zones || zones->zones.is_empty()) {
     return nodes;
   }
   /* Insertion sort to make sure that all nodes in a zone are packed together right before the zone
@@ -172,12 +167,13 @@ static Vector<bNode *> get_node_code_gen_order(bNodeTree &ntree)
   for (int old_i = nodes.size() - 1; old_i >= 0; old_i--) {
     bNode *node = nodes[old_i];
     const bke::bNodeTreeZone *zone = zones->get_zone_by_node(node->identifier);
-    if (!zone) {
-      /* None outside of any zone can stay where they are. */
-      continue;
+    if (zone && zone->output_node_id == node->identifier) {
+      /* The output of a zone should not be moved, except for nested zones,
+       * which still have to be packed together with the rest of the parent zone. */
+      zone = zone->parent_zone;
     }
-    if (zone->output_node_id == node->identifier) {
-      /* The output of a zone should not be moved. */
+    if (!zone) {
+      /* Nodes outside of any zone can stay where they are. */
       continue;
     }
     for (int new_i = old_i + 1; new_i < nodes.size(); new_i++) {
@@ -233,7 +229,7 @@ bNodeTreeExec *ntree_exec_begin(bNodeExecContext *context,
 
     if (node->is_muted() || node->is_reroute()) {
       for (bNodeSocket &sock : node->outputs) {
-        node_init_output_index_muted(&sock, &index, node->runtime->internal_links);
+        node_init_output_index_muted(&sock, &index);
       }
     }
     else {

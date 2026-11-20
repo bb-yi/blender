@@ -12,16 +12,16 @@
 
 #include "mathutils.hh"
 
-#include "BLI_math_base_safe.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_base_safe.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines.hh"
 
 #include "../generic/py_capi_utils.hh"
 
 #ifndef MATH_STANDALONE
-#  include "BLI_dynstr.h"
+#  include "BLI_dynstr.hh"
 #endif
 
 namespace blender {
@@ -145,7 +145,7 @@ static PyObject *Vector_vectorcall(PyObject *type,
                                    const size_t nargsf,
                                    PyObject *kwnames)
 {
-  if (UNLIKELY(kwnames && PyTuple_GET_SIZE(kwnames))) {
+  if (kwnames && PyTuple_GET_SIZE(kwnames)) [[unlikely]] {
     PyErr_SetString(PyExc_TypeError,
                     "Vector(): "
                     "takes no keyword args");
@@ -189,7 +189,7 @@ static PyObject *Vector_vectorcall(PyObject *type,
 
 static PyObject *Vector_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-  if (UNLIKELY(kwds && PyDict_GET_SIZE(kwds))) {
+  if (kwds && PyDict_GET_SIZE(kwds)) [[unlikely]] {
     PyErr_SetString(PyExc_TypeError,
                     "Vector(): "
                     "takes no keyword args");
@@ -226,7 +226,14 @@ static PyObject *C_Vector_Fill(PyObject *cls, PyObject *args)
   int vec_num;
   float fill = 0.0f;
 
-  if (!PyArg_ParseTuple(args, "i|f:Vector.Fill", &vec_num, &fill)) {
+  if (!PyArg_ParseTuple(args,
+                        "i" /* `size` */
+                        "|" /* Optional arguments. */
+                        "f" /* `fill` */
+                        ":Vector.Fill",
+                        &vec_num,
+                        &fill))
+  {
     return nullptr;
   }
 
@@ -274,7 +281,16 @@ static PyObject *C_Vector_Range(PyObject *cls, PyObject *args)
   int start = 0;
   int step = 1;
 
-  if (!PyArg_ParseTuple(args, "i|ii:Vector.Range", &start, &stop, &step)) {
+  if (!PyArg_ParseTuple(args,
+                        "i" /* `start` */
+                        "|" /* Optional arguments. */
+                        "i" /* `stop` */
+                        "i" /* `step` */
+                        ":Vector.Range",
+                        &start,
+                        &stop,
+                        &step))
+  {
     return nullptr;
   }
 
@@ -356,7 +372,15 @@ static PyObject *C_Vector_Linspace(PyObject *cls, PyObject *args)
   int vec_num;
   float start, end, step;
 
-  if (!PyArg_ParseTuple(args, "ffi:Vector.Linspace", &start, &end, &vec_num)) {
+  if (!PyArg_ParseTuple(args,
+                        "f" /* `start` */
+                        "f" /* `stop` */
+                        "i" /* `size` */
+                        ":Vector.Linspace",
+                        &start,
+                        &end,
+                        &vec_num))
+  {
     return nullptr;
   }
 
@@ -401,7 +425,13 @@ static PyObject *C_Vector_Repeat(PyObject *cls, PyObject *args)
   int i, vec_num, value_num;
   PyObject *value;
 
-  if (!PyArg_ParseTuple(args, "Oi:Vector.Repeat", &value, &vec_num)) {
+  if (!PyArg_ParseTuple(args,
+                        "O" /* `vector` */
+                        "i" /* `size` */
+                        ":Vector.Repeat",
+                        &value,
+                        &vec_num))
+  {
     return nullptr;
   }
 
@@ -538,13 +568,13 @@ static PyObject *Vector_resize(VectorObject *self, PyObject *value)
 {
   int vec_num;
 
-  if (UNLIKELY(BaseMathObject_Prepare_ForResize(self, "Vector.resize()") == -1)) {
+  if (BaseMathObject_Prepare_ForResize(self, "Vector.resize()") == -1) [[unlikely]] {
     /* An exception has been raised. */
 
     return nullptr;
   }
 
-  if ((vec_num = PyC_Long_AsI32(value)) == -1) {
+  if (((vec_num = PyC_Long_AsI32(value)) == -1) && PyErr_Occurred()) {
     PyErr_SetString(PyExc_TypeError,
                     "Vector.resize(size): "
                     "expected size argument to be an integer");
@@ -589,12 +619,16 @@ static PyObject *Vector_resized(VectorObject *self, PyObject *value)
   int vec_num;
   float *vec;
 
-  if ((vec_num = PyLong_AsLong(value)) == -1) {
+  if (((vec_num = PyC_Long_AsI32(value)) == -1) && PyErr_Occurred()) {
     return nullptr;
   }
 
   if (vec_num < 2) {
     PyErr_SetString(PyExc_RuntimeError, "Vector.resized(): invalid size");
+    return nullptr;
+  }
+
+  if (BaseMath_ReadCallback(self) == -1) {
     return nullptr;
   }
 
@@ -607,8 +641,11 @@ static PyObject *Vector_resized(VectorObject *self, PyObject *value)
     return nullptr;
   }
 
-  std::fill_n(vec, vec_num, 0.0f);
-  memcpy(vec, self->vec, self->vec_num * sizeof(float));
+  const int vec_num_copy = std::min(self->vec_num, vec_num);
+  memcpy(vec, self->vec, vec_num_copy * sizeof(float));
+  if (vec_num_copy != vec_num) {
+    std::fill_n(vec + vec_num_copy, vec_num - vec_num_copy, 0.0f);
+  }
 
   return Vector_CreatePyObject_alloc(vec, vec_num, nullptr);
 }
@@ -621,7 +658,7 @@ PyDoc_STRVAR(
     "   Resize the vector to 2D (x, y).\n");
 static PyObject *Vector_resize_2d(VectorObject *self)
 {
-  if (UNLIKELY(BaseMathObject_Prepare_ForResize(self, "Vector.resize_2d()") == -1)) {
+  if (BaseMathObject_Prepare_ForResize(self, "Vector.resize_2d()") == -1) [[unlikely]] {
     /* An exception has been raised. */
     return nullptr;
   }
@@ -646,7 +683,7 @@ PyDoc_STRVAR(
     "   Resize the vector to 3D (x, y, z).\n");
 static PyObject *Vector_resize_3d(VectorObject *self)
 {
-  if (UNLIKELY(BaseMathObject_Prepare_ForResize(self, "Vector.resize_3d()") == -1)) {
+  if (BaseMathObject_Prepare_ForResize(self, "Vector.resize_3d()") == -1) [[unlikely]] {
     /* An exception has been raised. */
     return nullptr;
   }
@@ -675,7 +712,7 @@ PyDoc_STRVAR(
     "   Resize the vector to 4D (x, y, z, w).\n");
 static PyObject *Vector_resize_4d(VectorObject *self)
 {
-  if (UNLIKELY(BaseMathObject_Prepare_ForResize(self, "Vector.resize_4d()") == -1)) {
+  if (BaseMathObject_Prepare_ForResize(self, "Vector.resize_4d()") == -1) [[unlikely]] {
     /* An exception has been raised. */
     return nullptr;
   }
@@ -784,7 +821,12 @@ static PyObject *Vector_to_tuple(VectorObject *self, PyObject *args)
 {
   int ndigits = -1;
 
-  if (!PyArg_ParseTuple(args, "|i:to_tuple", &ndigits)) {
+  if (!PyArg_ParseTuple(args,
+                        "|" /* Optional arguments. */
+                        "i" /* `precision` */
+                        ":to_tuple",
+                        &ndigits))
+  {
     return nullptr;
   }
 
@@ -828,7 +870,14 @@ static PyObject *Vector_to_track_quat(VectorObject *self, PyObject *args)
   const char *sup = nullptr;
   short track = 2, up = 1;
 
-  if (!PyArg_ParseTuple(args, "|ss:to_track_quat", &strack, &sup)) {
+  if (!PyArg_ParseTuple(args,
+                        "|" /* Optional arguments. */
+                        "s" /* `track` */
+                        "s" /* `up` */
+                        ":to_track_quat",
+                        &strack,
+                        &sup))
+  {
     return nullptr;
   }
 
@@ -1158,11 +1207,23 @@ static PyObject *Vector_angle(VectorObject *self, PyObject *args)
   int x;
   PyObject *fallback = nullptr;
 
-  if (!PyArg_ParseTuple(args, "O|O:angle", &value, &fallback)) {
+  if (!PyArg_ParseTuple(args,
+                        "O" /* `other` */
+                        "|" /* Optional arguments. */
+                        "O" /* `fallback` */
+                        ":angle",
+                        &value,
+                        &fallback))
+  {
     return nullptr;
   }
 
   if (BaseMath_ReadCallback(self) == -1) {
+    return nullptr;
+  }
+
+  if (self->vec_num > 4) {
+    PyErr_SetString(PyExc_ValueError, "Vector must be 2D, 3D or 4D");
     return nullptr;
   }
 
@@ -1172,11 +1233,6 @@ static PyObject *Vector_angle(VectorObject *self, PyObject *args)
           tvec, self->vec_num, self->vec_num, value, "Vector.angle(other), invalid 'other' arg") ==
       -1)
   {
-    return nullptr;
-  }
-
-  if (self->vec_num > 4) {
-    PyErr_SetString(PyExc_ValueError, "Vector must be 2D, 3D or 4D");
     return nullptr;
   }
 
@@ -1229,7 +1285,14 @@ static PyObject *Vector_angle_signed(VectorObject *self, PyObject *args)
   PyObject *value;
   PyObject *fallback = nullptr;
 
-  if (!PyArg_ParseTuple(args, "O|O:angle_signed", &value, &fallback)) {
+  if (!PyArg_ParseTuple(args,
+                        "O" /* `other` */
+                        "|" /* Optional arguments. */
+                        "O" /* `fallback` */
+                        ":angle_signed",
+                        &value,
+                        &fallback))
+  {
     return nullptr;
   }
 
@@ -1286,7 +1349,7 @@ PyDoc_STRVAR(
     "   .. note:: 2D vectors raise an :exc:`AttributeError`.\n");
 static PyObject *Vector_rotation_difference(VectorObject *self, PyObject *value)
 {
-  float quat[4], vec_a[3], vec_b[3];
+  float quat[4], vec_a[3], vec_b[MAX_DIMENSIONS];
 
   if (self->vec_num < 3 || self->vec_num > 4) {
     PyErr_SetString(PyExc_ValueError,
@@ -1386,7 +1449,13 @@ static PyObject *Vector_lerp(VectorObject *self, PyObject *args)
   float fac;
   float *tvec;
 
-  if (!PyArg_ParseTuple(args, "Of:lerp", &value, &fac)) {
+  if (!PyArg_ParseTuple(args,
+                        "O" /* `other` */
+                        "f" /* `factor` */
+                        ":lerp",
+                        &value,
+                        &fac))
+  {
     return nullptr;
   }
 
@@ -1438,7 +1507,16 @@ static PyObject *Vector_slerp(VectorObject *self, PyObject *args)
   int x;
   PyObject *fallback = nullptr;
 
-  if (!PyArg_ParseTuple(args, "Of|O:slerp", &value, &fac, &fallback)) {
+  if (!PyArg_ParseTuple(args,
+                        "O" /* `other` */
+                        "f" /* `factor` */
+                        "|" /* Optional arguments. */
+                        "O" /* `fallback` */
+                        ":slerp",
+                        &value,
+                        &fac,
+                        &fallback))
+  {
     return nullptr;
   }
 
@@ -1461,7 +1539,7 @@ static PyObject *Vector_slerp(VectorObject *self, PyObject *args)
   other_len_sq = normalize_vn(other_vec, vec_num);
 
   /* use fallbacks for zero length vectors */
-  if (UNLIKELY((self_len_sq < FLT_EPSILON) || (other_len_sq < FLT_EPSILON))) {
+  if ((self_len_sq < FLT_EPSILON) || (other_len_sq < FLT_EPSILON)) [[unlikely]] {
     /* avoid exception */
     if (fallback) {
       Py_INCREF(fallback);
@@ -1478,7 +1556,7 @@ static PyObject *Vector_slerp(VectorObject *self, PyObject *args)
   cosom = float(dot_vn_vn(self_vec, other_vec, vec_num));
 
   /* direct opposite, can't slerp */
-  if (UNLIKELY(cosom < (-1.0f + FLT_EPSILON))) {
+  if (cosom < (-1.0f + FLT_EPSILON)) [[unlikely]] {
     /* avoid exception */
     if (fallback) {
       Py_INCREF(fallback);
@@ -1660,10 +1738,10 @@ static PyObject *Vector_str(VectorObject *self)
 static int Vector_getbuffer(PyObject *obj, Py_buffer *view, int flags)
 {
   VectorObject *self = reinterpret_cast<VectorObject *>(obj);
-  if (UNLIKELY(BaseMath_Prepare_ForBufferAccess(self, view, flags) == -1)) {
+  if (BaseMath_Prepare_ForBufferAccess(self, view, flags) == -1) [[unlikely]] {
     return -1;
   }
-  if (UNLIKELY(BaseMath_ReadCallback(self) == -1)) {
+  if (BaseMath_ReadCallback(self) == -1) [[unlikely]] {
     return -1;
   }
 
@@ -1693,7 +1771,7 @@ static void Vector_releasebuffer(PyObject * /*exporter*/, Py_buffer *view)
   self->flag &= ~BASE_MATH_FLAG_HAS_BUFFER_VIEW;
 
   if (view->readonly == 0) {
-    if (UNLIKELY(BaseMath_WriteCallback(self) == -1)) {
+    if (BaseMath_WriteCallback(self) == -1) [[unlikely]] {
       PyErr_Print();
     }
   }
@@ -2906,8 +2984,9 @@ static int Vector_swizzle_set(VectorObject *self, PyObject *value, void *closure
 
   /* We must first copy current vec into tvec, else some org values may be lost.
    * See #31760.
-   * Assuming self->vec_num can't be higher than MAX_DIMENSIONS! */
-  memcpy(tvec, self->vec, self->vec_num * sizeof(float));
+   * Swizzle axes are limited to #MAX_DIMENSIONS, values after them are left as-is. */
+  const int tvec_num = std::min(self->vec_num, MAX_DIMENSIONS);
+  memcpy(tvec, self->vec, tvec_num * sizeof(float));
 
   while (swizzleClosure & SWIZZLE_VALID_AXIS) {
     axis_to = swizzleClosure & SWIZZLE_AXIS;
@@ -2918,7 +2997,7 @@ static int Vector_swizzle_set(VectorObject *self, PyObject *value, void *closure
 
   /* We must copy back the whole tvec into vec, else some changes may be lost (e.g. xz...).
    * See #31760. */
-  memcpy(self->vec, tvec, self->vec_num * sizeof(float));
+  memcpy(self->vec, tvec, tvec_num * sizeof(float));
   /* continue with BaseMathObject_WriteCallback at the end */
 
   if (BaseMath_WriteCallback(self) == -1) {
@@ -3634,7 +3713,7 @@ PyObject *Vector_CreatePyObject(const float *vec, const int vec_num, PyTypeObjec
   }
 
   vec_alloc = static_cast<float *>(PyMem_Malloc(vec_num * sizeof(float)));
-  if (UNLIKELY(vec_alloc == nullptr)) {
+  if (vec_alloc == nullptr) [[unlikely]] {
     PyErr_SetString(PyExc_MemoryError,
                     "Vector(): "
                     "problem allocating data");

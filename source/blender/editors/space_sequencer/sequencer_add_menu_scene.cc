@@ -2,14 +2,18 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup spseq
+ */
+
 #include "AS_asset_catalog.hh"
 #include "AS_asset_catalog_tree.hh"
 #include "AS_asset_library.hh"
 #include "AS_asset_representation.hh"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_multi_value_map.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "DNA_space_types.h"
 #include "DNA_workspace_types.h"
@@ -125,7 +129,7 @@ static void sequencer_add_unassigned_assets_draw(const bContext *C, Menu *menu)
                                          ICON_NONE,
                                          wm::OpCallContext::InvokeRegionWin,
                                          UI_ITEM_NONE);
-    BLI_assert(op_ptr.data != nullptr);
+    BLI_assert(op_ptr);
     asset::operator_asset_reference_props_set(*asset, op_ptr);
   }
 }
@@ -161,7 +165,7 @@ static void sequencer_add_scene_draw(const bContext *C, Menu *menu)
 
   if (show_assets) {
     if (!loading_finished) {
-      layout.label(IFACE_("Loading Asset Libraries"), ICON_INFO);
+      layout.label(IFACE_("Loading Asset Libraries"), ICON_STATUS_INFO);
     }
 
     tree.catalogs.foreach_root_item([&](const asset_system::AssetCatalogTreeItem &item) {
@@ -181,14 +185,7 @@ static void sequencer_add_scene_draw(const bContext *C, Menu *menu)
   /* Show existing scenes. */
   Main *bmain = CTX_data_main(C);
   const int scenes_len = bmain->scenes.count();
-  if (scenes_len > 10) {
-    layout.op("SEQUENCER_OT_scene_strip_add",
-              IFACE_("Scene Strip..."),
-              ICON_SCENE_DATA,
-              wm::OpCallContext::InvokeDefault,
-              UI_ITEM_NONE);
-  }
-  else if (scenes_len == 1) {
+  if (scenes_len == 1) {
     layout.label(IFACE_("Scene Strip"), ICON_SCENE_DATA);
     layout.label(IFACE_("No other scenes."), ICON_NONE);
   }

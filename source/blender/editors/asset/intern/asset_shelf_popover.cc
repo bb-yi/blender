@@ -12,8 +12,8 @@
 
 #include "BKE_screen.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_string_utf8.hh"
 
 #include "BLT_translation.hh"
 
@@ -129,7 +129,7 @@ class AssetCatalogTreeView : public ui::AbstractTreeView {
   {
     if (catalog_tree_.is_empty()) {
       auto &item = this->add_tree_item<ui::BasicTreeViewItem>(RPT_("No asset catalogs"),
-                                                              ICON_INFO);
+                                                              ICON_STATUS_INFO);
       item.disable_interaction();
       this->is_flat_ = true;
       return;

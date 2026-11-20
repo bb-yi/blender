@@ -6,7 +6,7 @@
 #include <numeric>
 
 #include "BLI_array.hh"
-#include "BLI_assert.h"
+#include "BLI_assert.hh"
 #include "BLI_enumerable_thread_specific.hh"
 #include "BLI_fftw.hh"
 #include "BLI_index_range.hh"
@@ -247,7 +247,7 @@ void convolve(Context &context,
   });
 
   Result output_cpu = context.create_result(input.type());
-  output_cpu.allocate_texture(input.domain(), true, ResultStorageType::CPU);
+  output_cpu.allocate_texture(input.domain(), true, ResultStorageType::CPUImage);
 
   /* Copy the result to the output. */
   threading::memory_bandwidth_bound_task(input.size_in_bytes(), [&]() {

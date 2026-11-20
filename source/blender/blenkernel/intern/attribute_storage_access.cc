@@ -2,11 +2,15 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include "BKE_attribute.hh"
 #include "BKE_attribute_storage.hh"
 #include "BKE_deform.hh"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "DNA_object_types.h"
 
@@ -108,14 +112,6 @@ Attribute::DataVariant attribute_init_to_data(const bke::AttrType data_type,
       const CPPType &type = varray.type();
       Attribute::ArrayData data = Attribute::ArrayData::from_uninitialized(type, domain_size);
       varray.materialize_to_uninitialized(varray.index_range(), data.data);
-      return data;
-    }
-    case AttributeInit::Type::MoveArray: {
-      const auto &init = static_cast<const AttributeInitMoveArray &>(initializer);
-      Attribute::ArrayData data;
-      data.data = init.data;
-      data.size = domain_size;
-      data.sharing_info = ImplicitSharingPtr<>(implicit_sharing::info_for_mem_free(data.data));
       return data;
     }
     case AttributeInit::Type::Shared: {

@@ -119,3 +119,29 @@ the GPU device. Never set it for normal operation. An untrackable GPU submission
 disables the session and retains its resources until process exit/device removal,
 rather than freeing memory still potentially used by the GPU; the status requests
 a restart in this exceptional case.
+
+## Offline animation history regression
+
+`test_animation_history.py` is a self-contained Windows Vulkan test. Run it with an installed
+Blender containing the DLSSNR runtime, isolated `BLENDER_USER_RESOURCES`, and
+`--background --factory-startup --python-exit-code 1 --python tests/dlss5/test_animation_history.py`.
+Set `DLSS_ANIMATION_TEST_OUT` to a directory outside the source tree for logs and EXR files.
+`DLSS_ANIMATION_SCENARIOS` can select comma-separated scenario names for a targeted rerun;
+leave it unset to run the complete suite.
+
+The test checks actual NR completion, adjacent-frame history, independent repeated animations,
+resource-cache independence, skipped frames, camera cuts, settings changes, multiple view layers,
+shape-key deformation, motion blur, composited scenes and guide failure recovery. It also checks
+that backward-only guides do not evaluate a future scene time, and that invalid masks and small
+extents bypass guide preparation. A GPU input readback checks backward pixel motion against
+an independent geometric projection (0.02 px tolerance). If the optional Pre-FX pass is present,
+it additionally checks that its history cannot alter the primary Combined output.
+
+`BLENDER_DLSS_NR_FORCE_RESET`, `BLENDER_DLSS_NR_DUMP_INPUTS` and
+`BLENDER_DLSS_NR_TEST_GUIDE_FAILURE` are diagnostic switches only.
+The reset switch forces independent NR frames; the dump switch writes raw float Color/Depth/Motion
+inputs to an existing directory and synchronizes their GPU readback. The guide-failure switch exercises
+the explicit native fallback and the next-frame history reset. Leave them unset in normal use.
+
+This fixes the integration's temporal continuity and motion contract. It does not promise
+pixel-identical NR output across processes or eliminate all temporal variation of the model.

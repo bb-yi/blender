@@ -24,9 +24,9 @@
 #include "DNA_modifier_types.h"
 #include "DNA_particle_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BKE_attribute.hh"
 #include "BKE_curves.hh"
@@ -564,6 +564,12 @@ static void ExportCurveSegmentsMotion(Hair *hair, ParticleCurveData *CData, cons
     }
   }
 
+  /* Keys without a matching curve keep the center position. */
+  if (i < num_keys) {
+    std::copy_n(hair->get_position() + i, num_keys - i, mP + i);
+    std::copy_n(hair->get_radius() + i, num_keys - i, mR + i);
+  }
+
   /* In case of new attribute, we verify if there really was any motion. */
   if (new_attribute) {
     export_hair_motion_validate_attribute(hair, motion_step, i, have_motion);
@@ -1051,7 +1057,10 @@ static void export_hair_curves_motion(Hair *hair,
     num_motion_keys = num_keys;
   }
   else {
-    /* Slow path: topology has changed, copy with per-curve interpolation. */
+    /* Slow path: topology has changed, copy with per-curve interpolation.
+     * Keys without a matching curve keep the center position. */
+    hair->copy_center_to_motion_step(motion_step);
+
     const size_t num_curves = hair->num_curves();
     packed_float3 *mP = attr_P->data_for_write<packed_float3>(attr_step);
     float *mR = attr_R->data_for_write<float>(attr_step);
@@ -1152,7 +1161,7 @@ void BlenderSync::sync_hair(BObjectInfo &b_ob_info, Hair *hair)
   new_hair.set_used_shaders(used_shaders);
 
   if (view_layer.use_hair) {
-    if (GS(b_ob_info.object_data->name) == blender::ID_CV) {
+    if (b_ob_info.object_data->id_type() == blender::ID_CV) {
       /* Hair object. */
       sync_hair(&new_hair, b_ob_info, false);
     }
@@ -1215,7 +1224,7 @@ void BlenderSync::sync_hair_motion(BObjectInfo &b_ob_info, Hair *hair, const int
 
   /* Export deformed coordinates. */
   if (ccl::BKE_object_is_deform_modified(b_ob_info, *b_scene, preview)) {
-    if (GS(b_ob_info.object_data->name) == blender::ID_CV) {
+    if (b_ob_info.object_data->id_type() == blender::ID_CV) {
       /* Hair object. */
       sync_hair(hair, b_ob_info, true, motion_step);
       return;

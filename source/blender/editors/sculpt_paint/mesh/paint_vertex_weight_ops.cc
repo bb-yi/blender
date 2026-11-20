@@ -8,11 +8,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_bitmap.h"
+#include "BLI_bitmap.hh"
 #include "BLI_enum_flags.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "DNA_brush_types.h"
 #include "DNA_mesh_types.h"
@@ -210,6 +210,9 @@ static wmOperatorStatus weight_sample_invoke(bContext *C, wmOperator *op, const 
     if (v_idx_best != -1) { /* should always be valid */
       ToolSettings *ts = vc.scene->toolsettings;
       Brush *brush = BKE_paint_brush(&ts->wpaint->paint);
+      if (brush == nullptr) {
+        return OPERATOR_CANCELLED;
+      }
       const int vgroup_active = mesh->vertex_group_active_index - 1;
       float vgroup_weight = BKE_defvert_find_weight(&dvert[v_idx_best], vgroup_active);
       const int defbase_tot = mesh->vertex_group_names.count();
@@ -306,7 +309,7 @@ static bool weight_paint_sample_mark_groups(const MDeformVert *dvert, MutableSpa
   int i = dvert->totweight;
   MDeformWeight *dw;
   for (dw = dvert->dw; i > 0; dw++, i--) {
-    if (UNLIKELY(dw->def_nr >= groups.size())) {
+    if (dw->def_nr >= groups.size()) [[unlikely]] {
       continue;
     }
     groups[dw->def_nr] = true;
@@ -535,6 +538,11 @@ void PAINT_OT_weight_set(wmOperatorType *ot)
 /* -------------------------------------------------------------------- */
 /** \name Interactive Weight Gradient Operator
  * \{ */
+
+enum {
+  WPAINT_GRADIENT_TYPE_LINEAR,
+  WPAINT_GRADIENT_TYPE_RADIAL,
+};
 
 /* *** VGroups Gradient *** */
 struct WPGradient_vertStore {

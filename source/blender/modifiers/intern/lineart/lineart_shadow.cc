@@ -15,11 +15,11 @@
 #include "BKE_grease_pencil_legacy_convert.hh"
 #include "BKE_object.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_task.h"
-#include "BLI_time.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_task_c.hh"
+#include "BLI_time.hh"
 
 #include "DNA_light_types.h"
 #include "DNA_modifier_types.h"
@@ -162,7 +162,7 @@ static LineartShadowSegment *lineart_give_shadow_segment(LineartData *ld)
   BLI_spin_lock(&ld->lock_cuts);
 
   /* See if there is any already allocated memory we can reuse. */
-  if (ld->wasted_shadow_cuts.first) {
+  if (ld->wasted_shadow_cuts.first()) {
     LineartShadowSegment *es = static_cast<LineartShadowSegment *>(
         BLI_pophead(&ld->wasted_shadow_cuts));
     BLI_spin_unlock(&ld->lock_cuts);
@@ -514,9 +514,8 @@ static void lineart_shadow_edge_cut(LineartData *ld,
 {
   LineartShadowSegment *seg, *i_seg;
   LineartShadowSegment *cut_start_after = static_cast<LineartShadowSegment *>(
-                           e->shadow_segments.first),
-                       *cut_end_before = static_cast<LineartShadowSegment *>(
-                           e->shadow_segments.last);
+                           e->shadow_segments.first()),
+                       *cut_end_before = e->shadow_segments.last();
   LineartShadowSegment *new_seg_1 = nullptr, *new_seg_2 = nullptr, *seg_1 = nullptr,
                        *seg_2 = nullptr;
   int untouched = 0;
@@ -529,10 +528,10 @@ static void lineart_shadow_edge_cut(LineartData *ld,
   if (LRT_DOUBLE_CLOSE_ENOUGH(start, 1) || LRT_DOUBLE_CLOSE_ENOUGH(end, 0)) {
     return;
   }
-  if (UNLIKELY(start != start)) {
+  if (start != start) [[unlikely]] {
     start = 0;
   }
-  if (UNLIKELY(end != end)) {
+  if (end != end) [[unlikely]] {
     end = 0;
   }
 
@@ -1273,7 +1272,7 @@ bool lineart_main_try_generate_shadow_v3(
                                nullptr,
                                included_objects);
 
-  if (!ld->geom.vertex_buffer_pointers.first) {
+  if (!ld->geom.vertex_buffer_pointers.first()) {
     /* No geometry loaded, return early. */
     lineart_destroy_render_data_keep_init(ld);
     MEM_delete(ld);

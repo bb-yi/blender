@@ -9,30 +9,41 @@
 #include "eevee_shadow_tilemap_lib.bsl.hh"
 #include "eevee_uniform.bsl.hh"
 #include "eevee_utility_tx.bsl.hh"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_utildefines.bsl.hh"
 
 namespace eevee {
 
+struct ShadowRenderConstants {
+  [[compilation_constant]] bool shadow_random;
+  /* Use a fixed seed for the noise input. */
+  [[compilation_constant]] bool shadow_static_noise;
+  [[compilation_constant]] bool use_node_moment_atlas;
+};
+
 /* Any entry point function using this should also use `[[texture_atomic]]`. */
 struct ShadowRenderData {
+  [[resource_table]] ShadowRenderConstants constants;
+
   [[sampler(SHADOW_ATLAS_TEX_SLOT)]] usampler2DArrayAtomic shadow_atlas_tx;
   [[sampler(SHADOW_TILEMAPS_TEX_SLOT)]] usampler2D shadow_tilemaps_tx;
   [[sampler(SHADOW_CASTER_ATLAS_TEX_SLOT)]] usampler2DArray shadow_caster_atlas_tx;
+  [[sampler(SHADOW_MOMENT_SAT_TEX_SLOT), condition(use_node_moment_atlas)]] sampler2DArray moment_sat_tx;
 
-  [[compilation_constant]] bool shadow_random;
+  [[resource_table]] Uniform uniforms;
+  [[resource_table]] draw::View views;
+  [[resource_table, condition(shadow_random)]] Sampling sampling;
+  [[resource_table, condition(shadow_random)]] UtilityTexture util_tx;
 
-  [[resource_table]] srt_t<Uniform> uniforms;
-  [[resource_table]] srt_t<draw::View> views;
-  [[resource_table, condition(shadow_random)]] srt_t<Sampling> sampling;
-  [[resource_table, condition(shadow_random)]] srt_t<UtilityTexture> util_tx;
-
-  float read_depth(ShadowCoordinates coord) const
+  float4 read_node_moment(int3 texel) const
   {
-    ShadowSamplingTile tile = shadow_tile_load(
-        shadow_tilemaps_tx, coord.tilemap_tile, coord.tilemap_index);
-    if (!tile.is_valid) {
-      return -1.0f;
+    if (constants.use_node_moment_atlas) [[static_branch]] {
+      return texelFetch(moment_sat_tx, texel, 0);
     }
+    return float4(0.0f);
+  }
+
+  int3 atlas_coordinates(ShadowCoordinates coord, ShadowSamplingTile tile) const
+  {
     /* Using bitwise ops is way faster than integer ops. */
     constexpr uint page_shift = uint(SHADOW_PAGE_LOD);
     constexpr uint page_mask = ~(0xFFFFFFFFu << uint(SHADOW_PAGE_LOD));
@@ -44,12 +55,20 @@ struct ShadowRenderData {
     uint2 texel_page = (texel >> tile.lod) & page_mask;
     texel = (uint2(tile.page.xy) << page_shift) | texel_page;
 
-    return uintBitsToFloat(texelFetch(shadow_atlas_tx, int3(int2(texel), int(tile.page.z)), 0).r);
+    return int3(int2(texel), int(tile.page.z));
+  }
+
+  float read_depth(ShadowCoordinates coord) const
+  {
+    ShadowSamplingTile tile = shadow_tile_load(
+        shadow_tilemaps_tx, coord.tilemap_tile, coord.tilemap_index);
+    return tile.is_valid ? uintBitsToFloat(texelFetch(shadow_atlas_tx, atlas_coordinates(coord, tile), 0).r) :
+                           -1.0f;
   }
 
   float punctual_sample_get(LightData light, float3 P) const
   {
-    float3 shadow_position = light.local().local.shadow_position;
+    float3 shadow_position = light.local.local.shadow_position;
     float3 lP = transform_point_inversed(light.object_to_world, P);
     lP -= shadow_position;
     int face_id = shadow_punctual_face_index_get(lP);
@@ -68,7 +87,12 @@ struct ShadowRenderData {
   float directional_sample_get(LightData light, float3 P) const
   {
     float3 lP = transform_direction_transposed(light.object_to_world, P);
-    ShadowCoordinates coord = shadow_directional_coordinates(light, lP);
+    [[resource_table]] const Uniform &uni = uniforms;
+    [[resource_table]] const draw::View &view_data = views;
+    const ViewMatrices view = view_data.get(0);
+    float pixel_size = shadow_screen_pixel_size(uni.uniform_buf.shadow.film_pixel_radius,
+                                                view.is_perspective(), view.z_distance(P));
+    ShadowCoordinates coord = shadow_directional_coordinates(light, lP, pixel_size);
 
     float depth = read_depth(coord);
     if (depth == -1.0f) {

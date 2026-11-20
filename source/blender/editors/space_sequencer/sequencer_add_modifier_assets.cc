@@ -2,13 +2,17 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup spseq
+ */
+
 #include "AS_asset_catalog.hh"
 #include "AS_asset_catalog_tree.hh"
 #include "AS_asset_library.hh"
 #include "AS_asset_representation.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_string_utf8.hh"
 
 #include "BKE_asset.hh"
 #include "BKE_context.hh"
@@ -185,7 +189,7 @@ static void root_catalogs_draw(const bContext *C, Menu *menu)
     layout.separator();
 
     if (!loading_finished) {
-      layout.label(IFACE_("Loading Asset Libraries"), ICON_INFO);
+      layout.label(IFACE_("Loading Asset Libraries"), ICON_STATUS_INFO);
     }
 
     tree.catalogs.foreach_root_item([&](const asset_system::AssetCatalogTreeItem &item) {
@@ -265,7 +269,7 @@ static wmOperatorStatus strip_modifier_add_asset_exec(bContext *C, wmOperator *o
 
   seq::modifier_persistent_uid_init(*strip, cmd->modifier);
 
-  seq::compositor_nodes_update_interface(bmain, *scene, *cmd);
+  seq::compositor_modifier_nodes_update_interface(bmain, *scene, *cmd);
 
   seq::relations_invalidate_cache(scene, strip);
   WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);

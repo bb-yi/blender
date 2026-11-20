@@ -4,7 +4,11 @@
 
 #include "infos/eevee_surf_deferred_infos.hh"
 
+#ifdef STENCIL_SNAPSHOT_PREVIEW
+FRAGMENT_SHADER_CREATE_INFO(eevee_stencil_snapshot_visualize)
+#else
 FRAGMENT_SHADER_CREATE_INFO(eevee_stencil_value_visualize)
+#endif
 
 float3 stencil_value_color(int value)
 {
@@ -90,6 +94,13 @@ float stencil_number_mask(int value, float2 pixel)
 
 void main()
 {
+#ifdef STENCIL_SNAPSHOT_PREVIEW
+  int2 texel = int2(gl_FragCoord.xy);
+  int stencil_value = int(texelFetch(stencil_value_tx, texel, 0).r & 15u);
+  /* Marker Only can mark empty background without contributing any depth. */
+  bool is_background = stencil_value == 0 &&
+                       texelFetch(depth_tx, texel, 0).r == background_depth;
+#endif
   float3 color = is_background ? float3(0.0f) : stencil_value_color(stencil_value);
 
   const float2 tile_size = float2(32.0f, 28.0f);
@@ -107,7 +118,9 @@ void main()
   color = mix(color, outline_color, outline * 0.85f);
   color = mix(color, text_color, fill);
 
+#ifndef STENCIL_SNAPSHOT_PREVIEW
   gl_FragDepth = 0.0f;
+#endif
   /* Combined alpha stores transmittance before Film converts it to final opacity. */
   out_color = float4(color, 0.0f);
 }

@@ -816,26 +816,26 @@ static uint64_t gpu_material_runtime_hash(GPUMaterial *gpu_material)
       GPU_material_uuid_get(gpu_material),
       GPU_material_compilation_timestamp(gpu_material),
       uint64_t(GPU_material_flag(gpu_material)));
-  const ListBaseT<GPUMaterialTexture> textures = GPU_material_textures(gpu_material);
-  for (const GPUMaterialTexture *texture = static_cast<const GPUMaterialTexture *>(textures.first);
-       texture != nullptr;
-       texture = texture->next)
-  {
+  for (const GPUMaterialTexture &texture : GPU_material_textures(gpu_material)) {
     hash = get_default_hash(hash,
-                            texture->ima,
-                            texture->iuser_available ? texture->iuser.framenr : 0,
-                            texture->iuser_available ? texture->iuser.tile : 0,
-                            texture->iuser_available ? texture->iuser.layer : 0);
+                            texture.ima,
+                            texture.iuser_available ? texture.iuser.framenr : 0,
+                            texture.iuser_available ? texture.iuser.tile : 0,
+                            texture.iuser_available ? texture.iuser.layer : 0);
     hash = get_default_hash(hash,
-                            texture->iuser_available ? texture->iuser.pass : 0,
-                            texture->iuser_available ? texture->iuser.multi_index : 0,
-                            texture->iuser_available ? texture->iuser.view : 0);
+                            texture.iuser_available ? texture.iuser.pass : 0,
+                            texture.iuser_available ? texture.iuser.multi_index : 0,
+                            texture.iuser_available ? texture.iuser.view : 0);
   }
   return hash;
 }
 
 void SyncModule::begin_sync()
 {
+  tessellation_passes_.clear();
+  object_attribute_requests_.clear();
+  object_attribute_request_hits_ = 0;
+  mesh_attribute_requests_ = 0;
   hardware_raytrace_sync_generation_++;
   hardware_raytrace_scene_entries_.clear();
   hardware_raytrace_scene_signature_ = 0;

@@ -46,6 +46,12 @@ class ShadowModule;
 class ShadowDirectional;
 class ShadowPunctual;
 
+enum class LightShaderDependency {
+  Passthrough,
+  Uniform,
+  PointDependent,
+};
+
 /* -------------------------------------------------------------------- */
 /** \name Light Object
  * \{ */
@@ -75,6 +81,9 @@ struct Light : public LightData, NonCopyable {
   ShadowDirectional *directional = nullptr;
   ShadowPunctual *punctual = nullptr;
 
+  /** Used by shadow sync. */
+  uint2 shadow_set_membership = uint2(0);
+
   Light()
   {
     /* Avoid valgrind warning. */
@@ -96,6 +105,7 @@ struct Light : public LightData, NonCopyable {
     this->light_shader_range_scale = other.light_shader_range_scale;
     this->directional = other.directional;
     this->punctual = other.punctual;
+    this->shadow_set_membership = other.shadow_set_membership;
     other.directional = nullptr;
     other.punctual = nullptr;
   }
@@ -111,7 +121,8 @@ struct Light : public LightData, NonCopyable {
             float4x4 object_to_world,
             char visibility_flag,
             const blender::Light *la,
-            const LightLinking *light_linking,
+            uint64_t light_set_membership,
+            uint64_t shadow_set_membership,
             float light_shader_range_scale,
             float threshold,
             int lightgroup_id = 0);
@@ -155,10 +166,18 @@ class LightModule {
   Instance &inst_;
   /** Map of light objects data. Converted to flat array each frame. */
   Map<ObjectKey, Light> light_map_;
+  struct NodeTreeInfo {
+    float range_scale;
+    LightShaderDependency dependency;
+    bool uses_scene_time;
+  };
+  /* Evaluated light data can be shared by many objects; recompute once per sync. */
+  Map<const blender::Light *, NodeTreeInfo> node_tree_info_;
+  int64_t node_tree_info_hits_ = 0;
   /**
    * In order to treat the world sun lights the same way as regular lights,
    * an #ObjectKey needs to be associated to each of them.
-   * */
+   */
   ObjectKey world_sunlight_key_[WORLD_SUN_MAX] = {ObjectKey(WORLD_SUN_DIFFUSE),
                                                   ObjectKey(WORLD_SUN_GLOSSY)};
   /** Flat array sent to GPU, populated from light_map_. Source buffer for light culling. */
@@ -299,6 +318,15 @@ class LightModule {
     pass.bind_ubo(WORLD_SUNLIGHT_BUF_SLOT, world_sunlight_ubo());
     pass.push_constant("hardware_local_lights_len", local_lights_len_);
     pass.push_constant("hardware_lights_len", lights_len_);
+  }
+
+  int64_t node_tree_info_count() const
+  {
+    return node_tree_info_.size();
+  }
+  int64_t node_tree_info_hits() const
+  {
+    return node_tree_info_hits_;
   }
 
   Span<const TelemetryShadowLightCost> shadow_light_costs() const

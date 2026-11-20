@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "node_shader_util.hh"
 
 namespace blender {
@@ -15,6 +19,9 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<decl::Vector>("Displacement"_ustr).hide_value();
   b.add_input<decl::Float>("Thickness"_ustr).hide_value();
   b.add_input<decl::Float>("Depth Offset"_ustr).hide_value();
+  b.add_input<decl::Color>("Tessellation"_ustr)
+      .hide_value()
+      .description("Tessellation settings, from a Tessellation Control node (EEVEE only)");
 }
 
 static int node_shader_gpu_output_material(GPUMaterial *mat,
@@ -39,12 +46,22 @@ static int node_shader_gpu_output_material(GPUMaterial *mat,
     GPU_material_output_displacement(mat, outlink_displacement);
   }
   if (in[3].link) {
-    GPU_link(mat, "node_output_material_thickness", in[3].link, &outlink_thickness);
+    GPU_link(mat,
+             "node_output_material_thickness",
+             in[3].link,
+             GPU_kernel_globals(),
+             GPU_shading_data(),
+             &outlink_thickness);
     GPU_material_output_thickness(mat, outlink_thickness);
   }
   if (BLI_listbase_count(&node->inputs) > 4 && in[4].link) {
     GPU_link(mat, "node_output_material_depth_offset", in[4].link, &outlink_depth_offset);
     GPU_material_output_depth_offset(mat, outlink_depth_offset);
+  }
+  /* Settings of a Tessellation Control node. EEVEE reads them on the CPU (see
+   * #ntreeShaderTessellationNode) to setup the draw-calls and only uses this output for these. */
+  if (BLI_listbase_count(&node->inputs) > 5 && in[5].link) {
+    GPU_material_output_tessellation(mat, in[5].link);
   }
   if (node->id != nullptr) {
     GPU_material_flag_set(mat, GPU_MATFLAG_NPR);

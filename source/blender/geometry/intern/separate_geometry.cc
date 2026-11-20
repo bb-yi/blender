@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup geo
+ */
+
 #include "GEO_separate_geometry.hh"
 
 #include "BKE_curves.hh"
@@ -68,7 +72,7 @@ static std::optional<PointCloud *> separate_pointcloud_selection(
     return nullptr;
   }
 
-  PointCloud *pointcloud = BKE_pointcloud_new_nomain(selection.size());
+  PointCloud *pointcloud = BKE_pointcloud_new_nomain(src_pointcloud.type, selection.size());
   bke::gather_attributes(src_pointcloud.attributes(),
                          AttrDomain::Point,
                          AttrDomain::Point,

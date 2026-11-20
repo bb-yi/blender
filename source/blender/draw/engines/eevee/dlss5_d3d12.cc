@@ -20,19 +20,20 @@
 #  include <dxgi1_6.h>
 #  include <wrl/client.h>
 
+#  include <algorithm>
 #  include <array>
 #  include <chrono>
 #  include <cmath>
-#  include <map>
-#  include <memory>
-#  include <mutex>
-#  include <algorithm>
+#  include <cstdio>
+#  include <cstring>
 #  include <filesystem>
 #  include <fstream>
 #  include <limits>
-#  include <cstdio>
+#  include <map>
+#  include <memory>
+#  include <mutex>
 #  include <string>
-#  include <cstring>
+#  include <tuple>
 #  include <vector>
 
 namespace blender::eevee {
@@ -696,10 +697,14 @@ struct Dlss5D3D12Session::Impl {
   bool super_resolution = false;
   GPUContext *offline_context = nullptr;
   bool force_history_reset = true;
+  Dlss5OfflineFrame offline_frame;
+  bool offline_frame_complete = false;
   /* One idle entry per feature per context, not an unbounded cache of scenes/sizes.
    * Checked-out sessions remain exclusively owned by their EEVEE module. */
   struct OfflineCache {
     Impl *idle[2] = {};
+    uint64_t sequence = 0;
+    std::map<std::tuple<uint32_t, std::string, std::string, bool>, Impl *> animation;
   };
   static inline std::mutex offline_cache_mutex;
   static inline std::map<GPUContext *, OfflineCache> offline_caches;
@@ -720,6 +725,9 @@ struct Dlss5D3D12Session::Impl {
     }
     for (Impl *session : cache.idle) {
       delete session;
+    }
+    for (auto &entry : cache.animation) {
+      delete entry.second;
     }
   }
   int sr_quality = 2;
@@ -1402,6 +1410,7 @@ struct Dlss5D3D12Session::Impl {
       return false;
     }
     release_feature();
+    force_history_reset = true;
 
     if (!same_size) {
       color.reset();
@@ -1739,7 +1748,12 @@ Dlss5D3D12Session::~Dlss5D3D12Session()
     std::lock_guard lock(Impl::offline_cache_mutex);
     auto found = Impl::offline_caches.find(impl_->offline_context);
     if (found != Impl::offline_caches.end()) {
-      Impl *&idle = found->second.idle[impl_->super_resolution];
+      Impl *&idle = impl_->offline_frame.sequence ?
+                        found->second.animation[std::make_tuple(impl_->offline_frame.scene,
+                                                                impl_->offline_frame.layer,
+                                                                impl_->offline_frame.view,
+                                                                impl_->offline_frame.pre_fx)] :
+                        found->second.idle[impl_->super_resolution];
       if (!idle) {
         CLOG_INFO(&LOG, "DLSS_CACHE return feature=%s creates=%llu evaluates=%llu",
                   impl_->super_resolution ? "SR" : "NR",
@@ -1782,6 +1796,72 @@ void Dlss5D3D12Session::reuse_for_offline_render()
   impl_->parameters_reported = false;
   CLOG_INFO(&LOG, "DLSS_CACHE acquire feature=%s hit=%d",
             impl_->super_resolution ? "SR" : "NR", cached != nullptr);
+}
+
+bool Dlss5D3D12Session::begin_offline_frame(const Dlss5OfflineFrame &frame)
+{
+  if (!frame.sequence) {
+    reuse_for_offline_render();
+    impl_->force_history_reset = true;
+    impl_->offline_frame_complete = false;
+    return false;
+  }
+  GPUContext *context = GPU_context_active_get();
+  if (!context || GPU_backend_get_type() != GPU_BACKEND_VULKAN) {
+    return false;
+  }
+  Impl *cached = nullptr;
+  std::vector<Impl *> expired;
+  {
+    std::lock_guard lock(Impl::offline_cache_mutex);
+    auto [entry, inserted] = Impl::offline_caches.try_emplace(context);
+    if (inserted) {
+      GPU_context_free_callback_add(Impl::free_offline_cache, context);
+    }
+    auto &cache = entry->second;
+    if (cache.sequence != frame.sequence) {
+      for (auto &item : cache.animation) {
+        expired.push_back(item.second);
+      }
+      cache.animation.clear();
+      cache.sequence = frame.sequence;
+    }
+    auto key = std::make_tuple(frame.scene, frame.layer, frame.view, frame.pre_fx);
+    std::swap(cached, cache.animation[key]);
+  }
+  for (Impl *session : expired) {
+    delete session;
+  }
+  if (cached) {
+    delete impl_;
+    impl_ = cached;
+  }
+  const auto &previous = impl_->offline_frame;
+  const bool continuous = cached && impl_->offline_frame_complete &&
+                          previous.frame + 1 == frame.frame && previous.camera == frame.camera &&
+                          previous.camera_type == frame.camera_type &&
+                          previous.signature == frame.signature &&
+                          previous.settings == frame.settings;
+  impl_->offline_context = context;
+  impl_->force_history_reset = !continuous;
+  impl_->offline_frame = frame;
+  impl_->offline_frame_complete = false;
+  impl_->parameters_reported = false;
+  CLOG_INFO(&LOG, "DLSS_CACHE acquire feature=NR hit=%d", cached != nullptr);
+  CLOG_INFO(&LOG,
+            "DLSS_HISTORY sequence=%llu frame=%d layer=%s view=%s pre_fx=%d reset=%d",
+            static_cast<unsigned long long>(frame.sequence),
+            frame.frame,
+            frame.layer.c_str(),
+            frame.view.c_str(),
+            frame.pre_fx,
+            !continuous || _wgetenv(L"BLENDER_DLSS_NR_FORCE_RESET") != nullptr);
+  return continuous;
+}
+
+void Dlss5D3D12Session::complete_offline_frame()
+{
+  impl_->offline_frame_complete = true;
 }
 
 void Dlss5D3D12Session::retry_initialization()
@@ -1940,6 +2020,11 @@ bool Dlss5D3D12Session::ensure_resources(int2,
 }
 void Dlss5D3D12Session::reset() {}
 void Dlss5D3D12Session::reuse_for_offline_render() {}
+bool Dlss5D3D12Session::begin_offline_frame(const Dlss5OfflineFrame &)
+{
+  return false;
+}
+void Dlss5D3D12Session::complete_offline_frame() {}
 void Dlss5D3D12Session::retry_initialization() {}
 bool Dlss5D3D12Session::warmup()
 {

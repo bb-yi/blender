@@ -12,12 +12,12 @@
 #include <ostream>
 #include <type_traits>
 
-#include "BLI_build_config.h"
+#include "BLI_build_config.hh"
 #include "BLI_hash.hh"
 #include "BLI_math_vector_swizzle.hh"
 #include "BLI_math_vector_unroll.hh"
 #include "BLI_unique_hash.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 namespace blender {
 
@@ -746,6 +746,20 @@ struct VecBase : public vec_struct_base<T, Size, std::is_trivial_v<T>> {
     return stream;
   }
 };
+
+/**
+ * This is a specialization of #value_is_zero_memory for VecBase. It allows using calloc for
+ * container construction in some cases.
+ */
+template<typename T, int Size> constexpr bool value_is_zero_memory(const VecBase<T, Size> &v)
+{
+  for (int i = 0; i < Size; i++) {
+    if (!value_is_zero_memory(v[i])) {
+      return false;
+    }
+  }
+  return true;
+}
 
 namespace math {
 

@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "node_shader_util.hh"
 
 namespace blender {
@@ -22,10 +26,11 @@ static int node_shader_gpu_fresnel(GPUMaterial *mat,
                                    GPUNodeStack *out)
 {
   if (!in[1].link) {
-    GPU_link(mat, "world_normals_get", &in[1].link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &in[1].link);
   }
 
-  return GPU_stack_link(mat, node, "node_fresnel", in, out);
+  return GPU_stack_link(
+      mat, node, "node_fresnel", in, out, GPU_kernel_globals(), GPU_shading_data());
 }
 
 NODE_SHADER_MATERIALX_BEGIN

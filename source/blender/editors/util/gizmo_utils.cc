@@ -10,7 +10,7 @@
 
 #include <cstring>
 
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 
@@ -33,7 +33,7 @@ bool ED_gizmo_poll_or_unlink_delayed_from_operator(const bContext *C,
   wmOperator *op = WM_operator_last_redo(C);
 #else
   wmWindowManager *wm = CTX_wm_manager(C);
-  wmOperator *op = static_cast<wmOperator *>(wm->runtime->operators.last);
+  wmOperator *op = wm->runtime->operators.last();
 #endif
 
   if (op == nullptr || !STREQ(op->type->idname, idname)) {

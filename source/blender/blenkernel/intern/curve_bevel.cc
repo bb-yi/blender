@@ -11,8 +11,8 @@
 
 #include <cstring>
 
-#include "BLI_listbase.h"
-#include "BLI_math_base.h" /* Needed with MSVC for M_PI & M_PI_2. */
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh" /* Needed with MSVC for M_PI & M_PI_2. */
 
 #include "MEM_guardedalloc.h"
 
@@ -243,7 +243,7 @@ static void curve_bevel_make_from_object(const Curve *cu, ListBaseT<DispList> *d
 
     DispList *dl;
     if (cu->bevobj->runtime->curve_cache) {
-      dl = static_cast<DispList *>(cu->bevobj->runtime->curve_cache->disp.first);
+      dl = cu->bevobj->runtime->curve_cache->disp.first();
     }
     else {
       BLI_assert(cu->bevobj->runtime->curve_cache != nullptr);

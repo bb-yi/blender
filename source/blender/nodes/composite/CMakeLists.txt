@@ -44,6 +44,7 @@ set(SRC
   nodes/node_composite_combine_color.cc
   nodes/node_composite_convert_color_space.cc
   nodes/node_composite_convert_to_display.cc
+  nodes/node_composite_lut.cc
   nodes/node_composite_convolve.cc
   nodes/node_composite_corner_pin.cc
   nodes/node_composite_crop.cc

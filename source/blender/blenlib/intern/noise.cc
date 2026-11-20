@@ -13,12 +13,12 @@
 #include <cmath>
 #include <cstdint>
 
-#include "BLI_math_base.h"
 #include "BLI_math_base.hh"
+#include "BLI_math_base_c.hh"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_noise.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 /* Some noise functions integer overflow as part of expected operation. */
 #ifdef __SANITIZE_ADDRESS__
@@ -691,12 +691,11 @@ template<typename T>
  * disable inlining for this function until we can get the compiler fixed. */
 BLI_NOINLINE
 #endif
-    float
-    perlin_fbm(T p,
-               const float detail,
-               const float roughness,
-               const float lacunarity,
-               const bool normalize)
+    float perlin_fbm(T p,
+                     const float detail,
+                     const float roughness,
+                     const float lacunarity,
+                     const bool normalize)
 {
   float fscale = 1.0f;
   float amp = 1.0f;
@@ -2302,7 +2301,8 @@ static float2 compute_2d_gabor_kernel(const float2 position,
  * \lim_{x \to \infty} \frac{1 - e^{-2 \pi f_0^2}}{4}
  * \endcode
  *
- * To get an approximation of 0.25. */
+ * To get an approximation of 0.25.
+ */
 static float compute_2d_gabor_standard_deviation()
 {
   const float integral_of_gabor_squared = 0.25f;

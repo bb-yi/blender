@@ -16,6 +16,7 @@ void main()
   drw_ResourceID_iface.resource_id = resource_id_raw;
 
   interp.P = drw_point_object_to_world(pos);
+  interp.P_relative = to_float3x3(drw_modelmat()) * pos;
   interp.N = normalize(drw_normal_object_to_world(nor));
   bake_interp.Ng = normalize(drw_normal_object_to_world(geom_nor));
   bake_interp.primitive_id = primitive_id;

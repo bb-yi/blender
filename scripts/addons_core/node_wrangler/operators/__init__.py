@@ -52,6 +52,7 @@ classes = (
     NODE_OT_lazy_mix,
     NODE_OT_link_active_to_selected,
     NODE_OT_link_to_output,
+    NODE_OT_nw_preview,
     NODE_OT_merge_selected,
     NODE_OT_reload_images,
     NODE_OT_reset_backdrop,

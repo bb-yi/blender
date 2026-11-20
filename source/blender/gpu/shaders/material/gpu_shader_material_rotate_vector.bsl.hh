@@ -1,0 +1,13 @@
+/* SPDX-FileCopyrightText: 2026 Blender Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+
+#pragma once
+
+#include "gpu_shader_math_quaternion.bsl.hh"
+
+[[node]]
+void rotate_vector(float3 vector, float4 rotation, float3 &result)
+{
+  result = transform_point_by_quaternion(Quaternion::from_float4(rotation), vector);
+}

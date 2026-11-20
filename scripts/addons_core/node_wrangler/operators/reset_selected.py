@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-import bpy
 from bpy.types import Operator
 from bpy_extras.node_utils import connect_sockets
 from bpy.app.translations import pgettext_rpt as rpt_
@@ -33,7 +32,8 @@ class NODE_OT_reset_selected(Operator):
     def is_frame_node(node):
         return node.bl_idname == "NodeFrame"
 
-    group_node_types = {"CompositorNodeGroup", "GeometryNodeGroup", "ShaderNodeGroup"}
+    group_node_types = {"CompositorNodeGroup", "GeometryNodeGroup", "ShaderNodeGroup",
+                        "EeveeFilterGraphNodeGroup", "EeveeFilterGraphNodeFilterMaterial"}
     # TODO All zone nodes are ignored here for now, because replacing one of the input/output pair breaks the zone.
     # It's possible to handle zones by using the `paired_output` function of an input node
     # and reconstruct the zone using the `pair_with_output` function.
@@ -49,9 +49,12 @@ class NODE_OT_reset_selected(Operator):
         return node.bl_idname in cls.node_ignore
 
     def execute(self, context):
-        node_active = context.active_node
         node_selected = context.selected_nodes
-        active_node_name = node_active.name if node_active.select else None
+        active_node_name = None
+
+        if active_node := context.active_node:
+            active_node_name = active_node.name if active_node.select else None
+
         valid_nodes = [n for n in node_selected if not self.ignore_node(n)]
 
         # Create output lists

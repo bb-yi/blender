@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "node_geometry_util.hh"
+#include "shader/node_shader_util.hh"
 
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "NOD_rna_define.hh"
 #include "RNA_access.hh"
@@ -47,7 +48,7 @@ class LazyFunctionForWarningNode : public LazyFunction {
   void execute_impl(lf::Params &params, const lf::Context &context) const override
   {
     const SocketValueVariant show_variant = params.get_input<SocketValueVariant>(0);
-    const bool show = show_variant.get<bool>();
+    const bool show = show_variant.copy_as<bool>();
     if (!show) {
       params.set_output(0, show_variant);
       return;
@@ -87,17 +88,8 @@ class WarningOperation : public NodeOperation {
       return;
     }
 
-    nodes::eval_log::NodesEvalLog *log = this->context().nodes_evaluation_log();
-    if (!log) {
-      return;
-    }
-    nodes::eval_log::NodeTreeLogger &tree_logger = log->get_local_tree_logger(
-        this->get_compute_context());
-
     const std::string message = this->get_input("Message").get_single_value_default<std::string>();
-    tree_logger.node_warnings.append(
-        *tree_logger.allocator,
-        {this->node().identifier, {NodeWarningType(this->node().custom1), std::move(message)}});
+    this->add_warning(NodeWarningType(this->node().custom1), message);
   }
 };
 
@@ -140,7 +132,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_cmp_node_type_base(&ntype, "GeometryNodeWarning"_ustr, GEO_NODE_WARNING);
+  common_node_type_base(&ntype, "GeometryNodeWarning"_ustr, GEO_NODE_WARNING);
   ntype.ui_name = "Warning";
   ntype.ui_description = "Create custom warnings in node groups";
   ntype.enum_name_legacy = "WARNING";

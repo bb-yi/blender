@@ -126,7 +126,7 @@ bNode &version_node_add_empty(bNodeTree &ntree, const char *idname);
  * See also #bNodeType for more details.
  */
 bNode &version_node_add_unknown(bNodeTree &ntree,
-                                bke::bNodeType &node_type,
+                                bke::bNodeType &ntype,
                                 const char *idname,
                                 const int16_t legacy_type,
                                 const std::string &ui_name,
@@ -186,6 +186,13 @@ void version_node_socket_index_animdata(
     int socket_index_orig,
     int socket_index_offset,
     int total_number_of_sockets);
+
+void version_node_socket_index_animdata(Main *bmain,
+                                        int node_tree_type,
+                                        const char *node_idname,
+                                        int socket_index_orig,
+                                        int socket_index_offset,
+                                        int total_number_of_sockets);
 
 /**
  * Replace the ID name of all nodes in the tree with the given type with the new name.
@@ -315,5 +322,8 @@ static void adjust_fcurve_key_frame_values(FCurve *fcurve,
  * for older versions before reusable node trees were introduced in bd61e69be5, while the new
  * compositing_node_group is returned otherwise. */
 bNodeTree *version_get_scene_compositor_node_tree(Main *bmain, Scene *scene);
+
+/* Adds the given node group as a new scene compositor effect to the given scene. */
+void version_compositing_node_group_to_effect(Scene &scene, bNodeTree &node_group);
 
 }  // namespace blender

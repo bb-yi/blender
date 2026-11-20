@@ -2,8 +2,10 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+import argparse
 import sys
 import unittest
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 from _bpy_internal.assets.remote_library import json_parsing, hashing
 from _bpy_internal.assets.remote_library import blender_asset_library_openapi as api_models
@@ -13,8 +15,12 @@ import bpy
 
 
 """
-blender -b --factory-startup --python tests/python/assets/remote_library/listing_generator_test.py
+blender -b --factory-startup --python tests/python/assets/remote_library/listing_generator_test.py -- \
+    --testdir tests/files/asset_library
 """
+
+# CLI argument, will be set to its actual value in main() below.
+arg_testdir: Path
 
 
 class CustomPropertiesTest(unittest.TestCase):
@@ -55,6 +61,73 @@ class CustomPropertiesTest(unittest.TestCase):
             Prop(name='amazing', type=Types.IDP_BOOL, value=True),
         ]
         # autopep8: on
+
+        assert meta is not None
+        self.assertEqual(expected_props, meta.properties)
+
+    def test_group_properties(self) -> None:
+        filepath = arg_testdir / "node-tool-file.blend"
+        bpy.ops.wm.open_mainfile(filepath=str(filepath))
+
+        node_asset = bpy.data.node_groups['Move object up']
+
+        meta = asset_finder._get_asset_meta(node_asset.asset_data)
+
+        Types = api_models.CustomPropertyTypeV1
+        Prop = api_models.CustomPropertyV1
+        expected_props = [
+            Prop(name='type',
+                 type=Types.IDP_INT,
+                 value=3),
+            Prop(name='properties',
+                 type=Types.IDP_GROUP,
+                 value=[Prop(name='inputs',
+                             type=Types.IDP_GROUP,
+                             value=[Prop(name='Socket_0',
+                                         type=Types.IDP_GROUP,
+                                         value=[Prop(name='name',
+                                                     type=Types.IDP_STRING,
+                                                     value='Geometry'),
+                                                Prop(name='type',
+                                                     type=Types.IDP_INT,
+                                                     value=10),
+                                                Prop(name='description',
+                                                     type=Types.IDP_STRING,
+                                                     value='')],
+                                         )],
+                             ),
+                        Prop(name='panels', type=Types.IDP_GROUP, value=[]),
+                        Prop(name='outputs',
+                             type=Types.IDP_GROUP,
+                             value=[Prop(name='Geometry',
+                                         type=Types.IDP_STRING,
+                                         value='NodeSocketGeometry')],
+                             ),
+                        Prop(name='output_sockets',
+                             type=Types.IDP_GROUP,
+                             value=[Prop(name='Socket_1',
+                                         type=Types.IDP_GROUP,
+                                         value=[Prop(name='name',
+                                                     type=Types.IDP_STRING,
+                                                     value='Geometry'),
+                                                Prop(name='type',
+                                                     type=Types.IDP_INT,
+                                                     value=10),
+                                                Prop(name='description',
+                                                     type=Types.IDP_STRING,
+                                                     value='')],
+                                         )],
+                             )],
+                 ),
+            Prop(name='geometry_node_asset_traits_flag',
+                 type=Types.IDP_INT,
+                 value=137,
+                 itemtype=None),
+            Prop(name='node_tool_idname',
+                 type=Types.IDP_STRING,
+                 value='geometry.tool',
+                 itemtype=None)
+        ]
 
         assert meta is not None
         self.assertEqual(expected_props, meta.properties)
@@ -131,14 +204,248 @@ class HashingTest(unittest.TestCase):
             )))
 
 
+# This test is using pure paths to make it independent of the platform it runs on. However, since the code under test
+# works with concrete paths, some type errors have to be silenced in this test.
+class BlenderVersionFromFilenameTest(unittest.TestCase):
+    maxDiff = None
+
+    def assert_versions_per_filename(
+        self,
+        paths_in: list[PurePath],
+        expect: list[tuple[PurePath, asset_finder.BlenderVersion, asset_finder.BlenderVersion]]
+    ) -> None:
+        """Helper to test the asset_finder.filenames_group_by_version_metadata() function."""
+
+        expect = [
+            asset_finder.FileVersionInfo(
+                path=path,  # type: ignore
+                blender_version_min=version_min,
+                blender_version_until=version_until,
+            )
+            for path, version_min, version_until in expect
+        ]
+        actual = asset_finder.filenames_group_by_version_metadata(paths_in)
+        self.assertEqual(expect, actual)
+
+    def test_filenames_group_by_version_metadata(self) -> None:
+        # One asset with three versions.
+        # - Mis-matched case of `@b` shouldn't matter.
+        # - Not given in version-order.
+        self.assert_versions_per_filename([
+            PurePosixPath("/path/to/library/subdir/filéname.blend"),
+            PurePosixPath("/path/to/library/subdir/filéname@B6_0.blend"),
+            PurePosixPath("/path/to/library/subdir/filéname@b5_3.blend"),
+        ], [
+            (PurePosixPath("/path/to/library/subdir/filéname.blend"), (), (5, 3)),
+            (PurePosixPath("/path/to/library/subdir/filéname@b5_3.blend"), (5, 3), (6, 0)),
+            (PurePosixPath("/path/to/library/subdir/filéname@B6_0.blend"), (6, 0), ()),
+        ])
+
+        # Major versions > 10:
+        self.assert_versions_per_filename([
+            PurePosixPath("/path/to/big/major.blend"),
+            PurePosixPath("/path/to/big/major@b20_0.blend"),
+            PurePosixPath("/path/to/big/major@b15_3.blend"),
+        ], [
+            (PurePosixPath("/path/to/big/major.blend"), (), (15, 3)),
+            (PurePosixPath("/path/to/big/major@b15_3.blend"), (15, 3), (20, 0)),
+            (PurePosixPath("/path/to/big/major@b20_0.blend"), (20, 0), ()),
+        ])
+
+        # Minor versions > 10:
+        self.assert_versions_per_filename([
+            PurePosixPath("/path/to/big/minor.blend"),
+            PurePosixPath("/path/to/big/minor@b5_14.blend"),
+            PurePosixPath("/path/to/big/minor@b5_3.blend"),
+        ], [
+            (PurePosixPath("/path/to/big/minor.blend"), (), (5, 3)),
+            (PurePosixPath("/path/to/big/minor@b5_3.blend"), (5, 3), (5, 14)),
+            (PurePosixPath("/path/to/big/minor@b5_14.blend"), (5, 14), ()),
+        ])
+
+        # Malformed marker.
+        self.assert_versions_per_filename([
+            PurePosixPath("/path/to/malformed.blend"),
+            PurePosixPath("/path/to/malformed@b553.blend"),
+        ], [
+            (PurePosixPath("/path/to/malformed.blend"), (), ()),
+            (PurePosixPath("/path/to/malformed@b553.blend"), (), ()),
+        ])
+
+        # No marker.
+        self.assert_versions_per_filename([
+            PurePosixPath("/path/to/alone.blend"),
+        ], [
+            (PurePosixPath("/path/to/alone.blend"), (), ()),
+        ])
+
+        # Only marker.
+        self.assert_versions_per_filename([
+            PurePosixPath("/path/to/@b5_5.blend"),
+        ], [
+            (PurePosixPath("/path/to/@b5_5.blend"), (), ()),
+        ])
+
+        # Double markers. These should be seen as two separate base names, as only
+        # the last marker is stripped to form the base name.
+        self.assert_versions_per_filename([
+            PurePosixPath("/path/to/double@b4_5.blend"),
+            PurePosixPath("/path/to/double@b5_3@b6_0.blend"),
+        ], [
+            (PurePosixPath("/path/to/double@b4_5.blend"), (4, 5), ()),
+            (PurePosixPath("/path/to/double@b5_3@b6_0.blend"), (6, 0), ()),
+        ])
+
+        # No markerless first version.
+        self.assert_versions_per_filename([
+            PurePosixPath("/path/to/only_marked@b5_4.blend"),
+            PurePosixPath("/path/to/only_marked@b6_0.blend"),
+        ], [
+            (PurePosixPath("/path/to/only_marked@b5_4.blend"), (5, 4), (6, 0)),
+            (PurePosixPath("/path/to/only_marked@b6_0.blend"), (6, 0), ()),
+        ])
+
+    def test_filenames_group_by_version_metadata_duplicate(self) -> None:
+        # Two files with the same min version:
+        self.assert_versions_per_filename([
+            PurePosixPath("/path/to/asset.blend"),
+            PurePosixPath("/path/to/asset@b5_3.blend"),
+            PurePosixPath("/path/to/asset@B5_3.blend"),
+            PurePosixPath("/path/to/asset@b6_0.blend"),
+        ], [
+            (PurePosixPath("/path/to/asset.blend"), (), (5, 3)),
+            (PurePosixPath("/path/to/asset@B5_3.blend"), (5, 3), (6, 0)),
+            (PurePosixPath("/path/to/asset@b5_3.blend"), (5, 3), (6, 0)),
+            (PurePosixPath("/path/to/asset@b6_0.blend"), (6, 0), ()),
+        ])
+
+    def test_filenames_group_by_version_metadata__posix(self) -> None:
+        # POSIX paths are case sensitive:
+        self.assert_versions_per_filename([
+            PurePosixPath('/path/to/case/sensitive.blend'),
+            PurePosixPath('/path/to/CASE/sensitive@b5_3.blend'),
+            PurePosixPath('/path/to/case/SENSITIVE@B6_0.blend'),
+        ], [
+            (PurePosixPath('/path/to/case/sensitive.blend'), (), ()),
+            (PurePosixPath('/path/to/CASE/sensitive@b5_3.blend'), (5, 3), ()),
+            (PurePosixPath('/path/to/case/SENSITIVE@B6_0.blend'), (6, 0), ()),
+        ])
+
+    def test_filenames_group_by_version_metadata__windows(self) -> None:
+        # One asset with three versions.
+        # - Mis-matched case of `@b` shouldn't matter.
+        # - Not given in version-order.
+        self.assert_versions_per_filename([
+            PureWindowsPath(r'C:\path\to\library\subdir\filéname.blend'),
+            PureWindowsPath(r'C:\path\to\library\subdir\filéname@B6_0.blend'),
+            PureWindowsPath(r'C:\path\to\library\subdir\filéname@b5_3.blend'),
+        ], [
+            (PureWindowsPath(r"C:\path\to\library\subdir\filéname.blend"), (), (5, 3)),
+            (PureWindowsPath(r"C:\path\to\library\subdir\filéname@b5_3.blend"), (5, 3), (6, 0)),
+            (PureWindowsPath(r"C:\path\to\library\subdir\filéname@B6_0.blend"), (6, 0), ()),
+        ])
+
+        # Same path on different drive:
+        self.assert_versions_per_filename([
+            PureWindowsPath(r'C:\path\to\drive\filéname.blend'),
+            PureWindowsPath(r'D:\path\to\drive\filéname@B6_0.blend'),
+            PureWindowsPath(r'C:\path\to\drive\filéname@b5_3.blend'),
+        ], [
+            (PureWindowsPath(r'C:\path\to\drive\filéname.blend'), (), (5, 3)),
+            # No version, because next file is different cluster
+            (PureWindowsPath(r'C:\path\to\drive\filéname@b5_3.blend'), (5, 3), ()),
+            (PureWindowsPath(r'D:\path\to\drive\filéname@B6_0.blend'), (6, 0), ()),
+        ])
+
+        # Windows paths are not case sensitive:
+        self.assert_versions_per_filename([
+            PureWindowsPath(r'C:\path\to\case\insensitive.blend'),
+            PureWindowsPath(r'C:\path\to\CASE\insensitive@b5_3.blend'),
+            PureWindowsPath(r'C:\path\to\case\INSENSITIVE@B6_0.blend'),
+        ], [
+            (PureWindowsPath(r'C:\path\to\case\insensitive.blend'), (), (5, 3)),
+            (PureWindowsPath(r'C:\path\to\CASE\insensitive@b5_3.blend'), (5, 3), (6, 0)),
+            (PureWindowsPath(r'C:\path\to\case\INSENSITIVE@B6_0.blend'), (6, 0), ()),
+        ])
+
+    def test_asset_versions_min_until(self) -> None:
+        # Expected case: written by minimum blend version, with 'until' version.
+        actual = asset_finder._asset_versions_min_until(
+            asset_finder.FileVersionInfo(
+                path=PurePosixPath("/path/to/library/subdir/filéname@b5_3.blend"),
+                blender_version_min=(5, 3),
+                blender_version_until=(6, 0),
+            ),
+            file_written_version=(5, 3),
+        )
+        expected = api_models.AssetBlenderVersionsV1(min="5.3", until="6.0")
+        self.assertEqual(expected, actual)
+
+        # Expected case: written by minimum blend version, without 'until' version.
+        actual = asset_finder._asset_versions_min_until(
+            asset_finder.FileVersionInfo(
+                path=PurePosixPath("/path/to/library/subdir/filéname@b5_3.blend"),
+                blender_version_min=(5, 3),
+                blender_version_until=(),
+            ),
+            file_written_version=(5, 3),
+        )
+        expected = api_models.AssetBlenderVersionsV1(min="5.3")
+        self.assertEqual(expected, actual)
+
+        # Expected case: written by minimum blend version, no versions in the filename.
+        actual = asset_finder._asset_versions_min_until(
+            asset_finder.FileVersionInfo(
+                path=PurePosixPath("/path/to/library/subdir/filéname.blend"),
+                blender_version_min=(),
+                blender_version_until=(),
+            ),
+            file_written_version=(5, 3),
+        )
+        expected = api_models.AssetBlenderVersionsV1(min="5.3")
+        self.assertEqual(expected, actual)
+
+        # Weird case case: written by version newer than the minimal one.
+        actual = asset_finder._asset_versions_min_until(
+            asset_finder.FileVersionInfo(
+                path=PurePosixPath("/path/to/library/subdir/filéname@b5_3.blend"),
+                blender_version_min=(5, 3),
+                blender_version_until=(6, 0),
+            ),
+            file_written_version=(5, 4),
+        )
+
+        expected = api_models.AssetBlenderVersionsV1(min="5.4", until="6.0")
+        self.assertEqual(expected, actual)
+
+        # Weird case case: written by version newer than the 'until' one.
+        actual = asset_finder._asset_versions_min_until(
+            asset_finder.FileVersionInfo(
+                path=PurePosixPath("/path/to/library/subdir/filéname@b5_3.blend"),
+                blender_version_min=(5, 3),
+                blender_version_until=(6, 0),
+            ),
+            file_written_version=(6, 2),
+        )
+
+        expected = api_models.AssetBlenderVersionsV1(min="6.2", until="6.0")
+        self.assertEqual(expected, actual)
+
+
 def main():
-    global args
+    global arg_testdir
 
     argv = [sys.argv[0]]
     if '--' in sys.argv:
         argv += sys.argv[sys.argv.index('--') + 1:]
 
-    unittest.main(argv=argv)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--testdir', required=True, type=Path)
+    args, remaining = parser.parse_known_args(argv)
+
+    arg_testdir = args.testdir
+
+    unittest.main(argv=remaining)
 
 
 if __name__ == "__main__":

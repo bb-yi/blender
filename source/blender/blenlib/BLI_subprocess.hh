@@ -25,7 +25,7 @@
 
 #  include "BLI_span.hh"
 #  include "BLI_string_ref.hh"
-#  include "BLI_sys_types.h"
+#  include "BLI_sys_types.hh"
 #  include "BLI_utility_mixins.hh"
 #  include <string>
 
@@ -103,7 +103,7 @@ class SharedMemory : NonCopyable {
   /**
    * Get a pointer to the shared memory block.
    * WARNING: It can be null if creation failed, or invalid if the owner destructor has run.
-   * */
+   */
   void *get_data()
   {
     return data_;

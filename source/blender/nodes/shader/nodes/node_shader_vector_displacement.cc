@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup shdnodes
+ */
+
 #include "node_shader_util.hh"
 
 namespace blender {
@@ -46,9 +50,17 @@ static int gpu_shader_vector_displacement(GPUMaterial *mat,
                             "node_vector_displacement_tangent",
                             in,
                             out,
-                            GPU_attribute(mat, CD_TANGENT, ""));
+                            GPU_attribute(mat, CD_TANGENT, ""),
+                            GPU_kernel_globals(),
+                            GPU_shading_data());
     case SHD_SPACE_OBJECT:
-      return GPU_stack_link(mat, node, "node_vector_displacement_object", in, out);
+      return GPU_stack_link(mat,
+                            node,
+                            "node_vector_displacement_object",
+                            in,
+                            out,
+                            GPU_kernel_globals(),
+                            GPU_shading_data());
     case SHD_SPACE_WORLD:
     default:
       return GPU_stack_link(mat, node, "node_vector_displacement_world", in, out);

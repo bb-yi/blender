@@ -6,8 +6,8 @@
  * \ingroup shdnodes
  */
 
-#include "BLI_listbase.h"
-#include "BLI_string.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
 #include "BLI_string_utils.hh"
 
 #include "UI_interface_layout.hh"

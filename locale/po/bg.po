@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.2.0 LTS Release Candidate (b'3d8c46ac31f4')\n"
+"Project-Id-Version: Blender 5.3.0 Release Candidate (b'f78a5e153839')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-07-13 07:34+0000\n"
+"POT-Creation-Date: 2026-11-09 09:34+0000\n"
 "PO-Revision-Date: 2025-07-23 15:34+0000\n"
 "Last-Translator: Just Adam <adam.abbas2009@gmail.com>\n"
 "Language-Team: Bulgarian <https://translate.blender.org/projects/blender-ui/ui/bg/>\n"
@@ -664,10 +664,6 @@ msgid "Gamma"
 msgstr "Гама"
 
 
-msgid "View"
-msgstr "Изглед"
-
-
 msgid "RGB"
 msgstr "ЧЗС"
 
@@ -678,6 +674,10 @@ msgstr "По часовника"
 
 msgid "Alpha"
 msgstr "Запълненост"
+
+
+msgid "Identifier"
+msgstr "Идентификатор"
 
 
 msgid "Output"
@@ -718,6 +718,10 @@ msgstr "Разделяне"
 
 msgid "Plane"
 msgstr "Равнина"
+
+
+msgid "View"
+msgstr "Изглед"
 
 
 msgid "Render"
@@ -766,10 +770,6 @@ msgstr "Магнитен"
 
 msgid "Wind"
 msgstr "Вятър"
-
-
-msgid "Identifier"
-msgstr "Идентификатор"
 
 
 msgid "User Defined"
@@ -1124,14 +1124,6 @@ msgid "Type of event"
 msgstr "Вид събитие"
 
 
-msgid "Release"
-msgstr "Освобождаване"
-
-
-msgid "Click"
-msgstr "Клик"
-
-
 msgid "Mix"
 msgstr "Смесване"
 
@@ -1152,12 +1144,12 @@ msgid "Merge"
 msgstr "Слей"
 
 
-msgid "Import"
-msgstr "Внеси"
-
-
 msgid "UV Mapping"
 msgstr "UV Картиране"
+
+
+msgid "Import"
+msgstr "Внеси"
 
 
 msgid "Light"
@@ -1403,11 +1395,6 @@ msgstr "Филтрирай .blend файловете"
 
 msgid "Filter text files"
 msgstr "Филтрирай текстовите файлове"
-
-
-msgctxt "Operator"
-msgid "Accept"
-msgstr "Приеми"
 
 
 msgid "Directory of the file"
@@ -1830,6 +1817,10 @@ msgid "Copy"
 msgstr "Копиране"
 
 
+msgid "Movie"
+msgstr "Преместване"
+
+
 msgctxt "Operator"
 msgid "Add Surface Circle"
 msgstr "Добави Повърхностен Кръг"
@@ -1942,6 +1933,10 @@ msgid "Doc ID"
 msgstr "Doc ID"
 
 
+msgid "Trusted Source"
+msgstr "Надежден Източник"
+
+
 msgctxt "Operator"
 msgid "Memory Statistics"
 msgstr "Статистики на Паметта"
@@ -1953,10 +1948,6 @@ msgstr "Принтирай статистиката на паметта в ко�
 
 msgid "Open a Blender file"
 msgstr "Отваряне на Blender файл"
-
-
-msgid "Trusted Source"
-msgstr "Надежден Източник"
 
 
 msgctxt "Operator"
@@ -2231,6 +2222,10 @@ msgid "Animated"
 msgstr "Анимирани"
 
 
+msgid "Release"
+msgstr "Освобождаване"
+
+
 msgid "Cancel"
 msgstr "Отказ"
 
@@ -2290,10 +2285,6 @@ msgstr "Запълненост:"
 
 msgid "OK"
 msgstr "ОК"
-
-
-msgid "Movie"
-msgstr "Преместване"
 
 
 msgid "Stop this job"

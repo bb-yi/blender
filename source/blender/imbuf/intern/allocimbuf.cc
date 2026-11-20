@@ -12,8 +12,10 @@
 #include <algorithm>
 #include <cstddef>
 
+#include "IMB_colormanagement.hh"
 #include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
+#include "IMB_partial_update.hh"
 
 #include "IMB_colormanagement_intern.hh"
 #include "IMB_metadata.hh"
@@ -51,7 +53,7 @@ bool imb_alloc_buffer(BufferType &buffer,
     return false;
   }
   buffer.data = static_cast<decltype(BufferType::data)>(data);
-  buffer.sharing_info = ImplicitSharingPtr<>(implicit_sharing::info_for_mem_free(data));
+  buffer.sharing_info = ImplicitSharingPtr<>(implicit_sharing::info_for_mem_free(buffer.data));
   return true;
 }
 
@@ -93,12 +95,34 @@ float *ImBuf::float_data_for_write()
   return const_cast<float *>(this->float_buffer.data);
 }
 
+const ColorSpace &ImBuf::byte_colorspace() const
+{
+  if (this->byte_buffer.colorspace) {
+    return *this->byte_buffer.colorspace;
+  }
+
+  return *IMB_colormanagement_space_get_named(
+      IMB_colormanagement_role_colorspace_name_get(COLOR_ROLE_DEFAULT_BYTE));
+}
+
+const ColorSpace &ImBuf::float_colorspace() const
+{
+  if (this->float_buffer.colorspace) {
+    return *this->float_buffer.colorspace;
+  }
+
+  return *IMB_colormanagement_space_get_named(
+      IMB_colormanagement_role_colorspace_name_get(COLOR_ROLE_SCENE_LINEAR));
+}
+
 void IMB_free_float_pixels(ImBuf *ibuf)
 {
   if (ibuf == nullptr) {
     return;
   }
-  ibuf->float_buffer = {};
+  /* Keep the colorspace, it's used when new pixels are assigned. */
+  ibuf->float_buffer.data = nullptr;
+  ibuf->float_buffer.sharing_info.reset();
 }
 
 void IMB_free_byte_pixels(ImBuf *ibuf)
@@ -106,23 +130,15 @@ void IMB_free_byte_pixels(ImBuf *ibuf)
   if (ibuf == nullptr) {
     return;
   }
-  ibuf->byte_buffer = {};
+  /* Keep the colorspace, it's used when new pixels are assigned. */
+  ibuf->byte_buffer.data = nullptr;
+  ibuf->byte_buffer.sharing_info.reset();
 }
 
 void IMB_free_all_data(ImBuf *ibuf)
 {
   IMB_free_byte_pixels(ibuf);
   IMB_free_float_pixels(ibuf);
-}
-
-void IMB_free_gpu_textures(ImBuf *ibuf)
-{
-  if (!ibuf || !ibuf->gpu.texture) {
-    return;
-  }
-
-  GPU_texture_free(ibuf->gpu.texture);
-  ibuf->gpu.texture = nullptr;
 }
 
 void IMB_freeImBuf(ImBuf *ibuf)
@@ -139,7 +155,7 @@ void IMB_freeImBuf(ImBuf *ibuf)
 
     IMB_free_all_data(ibuf);
     IMB_free_gpu_textures(ibuf);
-    IMB_metadata_free(ibuf->metadata);
+    IMB_partial_update_free(ibuf);
     MEM_delete(ibuf);
   }
 }
@@ -161,8 +177,6 @@ ImBuf *IMB_makeSingleUser(ImBuf *ibuf)
   }
 
   ImBuf *rval = IMB_dupImBuf(ibuf);
-
-  IMB_metadata_copy(rval, ibuf);
 
   IMB_freeImBuf(ibuf);
 
@@ -189,9 +203,7 @@ bool IMB_alloc_float_pixels(ImBuf *ibuf, const uint channels, bool initialize_pi
     return false;
   }
 
-  if (ibuf->float_data()) {
-    IMB_free_float_pixels(ibuf);
-  }
+  IMB_free_float_pixels(ibuf);
 
   if (!imb_alloc_buffer(
           ibuf->float_buffer, ibuf->x, ibuf->y, channels, sizeof(float), initialize_pixels))
@@ -212,7 +224,7 @@ bool IMB_alloc_byte_pixels(ImBuf *ibuf, bool initialize_pixels)
     return false;
   }
 
-  ibuf->byte_buffer = {};
+  IMB_free_byte_pixels(ibuf);
 
   if (!imb_alloc_buffer(
           ibuf->byte_buffer, ibuf->x, ibuf->y, 4, sizeof(uint8_t), initialize_pixels))
@@ -225,7 +237,7 @@ bool IMB_alloc_byte_pixels(ImBuf *ibuf, bool initialize_pixels)
 
 void ImBuf::assign_byte_data(uint8_t *data)
 {
-  this->byte_buffer = {};
+  IMB_free_byte_pixels(this);
   if (data) {
     this->byte_buffer.data = data;
     this->byte_buffer.sharing_info = ImplicitSharingPtr<>(
@@ -235,7 +247,7 @@ void ImBuf::assign_byte_data(uint8_t *data)
 
 void ImBuf::assign_float_data(float *data)
 {
-  this->float_buffer = {};
+  IMB_free_float_pixels(this);
   if (data) {
     this->float_buffer.data = data;
     this->float_buffer.sharing_info = ImplicitSharingPtr<>(
@@ -267,12 +279,6 @@ void ImBuf::assign_float_data(const float *data, ImplicitSharingPtr<> sharing_pt
   this->float_buffer.sharing_info = std::move(sharing_ptr);
 }
 
-void IMB_assign_gpu_texture(ImBuf *ibuf, gpu::Texture *texture)
-{
-  IMB_free_gpu_textures(ibuf);
-  ibuf->gpu.texture = texture;
-}
-
 void IMB_ensure_host_buffer(ImBuf *ibuf)
 {
   if (!ibuf || !ibuf->gpu.texture) {
@@ -293,9 +299,7 @@ void IMB_ensure_host_buffer(ImBuf *ibuf)
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
   float *output_buffer = static_cast<float *>(
       GPU_texture_read(ibuf->gpu.texture, GPU_DATA_FLOAT, 0));
-  const ColorSpace *float_colorspace = ibuf->float_buffer.colorspace;
   ibuf->assign_float_data(output_buffer);
-  ibuf->float_buffer.colorspace = float_colorspace;
 
   if (need_secondary_context) {
     IMB_deactivate_gpu_context();
@@ -376,7 +380,8 @@ ImBuf *IMB_allocImBuf(uint x, uint y, ImBufFlags flags)
 
 bool IMB_initImBuf(ImBuf *ibuf, uint x, uint y, ImBufFlags flags)
 {
-  *ibuf = ImBuf{};
+  ibuf->~ImBuf();
+  new (ibuf) ImBuf();
 
   ibuf->x = x;
   ibuf->y = y;
@@ -386,6 +391,7 @@ bool IMB_initImBuf(ImBuf *ibuf, uint x, uint y, ImBufFlags flags)
   ibuf->channels = 4;
   /* IMB_DPI_DEFAULT -> pixels-per-meter. */
   ibuf->ppm[0] = ibuf->ppm[1] = IMB_DPI_DEFAULT / 0.0254;
+  ibuf->full_update_changeset_id = IMB_partial_update_changeset_id_next();
 
   const bool init_pixels = !flag_is_set(flags, ImBufFlags::UninitializedPixels);
 
@@ -436,12 +442,10 @@ ImBuf *IMB_dupImBuf(const ImBuf *ibuf1)
   ibuf2->ppm[0] = ibuf1->ppm[0];
   ibuf2->ppm[1] = ibuf1->ppm[1];
   ibuf2->dither = ibuf1->dither;
-  ibuf2->index = ibuf1->index;
   ibuf2->userflags = ibuf1->userflags;
   ibuf2->userflags = ibuf1->userflags;
-  /* for now don't duplicate metadata */
-  ibuf2->metadata = nullptr;
-  ibuf2->exrhandle = ibuf1->exrhandle;
+  ibuf2->metadata_ptr = ibuf1->metadata_ptr;
+  ibuf2->metadata_sharing_info = ibuf1->metadata_sharing_info;
   ibuf2->ftype = ibuf1->ftype;
   ibuf2->foptions = ibuf1->foptions;
   ibuf2->filepath = ibuf1->filepath;
@@ -473,6 +477,27 @@ size_t IMB_get_size_in_memory(const ImBuf *ibuf)
   size += channel_size * IMB_get_pixel_count(ibuf) * size_t(ibuf->channels);
 
   return size;
+}
+
+ImColorMode IMB_color_mode_from_channels(const int channels)
+{
+  switch (channels) {
+    case 1:
+      return ImColorMode::BW;
+    case 2:
+      return ImColorMode::BW_A;
+    case 3:
+      return ImColorMode::RGB;
+    case 4:
+      return ImColorMode::RGBA;
+  }
+  return ImColorMode::RGBA;
+}
+
+bool IMB_chan_id_is_color(const StringRef chan_id)
+{
+  return chan_id == "RGB" || chan_id == "RGBA" || chan_id == "RA" || chan_id == "BA" ||
+         chan_id == "GA" || chan_id == "R" || chan_id == "G" || chan_id == "B" || chan_id == "A";
 }
 
 }  // namespace blender

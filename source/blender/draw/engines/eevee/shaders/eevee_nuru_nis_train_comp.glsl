@@ -26,8 +26,8 @@ COMPUTE_SHADER_CREATE_INFO(eevee_nuru_nis_train)
 #include "eevee_reverse_z_lib.glsl"
 #include "eevee_sampling_lib.glsl"
 #include "gpu_shader_codegen_lib.glsl"
-#include "gpu_shader_math_vector_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_vector.bsl.hh"
+#include "gpu_shader_utildefines.bsl.hh"
 
 /** Fixed-point gradient accumulation: portable signed atomicAdd on int (float atomics and
  * compare-swap are not available across all our GLSL backends). Scale chosen for headroom:

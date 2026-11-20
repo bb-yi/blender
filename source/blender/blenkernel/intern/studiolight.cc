@@ -11,19 +11,20 @@
 #include "BKE_appdir.hh"
 #include "BKE_icons.hh"
 
-#include "BLI_dynstr.h"
-#include "BLI_fileops.h"
-#include "BLI_fileops_types.h"
-#include "BLI_linklist.h"
-#include "BLI_listbase.h"
-#include "BLI_math_color.h"
-#include "BLI_math_vector.h"
+#include "BLI_dynstr.hh"
+#include "BLI_fileops.hh"
+#include "BLI_fileops_types.hh"
+#include "BLI_linklist.hh"
+#include "BLI_listbase.hh"
+#include "BLI_math_color_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 
 #include "CLG_log.h"
 
+#include "DNA_color_types.h"
 #include "DNA_listBase.h"
 
 #include "IMB_colormanagement.hh"
@@ -285,123 +286,79 @@ static void direction_to_equirect(float r[2], const float dir[3])
   r[1] = (acosf(dir[2] / 1.0) - M_PI) / -M_PI;
 }
 
-namespace {
-
-struct MultilayerConvertContext {
-  int num_diffuse_channels;
-  float *diffuse_pass;
-  int num_specular_channels;
-  float *specular_pass;
-};
-
-}  // namespace
-
-static void *studiolight_multilayer_addview(void * /*base*/, const char * /*view_name*/)
-{
-  return nullptr;
-}
-static void *studiolight_multilayer_addlayer(void *base, const char * /*layer_name*/)
-{
-  return base;
-}
-
-/* Convert a multilayer pass to ImBuf channel 4 float buffer.
- * NOTE: Parameter rect will become invalid. Do not use rect after calling this
- * function */
-static float *studiolight_multilayer_convert_pass(const ImBuf *ibuf,
-                                                  float *rect,
-                                                  const uint channels)
-{
-  if (channels == 4) {
-    return rect;
-  }
-
-  float *new_rect = MEM_new_array_zeroed<float>(4 * size_t(ibuf->x) * size_t(ibuf->y), __func__);
-
-  IMB_buffer_float_rgba_from_float(new_rect, rect, channels, ibuf->x, ibuf->y);
-
-  MEM_delete(rect);
-  return new_rect;
-}
-
-static void studiolight_multilayer_addpass(void *base,
-                                           void * /*lay*/,
+/**
+ * Read a named pass from a multi-layer EXR and return a 4-channel float ImBuf.
+ * Returns null if the pass is not in the file.
+ */
+static ImBuf *studiolight_read_matcap_pass(ExrReadHandle *handle,
                                            const char *pass_name,
-                                           float *rect,
-                                           int num_channels,
-                                           const char * /*chan_id*/,
-                                           const char * /*view_name*/,
-                                           const ColorSpace * /*colorspace*/)
+                                           const char *file_colorspace)
 {
-  MultilayerConvertContext *ctx = static_cast<MultilayerConvertContext *>(base);
-  /* NOTE: This function must free pass pixels data if it is not used, this
-   * is how IMB_exr_multilayer_convert() is working. */
-  /* If we've found a first combined pass, skip all the rest ones. */
-  if (STREQ(pass_name, STUDIOLIGHT_PASSNAME_DIFFUSE)) {
-    ctx->diffuse_pass = rect;
-    ctx->num_diffuse_channels = num_channels;
+  Vector<ExrPassInfo> passes = IMB_exr_get_passes(handle);
+  for (ExrPassInfo &info : passes) {
+    if (info.pass != pass_name) {
+      continue;
+    }
+    MutableSpan<ExrPassInfo> single(&info, 1);
+    IMB_exr_read_passes(handle, single, file_colorspace, false);
+    ImBuf *pass_ibuf = info.ibuf;
+    if (pass_ibuf == nullptr || pass_ibuf->channels == 4) {
+      return pass_ibuf;
+    }
+    /* Expand to 4 channels for matcaps. */
+    ImBuf *rgba_ibuf = IMB_allocImBuf(pass_ibuf->x, pass_ibuf->y, ImBufFlags::FloatData);
+    if (rgba_ibuf) {
+      IMB_buffer_float_rgba_from_float(rgba_ibuf->float_data_for_write(),
+                                       pass_ibuf->float_data(),
+                                       pass_ibuf->channels,
+                                       pass_ibuf->x,
+                                       pass_ibuf->y);
+    }
+    IMB_freeImBuf(pass_ibuf);
+    return rgba_ibuf;
   }
-  else if (STREQ(pass_name, STUDIOLIGHT_PASSNAME_SPECULAR)) {
-    ctx->specular_pass = rect;
-    ctx->num_specular_channels = num_channels;
-  }
-  else {
-    MEM_delete(rect);
-  }
+  return nullptr;
 }
 
 static void studiolight_load_equirect_image(StudioLight *sl)
 {
   if (sl->flag & STUDIOLIGHT_EXTERNAL_FILE) {
-    ImBuf *ibuf = IMB_load_image_from_filepath(sl->filepath,
-                                               ImBufFlags::MultiLayer | ImBufFlags::AlphaIgnore);
+    ColorManagedColorspaceSettings colorspace_settings{};
+    ImBuf *ibuf = IMB_load_image_from_filepath(
+        sl->filepath, ImBufFlags::MultiLayer | ImBufFlags::AlphaIgnore, &colorspace_settings);
     ImBuf *specular_ibuf = nullptr;
     ImBuf *diffuse_ibuf = nullptr;
     const bool failed = (ibuf == nullptr);
 
     if (ibuf) {
-      if (ibuf->ftype == IMB_FTYPE_OPENEXR && ibuf->exrhandle) {
-        /* the read file is a multilayered openexr file (exrhandle != nullptr)
-         * This file is currently only supported for MATCAPS where
-         * the first found 'diffuse' pass will be used for diffuse lighting
-         * and the first found 'specular' pass will be used for specular lighting */
-        MultilayerConvertContext ctx = {0};
-        IMB_exr_multilayer_convert(ibuf->exrhandle,
-                                   &ctx,
-                                   &studiolight_multilayer_addview,
-                                   &studiolight_multilayer_addlayer,
-                                   &studiolight_multilayer_addpass);
+      ExrReadHandle *exr_handle = flag_is_set(ibuf->flags, ImBufFlags::MultiLayer) ?
+                                      IMB_exr_open_multilayer(sl->filepath) :
+                                      nullptr;
 
-        /* `ctx.diffuse_pass` and `ctx.specular_pass` can be freed inside
-         * `studiolight_multilayer_convert_pass` when conversion happens.
-         * When not converted we move the ownership of the buffer to the
-         * `converted_pass`. We only need to free `converted_pass` as it holds
-         * the unmodified allocation from the `ctx.*_pass` or the converted data.
-         */
-        if (ctx.diffuse_pass != nullptr) {
-          float *converted_pass = studiolight_multilayer_convert_pass(
-              ibuf, ctx.diffuse_pass, ctx.num_diffuse_channels);
-          diffuse_ibuf = IMB_allocFromBufferOwn(
-              nullptr, converted_pass, ibuf->x, ibuf->y, ctx.num_diffuse_channels);
-        }
+      if (exr_handle) {
+        /* The read file is a multi-layer OpenEXR file. This is currently only
+         * supported for MATCAPS where the first found 'diffuse' pass will be used
+         * for diffuse lighting and the first found 'specular' pass will be used
+         * for specular lighting. */
+        const char *file_colorspace = colorspace_settings.name;
+        diffuse_ibuf = studiolight_read_matcap_pass(
+            exr_handle, STUDIOLIGHT_PASSNAME_DIFFUSE, file_colorspace);
+        specular_ibuf = studiolight_read_matcap_pass(
+            exr_handle, STUDIOLIGHT_PASSNAME_SPECULAR, file_colorspace);
 
-        if (ctx.specular_pass != nullptr) {
-          float *converted_pass = studiolight_multilayer_convert_pass(
-              ibuf, ctx.specular_pass, ctx.num_specular_channels);
-          specular_ibuf = IMB_allocFromBufferOwn(
-              nullptr, converted_pass, ibuf->x, ibuf->y, ctx.num_specular_channels);
-        }
-
-        IMB_exr_close(ibuf->exrhandle);
-        ibuf->exrhandle = nullptr;
+        IMB_exr_close(exr_handle);
         IMB_freeImBuf(ibuf);
         ibuf = nullptr;
       }
-      else {
+      else if (!flag_is_set(ibuf->flags, ImBufFlags::MultiLayer)) {
         /* read file is an single layer openexr file or the read file isn't
          * an openexr file */
         IMB_float_from_byte(ibuf);
         diffuse_ibuf = ibuf;
+        ibuf = nullptr;
+      }
+      else {
+        IMB_freeImBuf(ibuf);
         ibuf = nullptr;
       }
     }
@@ -718,10 +675,10 @@ static void studiolight_radiance_preview(uint *icon_buffer, StudioLight *sl)
 
       float4 color = studiolight_calculate_radiance(sl->equirect_radiance_buffer, direction);
 
-      *pixel = rgb_to_cpack(linearrgb_to_srgb(color[0]),
-                            linearrgb_to_srgb(color[1]),
-                            linearrgb_to_srgb(color[2])) |
-               alphamask;
+      /* Buffer is in the working space. */
+      float srgb[3];
+      IMB_colormanagement_scene_linear_to_srgb_v3(srgb, color);
+      *pixel = rgb_to_cpack(srgb[0], srgb[1], srgb[2]) | alphamask;
     }
     else {
       *pixel = 0x0;
@@ -755,10 +712,10 @@ static void studiolight_matcap_preview(uint *icon_buffer, StudioLight *sl, bool 
 
     uint alphamask = alpha_circle_mask(dx, dy, 0.5f - texel_size[0], 0.5f);
 
-    *pixel = rgb_to_cpack(linearrgb_to_srgb(color[0]),
-                          linearrgb_to_srgb(color[1]),
-                          linearrgb_to_srgb(color[2])) |
-             alphamask;
+    /* Buffers are in the working space. */
+    float srgb[3];
+    IMB_colormanagement_scene_linear_to_srgb_v3(srgb, color);
+    *pixel = rgb_to_cpack(srgb[0], srgb[1], srgb[2]) | alphamask;
   }
   ITER_PIXELS_END;
 }

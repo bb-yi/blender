@@ -6,8 +6,6 @@
  * \ingroup sequencer
  */
 
-#include "BLI_math_rotation.hh"
-
 #include "BLT_translation.hh"
 
 #include "COM_domain.hh"
@@ -18,7 +16,10 @@
 #include "DNA_sequence_types.h"
 
 #include "BKE_anim_data.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
+#include "BKE_compositor.hh"
+#include "BKE_compute_context_cache.hh"
+#include "BKE_compute_contexts.hh"
 #include "BKE_context.hh"
 #include "BKE_idprop.hh"
 #include "BKE_node.hh"
@@ -51,187 +52,26 @@
 
 namespace blender::seq {
 
-void compositor_nodes_update_interface(Main &bmain,
-                                       Scene &sequencer_scene,
-                                       SequencerCompositorModifierData &cmd)
+void compositor_modifier_nodes_update_interface(Main &bmain,
+                                                Scene &sequencer_scene,
+                                                SequencerCompositorModifierData &cmd)
 {
   if (!cmd.modifier.system_properties) {
     cmd.modifier.system_properties =
         bke::idprop::create_group("SequencerCompositorModifierProperties").release();
   }
+
+  /* In case the node group is missing, do not update the properties to avoid the values reverting
+   * to their default value if the node group later becomes available. */
+  if (!cmd.node_group || ID_MISSING(cmd.node_group)) {
+    return;
+  }
+
   PointerRNA properties_ptr = RNA_pointer_create_discrete(
       &sequencer_scene.id, RNA_SequencerCompositorModifierProperties, &cmd);
   RNA_ensure_and_sync_system_properties(bmain, properties_ptr, *cmd.modifier.system_properties);
 
   DEG_id_tag_update(&sequencer_scene.id, ID_RECALC_SEQUENCER_STRIPS);
-}
-
-template<typename T>
-static void set_float_array(PointerRNA *input_props_ptr, compositor::Result &result)
-{
-  T value;
-  RNA_float_get_array(input_props_ptr, "value", value);
-  result.set_single_value(value);
-}
-
-template<typename T>
-static void set_int_array(PointerRNA *input_props_ptr, compositor::Result &result)
-{
-  T value;
-  RNA_int_get_array(input_props_ptr, "value", value);
-  result.set_single_value(value);
-}
-
-static void set_single_input_from_rna_value(PointerRNA *input_props_ptr,
-                                            const eNodeSocketDatatype socket_type,
-                                            compositor::Result &result,
-                                            const std::optional<int> dimensions = {})
-{
-  using namespace nodes;
-  switch (socket_type) {
-    case SOCK_FLOAT: {
-      const auto type = CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type"));
-      if (type == CompositorNodesInputType::Value) {
-        const float value = RNA_float_get(input_props_ptr, "value");
-        result.set_single_value(value);
-      }
-      break;
-    }
-    case SOCK_VECTOR: {
-      const auto type = CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type"));
-      if (type == CompositorNodesInputType::Value) {
-        switch (dimensions.value_or(3)) {
-          case 2: {
-            set_float_array<float2>(input_props_ptr, result);
-            break;
-          }
-          case 3: {
-            set_float_array<float3>(input_props_ptr, result);
-            break;
-          }
-          case 4: {
-            set_float_array<float4>(input_props_ptr, result);
-            break;
-          }
-          default:
-            BLI_assert_unreachable();
-        }
-      }
-      break;
-    }
-    case SOCK_RGBA: {
-      const auto type = CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type"));
-      if (type == CompositorNodesInputType::Value) {
-        ColorGeometry4f value;
-        RNA_float_get_array(input_props_ptr, "value", value);
-        result.set_single_value(value);
-      }
-      break;
-    }
-    case SOCK_BOOLEAN: {
-      const auto type = CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type"));
-      if (type == CompositorNodesInputType::Value) {
-        const bool value = RNA_boolean_get(input_props_ptr, "value");
-        result.set_single_value(value);
-      }
-      break;
-    }
-    case SOCK_INT: {
-      const auto type = CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type"));
-      if (type == CompositorNodesInputType::Value) {
-        const int value = RNA_int_get(input_props_ptr, "value");
-        result.set_single_value(value);
-      }
-      break;
-    }
-    case SOCK_ROTATION: {
-      const auto type = CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type"));
-      if (type == CompositorNodesInputType::Value) {
-        float3 value_euler;
-        RNA_float_get_array(input_props_ptr, "value", value_euler);
-        math::Quaternion value_rotation = math::to_quaternion(math::EulerXYZ(value_euler));
-        result.set_single_value(value_rotation);
-      }
-      break;
-    }
-    case SOCK_MENU: {
-      const auto type = CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type"));
-      if (type == CompositorNodesInputType::Value) {
-        const MenuValue value = MenuValue(RNA_enum_get(input_props_ptr, "value"));
-        result.set_single_value(value);
-      }
-      break;
-    }
-    case SOCK_STRING: {
-      const auto type = CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type"));
-      if (type == CompositorNodesInputType::Value) {
-        const std::string value = RNA_string_get(input_props_ptr, "value");
-        result.set_single_value(value);
-      }
-      break;
-    }
-    case SOCK_INT_VECTOR: {
-      const auto type = CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type"));
-      if (type == CompositorNodesInputType::Value) {
-        switch (dimensions.value_or(2)) {
-          case 2: {
-            set_int_array<int2>(input_props_ptr, result);
-            break;
-          }
-          case 3: {
-            set_int_array<int3>(input_props_ptr, result);
-            break;
-          }
-          default:
-            BLI_assert_unreachable();
-        }
-      }
-      break;
-    }
-    case SOCK_OBJECT: {
-      const auto type = CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type"));
-      if (type == CompositorNodesInputType::Value) {
-        Object *value = RNA_pointer_get(input_props_ptr, "value").data_as<Object>();
-        result.set_single_value(value);
-      }
-      break;
-    }
-    case SOCK_FONT: {
-      const auto type = CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type"));
-      if (type == CompositorNodesInputType::Value) {
-        VFont *value = RNA_pointer_get(input_props_ptr, "value").data_as<VFont>();
-        result.set_single_value(value);
-      }
-      break;
-    }
-    case SOCK_IMAGE:
-    case SOCK_COLLECTION:
-    case SOCK_TEXTURE:
-    case SOCK_MATERIAL:
-    case SOCK_SCENE:
-    case SOCK_TEXT_ID:
-    case SOCK_MASK:
-    case SOCK_SOUND:
-    case SOCK_GEOMETRY:
-    case SOCK_MATRIX:
-    case SOCK_BUNDLE:
-    case SOCK_CLOSURE:
-    case SOCK_SHADER:
-    case SOCK_CUSTOM:
-      break;
-  }
-}
-
-static std::optional<int> get_socket_dimension(const bNodeTreeInterfaceSocket *socket,
-                                               const eNodeSocketDatatype socket_type)
-{
-  if (socket_type == SOCK_VECTOR) {
-    return static_cast<bNodeSocketValueVector *>(socket->socket_data)->dimensions;
-  }
-  else if (socket_type == SOCK_INT_VECTOR) {
-    return static_cast<bNodeSocketValueIntVector *>(socket->socket_data)->dimensions;
-  }
-  return {};
 }
 
 class CompositorModifierContext : public CompositorContext {
@@ -243,19 +83,27 @@ class CompositorModifierContext : public CompositorContext {
   compositor::Result mask_;
   ImBuf *mask_buffer_ = nullptr;
   int timeline_frame_;
+
+  /* The compute context of the active viewer if one exists. */
+  const ComputeContext *viewer_compute_context_;
+
   bool owns_mask_ = false;
   PointerRNA properties_ptr_;
 
  public:
   CompositorModifierContext(const ModifierApplyContext &mod_context,
                             compositor::StaticCacheManager &cache_manager,
+                            bke::ComputeContextCache &compute_context_cache,
                             SequencerCompositorModifierData *modifier_data)
-      : CompositorContext(cache_manager, mod_context.render_data, mod_context.strip),
+      : CompositorContext(
+            cache_manager, compute_context_cache, mod_context.render_data, mod_context.strip),
         mod_context_(mod_context),
         modifier_data_(modifier_data),
         image_buffer_(mod_context.result.image),
         mask_(*this, compositor::ResultType::Color, compositor::ResultPrecision::Full),
-        timeline_frame_(mod_context.timeline_frame)
+        timeline_frame_(mod_context.timeline_frame),
+        viewer_compute_context_(bke::compositor::compute_viewer_compute_context(
+            *render_data_.scene, *modifier_data_->node_group, compute_context_cache))
   {
     PointerRNA ptr = RNA_pointer_create_discrete(
         &mod_context.render_data.scene->id, RNA_SequencerCompositorModifierData, modifier_data);
@@ -271,6 +119,11 @@ class CompositorModifierContext : public CompositorContext {
       this->mask_.release();
       this->owns_mask_ = false;
     }
+  }
+
+  const ComputeContext *viewer_compute_context() const override
+  {
+    return viewer_compute_context_;
   }
 
   compositor::Domain get_compositing_domain() const override
@@ -293,18 +146,14 @@ class CompositorModifierContext : public CompositorContext {
 
     const bNodeTree &node_group = *DEG_get_evaluated<bNodeTree>(render_data_.depsgraph,
                                                                 modifier_data_->node_group);
-    const bke::DataBlockComputeContext compute_context(nullptr, this->get_scene().id);
-    NodeGroupOperation node_group_operation(*this,
-                                            node_group,
-                                            this->needed_outputs(),
-                                            node_group.active_viewer_key,
-                                            bke::NODE_INSTANCE_KEY_BASE,
-                                            compute_context);
+    const bke::DataBlockComputeContext &compute_context =
+        this->compute_context_cache().for_data_block(nullptr, this->get_scene().id);
+    NodeGroupOperation node_group_operation(*this, node_group, compute_context);
     set_output_refcount(node_group, node_group_operation);
 
     node_group.ensure_topology_cache();
     PointerRNA inputs_ptr = RNA_pointer_get(&properties_ptr_, "inputs");
-    BLI_assert(inputs_ptr.data != nullptr);
+    BLI_assert(inputs_ptr);
 
     /* Map the inputs to the operation. */
     Vector<std::unique_ptr<Result>> inputs;
@@ -348,14 +197,11 @@ class CompositorModifierContext : public CompositorContext {
         }
       }
       else if (valid_socket_type) {
-        PointerRNA input_props_ptr = RNA_pointer_get(&inputs_ptr, input_socket->identifier);
-        input_result->allocate_single_value();
-        set_single_input_from_rna_value(&input_props_ptr,
-                                        socket_type,
-                                        *input_result,
-                                        get_socket_dimension(input_socket, socket_type));
+        /* Remaining inputs read their value from the exposed RNA property. */
+        set_input_result_from_rna(inputs_ptr, *input_socket, socket_type, *input_result);
       }
       else {
+        /* Unsupported sockets. */
         input_result->allocate_invalid();
       }
 
@@ -440,7 +286,9 @@ static void compositor_modifier_apply(ModifierApplyContext &context,
   }
 
   CompositorCache &com_cache = context.render_data.scene->ed->runtime->ensure_compositor_cache();
-  CompositorModifierContext com_mod_context(context, com_cache.get_cache_manager(), modifier_data);
+  bke::ComputeContextCache compute_context_cache;
+  CompositorModifierContext com_mod_context(
+      context, com_cache.get_cache_manager(), compute_context_cache, modifier_data);
 
   GpuContextState gpu_state = GpuContextState::Unsupported;
   if (com_mod_context.use_gpu()) {
@@ -461,7 +309,7 @@ static void compositor_modifier_apply(ModifierApplyContext &context,
 static PointerRNA *modifier_panel_get_property_pointers(Panel *panel)
 {
   PointerRNA *ptr = ui::panel_custom_data_get(panel);
-  BLI_assert(!RNA_pointer_is_null(ptr));
+  BLI_assert(*ptr);
   BLI_assert(RNA_struct_is_a(ptr->type, RNA_StripModifier));
   ui::panel_context_pointer_set(panel, "modifier", ptr);
   return ptr;

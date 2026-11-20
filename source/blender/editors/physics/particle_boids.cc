@@ -12,7 +12,7 @@
 
 #include "DNA_particle_types.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "BKE_boids.h"
 #include "BKE_context.hh"
@@ -99,7 +99,7 @@ static wmOperatorStatus rule_del_exec(bContext *C, wmOperator * /*op*/)
       break;
     }
   }
-  rule = static_cast<BoidRule *>(state->rules.first);
+  rule = state->rules.first();
 
   if (rule) {
     rule->flag |= BOIDRULE_CURRENT;
@@ -254,12 +254,12 @@ static wmOperatorStatus state_del_exec(bContext *C, wmOperator * /*op*/)
   }
 
   /* there must be at least one state */
-  if (!part->boids->states.first) {
+  if (!part->boids->states.first_) {
     state = boid_new_state(part->boids);
     BLI_addtail(&part->boids->states, state);
   }
   else {
-    state = static_cast<BoidState *>(part->boids->states.first);
+    state = part->boids->states.first();
   }
 
   state->flag |= BOIDSTATE_CURRENT;

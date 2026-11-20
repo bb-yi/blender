@@ -27,9 +27,24 @@
 #  include <thread>
 #endif
 
+#ifdef WITH_GHOST_DBUS
+#  include "GHOST_SystemDBusUnix.hh"
+#  include <atomic>
+#  include <memory>
+#endif
+
 class GHOST_WindowWayland;
+#ifdef WITH_GHOST_DBUS
+struct GWL_DBusEvent;
+#endif
 
 bool ghost_wl_display_report_error_if_set(wl_display *display);
+
+/**
+ * Create a 1x1 transparent buffer, intended for up-scaling via #wp_viewport_set_destination.
+ * The caller owns the returned buffer, null on allocation failure.
+ */
+struct wl_buffer *ghost_wl_buffer_create_transparent_pixel(struct wl_shm *shm);
 
 bool ghost_wl_output_own(const struct wl_output *wl_output);
 void ghost_wl_output_tag(struct wl_output *wl_output);
@@ -52,6 +67,16 @@ void ghost_wl_surface_tag_cursor_pointer(struct wl_surface *wl_surface);
 
 bool ghost_wl_surface_own_cursor_tablet(const struct wl_surface *wl_surface);
 void ghost_wl_surface_tag_cursor_tablet(struct wl_surface *wl_surface);
+
+#ifdef WITH_GHOST_CSD
+/**
+ * Tag for the invisible resize margin around the window
+ * (see #GWL_WindowCSD::margin_surface). Kept distinct from #ghost_wl_surface_tag
+ * so input paths without margin support ignore it as any other foreign surface.
+ */
+bool ghost_wl_surface_own_csd_margin(const struct wl_surface *wl_surface);
+void ghost_wl_surface_tag_csd_margin(struct wl_surface *wl_surface);
+#endif
 
 /* Scaling to: translates from WAYLAND into GHOST (viewport local) coordinates.
  * Scaling from: performs the reverse translation.
@@ -158,10 +183,23 @@ struct GWL_Output {
   std::string model;
 };
 
+#ifdef WITH_GHOST_DBUS
+/**
+ * Settings read on demand by the consumer.
+ *
+ * \note Settings the back-end must act on when they change are queued as a #GWL_DBusEvent
+ * instead, so they're applied from the main thread.
+ */
+struct GHOST_SystemDBusSettings {
+  /** Written from the watcher's background thread, see #getSystemColorScheme. */
+  std::atomic<uint32_t> color_scheme = -1;
+};
+#endif /* WITH_GHOST_DBUS */
+
 class GHOST_SystemWayland : public GHOST_System {
  public:
   GHOST_SystemWayland(bool background);
-  GHOST_SystemWayland() : GHOST_SystemWayland(true) {};
+  GHOST_SystemWayland() : GHOST_SystemWayland(true) {}
 
   ~GHOST_SystemWayland() override;
 
@@ -267,6 +305,7 @@ class GHOST_SystemWayland : public GHOST_System {
 
   struct wl_display *wl_display_get();
   struct wl_compositor *wl_compositor_get();
+  struct wl_subcompositor *wl_subcompositor_get();
   struct zwp_primary_selection_device_manager_v1 *wp_primary_selection_manager_get();
   struct xdg_activation_v1 *xdg_activation_manager_get();
   struct zwp_pointer_gestures_v1 *wp_pointer_gestures_get();
@@ -296,8 +335,10 @@ class GHOST_SystemWayland : public GHOST_System {
 
   bool use_window_frame_get() const;
   bool use_window_frame_csd_get() const;
+
+  int preferences_cursor_size_get() const;
 #ifdef WITH_GHOST_CSD
-  const GHOST_CSD_Layout &csd_layout_base_get() const;
+  const GHOST_CSD_Layout &preferences_csd_button_layout_get() const;
 #endif
 
   static const char *xdg_app_id_get();
@@ -380,5 +421,25 @@ class GHOST_SystemWayland : public GHOST_System {
    */
   void display_destroy_and_free_all();
 
+#ifdef WITH_GHOST_DBUS
+  /** Create the watcher, register the settings to follow & start it. */
+  void dbus_watcher_start(bool watch_cursor_size);
+  /** Queue a change for #dbus_event_handle, may be called from any thread. */
+  void dbus_event_push(GWL_DBusEvent dbus_event);
+  /** Apply the queued changes, main thread only. */
+  void dbus_events_handle_pending();
+  /**
+   * Handle a change the back-end must act on itself, see #GWL_DBusEvent.
+   *
+   * \note Main thread only, caller must lock `server_mutex`.
+   */
+  void dbus_event_handle(const GWL_DBusEvent &dbus_event);
+#endif /* WITH_GHOST_DBUS */
+
   struct GWL_Display *display_;
+
+#ifdef WITH_GHOST_DBUS
+  std::unique_ptr<GHOST_SystemDBusUnix> dbus_watcher_;
+  GHOST_SystemDBusSettings dbus_;
+#endif
 };

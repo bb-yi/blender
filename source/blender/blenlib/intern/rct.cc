@@ -15,12 +15,12 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "BLI_math_base.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
+#include "BLI_math_base_c.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_vector.hh"
-#include "BLI_rect.h"
-#include "BLI_utildefines.h"
+#include "BLI_rect.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_vec_types.h"
 
@@ -1141,6 +1141,20 @@ void BLI_rctf_rotate_expand(rctf *dst, const rctf *src, const float angle)
 }
 
 #undef ROTATE_SINCOS
+
+void BLI_rctf_rotate_expand_around(rctf *dst,
+                                   const rctf *src,
+                                   const float pivot[2],
+                                   const float angle)
+{
+  const float cent[2] = {BLI_rctf_cent_x(src) - pivot[0], BLI_rctf_cent_y(src) - pivot[1]};
+  const float sin_a = sinf(angle);
+  const float cos_a = cosf(angle);
+  const float cent_rot[2] = {cent[0] * cos_a - cent[1] * sin_a, cent[0] * sin_a + cent[1] * cos_a};
+
+  BLI_rctf_rotate_expand(dst, src, angle);
+  BLI_rctf_translate(dst, cent_rot[0] - cent[0], cent_rot[1] - cent[1]);
+}
 
 bool BLI_rctf_clamp_segment(const rctf *rect, float s1[2], float s2[2])
 {

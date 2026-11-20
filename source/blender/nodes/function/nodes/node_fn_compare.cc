@@ -4,9 +4,9 @@
 
 #include <cmath>
 
-#include "BLI_listbase.h"
-#include "BLI_math_vector.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string_utf8.hh"
 
 #include "BLT_translation.hh"
 
@@ -20,6 +20,7 @@
 #include "DEG_depsgraph_query.hh"
 
 #include "node_function_util.hh"
+#include "node_shader_util.hh"
 
 #include "NOD_rna_define.hh"
 #include "NOD_socket_search_link.hh"
@@ -35,10 +36,20 @@ namespace blender::nodes::node_fn_compare_cc {
 
 NODE_STORAGE_FUNCS(NodeFunctionCompare)
 
-static bool is_supported_data_block_type(const eNodeSocketDatatype data_type)
+static bool is_supported_data_block_type(const bNodeTree *ntree,
+                                         const eNodeSocketDatatype data_type)
 {
-  return ELEM(
-      data_type, SOCK_OBJECT, SOCK_IMAGE, SOCK_COLLECTION, SOCK_MATERIAL, SOCK_FONT, SOCK_SOUND);
+  if (!ELEM(data_type,
+            SOCK_OBJECT,
+            SOCK_IMAGE,
+            SOCK_COLLECTION,
+            SOCK_MATERIAL,
+            SOCK_FONT,
+            SOCK_SOUND))
+  {
+    return false;
+  }
+  return bke::node_tree_type_supports_socket_type_static(ntree->type, data_type);
 }
 
 static void node_declare(NodeDeclarationBuilder &b)
@@ -46,6 +57,7 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.is_function_node();
 
   const bNode *node = b.node_or_null();
+  const bNodeTree *ntree = b.tree_or_null();
   if (node != nullptr) {
     const NodeFunctionCompare &storage = node_storage(*node);
     const NodeCompareOperation operation = NodeCompareOperation(storage.operation);
@@ -54,7 +66,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 
     const bool type_is_float = ELEM(data_type, SOCK_FLOAT, SOCK_VECTOR, SOCK_RGBA);
     const bool is_vector = data_type == SOCK_VECTOR;
-    const bool is_data_block = is_supported_data_block_type(data_type);
+    const bool is_data_block = is_supported_data_block_type(ntree, data_type);
 
     auto &a_input =
         b.add_input(data_type, "A"_ustr).translation_context(BLT_I18NCONTEXT_ID_NODETREE);
@@ -118,7 +130,7 @@ class SocketSearchOp {
 };
 
 static std::optional<eNodeSocketDatatype> get_compare_type_for_operation(
-    const eNodeSocketDatatype type, const NodeCompareOperation operation)
+    const bNodeTree &ntree, const eNodeSocketDatatype type, const NodeCompareOperation operation)
 {
   switch (type) {
     case SOCK_BOOLEAN:
@@ -149,7 +161,7 @@ static std::optional<eNodeSocketDatatype> get_compare_type_for_operation(
       }
       return type;
     default:
-      if (is_supported_data_block_type(type)) {
+      if (is_supported_data_block_type(&ntree, type)) {
         if (!ELEM(operation, NODE_COMPARE_EQUAL, NODE_COMPARE_NOT_EQUAL)) {
           return std::nullopt;
         }
@@ -159,15 +171,59 @@ static std::optional<eNodeSocketDatatype> get_compare_type_for_operation(
   }
 }
 
+static eNodeSocketDatatype op_type_to_socket_type(const NodeCompareOperation value)
+{
+  switch (value) {
+    case NODE_COMPARE_LESS_THAN:
+      return SOCK_FLOAT;
+    case NODE_COMPARE_LESS_EQUAL:
+      return SOCK_FLOAT;
+    case NODE_COMPARE_GREATER_THAN:
+      return SOCK_FLOAT;
+    case NODE_COMPARE_GREATER_EQUAL:
+      return SOCK_FLOAT;
+    case NODE_COMPARE_EQUAL:
+      return SOCK_INT;
+    case NODE_COMPARE_NOT_EQUAL:
+      return SOCK_INT;
+    case NODE_COMPARE_COLOR_BRIGHTER:
+      return SOCK_RGBA;
+    case NODE_COMPARE_COLOR_DARKER:
+      return SOCK_RGBA;
+  }
+  BLI_assert_unreachable();
+  return SOCK_RGBA;
+}
+
 static void node_gather_link_searches(GatherLinkSearchOpParams &params)
 {
+  const bNodeTree &ntree = params.node_tree();
+  const bool is_input = params.in_out() == SOCK_IN;
   const eNodeSocketDatatype type = params.other_socket().type;
-  if (!ELEM(type, SOCK_INT, SOCK_BOOLEAN, SOCK_FLOAT, SOCK_VECTOR, SOCK_RGBA, SOCK_STRING) &&
-      !is_supported_data_block_type(type))
+  const bool can_link_to_result = !is_input && ntree.typeinfo->validate_link(SOCK_BOOLEAN, type);
+  if (!ELEM(type, SOCK_INT, SOCK_FLOAT, SOCK_VECTOR, SOCK_RGBA, SOCK_STRING) &&
+      !can_link_to_result && !is_supported_data_block_type(&ntree, type))
   {
     return;
   }
-  const UString socket_name = params.in_out() == SOCK_IN ? "A"_ustr : "Result"_ustr;
+
+  if (!is_input) {
+    if (can_link_to_result) {
+      for (const EnumPropertyItem *item = rna_enum_node_compare_operation_items;
+           item->identifier != nullptr;
+           item++)
+      {
+        if (item->name == nullptr || item->identifier[0] == '\0') {
+          continue;
+        }
+        const NodeCompareOperation operation = NodeCompareOperation(item->value);
+        const eNodeSocketDatatype type = op_type_to_socket_type(operation);
+        params.add_item(IFACE_(item->name), SocketSearchOp{"Result"_ustr, type, operation});
+      }
+    }
+    return;
+  }
+
   for (const EnumPropertyItem *item = rna_enum_node_compare_operation_items;
        item->identifier != nullptr;
        item++)
@@ -175,19 +231,25 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
     if (item->name != nullptr && item->identifier[0] != '\0') {
       const NodeCompareOperation operation = NodeCompareOperation(item->value);
       if (const std::optional<eNodeSocketDatatype> fixed_type = get_compare_type_for_operation(
-              type, operation))
+              ntree, type, operation))
       {
-        params.add_item(IFACE_(item->name), SocketSearchOp{socket_name, *fixed_type, operation});
+        params.add_item(IFACE_(item->name), SocketSearchOp{"A"_ustr, *fixed_type, operation});
       }
     }
   }
 
-  if (params.in_out() == SOCK_IN && (type != SOCK_STRING || is_supported_data_block_type(type))) {
-    params.add_item(
-        IFACE_("Angle"),
-        SocketSearchOp{
-            "Angle"_ustr, SOCK_VECTOR, NODE_COMPARE_GREATER_THAN, NODE_COMPARE_MODE_DIRECTION});
+  if (params.in_out() != SOCK_IN) {
+    return;
   }
+
+  if (type == SOCK_STRING || is_supported_data_block_type(&ntree, type)) {
+    return;
+  }
+
+  params.add_item(
+      IFACE_("Angle"),
+      SocketSearchOp{
+          "Angle"_ustr, SOCK_VECTOR, NODE_COMPARE_GREATER_THAN, NODE_COMPARE_MODE_DIRECTION});
 }
 
 static void node_label(const bNodeTree * /*tree*/,
@@ -240,6 +302,7 @@ static const mf::MultiFunction *get_multi_function(const bNode &node)
 {
   const NodeFunctionCompare *data = (NodeFunctionCompare *)node.storage;
   const eNodeSocketDatatype data_type = data->data_type;
+  const bNodeTree &ntree = node.owner_tree();
 
   static auto exec_preset_all = mf::build::exec_presets::AllSpanOrSingle();
   static auto exec_preset_first_two = mf::build::exec_presets::SomeSpanOrSingle<0, 1>();
@@ -546,7 +609,7 @@ static const mf::MultiFunction *get_multi_function(const bNode &node)
               static auto fn = mf::build::SI4_SO<float3, float3, float, float, bool>(
                   "Not Equal - Dot Product",
                   [](float3 a, float3 b, float comp, float epsilon) {
-                    return abs(math::dot(a, b) - comp) >= epsilon;
+                    return abs(math::dot(a, b) - comp) > epsilon;
                   },
                   exec_preset_first_two);
               return &fn;
@@ -655,7 +718,7 @@ static const mf::MultiFunction *get_multi_function(const bNode &node)
       }
       break;
     default: {
-      if (is_supported_data_block_type(data_type)) {
+      if (is_supported_data_block_type(&ntree, data_type)) {
         return to_static_data_block_type(
             data_type, [&]<typename T>() -> const mf::MultiFunction * {
               switch (data->operation) {
@@ -696,10 +759,196 @@ static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
   builder.set_matching_fn(fn);
 }
 
+static const char *gpu_shader_get_name(const eNodeSocketDatatype data_type,
+                                       const NodeCompareOperation operation,
+                                       const NodeCompareMode mode)
+{
+  switch (data_type) {
+    case SOCK_FLOAT:
+      switch (operation) {
+        case NODE_COMPARE_LESS_THAN:
+          return "compare_float_less_than";
+        case NODE_COMPARE_LESS_EQUAL:
+          return "compare_float_less_equal";
+        case NODE_COMPARE_GREATER_THAN:
+          return "compare_float_greater_than";
+        case NODE_COMPARE_GREATER_EQUAL:
+          return "compare_float_greater_equal";
+        case NODE_COMPARE_EQUAL:
+          return "compare_float_equal";
+        case NODE_COMPARE_NOT_EQUAL:
+          return "compare_float_not_equal";
+        case NODE_COMPARE_COLOR_BRIGHTER:
+        case NODE_COMPARE_COLOR_DARKER:
+          break;
+      }
+      break;
+    case SOCK_INT:
+      switch (operation) {
+        case NODE_COMPARE_LESS_THAN:
+          return "compare_int_less_than";
+        case NODE_COMPARE_LESS_EQUAL:
+          return "compare_int_less_equal";
+        case NODE_COMPARE_GREATER_THAN:
+          return "compare_int_greater_than";
+        case NODE_COMPARE_GREATER_EQUAL:
+          return "compare_int_greater_equal";
+        case NODE_COMPARE_EQUAL:
+          return "compare_int_equal";
+        case NODE_COMPARE_NOT_EQUAL:
+          return "compare_int_not_equal";
+        case NODE_COMPARE_COLOR_BRIGHTER:
+        case NODE_COMPARE_COLOR_DARKER:
+          break;
+      }
+      break;
+    case SOCK_VECTOR:
+      switch (operation) {
+        case NODE_COMPARE_LESS_THAN:
+          switch (mode) {
+            case NODE_COMPARE_MODE_AVERAGE:
+              return "compare_vector_average_less_than";
+            case NODE_COMPARE_MODE_DOT_PRODUCT:
+              return "compare_vector_dot_less_than";
+            case NODE_COMPARE_MODE_DIRECTION:
+              return "compare_vector_direction_less_than";
+            case NODE_COMPARE_MODE_ELEMENT:
+              return "compare_vector_element_less_than";
+            case NODE_COMPARE_MODE_LENGTH:
+              return "compare_vector_length_less_than";
+          }
+          break;
+        case NODE_COMPARE_LESS_EQUAL:
+          switch (mode) {
+            case NODE_COMPARE_MODE_AVERAGE:
+              return "compare_vector_average_less_equal";
+            case NODE_COMPARE_MODE_DOT_PRODUCT:
+              return "compare_vector_dot_less_equal";
+            case NODE_COMPARE_MODE_DIRECTION:
+              return "compare_vector_direction_less_equal";
+            case NODE_COMPARE_MODE_ELEMENT:
+              return "compare_vector_element_less_equal";
+            case NODE_COMPARE_MODE_LENGTH:
+              return "compare_vector_length_less_equal";
+          }
+          break;
+        case NODE_COMPARE_GREATER_THAN:
+          switch (mode) {
+            case NODE_COMPARE_MODE_AVERAGE:
+              return "compare_vector_average_greater_than";
+            case NODE_COMPARE_MODE_DOT_PRODUCT:
+              return "compare_vector_dot_greater_than";
+            case NODE_COMPARE_MODE_DIRECTION:
+              return "compare_vector_direction_greater_than";
+            case NODE_COMPARE_MODE_ELEMENT:
+              return "compare_vector_element_greater_than";
+            case NODE_COMPARE_MODE_LENGTH:
+              return "compare_vector_length_greater_than";
+          }
+          break;
+        case NODE_COMPARE_GREATER_EQUAL:
+          switch (mode) {
+            case NODE_COMPARE_MODE_AVERAGE:
+              return "compare_vector_average_greater_equal";
+            case NODE_COMPARE_MODE_DOT_PRODUCT:
+              return "compare_vector_dot_greater_equal";
+            case NODE_COMPARE_MODE_DIRECTION:
+              return "compare_vector_direction_greater_equal";
+            case NODE_COMPARE_MODE_ELEMENT:
+              return "compare_vector_element_greater_equal";
+            case NODE_COMPARE_MODE_LENGTH:
+              return "compare_vector_length_greater_equal";
+          }
+          break;
+        case NODE_COMPARE_EQUAL:
+          switch (mode) {
+            case NODE_COMPARE_MODE_AVERAGE:
+              return "compare_vector_average_equal";
+            case NODE_COMPARE_MODE_DOT_PRODUCT:
+              return "compare_vector_dot_equal";
+            case NODE_COMPARE_MODE_DIRECTION:
+              return "compare_vector_direction_equal";
+            case NODE_COMPARE_MODE_ELEMENT:
+              return "compare_vector_element_equal";
+            case NODE_COMPARE_MODE_LENGTH:
+              return "compare_vector_length_equal";
+          }
+          break;
+        case NODE_COMPARE_NOT_EQUAL:
+          switch (mode) {
+            case NODE_COMPARE_MODE_AVERAGE:
+              return "compare_vector_average_not_equal";
+            case NODE_COMPARE_MODE_DOT_PRODUCT:
+              return "compare_vector_dot_not_equal";
+            case NODE_COMPARE_MODE_DIRECTION:
+              return "compare_vector_direction_not_equal";
+            case NODE_COMPARE_MODE_ELEMENT:
+              return "compare_vector_element_not_equal";
+            case NODE_COMPARE_MODE_LENGTH:
+              return "compare_vector_length_not_equal";
+          }
+          break;
+        case NODE_COMPARE_COLOR_BRIGHTER:
+        case NODE_COMPARE_COLOR_DARKER:
+          break;
+      }
+      break;
+    case SOCK_RGBA:
+      switch (operation) {
+        case NODE_COMPARE_EQUAL:
+          return "compare_color_equal";
+        case NODE_COMPARE_NOT_EQUAL:
+          return "compare_color_not_equal";
+        case NODE_COMPARE_COLOR_BRIGHTER:
+          return "compare_color_brighter";
+        case NODE_COMPARE_COLOR_DARKER:
+          return "compare_color_darker";
+        case NODE_COMPARE_LESS_THAN:
+        case NODE_COMPARE_LESS_EQUAL:
+        case NODE_COMPARE_GREATER_THAN:
+        case NODE_COMPARE_GREATER_EQUAL:
+          break;
+      }
+      break;
+    default:
+      break;
+  }
+
+  BLI_assert_unreachable();
+  return nullptr;
+}
+
+static int node_gpu_material(GPUMaterial *mat,
+                             bNode *node,
+                             bNodeExecData * /*execdata*/,
+                             GPUNodeStack *in,
+                             GPUNodeStack *out)
+{
+  const NodeFunctionCompare &storage = node_storage(*node);
+  const eNodeSocketDatatype data_type = eNodeSocketDatatype(storage.data_type);
+  const NodeCompareOperation operation = NodeCompareOperation(storage.operation);
+  const NodeCompareMode mode = NodeCompareMode(storage.mode);
+
+  const char *name = gpu_shader_get_name(data_type, operation, mode);
+
+  if (name == nullptr) {
+    return 0;
+  }
+
+  if (ELEM(operation, NODE_COMPARE_COLOR_BRIGHTER, NODE_COMPARE_COLOR_DARKER)) {
+    float luminance_coefficients[3];
+    IMB_colormanagement_get_luminance_coefficients(luminance_coefficients);
+    return GPU_stack_link(mat, node, name, in, out, GPU_constant(luminance_coefficients));
+  }
+
+  return GPU_stack_link(mat, node, name, in, out);
+}
+
 static void data_type_update(Main *bmain, Scene *scene, PointerRNA *ptr)
 {
   bNode *node = static_cast<bNode *>(ptr->data);
   NodeFunctionCompare *node_storage = static_cast<NodeFunctionCompare *>(node->storage);
+  const bNodeTree *ntree = reinterpret_cast<const bNodeTree *>(ptr->owner_id);
 
   if (node_storage->data_type == SOCK_RGBA && !ELEM(node_storage->operation,
                                                     NODE_COMPARE_EQUAL,
@@ -710,7 +959,7 @@ static void data_type_update(Main *bmain, Scene *scene, PointerRNA *ptr)
     node_storage->operation = NODE_COMPARE_EQUAL;
   }
   else if ((node_storage->data_type == SOCK_STRING ||
-            is_supported_data_block_type(node_storage->data_type)) &&
+            is_supported_data_block_type(ntree, node_storage->data_type)) &&
            !ELEM(node_storage->operation, NODE_COMPARE_EQUAL, NODE_COMPARE_NOT_EQUAL))
   {
     node_storage->operation = NODE_COMPARE_EQUAL;
@@ -753,18 +1002,19 @@ static void node_rna(StructRNA *srna)
 
   PropertyRNA *prop;
 
-  prop = RNA_def_node_enum(
+  RNA_def_node_enum(
       srna,
       "operation",
       "Operation",
       "",
       rna_enum_node_compare_operation_items,
       NOD_storage_enum_accessors(operation),
-      NODE_COMPARE_EQUAL,
+      NODE_COMPARE_GREATER_THAN,
       [](bContext * /*C*/, PointerRNA *ptr, PropertyRNA * /*prop*/, bool *r_free) {
         *r_free = true;
         bNode *node = static_cast<bNode *>(ptr->data);
         NodeFunctionCompare *data = static_cast<NodeFunctionCompare *>(node->storage);
+        const bNodeTree *ntree = reinterpret_cast<const bNodeTree *>(ptr->owner_id);
 
         if (ELEM(data->data_type, SOCK_FLOAT, SOCK_INT, SOCK_VECTOR)) {
           return enum_items_filter(
@@ -788,7 +1038,7 @@ static void node_rna(StructRNA *srna)
                                                  NODE_COMPARE_COLOR_DARKER);
                                    });
         }
-        if (is_supported_data_block_type(data->data_type)) {
+        if (is_supported_data_block_type(ntree, data->data_type)) {
           return enum_items_filter(
               rna_enum_node_compare_operation_items, [](const EnumPropertyItem &item) {
                 return ELEM(item.value, NODE_COMPARE_EQUAL, NODE_COMPARE_NOT_EQUAL);
@@ -806,29 +1056,30 @@ static void node_rna(StructRNA *srna)
       rna_enum_node_socket_data_type_items,
       NOD_storage_enum_accessors(data_type),
       std::nullopt,
-      [](bContext * /*C*/, PointerRNA * /*ptr*/, PropertyRNA * /*prop*/, bool *r_free) {
+      [](bContext * /*C*/, PointerRNA *ptr, PropertyRNA * /*prop*/, bool *r_free) {
         *r_free = true;
+        const bNodeTree *ntree = reinterpret_cast<const bNodeTree *>(ptr->owner_id);
         return enum_items_filter(
-            rna_enum_node_socket_data_type_items, [](const EnumPropertyItem &item) {
+            rna_enum_node_socket_data_type_items, [&](const EnumPropertyItem &item) {
               return ELEM(item.value, SOCK_FLOAT, SOCK_INT, SOCK_VECTOR, SOCK_STRING, SOCK_RGBA) ||
-                     is_supported_data_block_type(eNodeSocketDatatype(item.value));
+                     is_supported_data_block_type(ntree, eNodeSocketDatatype(item.value));
             });
       });
   RNA_def_property_update_runtime(prop, data_type_update);
 
-  prop = RNA_def_node_enum(srna,
-                           "mode",
-                           "Mode",
-                           "",
-                           mode_items,
-                           NOD_storage_enum_accessors(mode),
-                           NODE_COMPARE_MODE_ELEMENT);
+  RNA_def_node_enum(srna,
+                    "mode",
+                    "Mode",
+                    "",
+                    mode_items,
+                    NOD_storage_enum_accessors(mode),
+                    NODE_COMPARE_MODE_ELEMENT);
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
-  fn_node_type_base(&ntype, "FunctionNodeCompare"_ustr, FN_NODE_COMPARE);
+  fn_cmp_node_type_base(&ntype, "FunctionNodeCompare"_ustr, FN_NODE_COMPARE);
   ntype.ui_name = "Compare";
   ntype.ui_description = "Perform a comparison operation on the two given inputs";
   ntype.enum_name_legacy = "COMPARE";
@@ -838,6 +1089,7 @@ static void node_register()
   ntype.initfunc = node_init;
   bke::node_type_storage(
       ntype, "NodeFunctionCompare", node_free_standard_storage, node_copy_standard_storage);
+  ntype.gpu_fn = node_gpu_material;
   ntype.build_multi_function = node_build_multi_function;
   ntype.draw_buttons = node_layout;
   ntype.gather_link_search_ops = node_gather_link_searches;

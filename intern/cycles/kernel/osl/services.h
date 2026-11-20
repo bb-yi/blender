@@ -19,6 +19,8 @@
 #include <OpenImageIO/unordered_map_concurrent.h>
 
 #include "util/concurrent_set.h"
+#include "util/map.h"
+#include "util/thread.h"
 
 #include "scene/image.h"
 
@@ -57,7 +59,26 @@ struct OSLTextureHandle {
   ImageHandle handle;
 };
 
-using OSLTextureHandleMap = OIIO::unordered_map_concurrent<OSLUStringHash, OSLTextureHandle>;
+/* The OSL shading system is shared between sessions, so the key for a texture
+ * includes both the filename and the per session image manager so it doesn't
+ * get shared and leaves dangling pointers when one session is freed while
+ * another is using its textures. */
+struct OSLTextureKey {
+  OSLUStringHash filename;
+  const ImageManager *image_manager = nullptr;
+
+  bool operator==(const OSLTextureKey &other) const = default;
+};
+
+struct OSLTextureKeyHash {
+  size_t operator()(const OSLTextureKey &key) const
+  {
+    return key.filename.hash();
+  }
+};
+
+using OSLTextureHandleMap =
+    OIIO::unordered_map_concurrent<OSLTextureKey, OSLTextureHandle, OSLTextureKeyHash>;
 using OSLTextureFilenameMap = concurrent_set<OSLUStringHash>;
 
 /* OSL Render Services
@@ -282,9 +303,18 @@ class OSLRenderServices : public OSL::RendererServices {
    * shading system. */
   OSLTextureHandleMap textures;
 
-  static ImageManager *image_manager;
+  /* Image manager to add textures to, for shading contexts used to JIT compile
+   * shader groups. Multiple render sessions use this render services, so they are
+   * keyed by shading context. */
+  void image_manager_add(const OSL::ShadingContext *context, ImageManager *image_manager);
+  void image_manager_remove(const OSL::ShadingContext *context);
 
  private:
+  ImageManager *image_manager_find(const OSL::ShadingContext *context);
+
+  unordered_map<const OSL::ShadingContext *, ImageManager *> image_managers_;
+  thread_mutex image_managers_mutex_;
+
   int device_type_;
 
   /* We don't support lookup by filename without a handle, which is required anyway

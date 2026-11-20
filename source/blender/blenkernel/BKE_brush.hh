@@ -151,17 +151,17 @@ float BKE_brush_sample_masktex(
  * Get the mask texture for this given object mode.
  *
  * This is preferred above using mtex/mask_mtex attributes directly as due to legacy these
- * attributes got switched in sculpt mode.
+ * attributes got switched in sculpt mode and subsequently vertex paint.
  */
-const MTex *BKE_brush_mask_texture_get(const Brush *brush, eObjectMode object_mode);
+const MTex *BKE_brush_mask_texture_get(const Brush *brush, PaintMode paint_mode);
 
 /**
  * Get the color texture for this given object mode.
  *
  * This is preferred above using mtex/mask_mtex attributes directly as due to legacy these
- * attributes got switched in sculpt mode.
+ * attributes got switched in sculpt mode and subsequently vertex paint.
  */
-const MTex *BKE_brush_color_texture_get(const Brush *brush, eObjectMode object_mode);
+const MTex *BKE_brush_color_texture_get(const Brush *brush, PaintMode paint_mode);
 
 /**
  * Radial control.
@@ -169,6 +169,10 @@ const MTex *BKE_brush_color_texture_get(const Brush *brush, eObjectMode object_m
 ImBuf *BKE_brush_gen_radial_control_imbuf(Brush *br, bool secondary, bool display_gradient);
 
 /* Unified strength size and color. */
+
+bool BKE_brush_use_unified_size(const Paint *paint, const Brush *brush);
+bool BKE_brush_use_unified_strength(const Paint *paint, const Brush *brush);
+bool BKE_brush_use_unified_color(const Paint *paint, const Brush *brush);
 
 struct BrushColorJitterSettings {
   int flag;
@@ -238,6 +242,10 @@ float normal_weight_get(const Brush &brush, bool invert);
 /* debugging only */
 void BKE_brush_debug_print_state(Brush *br);
 
+namespace bke::brush {
+bool implements_3d_texture_paint(const Brush &brush);
+}
+
 /* -------------------------------------------------------------------- */
 /** \name Brush Capabilities
  * Common boolean checks used during both brush evaluation and in UI drawing
@@ -250,6 +258,7 @@ bool supports_accumulate(const Brush &brush);
 bool supports_topology_rake(const Brush &brush);
 bool supports_auto_smooth(const Brush &brush);
 bool supports_normal_radius(const Brush &brush);
+bool supports_tip_roundness(const Brush &brush);
 bool supports_hardness(const Brush &brush);
 bool supports_height(const Brush &brush);
 bool supports_plane_height(const Brush &brush);

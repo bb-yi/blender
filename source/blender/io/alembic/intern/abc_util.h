@@ -9,6 +9,8 @@
 
 #include "abc_reader_object.h"
 
+#include "BLI_string_ref.hh"
+
 #include <Alembic/Abc/Foundation.h>
 #include <Alembic/Abc/ICompoundProperty.h>
 #include <Alembic/Abc/IObject.h>
@@ -34,6 +36,19 @@ namespace io::alembic {
 
 class AbcObjectReader;
 struct AbcReaderConstructorArgs;
+
+static inline const std::string ABC_CURVE_RESOLUTION_U_PROPNAME = "blender:resolution";
+static inline const std::string ABC_ACTIVE_COLOR_ATTRIBUTE_PROPNAME =
+    "blender:active_color_attribute";
+static inline const std::string ABC_DEFAULT_COLOR_ATTRIBUTE_PROPNAME =
+    "blender:default_color_attribute";
+
+/* ORCO, Generated Coordinates, and Reference Points ("Pref") are all terms for the same thing.
+ * Other applications (Maya, Houdini) write these to a property called "Pref". */
+static inline const std::string propNameOriginalCoordinates = "Pref";
+
+/* This should only return true if the attribute (or property) is exported in .arbGeomParams. */
+bool is_reserved_attribute_name(const StringRefNull name);
 
 std::string get_valid_abc_name(const char *name);
 
@@ -79,6 +94,32 @@ std::optional<SampleInterpolationSettings> get_sample_interpolation_settings(
     size_t samples_number);
 
 AbcObjectReader *create_reader(const AbcReaderConstructorArgs &args);
+
+/* Alembic does not have specific enumerations for FaceVaryingInterpolateBoundary and
+ * InterpolateBoundary, rather it uses the values from OpenSubDiv 2.x and RenderMan
+ * directly respectively.
+ *
+ * The identifiers used in the following enumerations are based on their USD equivalent
+ * as used in USD's Alembic writer.
+ */
+
+/* See https://opensubdiv.org/docs/compatibility.html for how to convert values from
+ * OpenSubDiv 2.x to 3.x. */
+enum class AbcFaceVaryingInterpolateBoundary : int {
+  ALL = 0,
+  EDGE_AND_CORNERS = 1,
+  NONE = 2,
+  BOUNDARIES = 3,
+};
+
+/* See the RenderMan documentation for those values:
+ * https://rmanwiki-27.pixar.com/space/REN27/542213016/Subdivision+Surfaces#Boundary-Interpolation
+ */
+enum class AbcInterpolateBoundary : int {
+  NONE = 0,
+  EDGE_AND_CORNERS = 1,
+  EDGE_ONLY = 2,
+};
 
 }  // namespace io::alembic
 }  // namespace blender

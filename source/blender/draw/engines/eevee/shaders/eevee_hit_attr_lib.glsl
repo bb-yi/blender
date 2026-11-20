@@ -5,7 +5,7 @@
 #pragma once
 
 #include "gpu_shader_attribute_load_lib.glsl"
-#include "eevee_attributes_mesh_lib.glsl"
+#include "eevee_attributes_mesh_lib.bsl.hh"
 
 /* Only sparse replay needs triangle indices; ordinary raster domains stay unchanged. */
 struct HitMeshVertex {

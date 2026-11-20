@@ -8,8 +8,8 @@
 
 #include <cstdlib>
 
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_screen_types.h"
 #include "DNA_workspace_types.h"
@@ -132,7 +132,7 @@ static bScreen *screen_fullscreen_find_associated_normal_screen(const Main *bmai
 {
   for (bScreen &screen_iter : bmain->screens) {
     if ((&screen_iter != screen) && ELEM(screen_iter.state, SCREENMAXIMIZED, SCREENFULL)) {
-      ScrArea *area = static_cast<ScrArea *>(screen_iter.areabase.first);
+      ScrArea *area = screen_iter.areabase.first();
       if (area && area->full == screen) {
         return &screen_iter;
       }

@@ -5,7 +5,6 @@
 
 #include "usd_armature_utils.hh"
 #include "usd_blend_shape_utils.hh"
-#include "usd_hash_types.hh"
 #include "usd_hierarchy_iterator.hh"
 #include "usd_skel_convert.hh"
 #include "usd_skel_root_utils.hh"
@@ -30,7 +29,7 @@
 #include "BKE_main.hh"
 #include "BKE_report.hh"
 
-#include "BLI_assert.h"
+#include "BLI_assert.hh"
 
 #include "DNA_layer_types.h"
 #include "DNA_object_types.h"

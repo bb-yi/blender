@@ -21,15 +21,15 @@
 #include "DNA_windowmanager_types.h"
 #include "DNA_workspace_types.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
 #include "BLI_set.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BKE_action.hh"
+#include "BKE_annotations.h"
 #include "BKE_armature.hh"
 #include "BKE_context.hh"
-#include "BKE_gpencil_legacy.h"
 #include "BKE_layer.hh"
 #include "BKE_library.hh"
 #include "BKE_object.hh"
@@ -42,6 +42,7 @@
 #include "ED_armature.hh"
 #include "ED_clip.hh"
 #include "ED_gpencil_legacy.hh"
+#include "ED_markers.hh"
 
 #include "SEQ_channels.hh"
 #include "SEQ_select.hh"
@@ -115,6 +116,8 @@ const char *screen_context_dir[] = {
     "selected_strips",
     "selected_editable_strips",
     "sequencer_scene",
+    "markers",
+    "selected_markers",
     nullptr,
 };
 
@@ -571,7 +574,7 @@ static eContextResult screen_ctx_property(const bContext *C, bContextDataResult 
   int index;
 
   ui::context_active_but_prop_get(C, &ptr, &prop, &index);
-  if (ptr.data && prop) {
+  if (ptr && prop) {
     /* context_active_but_prop_get returns an index of 0 if the property is not
      * an array, but other functions expect -1 for non-arrays. */
     if (!RNA_property_array_check(prop)) {
@@ -814,7 +817,7 @@ static eContextResult screen_ctx_active_annotation_layer(const bContext *C,
   bGPdata *gpd = ED_annotation_data_get_active_direct(id_cast<ID *>(screen), area, scene);
 
   if (gpd) {
-    bGPDlayer *gpl = BKE_gpencil_layer_active_get(gpd);
+    bGPDlayer *gpl = BKE_annotations_layer_active_get(gpd);
 
     if (gpl) {
       CTX_data_pointer_set(result, &gpd->id, RNA_AnnotationLayer, gpl);
@@ -1188,6 +1191,35 @@ static eContextResult screen_ctx_sequencer_scene(const bContext *C, bContextData
   }
   return CTX_RESULT_NO_DATA;
 }
+static eContextResult screen_ctx_markers_ex(const bContext *C,
+                                            bContextDataResult *result,
+                                            const bool selected_only)
+{
+  Scene *scene = CTX_data_scene(C);
+  ListBaseT<TimeMarker> *markers = ED_scene_markers_get(C, scene);
+  if (!markers) {
+    return CTX_RESULT_NO_DATA;
+  }
+
+  ID *owner_id = ED_markers_get_owner_id(C, scene);
+  for (TimeMarker &marker : *markers) {
+    if (!selected_only || (marker.flag & SELECT)) {
+      /* Scene's markers and action's markers are both of type RNA_TimelineMarker. */
+      CTX_data_list_add(result, owner_id, RNA_TimelineMarker, &marker);
+    }
+  }
+
+  CTX_data_type_set(result, ContextDataType::Collection);
+  return CTX_RESULT_OK;
+}
+static eContextResult screen_ctx_markers(const bContext *C, bContextDataResult *result)
+{
+  return screen_ctx_markers_ex(C, result, /*selected_only=*/false);
+}
+static eContextResult screen_ctx_selected_markers(const bContext *C, bContextDataResult *result)
+{
+  return screen_ctx_markers_ex(C, result, /*selected_only=*/true);
+}
 
 /* Registry of context callback functions. */
 
@@ -1250,6 +1282,8 @@ static const Map<StringRef, context_callback> &ensure_ed_screen_context_function
     map.add("selected_strips", screen_ctx_selected_strips);
     map.add("selected_editable_strips", screen_ctx_selected_editable_strips);
     map.add("sequencer_scene", screen_ctx_sequencer_scene);
+    map.add("markers", screen_ctx_markers);
+    map.add("selected_markers", screen_ctx_selected_markers);
     return map;
   }();
   return screen_context_functions;

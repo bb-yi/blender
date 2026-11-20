@@ -4,7 +4,7 @@
 
 #include "node_geometry_util.hh"
 
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "BLO_read_write.hh"
 
@@ -388,7 +388,7 @@ static void node_extra_info(NodeExtraInfoParams &params)
       NodeExtraInfoRow row;
       row.text = RPT_("Missing Geometry");
       row.tooltip = TIP_("Each output field has to correspond to a geometry that is above it");
-      row.icon = ICON_ERROR;
+      row.icon = ICON_STATUS_ERROR;
       params.rows.append(std::move(row));
     }
   }

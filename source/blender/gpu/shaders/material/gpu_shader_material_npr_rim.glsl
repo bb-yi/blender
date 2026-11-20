@@ -8,17 +8,19 @@ void node_npr_rim(float4 color, float strength, float3 normal,
                   float thickness, float thickness_falloff,
                   float width_px, float threshold, float softness, float samples,
                   float light_bias, float light_factor, float mask, float alpha,
-                  float mode, float supported, float4 &result, float &factor)
+                  float mode, float supported,
+                  [[resource_table]] KernelGlobals &kg, ShadingData &sd,
+                  float4 &result, float &factor)
 {
   float shape = 0.0f;
   if (mode < 0.5f) {
-    float3 N = npr_v2_safe_normalize(normal, g_data.N);
-    float3 V = npr_v2_safe_normalize(coordinate_incoming(g_data.P), N);
-    shape = npr_v2_rim_shape(N, V, float4(angle, arc_length, arc_falloff, thickness),
+    float3 N = npr_v2_safe_normalize(normal, sd.N);
+    float3 V = npr_v2_safe_normalize(coordinate_impl(kg, sd, sd.P, sd.N).incoming, N);
+    shape = npr_v2_rim_shape(kg, sd, N, V, float4(angle, arc_length, arc_falloff, thickness),
                              thickness_falloff);
   }
   else if (supported > 0.5f && alpha >= 1.0f) {
-    shape = npr_v2_depth_rim(width_px, threshold, softness, angle,
+    shape = npr_v2_depth_rim(kg, sd, width_px, threshold, softness, angle,
                             arc_length, arc_falloff, samples);
   }
   float bias = clamp(light_bias, -1.0f, 1.0f);

@@ -30,7 +30,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static bool input_link_is_image(const bNode &node)
 {
-  const bNodeSocket *color_input = static_cast<const bNodeSocket *>(node.inputs.first);
+  const bNodeSocket *color_input = node.inputs.first();
   return color_input != nullptr && color_input->link != nullptr &&
          color_input->link->fromsock != nullptr && color_input->link->fromsock->type == SOCK_IMAGE;
 }
@@ -59,7 +59,8 @@ static int node_shader_gpu_npr_output(GPUMaterial *mat,
       GPU_link(mat, "npr_output_vec3", in[0].link, &outlink_npr);
       break;
     case SOCK_IMAGE:
-      GPU_link(mat, "npr_output_texture_handle", in[0].link, &outlink_npr);
+      GPU_link(mat, "npr_output_texture_handle", in[0].link,
+               GPU_kernel_globals(), GPU_shading_data(), &outlink_npr);
       break;
     default:
       GPU_link(mat, "npr_output", in[0].link, &outlink_npr);

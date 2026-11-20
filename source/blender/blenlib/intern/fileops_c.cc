@@ -20,9 +20,9 @@
 #include <zstd.h>
 
 #ifdef WIN32
-#  include "BLI_fileops_types.h"
+#  include "BLI_fileops_types.hh"
 #  include "BLI_string_utils.hh"
-#  include "BLI_winstuff.h"
+#  include "BLI_winstuff.hh"
 #  include "utf_winfunc.hh"
 #  include "utfconv.hh"
 #  include <io.h>
@@ -43,11 +43,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_fileops.h"
+#include "BLI_fileops.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_sys_types.h" /* For `intptr_t` support. */
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_sys_types.hh" /* For `intptr_t` support. */
+#include "BLI_utildefines.hh"
 
 namespace blender {
 
@@ -127,7 +127,7 @@ int64_t BLI_read(int fd, void *buf, size_t nbytes)
       return nbytes_read;
     }
 
-    if (UNLIKELY(nbytes_read > nbytes)) {
+    if (nbytes_read > nbytes) [[unlikely]] {
       /* Badly behaving LIBC, reading more bytes than requested should never happen.
        * Possibly an invalid internal state/corruption, only check to prevent an eternal loop. */
       BLI_assert_unreachable();
@@ -455,6 +455,17 @@ bool BLI_file_ensure_parent_dir_exists(const char *filepath)
 {
   char di[FILE_MAX];
   BLI_path_split_dir_part(filepath, di, sizeof(di));
+
+  if (di[0] == '\0') {
+    /* This means the filepath did not have any directory component, and thus the current directory
+     * should be made to exist. However, if it doesn't exist, Blender fails (at least on Linux) to
+     * even get the CWD. */
+    BLI_path_abs_from_cwd(di, sizeof(di));
+    if (di[0] == '\0') {
+      /* Still empty, which means getting CWD failed. */
+      return false;
+    }
+  }
 
   /* Make if the dir doesn't exist. */
   return BLI_dir_create_recursive(di);
@@ -959,16 +970,16 @@ static void strbuf_append_path(StrBuf *buf, const char *filename)
   const size_t filename_len = strlen(filename);
   const size_t len = buf->str_len + (has_slash ? 0 : 1) + filename_len;
 
-  if (buf->str_len_alloc < len) {
+  if (buf->str_len_alloc <= len) {
     buf->str = static_cast<char *>(realloc(static_cast<void *>(buf->str), len + 1));
-    buf->str_len_alloc = len;
+    buf->str_len_alloc = len + 1;
   }
   if (has_slash == false) {
     buf->str[buf->str_len++] = SEP;
   }
   memcpy(buf->str + buf->str_len, filename, filename_len + 1);
   buf->str_len += filename_len;
-  BLI_assert(buf->str_len <= buf->str_len_alloc);
+  BLI_assert(buf->str_len < buf->str_len_alloc);
 }
 
 static void strbuf_trim(StrBuf *buf, size_t len)
@@ -1267,7 +1278,7 @@ int BLI_delete_soft(const char *filepath, const char **r_error_message)
   errno = 0;
 
   int pid = fork();
-  if (UNLIKELY(pid == -1)) {
+  if (pid == -1) [[unlikely]] {
     *r_error_message = errno ? strerror(errno) : "unable to fork process";
     return -1;
   }

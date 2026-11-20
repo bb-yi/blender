@@ -282,9 +282,6 @@ struct NodeInsertOfsData {
   bNode *next = nullptr;
 
   wmTimer *anim_timer = nullptr;
-
-  /** Offset to apply to node chain. */
-  float offset_x = 0.0f;
 };
 
 struct SpaceNode_Runtime {
@@ -512,7 +509,6 @@ void NODE_OT_add_import_node(wmOperatorType *ot);
 void NODE_OT_swap_group_asset(wmOperatorType *ot);
 void NODE_OT_new_node_tree(wmOperatorType *ot);
 void NODE_OT_new_compositing_node_group(wmOperatorType *ot);
-void NODE_OT_duplicate_compositing_node_group(wmOperatorType *ot);
 void NODE_OT_duplicate_compositing_modifier_node_group(wmOperatorType *ot);
 void NODE_OT_new_compositor_sequencer_node_group(wmOperatorType *operator_type);
 void NODE_OT_add_group_input_node(wmOperatorType *ot);
@@ -588,6 +584,7 @@ void NODE_OT_delete_reconnect(wmOperatorType *ot);
 void NODE_OT_resize(wmOperatorType *ot);
 
 void NODE_OT_mute_toggle(wmOperatorType *ot);
+void NODE_OT_comment_edit(wmOperatorType *ot);
 void NODE_OT_collapse_toggle(wmOperatorType *ot);
 void NODE_OT_hide_socket_toggle(wmOperatorType *ot);
 void NODE_OT_preview_toggle(wmOperatorType *ot);
@@ -611,6 +608,7 @@ void NODE_OT_shader_script_update(wmOperatorType *ot);
 void NODE_OT_glsl_function_refresh(wmOperatorType *ot);
 void NODE_OT_glsl_function_new_text(wmOperatorType *ot);
 void NODE_OT_glsl_function_reset_defaults(wmOperatorType *ot);
+void NODE_OT_glsl_bundle_input(wmOperatorType *ot);
 void NODE_OT_glsl_function_toggle_code_mode(wmOperatorType *ot);
 void NODE_OT_glsl_function_make_internal(wmOperatorType *ot);
 
@@ -629,6 +627,9 @@ void NODE_GGT_backdrop_corner_pin(wmGizmoGroupType *gzgt);
 void NODE_GGT_backdrop_box_mask(wmGizmoGroupType *gzgt);
 void NODE_GGT_backdrop_ellipse_mask(wmGizmoGroupType *gzgt);
 void NODE_GGT_backdrop_split(wmGizmoGroupType *gzgt);
+void NODE_GGT_compositor_translate(wmGizmoGroupType *gzgt);
+void NODE_GGT_compositor_transform(wmGizmoGroupType *gzgt);
+void NODE_GGT_compositor_scale(wmGizmoGroupType *gzgt);
 
 /* `node_geometry_attribute_search.cc` */
 

@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "BLI_assert.h"
+#include "BLI_assert.hh"
 #include "BLI_math_euler.hh"
 #include "BLI_math_vector_types.hh"
 
@@ -12,6 +12,8 @@
 
 #include "BKE_node.hh"
 #include "BKE_node_runtime.hh"
+
+#include "NOD_geometry_nodes_bundle.hh"
 
 #include "COM_operation.hh"
 #include "COM_result.hh"
@@ -148,6 +150,17 @@ void SingleValueNodeInputOperation::execute()
       result.set_single_value(value);
       break;
     }
+    case SOCK_BUNDLE: {
+      result.set_single_value(nodes::Bundle::create());
+      break;
+    }
+    case SOCK_CLOSURE: {
+      result.set_single_value(ClosurePtr());
+      break;
+    }
+    case SOCK_CUSTOM:
+      /* An undefined socket, its value does not matter. */
+      break;
     default:
       BLI_assert_unreachable();
       break;

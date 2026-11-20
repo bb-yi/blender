@@ -11,9 +11,8 @@ VERTEX_SHADER_CREATE_INFO(overlay_motion_path_line)
 
 #include "gpu_shader_attribute_load_lib.glsl"
 #include "gpu_shader_index_load_lib.glsl"
-#include "gpu_shader_math_matrix_transform_lib.glsl"
-#include "gpu_shader_math_vector_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_matrix_transform.bsl.hh"
+#include "gpu_shader_math_vector.bsl.hh"
 
 struct VertIn {
   float3 P;

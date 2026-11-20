@@ -10,7 +10,7 @@
 #pragma once
 
 #include "BLI_enum_flags.hh"
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 #include "DNA_listBase.h"
 
@@ -192,7 +192,7 @@ enum eConstraint_EulerOrder : char {
   /** Automatic euler mode. */
   CONSTRAINT_EULER_AUTO = 0,
 
-  /** Explicit euler rotation modes - must sync with BLI_math_rotation.h defines. */
+  /** Explicit euler rotation modes - must sync with BLI_math_rotation_c.hh defines. */
   CONSTRAINT_EULER_XYZ = 1,
   CONSTRAINT_EULER_XZY = 2,
   CONSTRAINT_EULER_YXZ = 3,
@@ -692,7 +692,7 @@ struct bConstraint {
   char name[/*MAX_NAME*/ 64] = "";
 
   /** Amount of influence exerted by constraint (0.0-1.0). */
-  float enforce = 0;
+  float enforce = 1.0f;
   /** Point along `subtarget` bone where the actual target is. 0=head (default for all), 1=tail. */
   float headtail = 0;
 
@@ -728,7 +728,7 @@ struct bConstraintTarget {
   eConstraintTargetFlag flag = {};
   /** Type of target. */
   eConstraintObType type = CONSTRAINT_OBTYPE_OBJECT;
-  /** Rotation order for target (as defined in BLI_math_rotation.h). */
+  /** Rotation order for target (as defined in BLI_math_rotation_c.hh). */
   short rotOrder = 0;
   /** Weight for armature deform. */
   float weight = 0;
@@ -859,7 +859,7 @@ struct bLocateLikeConstraint {
 /* Copy Scale Constraint */
 struct bSizeLikeConstraint {
   struct Object *tar = nullptr;
-  eCopyScale_Flags flag = {};
+  eCopyScale_Flags flag = SIZELIKE_MULTIPLY;
   float power = 0;
   char subtarget[/*MAX_NAME*/ 64] = "";
 };
@@ -1070,7 +1070,7 @@ struct bPivotConstraint {
    * This option provides easier one-stop setups for foot-rolls.
    */
   /** Rotation axes to consider for this. */
-  ePivotConstraint_Axis rotAxis = PIVOTCON_AXIS_NONE;
+  ePivotConstraint_Axis rotAxis = PIVOTCON_AXIS_X_NEG;
 
   /* General flags */
   ePivotConstraint_Flag flag = {};

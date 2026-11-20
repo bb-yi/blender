@@ -11,11 +11,11 @@
 #include "AS_asset_catalog.hh"
 #include "AS_asset_catalog_tree.hh"
 
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "DNA_screen_types.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "BKE_context.hh"
 #include "BKE_screen.hh"
@@ -61,7 +61,8 @@ class AssetCatalogSelectorTree : public ui::AbstractTreeView {
   void build_tree() override
   {
     if (catalog_tree_.is_empty()) {
-      auto &item = add_tree_item<ui::BasicTreeViewItem>(RPT_("No asset catalogs"), ICON_INFO);
+      auto &item = add_tree_item<ui::BasicTreeViewItem>(RPT_("No asset catalogs"),
+                                                        ICON_STATUS_INFO);
       item.disable_interaction();
       this->is_flat_ = true;
       return;

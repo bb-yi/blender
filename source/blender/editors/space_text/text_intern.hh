@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include <optional>
+
+#include "BLI_math_vector_types.hh"
+
 #include "DNA_vec_types.h"
 
 namespace blender {
@@ -26,6 +30,16 @@ struct wmOperatorType;
 
 void draw_text_main(SpaceText *st, ARegion *region);
 
+/**
+ * Return the region-relative pixel position of the text cursor:
+ * X the left of the cursor cell, Y the top of its line (accounting for scroll & word-wrap).
+ * The cursor is the `sell` / `selc` end of the selection (its leading edge),
+ * matching the cursor drawn by the text editor.
+ * Return none when `st` has no text.
+ * The position may be outside the region.
+ */
+std::optional<int2> space_text_cursor_region_xy_get(const SpaceText *st, const ARegion *region);
+
 void text_update_line_edited(TextLine *line);
 void text_update_edited(Text *text);
 
@@ -40,13 +54,14 @@ void space_text_update_cursor_moved(bContext *C);
 #define TXT_NUMCOL_PAD 1.0f
 /* Total width of the optional line numbers column. */
 #define TXT_NUMCOL_WIDTH(st) \
-  ((st)->runtime->cwidth_px * ((st)->runtime->line_number_display_digits + (2 * TXT_NUMCOL_PAD)))
+  ((st)->runtime->char_width_px * \
+   ((st)->runtime->line_number_display_digits + (2 * TXT_NUMCOL_PAD)))
 
 /* Padding on left of body text in character units. */
 #define TXT_BODY_LPAD 1.0f
 /* Left position of body text. */
 #define TXT_BODY_LEFT(st) \
-  ((st)->showlinenrs ? TXT_NUMCOL_WIDTH(st) : 0) + (TXT_BODY_LPAD * (st)->runtime->cwidth_px)
+  ((st)->showlinenrs ? TXT_NUMCOL_WIDTH(st) : 0) + (TXT_BODY_LPAD * (st)->runtime->char_width_px)
 
 #define TXT_SCROLL_WIDTH U.widget_unit
 #define TXT_SCROLL_SPACE int(0.1f * U.widget_unit)
@@ -54,9 +69,9 @@ void space_text_update_cursor_moved(bContext *C);
 /* Space between lines, in relation to letter height. */
 #define TXT_LINE_VPAD 0.3f
 /* Space between lines. */
-#define TXT_LINE_SPACING(st) int(TXT_LINE_VPAD * st->runtime->lheight_px)
+#define TXT_LINE_SPACING(st) int(TXT_LINE_VPAD * st->runtime->line_height_px)
 /* Total height of each line. */
-#define TXT_LINE_HEIGHT(st) int((1.0f + TXT_LINE_VPAD) * st->runtime->lheight_px)
+#define TXT_LINE_HEIGHT(st) int((1.0f + TXT_LINE_VPAD) * st->runtime->line_height_px)
 
 #define SUGG_LIST_SIZE 7
 #define SUGG_LIST_WIDTH 20
@@ -186,10 +201,13 @@ namespace ed::text {
 struct SpaceText_Runtime {
 
   /** Actual line height, scaled by DPI. */
-  int lheight_px = 0;
+  int line_height_px = 0;
 
   /** Runtime computed, character width. */
-  int cwidth_px = 0;
+  int char_width_px = 0;
+
+  /** Runtime computed, font descender, negative as it's below the baseline. */
+  int descender_px = 0;
 
   /** The handle of the scroll-bar which can be clicked and dragged. */
   rcti scroll_region_handle{0, 0, 0, 0};
@@ -207,7 +225,7 @@ struct SpaceText_Runtime {
 
   /**
    * Run-time for scroll increments smaller than a line (smooth scroll).
-   * Values must be between zero and the line, column width: (cwidth, TXT_LINE_HEIGHT(st)).
+   * Values must be between zero and the line, column width: (char_width, TXT_LINE_HEIGHT(st)).
    */
   int scroll_ofs_px[2]{0, 0};
 

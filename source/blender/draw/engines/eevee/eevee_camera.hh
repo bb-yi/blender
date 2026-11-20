@@ -8,8 +8,10 @@
  * \ingroup eevee
  */
 
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector.hh"
 
 #include "BKE_camera.h"
 
@@ -82,7 +84,11 @@ inline bool operator==(const CameraData &a, const CameraData &b)
   return compare_m4m4(a.persmat.ptr(), b.persmat.ptr(), FLT_MIN) && (a.uv_scale == b.uv_scale) &&
          (a.uv_bias == b.uv_bias) && (a.equirect_scale == b.equirect_scale) &&
          (a.equirect_bias == b.equirect_bias) && (a.fisheye_fov == b.fisheye_fov) &&
-         (a.fisheye_lens == b.fisheye_lens) && (a.type == b.type);
+         (a.fisheye_lens == b.fisheye_lens) && (a.fisheye_sensor == b.fisheye_sensor) &&
+         (a.fisheye_polynomial_bias == b.fisheye_polynomial_bias) &&
+         (a.fisheye_polynomial_coefficients == b.fisheye_polynomial_coefficients) &&
+         (a.central_cylindrical_range == b.central_cylindrical_range) &&
+         (a.panoramic_view_mask == b.panoramic_view_mask) && (a.type == b.type);
 }
 
 inline bool operator!=(const CameraData &a, const CameraData &b)
@@ -117,6 +123,12 @@ class Camera {
   /** Just for tracking camera changes, use Instance::camera_orig_object for data access. */
   Object *last_camera_object_ = nullptr;
   bool camera_changed_ = false;
+  /** View projection matrix of the last #sync, to detect view changes. */
+  float4x4 last_persmat_ = float4x4::zero();
+  bool view_changed_ = true;
+  float3 last_position_ = float3(0.0f);
+  int2 last_render_extent_ = int2(-1);
+  bool position_changed_ = true;
 
  public:
   Camera(Instance &inst, CameraData &data) : inst_(inst), data_(data) {};
@@ -177,6 +189,15 @@ class Camera {
   bool camera_changed() const
   {
     return camera_changed_;
+  }
+  /** True if the view or projection changed since the previous sync. */
+  bool view_changed() const
+  {
+    return view_changed_;
+  }
+  bool position_changed() const
+  {
+    return position_changed_;
   }
 
  private:

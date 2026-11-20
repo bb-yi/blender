@@ -11,16 +11,16 @@
 #include "DNA_node_types.h"
 
 #include "BKE_anim_data.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_listbase_iterator.hh"
 #include "BLI_map.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_rand.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_vector.hh"
 
 #include "BKE_action.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_context.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_library.hh"
@@ -189,6 +189,10 @@ static Vector<MutableNodeAndSocket> get_internal_group_links(
           continue;
         }
         if (!link_filter(*link->tonode)) {
+          continue;
+        }
+        /* Don't map links to inactive group outputs. */
+        if (link->tonode->is_group_output() && (link->tonode->flag & NODE_DO_OUTPUT) == 0) {
           continue;
         }
         std::optional<int> multi_input_sort_id;
@@ -364,7 +368,7 @@ void NodeSetInterfaceBuilder::expose_socket(const bNodeSocket &src_socket,
       data = &io_mapping_.socket_data.lookup_or_add(io_socket, {});
       data_by_socket_.add_new(&key_socket, io_socket);
 
-      data->hidden = key_socket.flag & SOCK_HIDDEN;
+      data->hidden = key_socket.is_user_hidden();
       data->collapsed = key_socket.flag & SOCK_COLLAPSED;
       return data;
     }
@@ -620,7 +624,7 @@ static void map_socket(NodeTreeInterfaceMapping &io_mapping,
           .as_span()
           .cast<NodeAndSocket>());
   data.external_sockets.add_multiple(get_socket_links(*group_socket, false));
-  data.hidden = group_socket->flag & SOCK_HIDDEN;
+  data.hidden = group_socket->is_user_hidden();
   data.collapsed = group_socket->flag & SOCK_COLLAPSED;
   io_mapping.socket_data.add(&io_socket, std::move(data));
 }
@@ -1048,7 +1052,7 @@ static void replace_interface_socket(
 
   if (proxy_node) {
     BLI_assert(proxy_node);
-    STRNCPY(proxy_node->label, io_socket.name);
+    STRNCPY(proxy_node->label, io_socket.name().c_str());
 
     const float width = (proxy_node->is_reroute() ? 0.0f : proxy_node->width);
     const float height = (proxy_node->is_reroute() ? 0.0f : proxy_node->height);

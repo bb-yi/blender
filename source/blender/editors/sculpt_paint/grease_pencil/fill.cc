@@ -8,7 +8,7 @@
 #include "BLI_enum_flags.hh"
 #include "BLI_index_mask.hh"
 #include "BLI_math_base.hh"
-#include "BLI_math_geom.h"
+#include "BLI_math_geom_c.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_multi_value_map.hh"
@@ -1194,35 +1194,21 @@ static EdgeCurves follow_edge_connections(const Span<int> all_edges,
   return edge_curves;
 }
 
-static std::pair<int, int> order_edge(const std::pair<int, int> &edge)
-{
-  if (edge.first > edge.second) {
-    return std::pair<int, int>(edge.second, edge.first);
-  }
-  return edge;
-}
-
-static Array<int3> get_all_triangle_edges(const Span<std::pair<int, int>> edges,
-                                          const Span<Vector<int>> tris)
+static Array<int3> get_all_triangle_edges(const Span<int2> edges, const Span<Vector<int>> tris)
 {
   Array<int3> tri_edges(tris.size(), int3(NULL_INDEX));
 
-  Map<std::pair<int, int>, int> edge_to_index;
+  Map<OrderedEdge, int> edge_to_index;
   for (const int edge_index : edges.index_range()) {
-    const std::pair<int, int> &edge = edges[edge_index];
-    edge_to_index.add_new(order_edge(edge), edge_index);
+    edge_to_index.add_new(edges[edge_index], edge_index);
   }
 
   threading::parallel_for(tris.index_range(), 512, [&](const IndexRange range) {
     for (const int64_t tri_index : range) {
       const Vector<int> &face = tris[tri_index];
-
-      const std::pair<int, int> edge0 = order_edge(std::pair<int, int>(face[0], face[1]));
-      const std::pair<int, int> edge1 = order_edge(std::pair<int, int>(face[1], face[2]));
-      const std::pair<int, int> edge2 = order_edge(std::pair<int, int>(face[2], face[0]));
-
-      tri_edges[tri_index] = int3(
-          edge_to_index.lookup(edge0), edge_to_index.lookup(edge1), edge_to_index.lookup(edge2));
+      tri_edges[tri_index] = int3(edge_to_index.lookup(OrderedEdge(face[0], face[1])),
+                                  edge_to_index.lookup(OrderedEdge(face[1], face[2])),
+                                  edge_to_index.lookup(OrderedEdge(face[2], face[0])));
     }
   });
 
@@ -1258,13 +1244,13 @@ static Array<int3> get_all_triangle_adjacency(const int num_edges,
         const int edge = tri_edges[tri_index][j];
 
         const int index_0 = edge_to_tris[edge].first;
-        if (index_0 != tri_index && index_0 != NULL_INDEX) {
+        if (!ELEM(index_0, tri_index, NULL_INDEX)) {
           tri_adjacency[tri_index][j] = index_0;
           continue;
         }
 
         const int index_1 = edge_to_tris[edge].second;
-        if (index_1 != tri_index && index_1 != NULL_INDEX) {
+        if (!ELEM(index_1, tri_index, NULL_INDEX)) {
           tri_adjacency[tri_index][j] = index_1;
           continue;
         }
@@ -1277,16 +1263,15 @@ static Array<int3> get_all_triangle_adjacency(const int num_edges,
   return tri_adjacency;
 }
 
-static Array<float> get_edge_weights(const Span<std::pair<int, int>> edges,
-                                     const Span<double2> verts)
+static Array<float> get_edge_weights(const Span<int2> edges, const Span<double2> verts)
 {
   Array<float> edge_weights(edges.size());
 
   threading::parallel_for(edges.index_range(), 512, [&](const IndexRange range) {
     for (const int64_t edge_index : range) {
-      const std::pair<int, int> &edge = edges[edge_index];
-      const double2 &v1 = verts[edge.first];
-      const double2 &v2 = verts[edge.second];
+      const int2 &edge = edges[edge_index];
+      const double2 &v1 = verts[edge[0]];
+      const double2 &v2 = verts[edge[1]];
       edge_weights[edge_index] = math::distance(v1, v2);
     }
   });
@@ -1369,12 +1354,14 @@ static void add_weights_for_tri(const Span<int3> tri_adjacency,
   }
 }
 
-static meshintersect::CDT_input<double> get_input_from_drawings(
+static std::optional<meshintersect::CDT_input<double>> get_input_from_drawings(
     const Span<DrawingInfo> src_drawings,
     const Object &object,
     const VArray<bool> &boundary_layers,
     const ARegion &region,
-    const std::optional<float> opacity_threshold)
+    const std::optional<float> opacity_threshold,
+    Array<double2> &r_cdt_verts,
+    Array<int2> &r_cdt_edges)
 {
   using bke::greasepencil::Drawing;
   using bke::greasepencil::Layer;
@@ -1384,7 +1371,7 @@ static meshintersect::CDT_input<double> get_input_from_drawings(
   BLI_assert(grease_pencil.has_active_layer());
 
   Array<Vector<double2>> drawing_input_verts(src_drawings.size());
-  Array<Vector<std::pair<int, int>>> drawing_input_edges(src_drawings.size());
+  Array<Vector<OrderedEdge>> drawing_input_edges(src_drawings.size());
 
   threading::parallel_for(src_drawings.index_range(), 1, [&](const IndexRange range) {
     for (const int drawing_i : range) {
@@ -1486,8 +1473,7 @@ static meshintersect::CDT_input<double> get_input_from_drawings(
                                                                     first_point_offset;
           if (is_point_visible[local_i]) {
             if (is_point_visible[local_next]) {
-              drawing_input_edges[drawing_i].append(
-                  order_edge(std::pair<int, int>(point_offset, point_offset_next)));
+              drawing_input_edges[drawing_i].append(OrderedEdge(point_offset, point_offset_next));
             }
             point_offset++;
           }
@@ -1511,14 +1497,20 @@ static meshintersect::CDT_input<double> get_input_from_drawings(
   const OffsetIndices<int> drawing_edge_offsets = offset_indices::accumulate_counts_to_offsets(
       drawing_edge_offset_data);
 
-  meshintersect::CDT_input<double> input;
-  input.need_ids = true;
+  if (drawing_vert_offsets.total_size() == 0) {
+    return std::nullopt;
+  }
 
   /* Four points are added for the bounding box. */
-  input.vert.reinitialize(drawing_vert_offsets.total_size() + 4);
-  input.edge.reinitialize(drawing_edge_offsets.total_size());
+  r_cdt_verts = Array<double2>(drawing_vert_offsets.total_size() + 4);
+  r_cdt_edges = Array<int2>(drawing_edge_offsets.total_size());
 
-  MutableSpan<double2> verts_span = input.vert.as_mutable_span();
+  meshintersect::CDT_input<double> input;
+  input.needed_ids = CDT_ORIG_EDGES | CDT_ORIG_VERTS;
+  input.vert = r_cdt_verts;
+  input.edge = r_cdt_edges;
+
+  MutableSpan<double2> verts_span = r_cdt_verts.as_mutable_span();
   threading::parallel_for(drawing_input_verts.index_range(), 512, [&](const IndexRange range) {
     for (const int drawing_i : range) {
       const IndexRange drawing_range = drawing_vert_offsets[drawing_i];
@@ -1526,42 +1518,41 @@ static meshintersect::CDT_input<double> get_input_from_drawings(
     }
   });
 
-  MutableSpan<std::pair<int, int>> edges_span = input.edge.as_mutable_span();
+  MutableSpan<int2> edges_span = r_cdt_edges.as_mutable_span();
   threading::parallel_for(drawing_input_edges.index_range(), 512, [&](const IndexRange range) {
     for (const int drawing_i : range) {
       const IndexRange drawing_range = drawing_edge_offsets[drawing_i];
-      MutableSpan<std::pair<int, int>> edges_slice = edges_span.slice(drawing_range);
-      array_utils::copy(drawing_input_edges[drawing_i].as_span(), edges_slice);
+      MutableSpan<int2> edges_slice = edges_span.slice(drawing_range);
+      array_utils::copy(drawing_input_edges[drawing_i].as_span().cast<int2>(), edges_slice);
       const IndexRange vert_range = drawing_vert_offsets[drawing_i];
       if (vert_range.is_empty()) {
         continue;
       }
       const int vert_offset = vert_range.first();
       for (const int edge_i : drawing_range.index_range()) {
-        edges_slice[edge_i] = std::pair<int, int>(edges_slice[edge_i].first + vert_offset,
-                                                  edges_slice[edge_i].second + vert_offset);
+        edges_slice[edge_i] = int2(edges_slice[edge_i][0] + vert_offset,
+                                   edges_slice[edge_i][1] + vert_offset);
       }
     }
   });
 
-  Bounds<double2> bound = *bounds::min_max(input.vert.as_span().drop_back(4));
+  Bounds<double2> bound = *bounds::min_max(r_cdt_verts.as_span().drop_back(4));
 
   /* Pad by enough that all edges connected to the boundary are longer than any edge inside the
    * shape. */
   bound.pad(math::max(bound.size().x, bound.size().y) * 1.1f);
 
   const std::array<double2, 4> corners = bounds::corners(bound);
-  input.vert.as_mutable_span().take_back(4).copy_from(corners);
+  r_cdt_verts.as_mutable_span().take_back(4).copy_from(corners);
 
   return input;
 }
 
-static std::optional<EdgeCurves> create_connected_edges_from_fill(
-    const Span<bool> tri_to_fill,
-    const bool invert,
-    const Span<int3> tri_adjacency,
-    const Span<int3> tri_edges,
-    const Span<std::pair<int, int>> edges)
+static std::optional<EdgeCurves> create_connected_edges_from_fill(const Span<bool> tri_to_fill,
+                                                                  const bool invert,
+                                                                  const Span<int3> tri_adjacency,
+                                                                  const Span<int3> tri_edges,
+                                                                  const Span<int2> edges)
 {
   Set<int> boundary_edges;
 
@@ -1611,13 +1602,13 @@ static std::optional<EdgeCurves> create_connected_edges_from_fill(
   MultiValueMap<int, EncodedConnection> vert_to_edge_ends;
 
   for (const int edge_index : boundary_edges) {
-    const std::pair<int, int> edge = edges[edge_index];
+    const int2 edge = edges[edge_index];
 
     const EncodedConnection point_1 = encode_index_and_side(edge_index, Side::Start);
     const EncodedConnection point_2 = encode_index_and_side(edge_index, Side::End);
 
-    vert_to_edge_ends.add(edge.first, point_1);
-    vert_to_edge_ends.add(edge.second, point_2);
+    vert_to_edge_ends.add(edge[0], point_1);
+    vert_to_edge_ends.add(edge[1], point_2);
   }
 
   for (Span<EncodedConnection> edge_ends : vert_to_edge_ends.values()) {
@@ -1657,9 +1648,16 @@ std::optional<bke::CurvesGeometry> delaunay_fill_strokes(
     placement.cache_viewport_depths(&depsgraph, &region, &view3d);
   }
 
-  const meshintersect::CDT_input<double> input = get_input_from_drawings(
-      src_drawings, object, boundary_layers, region, opacity_threshold);
-  meshintersect::CDT_result<double> result = delaunay_2d_calc(input, CDT_FULL);
+  Array<double2> cdt_verts;
+  Array<int2> cdt_edges;
+  const std::optional<meshintersect::CDT_input<double>> input = get_input_from_drawings(
+      src_drawings, object, boundary_layers, region, opacity_threshold, cdt_verts, cdt_edges);
+  if (!input) {
+    return std::nullopt;
+  }
+  meshintersect::CDT_result<double> result = delaunay_2d_calc(*input, CDT_FULL);
+
+  const IndexRange src_boundary_points = input->vert.index_range().take_back(4);
 
   Array<bool> is_source_edge(result.edge.size(), false);
 
@@ -1702,6 +1700,32 @@ std::optional<bke::CurvesGeometry> delaunay_fill_strokes(
     return NULL_INDEX;
   };
 
+  /* Check if a triangle is touches the boundary. */
+  auto is_tri_connected_to_boundary = [&](const int tri_index) {
+    const Vector<int> &tri = result.face[tri_index];
+
+    for (const int j : IndexRange(3)) {
+      for (const int orig_point : result.vert_orig[tri[j]]) {
+        if (src_boundary_points.contains(orig_point)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
+  /* Get the first triangle that is touching the bounding box. */
+  auto get_first_boundary_tri = [&]() {
+    for (const int tri_index : result.face.index_range()) {
+      if (is_tri_connected_to_boundary(tri_index)) {
+        return tri_index;
+      }
+    }
+    BLI_assert_unreachable();
+    return NULL_INDEX;
+  };
+
   Array<float> tri_max_weight = get_tri_max_weight(result.face.size(),
                                                    tri_adjacency.as_span(),
                                                    tri_edges.as_span(),
@@ -1711,46 +1735,41 @@ std::optional<bke::CurvesGeometry> delaunay_fill_strokes(
   Array<int> tri_hint_index(result.face.size(), NULL_INDEX);
   Array<float> tri_weights(result.face.size(), 0.0f);
 
-  Vector<float2> pos_hint = {fill_points[0].first()};
+  /* Note: Delaunay filling allows for multiple hints being used at the same time, but for bucket
+   * filling only a single hint is used at a time. */
+  const Span<float2> hint_points = fill_points[0];
 
-  /* Each `hint` is the source of a fill region. The `hint_index` is the index of the triangle this
-   * hint is within. */
+  /* Each `hint` is the source of a fill region, each `hint` can have multiple points in it. */
   int hint_index = 0;
-  int first_tri_index = get_tri_for_point(pos_hint[hint_index]);
 
-  /* Get the first triangle that is touching the bounding box. */
-  auto get_first_boundary_tri = [&]() {
-    for (const int tri_index : result.face.index_range()) {
-      for (const int j : IndexRange(3)) {
-        const int next_tri = tri_adjacency[tri_index][j];
-
-        if (next_tri == NULL_INDEX) {
-          return tri_index;
-        }
-      }
+  Set<int> tris_for_hint;
+  for (const int i : hint_points.index_range()) {
+    const int hint_tri_index = get_tri_for_point(hint_points[i]);
+    if (hint_tri_index != NULL_INDEX && !is_tri_connected_to_boundary(hint_tri_index)) {
+      tris_for_hint.add(hint_tri_index);
     }
-    BLI_assert_unreachable();
-    return NULL_INDEX;
-  };
+  }
 
   /* Check if the user clicked outside of the bounding box. */
-  if (first_tri_index == NULL_INDEX) {
+  if (tris_for_hint.is_empty()) {
     if (!invert) {
       return std::nullopt;
     }
-    first_tri_index = get_first_boundary_tri();
+    tris_for_hint.add(get_first_boundary_tri());
   }
 
   if (internal_gaps && gap_factor > 0.0f) {
-    add_weights_for_tri(tri_adjacency.as_span(),
-                        tri_edges.as_span(),
-                        edge_weights.as_span(),
-                        tri_max_weight.as_span(),
-                        is_source_edge.as_span(),
-                        first_tri_index,
-                        hint_index,
-                        tri_hint_index.as_mutable_span(),
-                        tri_weights.as_mutable_span());
+    for (const int hint_tri_index : tris_for_hint) {
+      add_weights_for_tri(tri_adjacency.as_span(),
+                          tri_edges.as_span(),
+                          edge_weights.as_span(),
+                          tri_max_weight.as_span(),
+                          is_source_edge.as_span(),
+                          hint_tri_index,
+                          hint_index,
+                          tri_hint_index.as_mutable_span(),
+                          tri_weights.as_mutable_span());
+    }
 
     /* Create segmentation of the geometry until all triangles have full or nearly full weights.
      * the `gap_factor` is the factor that a triangle can be within and be considered full. */
@@ -1817,17 +1836,21 @@ std::optional<bke::CurvesGeometry> delaunay_fill_strokes(
   }
 
   if (!invert) {
-    /* Add the mouse fill again to make sure it as highest priority. */
-    add_weights_for_tri(tri_adjacency.as_span(),
-                        tri_edges.as_span(),
-                        edge_weights.as_span(),
-                        tri_max_weight.as_span(),
-                        is_source_edge.as_span(),
-                        first_tri_index,
-                        hint_index,
-                        tri_hint_index.as_mutable_span(),
-                        tri_weights.as_mutable_span());
+    for (const int hint_tri_index : tris_for_hint) {
+      /* Add the mouse fill again to make sure it as highest priority. */
+      add_weights_for_tri(tri_adjacency.as_span(),
+                          tri_edges.as_span(),
+                          edge_weights.as_span(),
+                          tri_max_weight.as_span(),
+                          is_source_edge.as_span(),
+                          hint_tri_index,
+                          hint_index,
+                          tri_hint_index.as_mutable_span(),
+                          tri_weights.as_mutable_span());
+    }
   }
+
+  Set<int> indices_to_fill({hint_index});
 
   Array<bool> tri_to_fill(result.face.size(), false);
 
@@ -1843,7 +1866,7 @@ std::optional<bke::CurvesGeometry> delaunay_fill_strokes(
   else {
     threading::parallel_for(result.face.index_range(), 512, [&](const IndexRange range) {
       for (const int64_t tri_index : range) {
-        if (tri_hint_index[tri_index] == hint_index) {
+        if (indices_to_fill.contains(tri_hint_index[tri_index])) {
           tri_to_fill[tri_index] = true;
         }
       }
@@ -1877,8 +1900,8 @@ std::optional<bke::CurvesGeometry> delaunay_fill_strokes(
       for (const int point_i : edges_range) {
         const int edge_index = edge_curves->edges[point_i];
         const bool reversed = edge_curves->reversed[point_i];
-        const std::pair<int, int> edge = result.edge[edge_index];
-        const int vert_id = reversed ? edge.second : edge.first;
+        const int2 edge = result.edge[edge_index];
+        const int vert_id = reversed ? edge[1] : edge[0];
 
         const float2 pos_2d = float2(result.vert[vert_id]);
         const float3 position = placement.project(pos_2d);

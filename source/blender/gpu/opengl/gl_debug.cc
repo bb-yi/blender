@@ -8,10 +8,10 @@
  * Debug features of OpenGL.
  */
 
-#include "BLI_compiler_attrs.h"
-#include "BLI_string.h"
-#include "BLI_system.h"
-#include "BLI_utildefines.h"
+#include "BLI_compiler_attrs.hh"
+#include "BLI_string.hh"
+#include "BLI_system.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_global.hh"
 
@@ -205,7 +205,7 @@ void check_gl_resources(const char *info)
   ubo_needed &= ~ctx->bound_ubo_slots;
   /* NOTE: This only check binding. To be valid, the bound ssbo needs to
    * be big enough to feed the data range the shader awaits. */
-  uint16_t ssbo_needed = interface->enabled_ssbo_mask_;
+  uint32_t ssbo_needed = interface->enabled_ssbo_mask_;
   ssbo_needed &= ~ctx->bound_ssbo_slots;
   /* NOTE: This only check binding. To be valid, the bound texture needs to
    * be the same format/target the shader expects. */

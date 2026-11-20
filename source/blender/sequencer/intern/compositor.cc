@@ -6,6 +6,11 @@
  * \ingroup sequencer
  */
 
+#include <optional>
+
+#include "BLI_math_rotation.hh"
+
+#include "BKE_compute_contexts.hh"
 #include "BKE_node_runtime.hh"
 
 #include "PRF_profile.hh"
@@ -13,6 +18,7 @@
 #include "COM_algorithm_parallel_reduction.hh"
 #include "COM_ocio_color_space_conversion_shader.hh"
 #include "COM_realize_on_domain_operation.hh"
+#include "COM_scheduler.hh"
 #include "COM_utilities.hh"
 
 #include "GPU_state.hh"
@@ -21,9 +27,167 @@
 #include "IMB_colormanagement.hh"
 #include "IMB_imbuf.hh"
 
+#include "NOD_compositor_nodes_srna.hh"
+
+#include "RNA_access.hh"
+
 #include "compositor.hh"
 
 namespace blender::seq {
+
+template<typename T>
+static void set_float_array(PointerRNA *input_props_ptr, compositor::Result &result)
+{
+  T value;
+  RNA_float_get_array(input_props_ptr, "value", value);
+  result.set_single_value(value);
+}
+
+template<typename T>
+static void set_int_array(PointerRNA *input_props_ptr, compositor::Result &result)
+{
+  T value;
+  RNA_int_get_array(input_props_ptr, "value", value);
+  result.set_single_value(value);
+}
+
+static void set_single_input_from_rna_value(PointerRNA *input_props_ptr,
+                                            const eNodeSocketDatatype socket_type,
+                                            compositor::Result &result,
+                                            const std::optional<int> dimensions)
+{
+  using namespace nodes;
+
+  /* Only consider inputs explicitly set to Value type. */
+  if (CompositorNodesInputType(RNA_enum_get(input_props_ptr, "type")) !=
+      CompositorNodesInputType::Value)
+  {
+    return;
+  }
+
+  switch (socket_type) {
+    case SOCK_FLOAT: {
+      const float value = RNA_float_get(input_props_ptr, "value");
+      result.set_single_value(value);
+      break;
+    }
+    case SOCK_VECTOR: {
+      switch (dimensions.value_or(3)) {
+        case 2: {
+          set_float_array<float2>(input_props_ptr, result);
+          break;
+        }
+        case 3: {
+          set_float_array<float3>(input_props_ptr, result);
+          break;
+        }
+        case 4: {
+          set_float_array<float4>(input_props_ptr, result);
+          break;
+        }
+        default:
+          BLI_assert_unreachable();
+      }
+      break;
+    }
+    case SOCK_RGBA: {
+      ColorGeometry4f value;
+      RNA_float_get_array(input_props_ptr, "value", value);
+      result.set_single_value(value);
+      break;
+    }
+    case SOCK_BOOLEAN: {
+      const bool value = RNA_boolean_get(input_props_ptr, "value");
+      result.set_single_value(value);
+      break;
+    }
+    case SOCK_INT: {
+      const int value = RNA_int_get(input_props_ptr, "value");
+      result.set_single_value(value);
+      break;
+    }
+    case SOCK_ROTATION: {
+      float3 value_euler;
+      RNA_float_get_array(input_props_ptr, "value", value_euler);
+      math::Quaternion value_rotation = math::to_quaternion(math::EulerXYZ(value_euler));
+      result.set_single_value(value_rotation);
+      break;
+    }
+    case SOCK_MENU: {
+      const MenuValue value = MenuValue(RNA_enum_get(input_props_ptr, "value"));
+      result.set_single_value(value);
+      break;
+    }
+    case SOCK_STRING: {
+      const std::string value = RNA_string_get(input_props_ptr, "value");
+      result.set_single_value(value);
+      break;
+    }
+    case SOCK_INT_VECTOR: {
+      switch (dimensions.value_or(2)) {
+        case 2: {
+          set_int_array<int2>(input_props_ptr, result);
+          break;
+        }
+        case 3: {
+          set_int_array<int3>(input_props_ptr, result);
+          break;
+        }
+        default:
+          BLI_assert_unreachable();
+      }
+      break;
+    }
+    case SOCK_OBJECT: {
+      Object *value = RNA_pointer_get(input_props_ptr, "value").data_as<Object>();
+      result.set_single_value(value);
+      break;
+    }
+    case SOCK_FONT: {
+      VFont *value = RNA_pointer_get(input_props_ptr, "value").data_as<VFont>();
+      result.set_single_value(value);
+      break;
+    }
+    case SOCK_IMAGE:
+    case SOCK_COLLECTION:
+    case SOCK_TEXTURE:
+    case SOCK_MATERIAL:
+    case SOCK_SCENE:
+    case SOCK_TEXT_ID:
+    case SOCK_MASK:
+    case SOCK_SOUND:
+    case SOCK_GEOMETRY:
+    case SOCK_MATRIX:
+    case SOCK_BUNDLE:
+    case SOCK_CLOSURE:
+    case SOCK_SHADER:
+    case SOCK_CUSTOM:
+      break;
+  }
+}
+
+static std::optional<int> get_socket_dimension(const bNodeTreeInterfaceSocket *socket,
+                                               const eNodeSocketDatatype socket_type)
+{
+  if (socket_type == SOCK_VECTOR) {
+    return static_cast<bNodeSocketValueVector *>(socket->socket_data)->dimensions;
+  }
+  if (socket_type == SOCK_INT_VECTOR) {
+    return static_cast<bNodeSocketValueIntVector *>(socket->socket_data)->dimensions;
+  }
+  return {};
+}
+
+void set_input_result_from_rna(PointerRNA &inputs_ptr,
+                               const bNodeTreeInterfaceSocket &socket,
+                               const eNodeSocketDatatype socket_type,
+                               compositor::Result &result)
+{
+  PointerRNA input_props_ptr = RNA_pointer_get(&inputs_ptr, socket.identifier);
+  result.allocate_single_value();
+  set_single_input_from_rna_value(
+      &input_props_ptr, socket_type, result, get_socket_dimension(&socket, socket_type));
+}
 
 compositor::ResultPrecision CompositorContext::get_precision() const
 {
@@ -135,31 +299,24 @@ void CompositorContext::write_viewer_impl(const compositor::Result &result, ImBu
   SimpleOperation *realization_operation = RealizeOnDomainOperation::construct_if_needed(
       *this, result, input_descriptor, result.domain());
 
-  if (realization_operation) {
-    Result realize_input = this->create_result(ResultType::Color, result.precision());
-    realize_input.share_data(result);
-    realization_operation->map_input_to_result(&realize_input);
-    realization_operation->evaluate();
-
-    Result &realized_viewer_result = realization_operation->get_result();
-    this->write_output(realized_viewer_result, image);
-    realized_viewer_result.release();
-    viewer_was_written_ = true;
-    delete realization_operation;
+  if (!realization_operation) {
+    this->write_output(result, image);
     return;
   }
 
-  this->write_output(result, image);
-  viewer_was_written_ = true;
+  Result realize_input = this->create_result(ResultType::Color, result.precision());
+  realize_input.share_data(result);
+  realization_operation->map_input_to_result(&realize_input);
+  realization_operation->evaluate();
+
+  Result &realized_result = realization_operation->get_result();
+  this->write_output(realized_result, image);
+  realized_result.release();
+  delete realization_operation;
 }
 
 void CompositorContext::write_output(const compositor::Result &result, ImBuf &image)
 {
-  /* Do not write the output if the viewer output was already written. */
-  if (viewer_was_written_) {
-    return;
-  }
-
   PRF_scope_with_name("SeqCompWriteOutput", ProfileCategory::Draw);
 
   if (result.is_single_value()) {
@@ -218,22 +375,7 @@ void CompositorContext::write_outputs(const bNodeTree &node_group,
       continue;
     }
 
-    /* Realize the output transforms if needed. */
-    const InputDescriptor input_descriptor = {ResultType::Color,
-                                              InputRealizationMode::OperationDomain};
-    SimpleOperation *realization_operation = RealizeOnDomainOperation::construct_if_needed(
-        *this, output_result, input_descriptor, output_result.domain());
-    if (realization_operation) {
-      realization_operation->map_input_to_result(&output_result);
-      realization_operation->evaluate();
-      Result &realized_output_result = realization_operation->get_result();
-      this->write_output(realized_output_result, output_image);
-      realized_output_result.release();
-      delete realization_operation;
-      continue;
-    }
-
-    this->write_output(output_result, output_image);
+    this->write_viewer_impl(output_result, output_image);
     output_result.release();
   }
 }
@@ -242,6 +384,16 @@ void CompositorContext::set_output_refcount(const bNodeTree &node_group,
                                             compositor::NodeGroupOperation &node_group_operation)
 {
   using namespace compositor;
+
+  /* If the node group has no viewer node in the active context, and the context requires a viewer
+   * output, we use the group output as a viewer. */
+  const bool has_viewer = this->viewer_compute_context() != nullptr;
+  const bool needs_viewer_output = flag_is_set(this->needed_side_effect_output_types(),
+                                               SideEffectOutputTypes::ViewerNode);
+  const bool use_group_output_as_viewer = (!has_viewer && needs_viewer_output);
+
+  const bool is_group_output_needed = render_data_.render || use_group_output_as_viewer;
+
   /* Set the reference count for the outputs, only the first color output is actually needed,
    * while the rest are ignored. */
   node_group.ensure_interface_cache();
@@ -249,7 +401,8 @@ void CompositorContext::set_output_refcount(const bNodeTree &node_group,
     const bool is_first_output = output_socket == node_group.interface_outputs().first();
     Result &output_result = node_group_operation.get_result(output_socket->identifier);
     const bool is_color = output_result.type() == ResultType::Color;
-    output_result.set_reference_count(is_first_output && is_color ? 1 : 0);
+    const bool is_needed = is_group_output_needed && is_first_output && is_color;
+    output_result.set_reference_count(is_needed ? 1 : 0);
   }
 }
 

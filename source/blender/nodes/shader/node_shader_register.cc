@@ -2,7 +2,12 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #include "NOD_register.hh"
+#include "NOD_npr_line.hh"
 
 #include "node_shader_register.hh"
 
@@ -12,6 +17,7 @@ void register_shader_nodes()
 {
   register_node_tree_type_sh();
   register_node_tree_type_eevee_filter_graph();
+  nodes::register_npr_line_nodes();
 
   register_node_type_sh_group();
 
@@ -67,8 +73,13 @@ void register_shader_nodes()
   register_node_type_sh_input_aov();
   register_node_type_sh_invert();
   register_node_type_sh_layer_weight();
-  register_node_type_sh_light_info();
+  register_node_type_sh_npr_light_info();
+  register_node_type_sh_light_accumulation();
+  register_node_type_sh_light_evaluation();
   register_node_type_sh_light_falloff();
+  register_node_type_sh_light_info();
+  register_node_type_sh_light_iter_internal_input();
+  register_node_type_sh_light_iter_internal_output();
   register_node_type_sh_light_path();
   register_node_type_sh_map_range();
   register_node_type_sh_mapping();
@@ -83,13 +94,17 @@ void register_shader_nodes()
   register_node_type_sh_npr_output();
   register_node_type_sh_npr_refraction();
   register_node_type_sh_outline_control();
+  register_node_type_sh_tessellation_control();
   register_node_type_sh_output_filter();
   register_node_type_sh_portal_in();
   register_node_type_sh_portal_out();
   register_node_type_sh_render_texture();
   register_node_type_sh_render_info();
+  register_node_type_sh_draw_info();
+  register_node_type_sh_stencil_value();
   register_node_type_sh_world_environment();
   register_node_type_sh_light_probe_color();
+  register_node_type_sh_planar_probe();
   register_node_type_sh_world_to_tangent();
   register_node_type_sh_basis_transform();
   register_node_type_sh_sdf_primitive();
@@ -118,6 +133,7 @@ void register_shader_nodes()
   register_node_type_sh_sepcolor();
   register_node_type_sh_sepxyz();
   register_node_type_sh_shadertorgb();
+  register_node_type_sh_shadow_raycast();
   register_node_type_sh_squeeze();
   register_node_type_sh_subsurface_scattering();
   register_node_type_sh_tangent();

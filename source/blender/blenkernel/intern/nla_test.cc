@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "BKE_gtest_base.hh"
 #include "BKE_nla.hh"
@@ -48,7 +48,7 @@ TEST_F(NlaStripTest, BKE_nlastrips_add_strip)
   NlaStrip strip1{};
   strip1.start = 0;
   strip1.end = 10;
-  strips.first = &strip1;
+  strips.first_ = &strip1;
 
   NlaStrip strip2{};
   strip2.start = 5;

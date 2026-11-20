@@ -5,11 +5,11 @@
 #include "testing/testing.h"
 
 #include "BLI_array.hh"
-#include "BLI_math_base.h"
-#include "BLI_math_matrix.h"
+#include "BLI_math_base_c.hh"
 #include "BLI_math_matrix.hh"
-#include "BLI_math_rotation.h"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_rotation.hh"
+#include "BLI_math_rotation_c.hh"
 #include "BLI_rand.hh"
 
 namespace blender::tests {
@@ -561,6 +561,13 @@ TEST(math_matrix, MatrixTransform)
   EXPECT_V3_NEAR(result, expect, 1e-5);
 
   result = transform_direction(m3, p);
+  EXPECT_V3_NEAR(result, expect, 1e-5);
+
+  expect = {-3, 2, 1};
+  result = transform_direction_transposed(m3, p);
+  EXPECT_V3_NEAR(result, expect, 1e-5);
+
+  result = transform_direction_transposed(m4, p);
   EXPECT_V3_NEAR(result, expect, 1e-5);
 
   expect = {-0.333333, -0.666666, -1.14814};

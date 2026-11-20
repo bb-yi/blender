@@ -22,9 +22,9 @@
 /* Minimal requirements for SHGetSpecialFolderPath on MINGW MSVC has this defined already. */
 #    define _WIN32_IE 0x0400
 #  endif
-/* For #SHGetSpecialFolderPath, has to be done before `BLI_winstuff.h`
+/* For #SHGetSpecialFolderPath, has to be done before `BLI_winstuff.hh`
  * because 'near' is disabled through `BLI_windstuff.h`. */
-#  include "BLI_winstuff.h"
+#  include "BLI_winstuff.hh"
 #  include <shlobj.h>
 #endif
 
@@ -33,20 +33,21 @@
 #include "MEM_CacheLimiterC-Api.h"
 #include "MEM_guardedalloc.h"
 
-#include "BLI_fileops.h"
-#include "BLI_filereader.h"
-#include "BLI_linklist.h"
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
-#include "BLI_math_time.h"
+#include "BLI_fileops.hh"
+#include "BLI_filereader.hh"
+#include "BLI_linklist.hh"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
+#include "BLI_math_time.hh"
 #include "BLI_memory_cache.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_system.h"
-#include "BLI_threads.h"
-#include "BLI_time.h"
-#include "BLI_timer.h"
-#include "BLI_utildefines.h"
+#include "BLI_path_utils.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_system.hh"
+#include "BLI_threads.hh"
+#include "BLI_time.hh"
+#include "BLI_timer.hh"
+#include "BLI_utildefines.hh"
 #include BLI_SYSTEM_PID_H
 
 #include "BLO_core_blend_header.hh"
@@ -74,6 +75,7 @@
 #include "BKE_appdir.hh"
 #include "BKE_autoexec.hh"
 #include "BKE_blender.hh"
+#include "BKE_blender_project.hh"
 #include "BKE_blender_version.h"
 #include "BKE_blendfile.hh"
 #include "BKE_callbacks.hh"
@@ -101,6 +103,7 @@
 #include "RNA_access.hh"
 #include "RNA_define.hh"
 
+#include "IMB_colormanagement.hh"
 #include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
 #include "IMB_metadata.hh"
@@ -184,7 +187,7 @@ static CLG_LogRef LOG = {"blend"};
 
 void WM_file_tag_modified()
 {
-  wmWindowManager *wm = static_cast<wmWindowManager *>(G_MAIN->wm.first);
+  wmWindowManager *wm = G_MAIN->wm.first();
   if (wm->file_saved) {
     wm->file_saved = 0;
     /* Notifier that data changed, for save-over warning or header. */
@@ -215,13 +218,14 @@ bool wm_file_or_session_data_has_unsaved_changes(const Main *bmain, const wmWind
 /**
  * Clear several WM/UI runtime data that would make later complex WM handling impossible.
  *
- * Return data should be cleared by #wm_file_read_setup_wm_finalize. */
+ * Return data should be cleared by #wm_file_read_setup_wm_finalize.
+ */
 static BlendFileReadWMSetupData *wm_file_read_setup_wm_init(bContext *C,
                                                             Main *bmain,
                                                             const bool is_read_homefile)
 {
   BLI_assert(BLI_listbase_count_at_most(&bmain->wm, 2) <= 1);
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
   BlendFileReadWMSetupData *wm_setup_data = MEM_new_zeroed<BlendFileReadWMSetupData>(__func__);
   wm_setup_data->is_read_homefile = is_read_homefile;
   /* This info is not always known yet when this function is called. */
@@ -415,10 +419,8 @@ static void wm_file_read_setup_wm_use_new(bContext *C,
   }
   /* Ensure that at least one window is kept open so we don't lose the context, see #42303. */
   if (!has_match) {
-    wm_file_read_setup_wm_substitute_old_window(old_wm,
-                                                wm,
-                                                static_cast<wmWindow *>(old_wm->windows.first),
-                                                static_cast<wmWindow *>(wm->windows.first));
+    wm_file_read_setup_wm_substitute_old_window(
+        old_wm, wm, old_wm->windows.first(), wm->windows.first());
   }
 
   wm_setup_data->old_wm = nullptr;
@@ -429,6 +431,9 @@ static void wm_file_read_setup_wm_use_new(bContext *C,
   BKE_libblock_free_data(&old_wm->id, false);
   BKE_libblock_free_data_py(&old_wm->id);
   MEM_delete(old_wm);
+
+  wmWindow *win = wm->runtime->winactive ? wm->runtime->winactive : wm->windows.first();
+  wm_window_make_drawable(wm, win);
 }
 
 /**
@@ -443,7 +448,7 @@ static void wm_file_read_setup_wm_finalize(bContext *C,
 {
   BLI_assert(BLI_listbase_count_at_most(&bmain->wm, 2) <= 1);
   BLI_assert(wm_setup_data != nullptr);
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
 
   /* If reading factory startup file, and there was no previous WM, clear the size of the windows
    * in newly read WM so that they get resized to occupy the whole available space on current
@@ -529,11 +534,9 @@ static void wm_init_userdef(Main *bmain)
   /* Needed so loading a file from the command line respects user-pref #26156. */
   SET_FLAG_FROM_TEST(G.fileflags, U.flag & USER_FILENOUI, G_FILE_NO_UI);
 
-  /* Set the python auto-execute setting from user prefs. */
-  /* Enabled by default, unless explicitly enabled in the command line which overrides. */
-  if ((G.f & G_FLAG_SCRIPT_OVERRIDE_PREF) == 0) {
-    SET_FLAG_FROM_TEST(G.f, (U.flag & USER_SCRIPT_AUTOEXEC_DISABLE) == 0, G_FLAG_SCRIPT_AUTOEXEC);
-  }
+  SET_FLAG_FROM_TEST(G.f,
+                     G.autoexec_override.value_or((U.flag & USER_SCRIPT_AUTOEXEC_DISABLE) == 0),
+                     G_FLAG_SCRIPT_AUTOEXEC);
 
   /* Only reset "offline mode" if they weren't passes via command line arguments. */
   if ((G.f & G_FLAG_INTERNET_OVERRIDE_PREF_ANY) == 0) {
@@ -559,7 +562,6 @@ static void wm_init_userdef(Main *bmain)
   BLO_sanitize_experimental_features_userpref_blend(&U);
 
   wm_gpu_backend_override_from_userdef();
-  GPU_backend_type_selection_detect();
 }
 
 /* Return codes. */
@@ -615,12 +617,12 @@ static int wm_read_exotic(const char *filepath)
 
 void WM_file_autoexec_init(const char *filepath)
 {
-  if (G.f & G_FLAG_SCRIPT_OVERRIDE_PREF) {
+  if (G.autoexec_override.has_value()) {
     return;
   }
-
   if (G.f & G_FLAG_SCRIPT_AUTOEXEC) {
-    if (BKE_autoexec_match(filepath, false, true)) {
+    /* Recovering a session that was never saved has no path to check. */
+    if ((filepath[0] != '\0') && BKE_autoexec_match(filepath, false, true)) {
       G.f &= ~G_FLAG_SCRIPT_AUTOEXEC;
     }
   }
@@ -628,7 +630,7 @@ void WM_file_autoexec_init(const char *filepath)
 
 void wm_file_read_report(Main *bmain, wmWindow *win)
 {
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
   ReportList *reports = &wm->runtime->reports;
   bool found = false;
   for (Scene &scene : bmain->scenes) {
@@ -709,7 +711,7 @@ static void wm_file_read_post(bContext *C,
       /* Remove windows which failed to be added via #WM_check. */
       wm_window_ghostwindows_remove_invalid(C, wm);
     }
-    CTX_wm_window_set(C, static_cast<wmWindow *>(wm->windows.first));
+    CTX_wm_window_set(C, wm->windows.first());
   }
 
 #ifdef WITH_PYTHON
@@ -822,7 +824,7 @@ static void wm_file_read_post(bContext *C,
   /* Report any errors.
    * Currently disabled if add-ons aren't yet loaded. */
   if (addons_loaded) {
-    wm_file_read_report(bmain, static_cast<wmWindow *>(wm->windows.first));
+    wm_file_read_report(bmain, wm->windows.first());
   }
 
   if (use_data) {
@@ -856,9 +858,20 @@ static void wm_file_read_post(bContext *C,
 
 static void wm_read_callback_pre_wrapper(bContext *C, const char *filepath)
 {
+  Main *bmain = CTX_data_main(C);
   /* NOTE: either #BKE_CB_EVT_LOAD_POST or #BKE_CB_EVT_LOAD_POST_FAIL must run.
    * Runs at the end of this function, don't return beforehand. */
-  BKE_callback_exec_string(CTX_data_main(C), filepath, BKE_CB_EVT_LOAD_PRE);
+  BKE_callback_exec_string(bmain, filepath, BKE_CB_EVT_LOAD_PRE);
+
+  /* Auto save (if enabled) the project config and then see if we should load in a
+   * new project if the project root path has changed.
+   */
+  BKE_blender_project_config_autosave(bmain);
+  BKE_blender_project_refresh(bmain, filepath);
+
+  /* The function above switch to the project of the new file, immediately update
+   * color management to match as blend file read needs the project config. */
+  IMB_colormanagement_project_read_post(bmain);
 }
 
 static void wm_read_callback_post_wrapper(bContext *C, const char *filepath, const bool success)
@@ -868,8 +881,8 @@ static void wm_read_callback_post_wrapper(bContext *C, const char *filepath, con
    * If the window is already set, don't change it. */
   bool has_window = CTX_wm_window(C) != nullptr;
   if (!has_window) {
-    wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
-    wmWindow *win = static_cast<wmWindow *>(wm->windows.first);
+    wmWindowManager *wm = bmain->wm.first();
+    wmWindow *win = wm->windows.first();
     CTX_wm_window_set(C, win);
   }
 
@@ -1102,6 +1115,7 @@ bool WM_file_read(bContext *C,
 
       if (do_history_file_update) {
         wm_history_file_update();
+        BKE_blender_project_recent_update(CTX_data_main(C));
       }
 
       wmFileReadPost_Params read_file_post_params{};
@@ -1154,6 +1168,38 @@ bool WM_file_read(bContext *C,
   BLI_assert(BKE_main_namemap_validate(*CTX_data_main(C)));
 
   return success;
+}
+
+bool WM_file_read_project(bContext *C, const char *filepath, ReportList *reports)
+{
+  const std::string project_root_path = BKE_is_path_inside_blender_project(filepath);
+
+  if (project_root_path.empty()) {
+    BKE_reportf(
+        reports, RPT_ERROR, "Could not find a project within the specified path: %s", filepath);
+    return false;
+  }
+
+  /* Initialize project before blend file, so it is taken into account. */
+  if (!BKE_blender_project_init_from_root_path(CTX_data_main(C), project_root_path)) {
+    BKE_reportf(
+        reports, RPT_ERROR, "Failed to load project from path: %s", project_root_path.c_str());
+    return false;
+  }
+
+  /* Read the startup file again with project configuration applied. */
+  wmHomeFileRead_Params read_homefile_params{};
+  read_homefile_params.use_data = true;
+  read_homefile_params.use_userdef = false;
+  read_homefile_params.use_factory_settings = G.factory_startup;
+  read_homefile_params.app_template_override = WM_init_state_app_template_get();
+  wm_homefile_read(C, &read_homefile_params, reports);
+
+  if (!G.background) {
+    BKE_blender_project_recent_update(CTX_data_main(C));
+  }
+
+  return true;
 }
 
 static struct {
@@ -1268,9 +1314,9 @@ void wm_homefile_read_ex(bContext *C,
   /* Options exclude each other. */
   BLI_assert((use_factory_settings && filepath_startup_override) == 0);
 
-  if ((G.f & G_FLAG_SCRIPT_OVERRIDE_PREF) == 0) {
-    SET_FLAG_FROM_TEST(G.f, (U.flag & USER_SCRIPT_AUTOEXEC_DISABLE) == 0, G_FLAG_SCRIPT_AUTOEXEC);
-  }
+  SET_FLAG_FROM_TEST(G.f,
+                     G.autoexec_override.value_or((U.flag & USER_SCRIPT_AUTOEXEC_DISABLE) == 0),
+                     G_FLAG_SCRIPT_AUTOEXEC);
 
   if (use_data) {
     if (reset_app_template) {
@@ -1357,6 +1403,11 @@ void wm_homefile_read_ex(bContext *C,
         skip_flags |= BLO_READ_SKIP_USERDEF;
       }
     }
+  }
+
+  /* Open last project on startup. */
+  if (params_homefile->is_first_time && use_data && wm_init_last_project_on_startup(bmain)) {
+    IMB_colormanagement_project_read_post(bmain);
   }
 
   if ((app_template != nullptr) && (app_template[0] != '\0')) {
@@ -1683,7 +1734,7 @@ static void wm_history_file_update()
     return;
   }
 
-  recent = static_cast<RecentFile *>(G.recent_files.first);
+  recent = G.recent_files.first();
   /* Refresh #BLENDER_HISTORY_FILE of recent opened files, when current file was changed. */
   if (!(recent) || (BLI_path_cmp(recent->filepath, blendfile_path) != 0)) {
 
@@ -1713,6 +1764,45 @@ static void wm_history_file_update()
     const GHOST_ISystemPaths *ghost_system_paths = GHOST_ISystemPaths::get();
     ghost_system_paths->addToSystemRecentFiles(blendfile_path);
   }
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Recent Project Files
+ * \{ */
+
+static std::optional<std::string> wm_project_root_path_get(const Main *bmain)
+{
+  return BKE_blender_project_read_callback(
+      bmain, [](const bke::BlenderProject *project) -> std::optional<std::string> {
+        if (project == nullptr) {
+          return std::nullopt;
+        }
+        return project->get_root_path();
+      });
+}
+
+/** Most recently used blend file, to initialize file browsers. */
+static std::string wm_recent_filepath_get(const Main *bmain)
+{
+  const std::optional<std::string> root_path = wm_project_root_path_get(bmain);
+  if (!root_path) {
+    const RecentFile *recent = G.recent_files.first();
+    return recent ? recent->filepath : "";
+  }
+
+  /* In a project, use a file from the project, or the project directory. */
+  for (const RecentFile &recent : G.recent_files) {
+    if (BLI_path_contains(root_path->c_str(), recent.filepath)) {
+      return recent.filepath;
+    }
+  }
+
+  char dirpath[FILE_MAX];
+  STRNCPY(dirpath, root_path->c_str());
+  BLI_path_slash_ensure(dirpath, sizeof(dirpath));
+  return dirpath;
 }
 
 /** \} */
@@ -1759,12 +1849,12 @@ static uint8_t *blend_file_thumb_fast_downscale(const uint8_t *src_rect,
    * this isn't a concern. */
 
   BLI_assert(dst_size[0] <= src_size[0] && dst_size[1] <= src_size[1]);
-  uint8_t *dst_rect = MEM_new_array_uninitialized<uint8_t>(size_t(4 * dst_size[0] * dst_size[1]),
+  uint8_t *dst_rect = MEM_new_array_uninitialized<uint8_t>(size_t(4) * dst_size[0] * dst_size[1],
                                                            __func__);
 
   /* A row, the width of the destination to accumulate pixel values into
    * before writing into the image. */
-  uint32_t *accum_row = MEM_new_array_zeroed<uint32_t>(size_t(dst_size[0] * 4), __func__);
+  uint32_t *accum_row = MEM_new_array_zeroed<uint32_t>(size_t(dst_size[0]) * 4, __func__);
 
 #  ifndef NDEBUG
   /* Assert that samples are calculated correctly. */
@@ -1906,8 +1996,7 @@ static ImBuf *blend_file_thumb_from_screenshot(bContext *C, BlendThumbnail **r_t
     /* Save metadata for quick access. */
     char version_str[10];
     SNPRINTF(version_str, "%d.%01d", BLENDER_VERSION / 100, BLENDER_VERSION % 100);
-    IMB_metadata_ensure(&ibuf->metadata);
-    IMB_metadata_set_field(ibuf->metadata, "Thumb::Blender::Version", version_str);
+    IMB_metadata_set_field(ibuf->metadata_for_write(), "Thumb::Blender::Version", version_str);
   }
 
   /* Must be freed by caller. */
@@ -1947,7 +2036,7 @@ static ImBuf *blend_file_thumb_from_camera(const bContext *C,
   if (screen != nullptr) {
     area = BKE_screen_find_big_area(screen, SPACE_VIEW3D, 0);
     if (area) {
-      v3d = static_cast<View3D *>(area->spacedata.first);
+      v3d = area->spacedata.first_as<View3D>();
       region = BKE_area_find_region_type(area, RGN_TYPE_WINDOW);
     }
   }
@@ -2013,8 +2102,7 @@ static ImBuf *blend_file_thumb_from_camera(const bContext *C,
     /* Save metadata for quick access. */
     char version_str[10];
     SNPRINTF(version_str, "%d.%01d", BLENDER_VERSION / 100, BLENDER_VERSION % 100);
-    IMB_metadata_ensure(&ibuf->metadata);
-    IMB_metadata_set_field(ibuf->metadata, "Thumb::Blender::Version", version_str);
+    IMB_metadata_set_field(ibuf->metadata_for_write(), "Thumb::Blender::Version", version_str);
 
     /* BLEN_THUMB_SIZE is size of thumbnail inside blend file: 128x128. */
     ImBuf *thumb_ibuf = IMB_scale_into_new(
@@ -2221,19 +2309,11 @@ static bool wm_file_write(bContext *C,
   const bool success = BLO_write_file(bmain, filepath, fileflags, &blend_write_params, reports);
 
   if (success) {
-    const bool do_history_file_update = (G.background == false) &&
-                                        (CTX_wm_manager(C)->op_undo_depth == 0);
-
     if (use_save_as_copy == false) {
       STRNCPY(bmain->filepath, filepath); /* Is guaranteed current file. */
     }
 
     SET_FLAG_FROM_TEST(G.fileflags, fileflags & G_FILE_COMPRESS, G_FILE_COMPRESS);
-
-    /* Prevent background mode scripts from clobbering history. */
-    if (do_history_file_update) {
-      wm_history_file_update();
-    }
 
     /* Run this function after because the file can't be written before the blend is. */
     if (ibuf_thumb) {
@@ -2250,6 +2330,21 @@ static bool wm_file_write(bContext *C,
 
   BKE_callback_exec_string(
       bmain, filepath, success ? BKE_CB_EVT_SAVE_POST : BKE_CB_EVT_SAVE_POST_FAIL);
+
+  /* Auto save (if enabled) the project config and then see if we should load in a
+   * new project if the project root path has changed.
+   */
+  BKE_blender_project_config_autosave(bmain);
+  BKE_blender_project_refresh(bmain, bmain->filepath);
+
+  /* Prevent background mode scripts from clobbering history.
+   * After BKE_blender_project_refresh which activates the project. */
+  const bool do_history_file_update = (G.background == false) &&
+                                      (CTX_wm_manager(C)->op_undo_depth == 0);
+  if (success && do_history_file_update) {
+    wm_history_file_update();
+    BKE_blender_project_recent_update(bmain);
+  }
 
   if (ibuf_thumb) {
     IMB_freeImBuf(ibuf_thumb);
@@ -2480,21 +2575,63 @@ void wm_open_init_load_ui(wmOperator *op, bool use_prefs)
   }
 }
 
-bool wm_open_init_use_scripts(wmOperator *op, bool use_prefs)
+/** How #wm_open_init_use_scripts resolves the default for "use_scripts". */
+enum class OpenTrust {
+  /** The default trust for the operator's "filepath" property. */
+  FilePath,
+  /** Keep the trust of the current session. */
+  CurrentSession,
+  /** The path this operator holds isn't the path the recovered file will have. */
+  Recover,
+};
+
+/**
+ * Return true if the script auto-execution should be cleared based on #WM_file_autoexec_init.
+ */
+[[nodiscard]] static bool wm_open_init_use_scripts(wmOperator *op, const OpenTrust source_of_trust)
 {
   PropertyRNA *prop = RNA_struct_find_property(op->ptr, "use_scripts");
-  bool use_scripts_autoexec_check = false;
-  if (!RNA_property_is_set(op->ptr, prop)) {
-    /* Use #G_FLAG_SCRIPT_AUTOEXEC rather than the userpref because this means if
-     * the flag has been disabled from the command line, then opening
-     * from the menu won't enable this setting. */
-    bool value = use_prefs ? ((U.flag & USER_SCRIPT_AUTOEXEC_DISABLE) == 0) :
-                             ((G.f & G_FLAG_SCRIPT_AUTOEXEC) != 0);
-
-    RNA_property_boolean_set(op->ptr, prop, value);
-    use_scripts_autoexec_check = true;
+  if (RNA_property_is_set(op->ptr, prop)) {
+    return false;
   }
-  return use_scripts_autoexec_check;
+
+  bool value = false;
+  switch (source_of_trust) {
+    case OpenTrust::FilePath: {
+      char filepath[FILE_MAX] = "";
+      if (PropertyRNA *prop_filepath = RNA_struct_find_property(op->ptr, "filepath")) {
+        RNA_property_string_get(op->ptr, prop_filepath, filepath);
+      }
+
+      if (filepath[0] == '\0') {
+        /* The file selector before a file is chosen, excluded paths are checked once it's set. */
+        value = G.autoexec_override.value_or((U.flag & USER_SCRIPT_AUTOEXEC_DISABLE) == 0);
+      }
+      else {
+        value = BKE_autoexec_default_trust_source(filepath,
+                                                  {
+                                                      .skip_overrides = false,
+                                                      .canonicalize = true,
+                                                      .strip_filename = true,
+                                                  });
+      }
+      break;
+    }
+    case OpenTrust::CurrentSession: {
+      /* Keep the trust of the current session rather than the preference. */
+      value = (G.f & G_FLAG_SCRIPT_AUTOEXEC) != 0;
+      break;
+    }
+    case OpenTrust::Recover: {
+      /* It may be in an excluded path so disable auto-execution,
+       * the user may still opt-in. */
+      value = G.autoexec_override.value_or(false);
+      break;
+    }
+  }
+
+  RNA_property_boolean_set(op->ptr, prop, value);
+  return true;
 }
 
 /** \} */
@@ -2752,7 +2889,7 @@ static wmOperatorStatus wm_userpref_read_exec(bContext *C, wmOperator *op)
   BKE_callback_exec_null(bmain, BKE_CB_EVT_EXTENSION_REPOS_UPDATE_POST);
 
   /* Needed to recalculate UI scaling values (eg, #UserDef.inv_scale_factor). */
-  wm_window_clear_drawable(static_cast<wmWindowManager *>(bmain->wm.first));
+  wm_window_clear_drawable(bmain->wm.first());
 
   WM_event_add_notifier(C, NC_WINDOW, nullptr);
   WM_event_add_notifier(C, NC_UI | ND_UI_FONT, nullptr);
@@ -3223,14 +3360,14 @@ static wmOperatorStatus wm_open_mainfile__select_file_path_exec(bContext *C, wmO
   }
 
   /* If possible, get the name of the most recently used `.blend` file. */
-  if (G.recent_files.first) {
-    RecentFile *recent = static_cast<RecentFile *>(G.recent_files.first);
-    blendfile_path = recent->filepath;
+  const std::string recent_filepath = wm_recent_filepath_get(bmain);
+  if (!recent_filepath.empty()) {
+    blendfile_path = recent_filepath.c_str();
   }
 
   RNA_string_set(op->ptr, "filepath", blendfile_path);
   wm_open_init_load_ui(op, true);
-  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, true);
+  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, OpenTrust::FilePath);
   UNUSED_VARS(use_scripts_autoexec_check); /* The user can set this in the UI. */
   op->customdata = nullptr;
 
@@ -3252,7 +3389,7 @@ static wmOperatorStatus wm_open_mainfile__open(bContext *C, wmOperator *op)
 
   /* Re-use last loaded setting so we can reload a file without changing. */
   wm_open_init_load_ui(op, false);
-  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, false);
+  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, OpenTrust::CurrentSession);
 
   SET_FLAG_FROM_TEST(G.fileflags, !RNA_boolean_get(op->ptr, "load_ui"), G_FILE_NO_UI);
   SET_FLAG_FROM_TEST(G.f, RNA_boolean_get(op->ptr, "use_scripts"), G_FLAG_SCRIPT_AUTOEXEC);
@@ -3347,8 +3484,10 @@ static bool wm_open_mainfile_check(bContext * /*C*/, wmOperator *op)
 
   RNA_string_get(op->ptr, "filepath", filepath);
 
-  if ((U.flag & USER_SCRIPT_AUTOEXEC_DISABLE) == 0) {
-    if (BKE_autoexec_match(filepath, true, true) == true) {
+  /* Excluded paths can't be trusted, unless the command line overrides the preference. */
+  if (((U.flag & USER_SCRIPT_AUTOEXEC_DISABLE) == 0) && !G.autoexec_override.has_value()) {
+    /* The file selector may start without a path, e.g. an unsaved session. */
+    if ((filepath[0] != '\0') && BKE_autoexec_match(filepath, true, true)) {
       RNA_property_boolean_set(op->ptr, prop, false);
       is_untrusted = true;
     }
@@ -3456,7 +3595,7 @@ static wmOperatorStatus wm_revert_mainfile_exec(bContext *C, wmOperator *op)
   bool success;
   char filepath[FILE_MAX];
 
-  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, false);
+  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, OpenTrust::CurrentSession);
 
   SET_FLAG_FROM_TEST(G.f, RNA_boolean_get(op->ptr, "use_scripts"), G_FLAG_SCRIPT_AUTOEXEC);
 
@@ -3525,7 +3664,7 @@ static wmOperatorStatus wm_recover_last_session_impl(bContext *C,
 
 static wmOperatorStatus wm_recover_last_session_exec(bContext *C, wmOperator *op)
 {
-  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, true);
+  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, OpenTrust::Recover);
   return wm_recover_last_session_impl(C, op, use_scripts_autoexec_check);
 }
 
@@ -3542,9 +3681,7 @@ static wmOperatorStatus wm_recover_last_session_invoke(bContext *C,
                                                        wmOperator *op,
                                                        const wmEvent * /*event*/)
 {
-  /* Keep the current setting instead of using the preferences since a file selector
-   * doesn't give us the option to change the setting. */
-  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, false);
+  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, OpenTrust::Recover);
 
   if (wm_operator_close_file_dialog_if_needed(
           C, op, wm_recover_last_session_after_dialog_callback))
@@ -3580,7 +3717,7 @@ static wmOperatorStatus wm_recover_auto_save_exec(bContext *C, wmOperator *op)
   RNA_string_get(op->ptr, "filepath", filepath);
   BLI_path_canonicalize_native(filepath, sizeof(filepath));
 
-  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, true);
+  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, OpenTrust::Recover);
   SET_FLAG_FROM_TEST(G.f, RNA_boolean_get(op->ptr, "use_scripts"), G_FLAG_SCRIPT_AUTOEXEC);
 
   G.fileflags |= G_FILE_RECOVER_READ;
@@ -3609,7 +3746,7 @@ static wmOperatorStatus wm_recover_auto_save_invoke(bContext *C,
 
   wm_autosave_location(filepath);
   RNA_string_set(op->ptr, "filepath", filepath);
-  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, true);
+  const bool use_scripts_autoexec_check = wm_open_init_use_scripts(op, OpenTrust::Recover);
   UNUSED_VARS(use_scripts_autoexec_check); /* The user can set this in the UI. */
   WM_event_add_fileselect(C, op);
 
@@ -3684,7 +3821,7 @@ static void wm_block_save_modified_images_cancel(bContext *C, void *arg_block, v
 static void wm_block_save_modified_images_save(bContext *C, void *arg_block, void *arg_data)
 {
   const Main *bmain = CTX_data_main(C);
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
   wmGenericCallback *callback = WM_generic_callback_steal(
       static_cast<wmGenericCallback *>(arg_data));
 
@@ -3755,7 +3892,7 @@ static ui::Block *block_create_save_modified_images_dialog(bContext *C, ARegion 
 {
   wmGenericCallback *post_action = static_cast<wmGenericCallback *>(arg);
   Main *bmain = CTX_data_main(C);
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
 
   ui::Block *block = block_begin(
       C, region, save_modified_images_dialog_name, ui::EmbossType::Emboss);
@@ -3911,9 +4048,8 @@ static void save_set_filepath(bContext *C, wmOperator *op)
   if (!RNA_property_is_set(op->ptr, prop)) {
     const char *blendfile_path = BKE_main_blendfile_path(bmain);
     /* If not saved before, get the name of the most recently used `.blend` file. */
-    if ((blendfile_path[0] == '\0') && G.recent_files.first) {
-      RecentFile *recent = static_cast<RecentFile *>(G.recent_files.first);
-      STRNCPY(filepath, recent->filepath);
+    if (blendfile_path[0] == '\0') {
+      STRNCPY(filepath, wm_recent_filepath_get(bmain).c_str());
     }
     else {
       STRNCPY(filepath, blendfile_path);
@@ -3978,7 +4114,7 @@ static wmOperatorStatus wm_save_as_mainfile_exec(bContext *C, wmOperator *op)
     ReportList *reports = CTX_wm_reports(C);
     const bool is_successful = ED_image_save_all_modified(C, reports);
     if (!is_successful) {
-      WM_report_banner_show(static_cast<wmWindowManager *>(bmain->wm.first), CTX_wm_window(C));
+      WM_report_banner_show(bmain->wm.first(), CTX_wm_window(C));
     }
   }
   else if (wm_show_save_modified_images_dialog(bmain, op)) {
@@ -4083,7 +4219,7 @@ static wmOperatorStatus wm_save_as_mainfile_exec(bContext *C, wmOperator *op)
     /* If saved file is the active one, there are technically no more compatibility issues, the
      * file on disk now matches the currently opened data version-wise. */
     bmain->has_forward_compatibility_issues = false;
-    bmain->colorspace.is_missing_opencolorio_config = false;
+    IMB_colormanagement_file_save_post(bmain);
 
     /* If saved file is the active one, notify WM so that saved status and window title can be
      * updated. */
@@ -4301,7 +4437,7 @@ void WM_OT_save_mainfile(wmOperatorType *ot)
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name Clear Recent Files List Operator
+/** \name Clear Recent Files/Projects List Operators
  * \{ */
 
 enum ClearRecentInclude { CLEAR_RECENT_ALL, CLEAR_RECENT_MISSING };
@@ -4369,6 +4505,39 @@ void WM_OT_clear_recent_files(wmOperatorType *ot)
       ot->srna, "remove", prop_clear_recent_types, CLEAR_RECENT_ALL, "Remove", "");
 }
 
+static wmOperatorStatus wm_clear_recent_projects_invoke(bContext *C,
+                                                        wmOperator *op,
+                                                        const wmEvent *event)
+{
+  return WM_operator_props_popup_confirm_ex(
+      C, op, event, IFACE_("Clear Recent Projects List"), IFACE_("Remove"));
+}
+
+static wmOperatorStatus wm_clear_recent_projects_exec(bContext * /*C*/, wmOperator *op)
+{
+  const ClearRecentInclude include = ClearRecentInclude(RNA_enum_get(op->ptr, "remove"));
+  BKE_blender_project_recent_clear(include == CLEAR_RECENT_MISSING);
+  return OPERATOR_FINISHED;
+}
+
+void WM_OT_clear_recent_projects(wmOperatorType *ot)
+{
+  ot->name = "Clear Recent Projects List";
+  ot->idname = "WM_OT_clear_recent_projects";
+  ot->description = "Clear the recent projects list";
+
+  ot->invoke = wm_clear_recent_projects_invoke;
+  ot->exec = wm_clear_recent_projects_exec;
+  ot->ui = wm_clear_recent_files_ui;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER;
+
+  /* props */
+  ot->prop = RNA_def_enum(
+      ot->srna, "remove", prop_clear_recent_types, CLEAR_RECENT_ALL, "Remove", "");
+}
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -4390,12 +4559,6 @@ static void wm_block_autorun_warning_reload_with_scripts(bContext *C, ui::Block 
 
   popup_block_close(C, win, block);
 
-  /* Save user preferences for permanent execution. */
-  if ((U.flag & USER_SCRIPT_AUTOEXEC_DISABLE) == 0) {
-    WM_operator_name_call(
-        C, "WM_OT_save_userpref", wm::OpCallContext::ExecDefault, nullptr, nullptr);
-  }
-
   /* Load file again with scripts enabled.
    * The reload is necessary to allow scripts to run when the files loads. */
   wm_test_autorun_revert_action_exec(C);
@@ -4407,12 +4570,6 @@ static void wm_block_autorun_warning_enable_scripts(bContext *C, ui::Block *bloc
   Main *bmain = CTX_data_main(C);
 
   popup_block_close(C, win, block);
-
-  /* Save user preferences for permanent execution. */
-  if ((U.flag & USER_SCRIPT_AUTOEXEC_DISABLE) == 0) {
-    WM_operator_name_call(
-        C, "WM_OT_save_userpref", wm::OpCallContext::ExecDefault, nullptr, nullptr);
-  }
 
   /* Force a full refresh, but without reloading the file. */
   for (Scene &scene : bmain->scenes) {
@@ -4435,8 +4592,7 @@ static ui::Block *block_create_autorun_warning(bContext *C, ARegion *region, voi
   const char *title = RPT_(
       "For security reasons, automatic execution of Python scripts "
       "in this file was disabled:");
-  const char *message = RPT_("This may lead to unexpected behavior");
-  const char *checkbox_text = RPT_("Permanently allow execution of scripts");
+  const char *message = RPT_("This may lead to unexpected behavior. Allow at your own risk.");
 
   /* Measure strings to find the longest. */
   const uiStyle *style = ui::style_get_dpi();
@@ -4444,12 +4600,8 @@ static ui::Block *block_create_autorun_warning(bContext *C, ARegion *region, voi
   int text_width = int(BLF_width(style->widget.uifont_id, title, BLF_DRAW_STR_DUMMY_MAX));
   text_width = std::max(text_width,
                         int(BLF_width(style->widget.uifont_id, message, BLF_DRAW_STR_DUMMY_MAX)));
-  text_width = std::max(
-      text_width,
-      int(BLF_width(style->widget.uifont_id, checkbox_text, BLF_DRAW_STR_DUMMY_MAX) +
-          (UI_SCALE_FAC * 25.0f)));
 
-  const int dialog_width = std::max(int(400.0f * UI_SCALE_FAC),
+  const int dialog_width = std::max(int(500.0f * UI_SCALE_FAC),
                                     text_width + int(style->columnspace * 2.5));
   const short icon_size = 40 * UI_SCALE_FAC;
   ui::Layout &layout = *uiItemsAlertBox(
@@ -4460,11 +4612,6 @@ static ui::Block *block_create_autorun_warning(bContext *C, ARegion *region, voi
   uiItemL_ex(&col, title, ICON_NONE, true, false);
   uiItemL_ex(&col, G.autoexec_fail, ICON_NONE, false, true);
   col.label(message, ICON_NONE);
-
-  layout.separator();
-
-  PointerRNA pref_ptr = RNA_pointer_create_discrete(nullptr, RNA_PreferencesFilePaths, &U);
-  layout.prop(&pref_ptr, "use_scripts_auto_execute", UI_ITEM_NONE, checkbox_text, ICON_NONE);
 
   layout.separator(2.0f);
 
@@ -4504,7 +4651,7 @@ static ui::Block *block_create_autorun_warning(bContext *C, ARegion *region, voi
                            50,
                            UI_UNIT_Y,
                            nullptr,
-                           TIP_("Enable scripts"));
+                           TIP_("Run potentially unsafe scripts in this blend file"));
     button_func_set(but,
                     [block](bContext &C) { wm_block_autorun_warning_enable_scripts(&C, block); });
   }
@@ -4514,7 +4661,7 @@ static ui::Block *block_create_autorun_warning(bContext *C, ARegion *region, voi
   but = uiDefIconTextBut(block,
                          ui::ButtonType::But,
                          ICON_NONE,
-                         IFACE_("Ignore"),
+                         IFACE_("Continue Safely"),
                          0,
                          0,
                          50,
@@ -4589,8 +4736,7 @@ void wm_test_autorun_warning(bContext *C)
   G.f |= G_FLAG_SCRIPT_AUTOEXEC_FAIL_QUIET;
 
   wmWindowManager *wm = CTX_wm_manager(C);
-  wmWindow *win = (wm->runtime->winactive) ? wm->runtime->winactive :
-                                             static_cast<wmWindow *>(wm->windows.first);
+  wmWindow *win = (wm->runtime->winactive) ? wm->runtime->winactive : wm->windows.first();
 
   if (win) {
     /* We want this warning on the Main window, not a child window even if active. See #118765. */
@@ -4614,8 +4760,7 @@ void wm_test_foreign_file_warning(bContext *C)
   G_MAIN->is_read_invalid = false;
 
   wmWindowManager *wm = CTX_wm_manager(C);
-  wmWindow *win = (wm->runtime->winactive) ? wm->runtime->winactive :
-                                             static_cast<wmWindow *>(wm->windows.first);
+  wmWindow *win = (wm->runtime->winactive) ? wm->runtime->winactive : wm->windows.first();
 
   if (win) {
     /* We want this warning on the Main window, not a child window even if active. See #118765. */
@@ -4692,9 +4837,11 @@ static void file_overwrite_detailed_info_show(ui::Layout &parent_layout, Main *b
     if (bmain->is_asset_edit_file || bmain->has_forward_compatibility_issues) {
       layout.separator(1.4f);
     }
-    layout.label(
-        RPT_("Displays, views or color spaces in this file were missing and have been changed."),
-        ICON_NONE);
+    layout.label(bmain->colorspace.is_failed_opencolorio_config ?
+                     RPT_("OpenColorIO configuration failed to load.") :
+                     RPT_("Displays, views or color spaces in this file were missing and have "
+                          "been changed."),
+                 ICON_NONE);
     layout.label(RPT_("Saving it with this OpenColorIO configuration may cause loss of data."),
                  ICON_NONE);
   }
@@ -4914,7 +5061,7 @@ static void wm_block_file_close_discard(bContext *C, void *arg_block, void *arg_
 static void wm_block_file_close_save(bContext *C, void *arg_block, void *arg_data)
 {
   const Main *bmain = CTX_data_main(C);
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first();
   wmGenericCallback *callback = WM_generic_callback_steal(
       static_cast<wmGenericCallback *>(arg_data));
   bool execute_callback = true;

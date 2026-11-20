@@ -8,7 +8,7 @@
 
 #include "node_shader_util.hh"
 
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_c.hh"
 
 namespace blender {
 
@@ -31,10 +31,11 @@ static int node_shader_gpu_world_environment(GPUMaterial *mat,
                                              GPUNodeStack *out)
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_LIGHTPROBE_ACCESS);
-  if (!in[0].link && is_zero_v3(in[0].vec)) {
-    GPU_link(mat, "world_view_direction_get", &in[0].link);
+  if (!in[0].link && is_zero_v3(std::get<float3>(in[0].value))) {
+    GPU_link(mat, "world_view_direction_get", GPU_kernel_globals(), GPU_shading_data(), &in[0].link);
   }
-  return GPU_stack_link(mat, node, "node_world_environment", in, out);
+  return GPU_stack_link(mat, node, "node_world_environment", in, out,
+                        GPU_kernel_globals(), GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_world_environment_cc

@@ -15,11 +15,11 @@
 #include "BKE_context.hh"
 
 #include "BLI_array.hh"
-#include "BLI_math_matrix.h"
 #include "BLI_math_matrix.hh"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
 #include "BLI_math_vector.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "SEQ_channels.hh"
 #include "SEQ_iterator.hh"
@@ -145,7 +145,7 @@ static void createTransSeqImageData(bContext *C, TransInfo *t)
 {
   Scene *scene = CTX_data_sequencer_scene(C);
   Editing *ed = seq::editing_get(scene);
-  const SpaceSeq *sseq = static_cast<const SpaceSeq *>(t->area->spacedata.first);
+  const SpaceSeq *sseq = t->area->spacedata.first_as<SpaceSeq>();
   const ARegion *region = t->region;
 
   if (ed == nullptr) {
@@ -341,7 +341,7 @@ static float2 calculate_new_origin_position(TransInfo *t, TransDataSeq *tdseq, T
   Scene *scene = CTX_data_sequencer_scene(t->context);
   Strip *strip = tdseq->strip;
 
-  const float2 box_size = seq::image_transform_box_size_get(scene, strip);
+  const float2 box_size = float2(seq::image_transform_box_size_get(scene, strip));
 
   const float2 viewport_pixel_aspect = {scene->r.xasp / scene->r.yasp, 1.0f};
   const float2 mirror = seq::image_transform_mirror_factor_get(strip);

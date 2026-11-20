@@ -4,13 +4,14 @@
 
 #pragma once
 
-/* Nuru c603d408e9f3 lighting compatibility with Blender 5.2 resource tables.
+/* Nuru c603d408e9f3 lighting compatibility with Blender resource tables.
  * The transport/composition stays in the pinned shader; only resource and type APIs live here. */
 #include "draw_model.bsl.hh"
 #include "draw_view.bsl.hh"
 #include "eevee_closure.bsl.hh"
 #include "eevee_light_lib.bsl.hh"
 #include "eevee_lightprobe.bsl.hh"
+#include "eevee_ltc_lib.bsl.hh"
 #include "eevee_shadow_tracing.bsl.hh"
 #include "eevee_uniform.bsl.hh"
 
@@ -186,13 +187,11 @@ LightData hardware_light_get(uint index)
     if (valid) {
       light.color = extracted.color;
       light.object_to_world = extracted.object_to_world;
-      LightSunData sun = light.sun();
-      sun.direction = direction;
-      light.sun() = sun;
+      light_sun_direction_set(light, direction);
     }
     else {
       light.color = float3(0.0f);
-      light.power = float4(0.0f);
+      light.power_factor = float4(0.0f);
       light.tilemap_index = LIGHT_NO_SHADOW;
     }
   }
@@ -208,12 +207,15 @@ void light_eval_single_closure(LightData light, LightVector lv, ClosureLight &cl
                                float3 V, float attenuation, float3 shadow)
 {
   [[resource_table]] const UtilityTexture &util = resource_table_get(UtilityTexture);
-  attenuation *= light.power[cl.type & 3u];
+  attenuation *= eevee::light::power_get(light, cl.type);
   if (attenuation < 1e-30f) {
     return;
   }
-  float ltc = light_ltc(util.utility_tx, light, cl.N, V, lv, cl.ltc_mat,
-                       light_shape_corners(light, lv));
+  float ltc = eevee::ltc::evaluate(util.utility_tx,
+                                  light,
+                                  LightShape::get(light, lv),
+                                  lv,
+                                  eevee::LTCData::unpack_from(cl));
   float3 radiance = light.color * ltc;
   cl.light_shadowed += shadow * attenuation * radiance;
   cl.light_unshadowed += attenuation * radiance;
@@ -289,8 +291,8 @@ float hardware_direct_light_local_importance(uint light_index, float3 P, bool va
   float importance = max(dot(abs(light.color), float3(0.2126f, 0.7152f, 0.0722f)), 1.0e-4f);
   if (valid) {
     float3 to_light = light.position() - P;
-    float radius = max(light.local().local.shape_radius, 1.0e-2f);
-    float power = max(abs(light.power[LIGHT_DIFFUSE]), 1.0e-6f);
+    float radius = max(light_local_data_get(light).local.shape_radius, 1.0e-2f);
+    float power = max(abs(eevee::light::power_get(light, LIGHT_DIFFUSE)), 1.0e-6f);
     importance *= power / max(dot(to_light, to_light) + radius * radius, 1.0e-4f);
   }
   return max(importance, 1.0e-8f);

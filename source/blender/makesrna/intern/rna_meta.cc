@@ -21,9 +21,9 @@
 
 #  include "MEM_guardedalloc.h"
 
-#  include "BLI_listbase.h"
-#  include "BLI_math_rotation.h"
-#  include "BLI_math_vector.h"
+#  include "BLI_listbase.hh"
+#  include "BLI_math_rotation_c.hh"
+#  include "BLI_math_vector_c.hh"
 
 #  include "DNA_object_types.h"
 #  include "DNA_scene_types.h"
@@ -293,6 +293,7 @@ static void rna_def_metaball_elements(BlenderRNA *brna, PropertyRNA *cprop)
                "",
                "Type for the new metaball element");
   parm = RNA_def_pointer(func, "element", "MetaElement", "", "The newly created metaball element");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 
   func = RNA_def_function(srna, "remove", "rna_MetaBall_elements_remove");

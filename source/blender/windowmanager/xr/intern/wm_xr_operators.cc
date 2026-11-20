@@ -11,15 +11,15 @@
  */
 
 #include "BLI_kdopbvh.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_quaternion.hh"
 #include "BLI_math_quaternion_types.hh"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_rotation_c.hh"
 #include "BLI_math_vector.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_time.h"
+#include "BLI_time.hh"
 
 #include "BLT_translation.hh"
 
@@ -94,7 +94,7 @@ static void wm_xr_session_update_screen(Main *bmain, const wmXrData *xr_data)
 {
   const bool session_exists = WM_xr_session_exists(xr_data);
 
-  for (bScreen *screen = static_cast<bScreen *>(bmain->screens.first); screen;
+  for (bScreen *screen = bmain->screens.first(); screen;
        screen = static_cast<bScreen *>(screen->id.next))
   {
     for (ScrArea &area : screen->areabase) {
@@ -107,7 +107,7 @@ static void wm_xr_session_update_screen(Main *bmain, const wmXrData *xr_data)
           }
 
           if (session_exists) {
-            wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+            wmWindowManager *wm = bmain->wm.first();
             const Scene *scene = WM_windows_scene_get_from_screen(wm, screen);
 
             ED_view3d_xr_shading_update(wm, v3d, scene);

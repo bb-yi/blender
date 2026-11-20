@@ -28,6 +28,7 @@
 namespace blender::eevee {
 
 class Instance;
+class Film;
 
 /* -------------------------------------------------------------------- */
 /** \name ShadingView
@@ -41,7 +42,9 @@ class ShadingView {
   /** Static string pointer. Used as debug name and as UUID for texture pool. */
   const char *name_;
   /** Matrix to apply to the viewmat. */
-  const float4x4 &face_matrix_;
+  float4x4 face_matrix_;
+  /** Cubemap face index. Used by panoramic views and film reprojection. */
+  ePanoramicFace face_id_;
 
   /** Ray-tracing persistent buffers. Only opaque and refraction can have surface tracing. */
   RayTraceBuffer rt_buffer_opaque_;
@@ -53,13 +56,16 @@ class ShadingView {
   Framebuffer combined_fb_ = {"combined_fb_"};
   Framebuffer gbuffer_fb_ = {"gbuffer_fb_"};
   Framebuffer transparent_fb_ = {"transparent"};
+  Framebuffer stencil_preview_fb_ = {"stencil_preview"};
   TextureFromPool postfx_tx_;
   TextureFromPool outline_postfx_tx_;
 
   /** Main views is created from the camera (or is from the viewport). It is not jittered. */
   View main_view_ = {"main_view"};
-  /** Sub views is jittered versions or the main views. This allows jitter updates without trashing
-   * the visibility culling cache. */
+  /**
+   * Sub views is jittered versions or the main views. This allows jitter updates without trashing
+   * the visibility culling cache.
+   */
   View jitter_view_ = {"jitter_view"};
   /** Same as jitter_view_ but has Depth Of Field jitter applied. */
   View render_view_;
@@ -70,8 +76,15 @@ class ShadingView {
   bool is_enabled_ = false;
 
  public:
-  ShadingView(Instance &inst, const char *name, const float4x4 &face_matrix)
-      : inst_(inst), name_(name), face_matrix_(face_matrix), render_view_(name) {};
+  ShadingView(Instance &inst,
+              const char *name,
+              const float4x4 &face_matrix,
+              ePanoramicFace face_id)
+      : inst_(inst),
+        name_(name),
+        face_matrix_(face_matrix),
+        face_id_(face_id),
+        render_view_(name) {};
 
   ~ShadingView() {};
 
@@ -80,6 +93,7 @@ class ShadingView {
   void sync();
 
   void render();
+  void render_dlss_guides(Film &film);
 
  private:
   void render_transparent_pass(RenderBuffers &rbufs);
@@ -120,12 +134,12 @@ class MainView {
 
  public:
   MainView(Instance &inst)
-      : shading_views_0(inst, "posX_view", cubeface_mat(0)),
-        shading_views_1(inst, "negX_view", cubeface_mat(1)),
-        shading_views_2(inst, "posY_view", cubeface_mat(2)),
-        shading_views_3(inst, "negY_view", cubeface_mat(3)),
-        shading_views_4(inst, "posZ_view", cubeface_mat(4)),
-        shading_views_5(inst, "negZ_view", cubeface_mat(5))
+      : shading_views_0(inst, "posX_view", cubeface_mat(0), PANORAMIC_FACE_POS_X),
+        shading_views_1(inst, "negX_view", cubeface_mat(1), PANORAMIC_FACE_NEG_X),
+        shading_views_2(inst, "posY_view", cubeface_mat(2), PANORAMIC_FACE_POS_Y),
+        shading_views_3(inst, "negY_view", cubeface_mat(3), PANORAMIC_FACE_NEG_Y),
+        shading_views_4(inst, "posZ_view", cubeface_mat(4), PANORAMIC_FACE_POS_Z),
+        shading_views_5(inst, "negZ_view", cubeface_mat(5), PANORAMIC_FACE_NEG_Z)
   {
   }
 
@@ -147,6 +161,13 @@ class MainView {
   {
     for (auto i : IndexRange(6)) {
       shading_views_[i].render();
+    }
+  }
+
+  void render_dlss_guides(Film &film)
+  {
+    for (auto i : IndexRange(6)) {
+      shading_views_[i].render_dlss_guides(film);
     }
   }
 

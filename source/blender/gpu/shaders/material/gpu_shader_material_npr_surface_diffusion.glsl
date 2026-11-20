@@ -15,16 +15,17 @@ void npr_surface_diffusion_capture(Closure input_shader, float &result)
 }
 
 [[node]]
-void node_npr_surface_color(float4 color, float strength, float weight, Closure &result)
+void node_npr_surface_color(float4 color, float strength, float weight,
+                            [[resource_table]] KernelGlobals &kg, ShadingData &sd,
+                            Closure &result)
 {
 #if defined(MAT_CAPTURE) || defined(MAT_BAKE_COLOR)
-  if (g_npr_diffusion_scope) {
+  if (sd.npr_diffusion_scope) {
     result = Closure(0);
     return;
   }
 #endif
   ClosureEmission unlit;
-  unlit.emission = max(color.rgb, float3(0.0f)) * max(strength, 0.0f);
-  unlit.weight = weight;
-  result = closure_eval(unlit);
+  unlit.emission = max(color.rgb, float3(0.0f)) * max(strength, 0.0f) * weight;
+  result = closure_eval(kg, sd, unlit);
 }

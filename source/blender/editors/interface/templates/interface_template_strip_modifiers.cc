@@ -14,7 +14,7 @@
 #include "BKE_context.hh"
 #include "BKE_screen.hh"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "SEQ_modifier.hh"
 #include "SEQ_select.hh"
@@ -67,7 +67,7 @@ void template_strip_modifiers(Layout * /*layout*/, bContext *C)
   }
   else {
     /* Assuming there's only one group of instanced panels, update the custom data pointers. */
-    Panel *panel = static_cast<Panel *>(region->panels.first);
+    Panel *panel = region->panels.first();
     for (StripModifierData &smd : *modifiers) {
       const seq::StripModifierTypeInfo *mti = seq::modifier_type_info_get(smd.type);
       if (mti->panel_register == nullptr) {

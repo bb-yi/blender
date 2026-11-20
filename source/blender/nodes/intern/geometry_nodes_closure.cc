@@ -5,6 +5,10 @@
 #include <cfloat>
 #include <climits>
 
+/** \file
+ * \ingroup nodes
+ */
+
 #include "BKE_node_runtime.hh"
 
 #include "NOD_geometry_nodes_bundle_signature.hh"

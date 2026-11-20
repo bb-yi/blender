@@ -10,8 +10,8 @@
 
 #include "ED_screen.hh"
 
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BLT_translation.hh"
 
@@ -84,6 +84,7 @@ TransModeInfo TransMode_align = {
     /*snap_distance_fn*/ nullptr,
     /*snap_apply_fn*/ nullptr,
     /*draw_fn*/ nullptr,
+    /*status_fn*/ nullptr,
 };
 
 }  // namespace blender::ed::transform

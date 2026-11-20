@@ -12,11 +12,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_vector.h"
-#include "BLI_rect.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_rect.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -285,10 +285,10 @@ static void slider_draw(const bContext * /*C*/, ARegion *region, void *arg)
   uint8_t color_bg[4];
 
   /* Get theme colors. */
-  ui::theme::get_color_4ubv(TH_HEADER_TEXT_HI, color_handle);
-  ui::theme::get_color_4ubv(TH_HEADER_TEXT, color_text);
-  ui::theme::get_color_4ubv(TH_HEADER_TEXT, color_line);
-  ui::theme::get_color_4ubv(TH_HEADER_TEXT, color_overshoot);
+  ui::theme::get_color_4ubv(TH_TEXT_HI, color_handle);
+  ui::theme::get_color_4ubv(TH_TEXT, color_text);
+  ui::theme::get_color_4ubv(TH_TEXT, color_line);
+  ui::theme::get_color_4ubv(TH_TEXT, color_overshoot);
   ui::theme::get_color_4ubv(TH_HEADER, color_bg);
 
   color_overshoot[0] = color_overshoot[0] * 0.8;
@@ -576,7 +576,7 @@ void ED_slider_status_get(const tSlider *slider, WorkspaceStatus &status)
     status.item_bool(IFACE_("Overshoot"), slider->overshoot, ICON_EVENT_E);
   }
   else {
-    status.item(IFACE_("Overshoot Disabled"), ICON_INFO);
+    status.item(IFACE_("Overshoot Disabled"), ICON_STATUS_INFO);
   }
 
   status.item_bool(IFACE_("Precision"), slider->precision, ICON_EVENT_SHIFT);
@@ -719,9 +719,10 @@ static const char *meta_data_list[] = {
 
 BLI_INLINE bool metadata_is_valid(const ImBuf *ibuf, char *r_str, short index, int offset)
 {
-  return (IMB_metadata_get_field(
-              ibuf->metadata, meta_data_list[index], r_str + offset, MAX_METADATA_STR - offset) &&
-          r_str[0]);
+  return (
+      IMB_metadata_get_field(
+          ibuf->metadata(), meta_data_list[index], r_str + offset, MAX_METADATA_STR - offset) &&
+      r_str[0]);
 }
 
 BLI_INLINE bool metadata_is_custom_drawable(const char *field)
@@ -949,14 +950,12 @@ static void text_info_row(const char *text,
   BLF_disable(font_id, BLF_SHADOW);
 }
 
-void ED_region_image_overlay_info_text_draw(const int render_size_x,
-                                            const int render_size_y,
-
-                                            const int viewer_size_x,
-                                            const int viewer_size_y,
-
-                                            const int draw_offset_x,
-                                            const int draw_offset_y)
+void ED_region_overlay_info_text_draw(const int render_size_x,
+                                      const int render_size_y,
+                                      const int viewer_size_x,
+                                      const int viewer_size_y,
+                                      const int draw_offset_x,
+                                      const int draw_offset_y)
 {
   BLF_set_default();
   const int font_id = BLF_default();
@@ -1042,7 +1041,7 @@ void ED_region_image_metadata_draw(
 {
   const uiStyle *style = ui::style_get_dpi();
 
-  if (!ibuf->metadata) {
+  if (!ibuf->metadata()) {
     return;
   }
 

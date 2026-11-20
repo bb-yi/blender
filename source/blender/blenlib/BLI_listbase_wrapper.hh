@@ -13,7 +13,7 @@
  * performance and debug-ability.
  */
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_vector.hh"
 
 #include "DNA_listBase.h"
@@ -67,7 +67,7 @@ template<typename LB, typename T> class ListBaseWrapperTemplate {
 
   Iterator begin() const
   {
-    return Iterator(listbase_, static_cast<T *>(listbase_->first));
+    return Iterator(listbase_, static_cast<T *>(listbase_->first_));
   }
 
   Iterator end() const

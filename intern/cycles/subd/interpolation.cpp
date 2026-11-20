@@ -73,6 +73,21 @@ struct SubdPackedFloat3 {
   }
 };
 
+struct SubdQuaternion {
+  using Type = Quaternion;
+  using AccumType = float4;
+
+  static AccumType read(const Type &value)
+  {
+    return make_float4(value);
+  }
+
+  static Type output(const AccumType &value)
+  {
+    return make_quaternion(value.x, value.y, value.z, value.w);
+  }
+};
+
 #ifdef WITH_OPENSUBDIV
 SubdAttributeInterpolation::SubdAttributeInterpolation(Mesh &mesh,
                                                        OsdMesh &osd_mesh,
@@ -168,6 +183,9 @@ void SubdAttributeInterpolation::setup_attribute(const Attribute &subd_attr, Att
            Attribute::same_storage(subd_attr.type, TypeRGBA))
   {
     setup_attribute_type<SubdFloat<float4>>(subd_attr, mesh_attr);
+  }
+  else if (Attribute::same_storage(subd_attr.type, TypeQuaternion)) {
+    setup_attribute_type<SubdQuaternion>(subd_attr, mesh_attr);
   }
 }
 
@@ -329,7 +347,7 @@ void SubdAttributeInterpolation::setup_attribute_vertex_smooth(const Attribute &
       osd_data.patch_table->EvaluateBasis(handle, uv.x, uv.y, p_weights, du_weights, dv_weights);
       Far::ConstIndexArray cv = osd_data.patch_table->GetPatchVertices(handle);
 
-      /* Compution position. */
+      /* Compute position. */
       typename T::AccumType value = subd_data[cv[0]] * p_weights[0];
       for (int k = 1; k < cv.size(); k++) {
         value += subd_data[cv[k]] * p_weights[k];
@@ -509,7 +527,7 @@ void SubdAttributeInterpolation::setup_attribute_corner_smooth(Attribute &mesh_a
                                                        channel);
         Far::ConstIndexArray cv = osd_data.patch_table->GetPatchFVarValues(handle, channel);
 
-        /* Compution position. */
+        /* Compute position. */
         typename T::AccumType value = subd_data[cv[0]] * p_weights[0];
         for (int k = 1; k < cv.size(); k++) {
           value += subd_data[cv[k]] * p_weights[k];

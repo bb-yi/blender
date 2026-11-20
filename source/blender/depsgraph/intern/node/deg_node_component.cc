@@ -37,7 +37,8 @@ ComponentNode::ComponentNode()
     : entry_operation(nullptr),
       exit_operation(nullptr),
       possibly_affects_visible_id(false),
-      affects_visible_id(false)
+      affects_visible_id(false),
+      is_user_modified(false)
 {
   operations_map = new Map<ComponentNode::OperationIDKey, OperationNode *>();
 }
@@ -295,7 +296,7 @@ DEG_COMPONENT_NODE_DEFINE(ParticleSettings, PARTICLE_SETTINGS, 0);
 DEG_COMPONENT_NODE_DEFINE(PointCache, POINT_CACHE, 0);
 DEG_COMPONENT_NODE_DEFINE(Pose, EVAL_POSE, ID_RECALC_GEOMETRY);
 DEG_COMPONENT_NODE_DEFINE(Sequencer, SEQUENCER, 0);
-DEG_COMPONENT_NODE_DEFINE(Compositor, COMPOSITOR, 0);
+DEG_COMPONENT_NODE_DEFINE(Compositor, COMPOSITOR, ID_RECALC_COMPOSITOR);
 DEG_COMPONENT_NODE_DEFINE(Shading, SHADING, ID_RECALC_SHADING);
 DEG_COMPONENT_NODE_DEFINE(Transform, TRANSFORM, ID_RECALC_TRANSFORM);
 DEG_COMPONENT_NODE_DEFINE(ObjectFromLayer, OBJECT_FROM_LAYER, 0);

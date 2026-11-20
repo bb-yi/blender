@@ -14,8 +14,9 @@ tabs_attr_infos = (
     ("show_properties_tool", "Tool", 'TOOL_SETTINGS'),
     ("show_properties_render", "Render", 'SCENE'),
     ("show_properties_output", "Output", 'OUTPUT'),
-    ("show_properties_view_layer", "View Layer", 'RENDERLAYERS'),
     ("show_properties_scene", "Scene", 'SCENE_DATA'),
+    ("show_properties_view_layer", "View Layer", 'RENDERLAYERS'),
+    ("show_properties_compositor", "Compositor & Effects", 'NODE_COMPOSITING'),
     ("show_properties_world", "World", 'WORLD'),
     ("show_properties_collection", "Collection", 'GROUP'),
     ("show_properties_object", "Object", 'OBJECT_DATA'),
@@ -29,7 +30,7 @@ tabs_attr_infos = (
     ("show_properties_bone_constraints", "Bone Constraints", 'CONSTRAINT_BONE'),
     ("show_properties_material", "Material", 'MATERIAL'),
     ("show_properties_texture", "Texture", 'TEXTURE'),
-    ("show_properties_strip", "Strip", 'SEQ_SEQUENCER'),
+    ("show_properties_strip", "Strip", 'SEQ_STRIP'),
     ("show_properties_strip_modifier", "Strip Modifiers", 'SEQ_STRIP_MODIFIER'),
 )
 
@@ -167,7 +168,7 @@ class PropertiesAnimationMixin:
             class_list = [c.__name__ for c in cls.mro()]
             print("PropertiesAnimationMixin: no animatable data-block, this is a bug "
                   "in one of these classes: {!r}".format(class_list))
-            layout.label(text="No animatable data-block, please report as bug", icon='ERROR')
+            layout.label(text="No animatable data-block, please report as bug", icon='STATUS_ERROR')
             return
 
         anim.draw_action_and_slot_selector_for_id(layout, animated_id)

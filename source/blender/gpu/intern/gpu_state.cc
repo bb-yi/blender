@@ -13,8 +13,8 @@
 #  define PIXELSIZE (1.0f)
 #endif
 
-#include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines.hh"
 
 #include "GPU_state.hh"
 
@@ -90,11 +90,6 @@ void GPU_line_smooth(bool enable)
 void GPU_polygon_smooth(bool enable)
 {
   SET_IMMUTABLE_STATE(polygon_smooth, enable);
-}
-
-void GPU_logic_op_xor_set(bool enable)
-{
-  SET_IMMUTABLE_STATE(logic_op_xor, enable);
 }
 
 void GPU_write_mask(GPUWriteMask mask)
@@ -354,7 +349,7 @@ StateManager::StateManager()
   state.stencil_test = GPU_STENCIL_NONE;
   state.stencil_op = GPU_STENCIL_OP_NONE;
   state.provoking_vert = GPU_VERTEX_LAST;
-  state.logic_op_xor = false;
+
   state.invert_facing = false;
   state.clip_distances = 0;
   state.clip_control = false;

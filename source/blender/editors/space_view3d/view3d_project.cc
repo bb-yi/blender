@@ -6,7 +6,6 @@
  * \ingroup spview3d
  */
 
-#include "DNA_camera_types.h"
 #include "DNA_layer_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
@@ -14,13 +13,10 @@
 #include "DNA_userdef_types.h"
 #include "DNA_view3d_types.h"
 
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-
-#include "BKE_camera.h"
-#include "BKE_screen.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "GPU_matrix.hh"
 
@@ -114,7 +110,7 @@ static eV3DProjStatus ed_view3d_project__internal(const ARegion *region,
 
   if (flag & V3D_PROJ_TEST_CLIP_BB) {
     const RegionView3D *rv3d = static_cast<const RegionView3D *>(region->regiondata);
-    if (rv3d->rflag & RV3D_CLIPPING) {
+    if ((rv3d->rflag & RV3D_CLIPPING) && (rv3d->clipbb != nullptr)) {
       if (ED_view3d_clipping_test(rv3d, co, is_local)) {
         return V3D_PROJ_RET_CLIP_BB;
       }
@@ -362,7 +358,7 @@ static void view3d_win_to_ray_segment(const Depsgraph *depsgraph,
 
 bool ED_view3d_clip_segment(const RegionView3D *rv3d, float ray_start[3], float ray_end[3])
 {
-  if ((rv3d->rflag & RV3D_CLIPPING) &&
+  if ((rv3d->rflag & RV3D_CLIPPING) && (rv3d->clipbb != nullptr) &&
       (clip_segment_v3_plane_n(ray_start, ray_end, rv3d->clip, 6, ray_start, ray_end) == false))
   {
     return false;
@@ -479,7 +475,7 @@ bool view3d_get_view_aligned_coordinate(ARegion *region,
 }
 #endif
 
-void ED_view3d_win_to_3d(const View3D *v3d,
+void ED_view3d_win_to_3d(const View3D * /*v3d*/,
                          const ARegion *region,
                          const float depth_pt[3],
                          const float mval[2],
@@ -507,19 +503,9 @@ void ED_view3d_win_to_3d(const View3D *v3d,
     float dy = (2.0f * mval[1] / float(region->winy)) - 1.0f;
 
     if (rv3d->persp == RV3D_CAMOB) {
-      /* ortho camera needs offset applied */
-      const Camera *cam = id_cast<const Camera *>(v3d->camera->data);
-      const int sensor_fit = BKE_camera_sensor_fit(cam->sensor_fit, region->winx, region->winy);
-      const float zoomfac = BKE_screen_view3d_zoom_to_fac(rv3d->camzoom) * 4.0f;
-      const float aspx = region->winx / float(region->winy);
-      const float aspy = region->winy / float(region->winx);
-      const float shiftx = cam->shiftx * 0.5f *
-                           (sensor_fit == CAMERA_SENSOR_FIT_HOR ? 1.0f : aspy);
-      const float shifty = cam->shifty * 0.5f *
-                           (sensor_fit == CAMERA_SENSOR_FIT_HOR ? aspx : 1.0f);
-
-      dx += (rv3d->camdx + shiftx) * zoomfac;
-      dy += (rv3d->camdy + shifty) * zoomfac;
+      /* Account for lens shift and pan, using the window matrix translation. */
+      dx -= rv3d->winmat[3][0];
+      dy -= rv3d->winmat[3][1];
     }
     ray_origin[0] = (rv3d->persinv[0][0] * dx) + (rv3d->persinv[1][0] * dy) + rv3d->viewinv[3][0];
     ray_origin[1] = (rv3d->persinv[0][1] * dx) + (rv3d->persinv[1][1] * dy) + rv3d->viewinv[3][1];
@@ -532,7 +518,7 @@ void ED_view3d_win_to_3d(const View3D *v3d,
   madd_v3_v3v3fl(r_out, ray_origin, ray_direction, lambda);
 }
 
-void ED_view3d_win_to_3d_with_shift(const View3D *v3d,
+void ED_view3d_win_to_3d_with_shift(const View3D * /*v3d*/,
                                     const ARegion *region,
                                     const float depth_pt[3],
                                     const float mval[2],
@@ -560,19 +546,9 @@ void ED_view3d_win_to_3d_with_shift(const View3D *v3d,
     float dy = (2.0f * mval[1] / float(region->winy)) - 1.0f;
 
     if (rv3d->persp == RV3D_CAMOB) {
-      /* ortho camera needs offset applied */
-      const Camera *cam = id_cast<const Camera *>(v3d->camera->data);
-      const int sensor_fit = BKE_camera_sensor_fit(cam->sensor_fit, region->winx, region->winy);
-      const float zoomfac = BKE_screen_view3d_zoom_to_fac(rv3d->camzoom) * 4.0f;
-      const float aspx = region->winx / float(region->winy);
-      const float aspy = region->winy / float(region->winx);
-      const float shiftx = cam->shiftx * 0.5f *
-                           (sensor_fit == CAMERA_SENSOR_FIT_HOR ? 1.0f : aspy);
-      const float shifty = cam->shifty * 0.5f *
-                           (sensor_fit == CAMERA_SENSOR_FIT_HOR ? aspx : 1.0f);
-
-      dx += (rv3d->camdx + shiftx) * zoomfac;
-      dy += (rv3d->camdy + shifty) * zoomfac;
+      /* Account for lens shift and pan, using the window matrix translation. */
+      dx -= rv3d->winmat[3][0];
+      dy -= rv3d->winmat[3][1];
     }
     ray_origin[0] = (rv3d->persinv[0][0] * dx) + (rv3d->persinv[1][0] * dy) + rv3d->persinv[3][0];
     ray_origin[1] = (rv3d->persinv[0][1] * dx) + (rv3d->persinv[1][1] * dy) + rv3d->persinv[3][1];

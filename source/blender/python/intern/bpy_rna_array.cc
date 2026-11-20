@@ -12,7 +12,7 @@
 
 #include "CLG_log.h"
 
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "RNA_types.hh"
 
@@ -480,7 +480,7 @@ static char *copy_values(PyObject *seq,
                          RNA_SetIndexFunc rna_set_index)
 {
 #ifdef USE_MATHUTILS
-  if (dim == 0) {
+  if (data && dim == 0) {
     if (MatrixObject_Check(seq)) {
       MatrixObject *pymat = reinterpret_cast<MatrixObject *>(seq);
       const size_t allocsize = pymat->col_num * pymat->row_num * sizeof(float);

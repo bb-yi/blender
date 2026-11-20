@@ -15,14 +15,18 @@
 
 #include "BKE_global.hh"
 #include "BLI_map.hh"
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 #include "DRW_gpu_wrapper.hh"
 
 #include "GPU_index_buffer.hh"
+#include "GPU_ray_tracing.hh"
 #include "draw_command_shared.hh"
 #include "draw_handle.hh"
 #include "draw_state.hh"
 #include "draw_view.hh"
+
+/** Maximum number of primitives an expanded draw can generate per original primitive. */
+#define DRW_EXPAND_PRIM_LEN_MAX 255
 
 namespace blender {
 
@@ -179,11 +183,14 @@ struct ResourceBind {
     UniformAsStorageBuf,
     VertexAsStorageBuf,
     IndexAsStorageBuf,
+    TopLevelAS,
   } type;
 
   union {
-    /** TODO: Use draw::Texture|StorageBuffer|UniformBuffer as resources as they will give more
-     * debug info. */
+    /**
+     * TODO: Use draw::Texture|StorageBuffer|UniformBuffer as resources as they will give more
+     * debug info.
+     */
     gpu::UniformBuf *uniform_buf;
     gpu::UniformBuf **uniform_buf_ref;
     gpu::StorageBuf *storage_buf;
@@ -195,6 +202,7 @@ struct ResourceBind {
     gpu::VertBuf **vertex_buf_ref;
     gpu::IndexBuf *index_buf;
     gpu::IndexBuf **index_buf_ref;
+    gpu::TopLevelAS *tlas;
   };
 
   ResourceBind() = default;
@@ -207,6 +215,8 @@ struct ResourceBind {
       : slot(slot_), is_reference(false), type(Type::StorageBuf), storage_buf(res) {};
   ResourceBind(int slot_, gpu::StorageBuf **res)
       : slot(slot_), is_reference(true), type(Type::StorageBuf), storage_buf_ref(res) {};
+  ResourceBind(int slot_, gpu::TopLevelAS *res)
+      : slot(slot_), is_reference(false), type(Type::TopLevelAS), tlas(res) {};
   ResourceBind(int slot_, gpu::UniformBuf *res, Type /*type*/)
       : slot(slot_), is_reference(false), type(Type::UniformAsStorageBuf), uniform_buf(res) {};
   ResourceBind(int slot_, gpu::UniformBuf **res, Type /*type*/)
@@ -370,9 +380,9 @@ struct SpecializeConstant {
 
 struct Draw {
   gpu::Batch *batch;
-  uint32_t instance_len : 24;
+  uint32_t instance_len : 20;
   uint32_t expand_prim_type : 4; /* #GPUPrimType */
-  uint32_t expand_prim_len : 4;
+  uint32_t expand_prim_len : 8;
   uint32_t vertex_first;
   uint32_t vertex_len;
   ResourceID res_id;
@@ -389,10 +399,10 @@ struct Draw {
   {
     BLI_assert(batch != nullptr);
     BLI_assert(expanded_prim_type <= 15);
-    BLI_assert(expanded_prim_len <= 15);
+    BLI_assert(expanded_prim_len <= DRW_EXPAND_PRIM_LEN_MAX);
     this->batch = batch;
     this->res_id = res_id;
-    this->instance_len = min_uu(instance_len, (1 << 24) - 1);
+    this->instance_len = min_uu(instance_len, (1 << 20) - 1);
     this->vertex_len = vertex_len;
     this->vertex_first = vertex_first;
     this->expand_prim_type = expanded_prim_type;
@@ -788,7 +798,7 @@ class DrawMultiBuf {
         group.desc.gpu_batch = batch;
         group.desc.expand_prim_type = expanded_prim_type;
         group.desc.expand_prim_len = expanded_prim_len;
-        BLI_assert_msg(expanded_prim_len < (1 << 3),
+        BLI_assert_msg(expanded_prim_len <= DRW_EXPAND_PRIM_LEN_MAX,
                        "Not enough bits to store primitive expansion");
         /* Custom group are not to be registered in the group_ids_. */
         if (!custom_group) {

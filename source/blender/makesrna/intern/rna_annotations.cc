@@ -11,6 +11,7 @@
 
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
+#include "RNA_path.hh"
 
 #include "rna_internal.hh"
 
@@ -22,16 +23,16 @@
 
 #  include "BLT_translation.hh"
 
-#  include "BLI_listbase.h"
-#  include "BLI_math_base.h"
+#  include "BLI_listbase.hh"
+#  include "BLI_math_base_c.hh"
 #  include "BLI_memory_utils.hh"
-#  include "BLI_string.h"
-#  include "BLI_string_utf8.h"
+#  include "BLI_string.hh"
+#  include "BLI_string_utf8.hh"
 #  include "BLI_string_utils.hh"
 
-#  include "BKE_animsys.h"
-#  include "BKE_gpencil_geom_legacy.h"
-#  include "BKE_gpencil_legacy.h"
+#  include "BKE_animsys.hh"
+#  include "BKE_annotations.h"
+#  include "BKE_global.hh"
 #  include "BKE_icons.hh"
 #  include "BKE_report.hh"
 
@@ -66,14 +67,14 @@ static bGPDframe *rna_annotation_frame_new(bGPDlayer *layer,
 {
   bGPDframe *frame;
 
-  if (BKE_gpencil_layer_frame_find(layer, frame_number)) {
+  if (BKE_annotations_layer_frame_find(layer, frame_number)) {
     BKE_reportf(reports, RPT_ERROR, "Frame already exists on this frame number %d", frame_number);
     return nullptr;
   }
 
-  frame = BKE_gpencil_frame_addnew(layer, frame_number);
+  frame = BKE_annotations_frame_addnew(layer, frame_number);
   if (active) {
-    layer->actframe = BKE_gpencil_layer_frame_get(layer, frame_number, GP_GETFRAME_USE_PREV);
+    layer->actframe = BKE_annotations_layer_frame_get(layer, frame_number, GP_GETFRAME_USE_PREV);
   }
   WM_main_add_notifier(NC_GPENCIL | NA_EDITED, nullptr);
 
@@ -90,7 +91,7 @@ static void rna_annotation_frame_remove(bGPDlayer *layer,
     return;
   }
 
-  BKE_gpencil_layer_frame_delete(layer, frame);
+  BKE_annotations_layer_frame_delete(layer, frame);
   frame_ptr->invalidate();
 
   WM_main_add_notifier(NC_GPENCIL | NA_EDITED, nullptr);
@@ -98,9 +99,9 @@ static void rna_annotation_frame_remove(bGPDlayer *layer,
 
 static bGPDframe *rna_annotation_frame_copy(bGPDlayer *layer, bGPDframe *src)
 {
-  bGPDframe *frame = BKE_gpencil_frame_duplicate(src, true);
+  bGPDframe *frame = BKE_annotations_frame_duplicate(src, true);
 
-  while (BKE_gpencil_layer_frame_find(layer, frame->framenum)) {
+  while (BKE_annotations_layer_frame_find(layer, frame->framenum)) {
     frame->framenum++;
   }
 
@@ -113,7 +114,7 @@ static bGPDframe *rna_annotation_frame_copy(bGPDlayer *layer, bGPDframe *src)
 
 static bGPDlayer *rna_annotation_layer_new(bGPdata *gpd, const char *name, bool setactive)
 {
-  bGPDlayer *gpl = BKE_gpencil_layer_addnew(gpd, name, setactive != 0, false);
+  bGPDlayer *gpl = BKE_annotations_layer_addnew(gpd, name, setactive != 0, false);
 
   WM_main_add_notifier(NC_GPENCIL | ND_DATA | NA_EDITED, nullptr);
 
@@ -128,7 +129,7 @@ static void rna_annotation_layer_remove(bGPdata *gpd, ReportList *reports, Point
     return;
   }
 
-  BKE_gpencil_layer_delete(gpd, layer);
+  BKE_annotations_layer_delete(gpd, layer);
   layer_ptr->invalidate();
 
   WM_main_add_notifier(NC_GPENCIL | ND_DATA | NA_EDITED, nullptr);
@@ -171,7 +172,14 @@ static void rna_annotation_layer_info_set(PointerRNA *ptr, const char *value)
       &gpd->layers, gpl, DATA_("GP_Layer"), '.', offsetof(bGPDlayer, info), sizeof(gpl->info));
 
   /* now fix animation paths */
-  BKE_animdata_fix_paths_rename_all(&gpd->id, "layers", oldname, gpl->info);
+  if (ptr->owner_id) {
+    BKE_animdata_fix_paths(*ptr->owner_id,
+                           "layers",
+                           RNA_path_name_to_infix(oldname),
+                           RNA_path_name_to_infix(gpl->info),
+                           /*verify_paths=*/true,
+                           *G_MAIN);
+  }
 
   /* Fix mask layers. */
   for (bGPDlayer &gpl_ : gpd->layers) {
@@ -186,7 +194,7 @@ static void rna_annotation_layer_info_set(PointerRNA *ptr, const char *value)
 static int rna_annotation_active_layer_index_get(PointerRNA *ptr)
 {
   bGPdata *gpd = rna_annotations(ptr);
-  bGPDlayer *gpl = BKE_gpencil_layer_active_get(gpd);
+  bGPDlayer *gpl = BKE_annotations_layer_active_get(gpd);
 
   return BLI_findindex(&gpd->layers, gpl);
 }
@@ -196,7 +204,7 @@ static void rna_annotation_active_layer_index_set(PointerRNA *ptr, int value)
   bGPdata *gpd = rna_annotations(ptr);
   bGPDlayer *gpl = static_cast<bGPDlayer *>(BLI_findlink(&gpd->layers, value));
 
-  BKE_gpencil_layer_active_set(gpd, gpl);
+  BKE_annotations_layer_active_set(gpd, gpl);
 
   /* Now do standard updates... */
   DEG_id_tag_update(&gpd->id, ID_RECALC_GEOMETRY);
@@ -231,7 +239,7 @@ static const EnumPropertyItem *rna_annotation_active_layer_itemf(bContext *C,
   }
 
   /* Existing layers */
-  for (gpl = static_cast<bGPDlayer *>(gpd->layers.first), i = 0; gpl; gpl = gpl->next, i++) {
+  for (gpl = gpd->layers.first(), i = 0; gpl; gpl = gpl->next, i++) {
     item_tmp.identifier = gpl->info;
     item_tmp.name = gpl->info;
     item_tmp.value = i;
@@ -283,7 +291,7 @@ static void rna_annotation_stroke_remove(bGPDframe *frame,
   }
 
   BLI_remlink(&frame->strokes, stroke);
-  BKE_gpencil_free_stroke(stroke);
+  BKE_annotations_free_stroke(stroke);
 
   /* Clear ptrs. */
   stroke_ptr->data = nullptr;
@@ -393,6 +401,7 @@ static void rna_def_annotation_strokes_api(BlenderRNA *brna, PropertyRNA *cprop)
   func = RNA_def_function(srna, "new", "rna_annotation_stroke_new");
   RNA_def_function_ui_description(func, "Add a new annotation stroke");
   parm = RNA_def_pointer(func, "stroke", "AnnotationStroke", "", "The newly created stroke");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 
   func = RNA_def_function(srna, "remove", "rna_annotation_stroke_remove");
@@ -554,6 +563,7 @@ static void rna_def_annotation_frames_api(BlenderRNA *brna, PropertyRNA *cprop)
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
   RNA_def_boolean(func, "active", false, "Active", "");
   parm = RNA_def_pointer(func, "frame", "AnnotationFrame", "", "The newly created frame");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 
   func = RNA_def_function(srna, "remove", "rna_annotation_frame_remove");
@@ -568,6 +578,7 @@ static void rna_def_annotation_frames_api(BlenderRNA *brna, PropertyRNA *cprop)
   parm = RNA_def_pointer(func, "source", "AnnotationFrame", "Source", "The source frame");
   RNA_def_parameter_flags(parm, PROP_NEVER_NULL, PARM_REQUIRED);
   parm = RNA_def_pointer(func, "copy", "AnnotationFrame", "", "The newly copied frame");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 }
 
@@ -731,6 +742,7 @@ static void rna_def_annotation_layers_api(BlenderRNA *brna, PropertyRNA *cprop)
   RNA_def_boolean(
       func, "set_active", true, "Set Active", "Set the newly created layer to the active layer");
   parm = RNA_def_pointer(func, "layer", "AnnotationLayer", "", "The newly created layer");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 
   func = RNA_def_function(srna, "remove", "rna_annotation_layer_remove");

@@ -9,18 +9,23 @@
  */
 
 #include "DNA_listBase.h"
+#include "DNA_vec_types.h"
 
 #include "BLI_array.hh"
 #include "BLI_bounds_types.hh"
 #include "BLI_math_matrix_types.hh"
+#include "BLI_set.hh"
 #include "BLI_span.hh"
+#include "BLI_vector.hh"
 
 namespace blender {
+
+enum eSeqOverlapMode : int;
+enum eSeqRippleFlag : int;
 
 struct Scene;
 struct Strip;
 struct SeqTimelineChannel;
-struct TimeMarker;
 
 namespace seq {
 
@@ -34,51 +39,34 @@ bool transform_single_image_check(const Strip *strip);
 bool transform_test_overlap(const Scene *scene, ListBaseT<Strip> *seqbasep, Strip *test);
 bool transform_test_overlap(const Scene *scene, Strip *strip1, Strip *strip2);
 void transform_translate_strip(Scene *evil_scene, Strip *strip, int delta);
-/**
- * \return 0 if there weren't enough space.
- */
-bool transform_seqbase_shuffle_ex(ListBaseT<Strip> *seqbasep,
-                                  Strip *test,
-                                  Scene *evil_scene,
-                                  int channel_delta);
-bool transform_seqbase_shuffle(ListBaseT<Strip> *seqbasep, Strip *test, Scene *evil_scene);
-bool transform_seqbase_shuffle_time(Span<Strip *> strips_to_shuffle,
-                                    Span<Strip *> time_dependent_strips,
-                                    ListBaseT<Strip> *seqbasep,
-                                    Scene *evil_scene,
-                                    ListBaseT<TimeMarker> *markers,
-                                    bool use_sync_markers);
-bool transform_seqbase_shuffle_time(Span<Strip *> strips_to_shuffle,
-                                    ListBaseT<Strip> *seqbasep,
-                                    Scene *evil_scene,
-                                    ListBaseT<TimeMarker> *markers,
-                                    bool use_sync_markers);
+void transform_shuffle_vertical(ListBaseT<Strip> *seqbasep,
+                                Span<Strip *> strips,
+                                Scene *scene,
+                                int channel_delta = 1);
 
 void transform_handle_overlap(Scene *scene,
                               ListBaseT<Strip> *seqbasep,
-                              Span<Strip *> transformed_strips,
-                              Span<Strip *> time_dependent_strips,
-                              bool use_sync_markers);
+                              Span<Strip *> source_strips,
+                              bool use_sync_markers,
+                              Span<Strip *> time_dependent_strips = {});
+/**
+ * As above, but resolve the overlap with an overridden \a overlap_mode and \a ripple_flag instead
+ * of the sequencer scene's tool settings.
+ */
 void transform_handle_overlap(Scene *scene,
                               ListBaseT<Strip> *seqbasep,
-                              Span<Strip *> transformed_strips,
-                              bool use_sync_markers);
+                              Span<Strip *> source_strips,
+                              bool use_sync_markers,
+                              eSeqOverlapMode overlap_mode,
+                              eSeqRippleFlag ripple_flag,
+                              Span<Strip *> time_dependent_strips = {});
 /**
- * Set strip channel. This value is clamped to valid values.
+ * Move strips and markers (if not locked) that start after \a timeline_frame by \a delta frames.
  */
-void strip_channel_set(Strip *strip, int channel);
-/**
- * Move strips and markers (if not locked) that start after timeline_frame by delta frames
- *
- * \param scene: Scene in which strips are located
- * \param seqbase: List in which strips are located
- * \param delta: offset in frames to be applied
- * \param timeline_frame: frame on timeline from where strips are moved
- */
-void transform_offset_after_frame(Scene *scene,
+void transform_strips_after_frame(Scene *scene,
                                   ListBaseT<Strip> *seqbase,
-                                  int delta,
-                                  int timeline_frame);
+                                  int timeline_frame,
+                                  int delta);
 
 /**
  * Check if `strip` can be moved.
@@ -86,11 +74,36 @@ void transform_offset_after_frame(Scene *scene,
  */
 bool transform_is_locked(const ListBaseT<SeqTimelineChannel> *channels, const Strip *strip);
 
+/**
+ *  Returns the extents of the strip along channels and frames.
+ */
+rcti strip_int_bounds_get(const Scene *scene, const Strip *strip);
+
+struct RippleRange {
+  int start;
+  int end;
+  Set<int> channels;
+};
+
+/**
+ * Break up \a strips into "ranges" (rather than calculate an entire bounding box from all the
+ * strips under consideration). This lets us simultaneously ripple separated parts of the timeline
+ * if the user edits strips that are far apart. Returned ranges are sorted by start frame.
+ */
+Vector<RippleRange> transform_ripple_ranges_get(const Scene *scene, Span<Strip *> strips);
+/**
+ * Whether \a strip should be rippled by some transformation on a channel in \a range.
+ */
+bool transform_strip_is_on_rippled_channel(const RippleRange &range,
+                                           const Strip *strip,
+                                           bool all_channels);
+
 /* Image transformation. */
 
 /**
  * Get per-axis mirror factors for a \a strip image.
- * \return float2 where each component is 1.0f (normal) or -1.0f (mirrored). */
+ * \return float2 where each component is 1.0f (normal) or -1.0f (mirrored).
+ */
 float2 image_transform_mirror_factor_get(const Strip *strip);
 
 /**
@@ -124,9 +137,9 @@ float3x3 image_transform_matrix_get(const Scene *scene, const Strip *strip);
  * For the fully-processed quad, see #image_transform_quad_get.
  * For the bounding box of the quad, see #image_transform_bounding_box_from_strips_get.
  *
- * \return float2 with (width, height) in view-space pixels
+ * \return int2 with (width, height) in view-space pixels
  */
-float2 image_transform_box_size_get(const Scene *scene, const Strip *strip);
+int2 image_transform_box_size_get(const Scene *scene, const Strip *strip);
 
 /**
  * Get 4 corner points of strip image. Corner vectors are in viewport space.
@@ -134,9 +147,6 @@ float2 image_transform_box_size_get(const Scene *scene, const Strip *strip);
  * 3--0
  * |  |
  * 2--1
- *
- * \param strip: Strip to calculate transformed image quad
- * \return array of four 2D points
  */
 Array<float2> image_transform_quad_get(const Scene *scene, const Strip *strip);
 
@@ -144,8 +154,7 @@ float2 image_preview_unit_to_px(const Scene *scene, float2 co_src);
 float2 image_preview_unit_from_px(const Scene *scene, float2 co_src);
 
 /**
- * Get viewport axis aligned bounding box from multiple strips.
- * \param strips: Span of strips to calculate the bounding box for
+ * Get viewport axis-aligned bounding box from multiple strips.
  */
 Bounds<float2> image_transform_bounding_box_from_strips_get(Scene *scene, Span<Strip *> strips);
 

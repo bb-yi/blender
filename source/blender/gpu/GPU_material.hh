@@ -8,11 +8,16 @@
 
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
+#include <variant>
 
+#include "BLI_assert.hh"
 #include "BLI_enum_flags.hh"
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
+#include "BLI_math_matrix_types.hh"
+#include "BLI_math_vector_types.hh"
 #include "BLI_set.hh"
 #include "BLI_span.hh"
 #include "BLI_string_ref.hh"
@@ -44,6 +49,7 @@ struct Material;
 struct Object;
 struct Scene;
 struct bNode;
+struct bNodeSocket;
 struct bNodeTree;
 
 /**
@@ -101,7 +107,7 @@ enum eGPUMaterialOptimizationStatus {
   GPU_MAT_OPTIMIZATION_SUCCESS,
 };
 
-enum eGPUMaterialFlag {
+enum eGPUMaterialFlag : uint64_t {
   GPU_MATFLAG_DIFFUSE = (1 << 0),
   GPU_MATFLAG_SUBSURFACE = (1 << 1),
   GPU_MATFLAG_GLOSSY = (1 << 2),
@@ -119,6 +125,11 @@ enum eGPUMaterialFlag {
   GPU_MATFLAG_SHADER_INFO = (1 << 13),
   GPU_MATFLAG_NPR_REFRACTION = (1 << 14),
   GPU_MATFLAG_NPR_FOREACH_LIGHT = (1 << 15),
+  GPU_MATFLAG_LIGHTING = (1ull << 32),
+  GPU_MATFLAG_LIGHT_ATTRIBUTE = (1ull << 33),
+  GPU_MATFLAG_SHADOW_OFFSET = (1ull << 34),
+  GPU_MATFLAG_SHADOW_MOMENTS = (1ull << 35),
+  GPU_MATFLAG_SHADOW_FILTER_METHODS = (1ull << 36),
 
   GPU_MATFLAG_VOLUME_SCATTER = (1 << 16),
   GPU_MATFLAG_VOLUME_ABSORPTION = (1 << 17),
@@ -171,6 +182,7 @@ enum eGPUCustomNodeDependencyFlag {
   GPU_CUSTOM_NODE_DEPENDENCY_GLSL_GEOMETRY_HELPERS = (1 << 0),
   GPU_CUSTOM_NODE_DEPENDENCY_GLSL_LIGHTPROBE_HELPERS = (1 << 1),
   GPU_CUSTOM_NODE_DEPENDENCY_GLSL_MATRIX_HELPERS = (1 << 2),
+  GPU_CUSTOM_NODE_DEPENDENCY_SHADING_CONTEXT = (1 << 3),
 };
 ENUM_OPERATORS(eGPUCustomNodeDependencyFlag);
 
@@ -193,12 +205,32 @@ using GPUMaterialPassReplacementCallbackFn = GPUPass *(*)(void *thunk, GPUMateri
 struct GPUMaterialFromNodeTreeResult {
   GPUMaterial *material = nullptr;
 
+  /** Compatible with #NodeWarningType. */
+  enum class WarningType {
+    Error = 0,
+    Warning = 1,
+    Info = 2,
+  };
+
   struct Error {
     const bNode *node;
     std::string message;
+    WarningType type;
   };
   Vector<Error> errors;
 };
+
+std::string GPU_material_error_message(GPUMaterial *material);
+void GPU_material_expression_source_add(GPUMaterial *material,
+                                        const bNode &node,
+                                        gpu::ShaderDiagnosticSource source,
+                                        std::string signature);
+const std::vector<gpu::ShaderDiagnosticSource> &GPU_material_expression_diagnostic_sources(
+    const GPUMaterial *material);
+void GPU_material_expression_diagnostics_publish(GPUMaterial *material,
+                                                 StringRef context_key,
+                                                 const std::shared_ptr<const void> &context_owner,
+                                                 uint64_t sync_epoch);
 
 /** WARNING: gpumaterials thread safety must be ensured by the caller. */
 GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
@@ -223,14 +255,27 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
 using ConstructGPUMaterialFn = void (*)(void *thunk, GPUMaterial *material);
 
 /* Construct a GPU material from a set of callbacks. See the callback types for more information.
- * The given thunk will be passed as the first parameter of each callback. */
+ * The given thunk will be passed as the first parameter of each callback. The UUID identify a
+ * possible variation for the same graph, for instance, a shader whose output is half precision or
+ * full precision. */
 GPUMaterial *GPU_material_from_callbacks(eGPUMaterialEngine engine,
                                          ConstructGPUMaterialFn construct_function_cb,
                                          GPUCodegenCallbackFn generate_code_function_cb,
-                                         void *thunk);
+                                         void *thunk,
+                                         const uint64_t uuid);
 
 void GPU_material_free_single(GPUMaterial *material);
 void GPU_material_free(ListBaseT<LinkData> *gpumaterial);
+bool GPU_material_animation_state_matches(ListBaseT<LinkData> *gpumaterial,
+                                          Span<double> state,
+                                          int *r_reject_reason = nullptr);
+/** Queue validated CPU-only uniform changes; actual upload occurs during material sync. */
+bool GPU_material_animation_uniform_update(Material *material, Span<double> state);
+int GPU_material_uniform_source_register(GPUMaterial *material, const bNodeSocket *socket);
+void GPU_material_uniform_capture_input(GPUMaterial *material,
+                                        const GPUInput &input,
+                                        size_t byte_offset);
+void GPU_material_uniform_capture_data(GPUMaterial *material, const void *data, size_t size);
 
 void GPU_materials_free(Main *bmain);
 
@@ -246,6 +291,9 @@ const char *GPU_material_get_name(GPUMaterial *material);
 Material *GPU_material_get_material(GPUMaterial *material);
 bool GPU_material_is_world(const GPUMaterial *material);
 bool GPU_material_is_outline_shell(const GPUMaterial *material);
+/* Root Alpha only, not transparency used inside a Shader to RGB color branch. */
+bool GPU_material_outline_shell_has_alpha(const GPUMaterial *material);
+void GPU_material_outline_shell_alpha_set(GPUMaterial *material, bool has_alpha);
 /**
  * Return true if the material compilation has not yet begin or begin.
  */
@@ -271,13 +319,31 @@ gpu::UniformBuf *GPU_material_uniform_buffer_get(GPUMaterial *material);
 void GPU_material_uniform_buffer_create(GPUMaterial *material, ListBaseT<LinkData> *inputs);
 
 bool GPU_material_has_surface_output(GPUMaterial *mat);
+/* Separate metadata: eGPUMaterialFlag already occupies all 32 bits. */
+void GPU_material_planar_probe_used_set(GPUMaterial *mat, bool used = true);
+bool GPU_material_planar_probe_used(const GPUMaterial *mat);
+void GPU_material_stencil_value_used_set(GPUMaterial *mat);
+bool GPU_material_stencil_value_used(const GPUMaterial *mat);
+void GPU_material_render_texture_register(GPUMaterial *mat, int uid);
+Span<int> GPU_material_render_texture_ids(const GPUMaterial *mat);
+void GPU_material_stencil_value_readable_set(GPUMaterial *mat);
+bool GPU_material_stencil_value_readable(const GPUMaterial *mat);
+void GPU_material_stencil_surface_used_set(GPUMaterial *mat);
+bool GPU_material_stencil_surface_used(const GPUMaterial *mat);
+void GPU_material_stencil_surface_readable_set(GPUMaterial *mat);
+bool GPU_material_stencil_surface_readable(const GPUMaterial *mat);
+StringRef GPU_material_stencil_marker_error(const GPUMaterial *mat);
 bool GPU_material_has_volume_output(GPUMaterial *mat);
 bool GPU_material_has_displacement_output(GPUMaterial *mat);
 bool GPU_material_has_depth_offset_output(GPUMaterial *mat);
+bool GPU_material_has_tessellation_output(GPUMaterial *mat);
 bool GPU_material_has_filter_output(GPUMaterial *mat);
 bool GPU_material_has_light_shader_output(GPUMaterial *mat);
 bool GPU_material_has_glsl_light_shader_eval(const GPUMaterial *mat);
 bool GPU_material_has_shader_info_shadow_classification(const GPUMaterial *mat);
+bool GPU_material_has_node_soft_shadow(const GPUMaterial *mat);
+bool GPU_material_has_node_shadow_cache(const GPUMaterial *mat);
+int GPU_material_node_shadow_cache_quality(const GPUMaterial *mat);
 bool GPU_material_principled_npr_v2_has(const GPUMaterial *mat);
 bool GPU_material_surface_diffusion_has(const GPUMaterial *mat);
 void GPU_material_surface_diffusion_set(GPUMaterial *mat);
@@ -333,29 +399,33 @@ const ListBaseT<GPULayerAttr> *GPU_material_layer_attributes(const GPUMaterial *
 /* Requested Material Attributes and Textures */
 
 enum GPUType {
-  /* Keep in sync with GPU_DATATYPE_STR */
-  /* The value indicates the number of elements in each type */
-  GPU_NONE = 0,
-  GPU_FLOAT = 1,
-  GPU_VEC2 = 2,
-  GPU_VEC3 = 3,
-  GPU_VEC4 = 4,
-  GPU_MAT3 = 9,
-  GPU_MAT4 = 16,
-  GPU_MAX_CONSTANT_DATA = GPU_MAT4,
+  GPU_NONE,
+  GPU_FLOAT,
+  GPU_VEC2,
+  GPU_VEC3,
+  GPU_VEC4,
+  GPU_MAT3,
+  GPU_MAT4,
 
-  /* Values not in GPU_DATATYPE_STR */
-  GPU_TEX1D_ARRAY = 1001,
-  GPU_TEX2D = 1002,
-  GPU_TEX2D_ARRAY = 1003,
-  GPU_TEX3D = 1004,
-
-  /* GLSL Struct types */
-  GPU_CLOSURE = 1007,
+  GPU_INT,
+  GPU_INT2,
+  GPU_INT3,
+  GPU_INT4,
+  GPU_BOOL,
+  GPU_TEX1D_ARRAY,
+  GPU_TEX2D,
+  GPU_TEX2D_ARRAY,
+  GPU_TEX3D,
+  GPU_TEXCUBE,
   GPU_TEX_HANDLE = 1008,
 
-  /* Opengl Attributes */
-  GPU_ATTR = 3001,
+  /* Struct types. */
+  GPU_CLOSURE,
+  GPU_KERNEL_GLOBALS,
+  GPU_SHADING_DATA,
+
+  /* Vertex Attributes. */
+  GPU_ATTR,
 };
 
 /** Non-owning callback input description copied by the frame push API. */
@@ -370,6 +440,85 @@ struct GPUMaterialFunctionOutput {
   GPUType type = GPU_NONE;
   GPUNodeLink **link = nullptr;
 };
+
+/* Element count of GPU_MAT4. */
+constexpr int GPU_MAX_CONSTANT_DATA = 16;
+
+constexpr int gpu_type_element_count(const GPUType type)
+{
+  switch (type) {
+    case GPU_FLOAT:
+    case GPU_INT:
+    case GPU_BOOL:
+      return 1;
+    case GPU_VEC2:
+    case GPU_INT2:
+      return 2;
+    case GPU_VEC3:
+    case GPU_INT3:
+      return 3;
+    case GPU_VEC4:
+    case GPU_INT4:
+      return 4;
+    case GPU_MAT3:
+      return 9;
+    case GPU_MAT4:
+      return 16;
+    case GPU_NONE:
+    case GPU_TEX1D_ARRAY:
+    case GPU_TEX2D:
+    case GPU_TEX2D_ARRAY:
+    case GPU_TEX3D:
+    case GPU_TEXCUBE:
+    case GPU_CLOSURE:
+    case GPU_TEX_HANDLE:
+    case GPU_ATTR:
+    case GPU_KERNEL_GLOBALS:
+    case GPU_SHADING_DATA:
+      break;
+  }
+
+  BLI_assert_unreachable();
+  return 0;
+}
+
+constexpr GPUType gpu_float_type_from_element_count(const int count)
+{
+  switch (count) {
+    case 1:
+      return GPU_FLOAT;
+    case 2:
+      return GPU_VEC2;
+    case 3:
+      return GPU_VEC3;
+    case 4:
+      return GPU_VEC4;
+    case 9:
+      return GPU_MAT3;
+    case 16:
+      return GPU_MAT4;
+  }
+
+  BLI_assert_unreachable();
+  return GPU_NONE;
+}
+
+constexpr GPUType gpu_int_type_from_element_count(const int count)
+{
+  switch (count) {
+    case 1:
+      return GPU_INT;
+    case 2:
+      return GPU_INT2;
+    case 3:
+      return GPU_INT3;
+    case 4:
+      return GPU_INT4;
+  }
+
+  BLI_assert_unreachable();
+  return GPU_NONE;
+}
 
 enum GPUDefaultValue {
   GPU_DEFAULT_0 = 0,
@@ -408,6 +557,7 @@ struct GPUMaterialTexture {
   ImageUser iuser = {};
   bool iuser_available = false;
   bool use_3d_lut_strip = false;
+  bool use_cube_strip = false;
   int lut_3d_width = 0;
   int lut_3d_height = 0;
   int lut_3d_depth = 0;
@@ -448,42 +598,182 @@ const GPUUniformAttrList *GPU_material_uniform_attributes(const GPUMaterial *mat
 /* Functions to create GPU Materials nodes. */
 /* TODO: Move to its own header. */
 
+/**
+ * Held type matches GPUType when the socket stores a constant.
+ * Otherwise, std::monostate is used as a placeholder.
+ */
+using GPUNodeStackValue = std::variant<std::monostate,
+                                       float,
+                                       float2,
+                                       float3,
+                                       float4,
+                                       float3x3,
+                                       float4x4,
+                                       int,
+                                       int2,
+                                       int3,
+                                       int4,
+                                       bool>;
+
+/**
+ * Returns the GPUNodeStackValue which corresponds to the given type, zero-initialized.
+ */
+inline GPUNodeStackValue GPU_node_stack_default_value(const GPUType type)
+{
+  switch (type) {
+    case GPU_FLOAT:
+      return 0.0f;
+    case GPU_VEC2:
+      return float2(0.0f);
+    case GPU_VEC3:
+      return float3(0.0f);
+    case GPU_VEC4:
+      return float4(0.0f);
+    case GPU_MAT3:
+      return float3x3::zero();
+    case GPU_MAT4:
+      return float4x4::zero();
+    case GPU_INT:
+      return 0;
+    case GPU_INT2:
+      return int2(0);
+    case GPU_INT3:
+      return int3(0);
+    case GPU_INT4:
+      return int4(0);
+    case GPU_BOOL:
+      return false;
+    case GPU_NONE:
+    case GPU_TEX1D_ARRAY:
+    case GPU_TEX2D:
+    case GPU_TEX2D_ARRAY:
+    case GPU_TEX3D:
+    case GPU_TEXCUBE:
+    case GPU_CLOSURE:
+    case GPU_TEX_HANDLE:
+    case GPU_ATTR:
+    case GPU_KERNEL_GLOBALS:
+    case GPU_SHADING_DATA:
+      break;
+  }
+
+  return std::monostate{};
+}
+
 struct GPUNodeStack {
-  GPUType type;
-  float vec[4];
-  GPUNodeLink *link;
-  bool hasinput;
-  bool hasoutput;
-  short sockettype;
-  bool end;
+  GPUType type = GPU_NONE;
+  GPUNodeStackValue value{std::monostate{}};
+  GPUNodeLink *link = nullptr;
+  bool hasinput = false;
+  bool hasoutput = false;
+  short sockettype = 0;
+  bool end = false;
 
   /* Return true if the socket might contain a polychromatic value.
    * This is a conservative heuristic that allows for optimization. */
   bool might_be_tinted() const
   {
-    return this->link || (this->vec[0] != this->vec[1]) || (this->vec[1] != this->vec[2]);
+    if (this->link) {
+      return true;
+    }
+    switch (this->type) {
+      case GPU_VEC3: {
+        const float3 &vec = std::get<float3>(this->value);
+        return (vec[0] != vec[1]) || (vec[1] != vec[2]);
+      }
+      case GPU_VEC4: {
+        const float4 &vec = std::get<float4>(this->value);
+        return (vec[0] != vec[1]) || (vec[1] != vec[2]);
+      }
+      default:
+        break;
+    }
+    BLI_assert_unreachable();
+    return true;
   }
 
   bool socket_not_zero() const
   {
-    return this->link || (saturate_f(this->vec[0]) > near_zero);
+    if (this->link) {
+      return true;
+    }
+    switch (this->type) {
+      case GPU_FLOAT:
+        return saturate_f(std::get<float>(this->value)) > near_zero;
+      case GPU_INT:
+        return std::get<int>(this->value) != 0;
+      case GPU_BOOL:
+        return std::get<bool>(this->value);
+      default:
+        break;
+    }
+    BLI_assert_unreachable();
+    return true;
   }
 
   bool socket_not_one() const
   {
-    return this->link || (saturate_f(this->vec[0]) < near_one);
+    if (this->link) {
+      return true;
+    }
+    switch (this->type) {
+      case GPU_FLOAT:
+        return saturate_f(std::get<float>(this->value)) < near_one;
+      case GPU_INT:
+        return std::get<int>(this->value) != 1;
+      case GPU_BOOL:
+        return !std::get<bool>(this->value);
+      default:
+        break;
+    }
+    BLI_assert_unreachable();
+    return true;
   }
 
   bool socket_not_black() const
   {
-    return this->link || saturate_f(this->vec[0]) > near_zero ||
-           saturate_f(this->vec[1]) > near_zero || saturate_f(this->vec[2]) > near_zero;
+    if (this->link) {
+      return true;
+    }
+    switch (this->type) {
+      case GPU_VEC3: {
+        const float3 &vec = std::get<float3>(this->value);
+        return saturate_f(vec[0]) > near_zero || saturate_f(vec[1]) > near_zero ||
+               saturate_f(vec[2]) > near_zero;
+      }
+      case GPU_VEC4: {
+        const float4 &vec = std::get<float4>(this->value);
+        return saturate_f(vec[0]) > near_zero || saturate_f(vec[1]) > near_zero ||
+               saturate_f(vec[2]) > near_zero;
+      }
+      default:
+        break;
+    }
+    BLI_assert_unreachable();
+    return true;
   }
 
   bool socket_not_white() const
   {
-    return this->link || saturate_f(this->vec[0]) < near_one ||
-           saturate_f(this->vec[1]) < near_one || saturate_f(this->vec[2]) < near_one;
+    if (this->link) {
+      return true;
+    }
+    switch (this->type) {
+      case GPU_VEC3: {
+        const float3 &vec = std::get<float3>(this->value);
+        return saturate_f(vec[0]) < near_one || saturate_f(vec[1]) < near_one ||
+               saturate_f(vec[2]) < near_one;
+      }
+      case GPU_VEC4: {
+        const float4 &vec = std::get<float4>(this->value);
+        return saturate_f(vec[0]) < near_one || saturate_f(vec[1]) < near_one ||
+               saturate_f(vec[2]) < near_one;
+      }
+      default:
+        break;
+    }
+    BLI_assert_unreachable();
+    return true;
   }
 
  private:
@@ -515,9 +805,14 @@ struct GPUCodegenOutput {
   /* Node-tree functions calls. */
   GPUGraphOutput displacement;
   GPUGraphOutput surface;
+  /* Shell variants defer AOV stores until coverage tests pass. Keep `surface` above complete
+   * for resource discovery; these graphs split its execution without changing other materials. */
+  std::optional<GPUGraphOutput> outline_shell_surface;
+  std::optional<GPUGraphOutput> outline_shell_aov;
   GPUGraphOutput volume;
   GPUGraphOutput thickness;
   std::optional<GPUGraphOutput> depth_offset;
+  std::optional<GPUGraphOutput> tessellation;
   GPUGraphOutput npr;
   GPUGraphOutput filter;
   Vector<int> filter_output_identifiers;
@@ -529,9 +824,23 @@ struct GPUCodegenOutput {
   GPUShaderCreateInfo *create_info;
 };
 
+GPUNodeLink *GPU_shading_data();
+GPUNodeLink *GPU_kernel_globals();
 GPUNodeLink *GPU_constant(const float *num);
 GPUNodeLink *GPU_uniform(const float *num);
+GPUNodeLink *GPU_uniform_from_socket(GPUMaterial *material,
+                                     const bNodeSocket *socket,
+                                     const float *num);
+GPUNodeLink *GPU_uniform_from_socket(GPUMaterial *material,
+                                     const bNodeSocket *socket,
+                                     const GPUNodeStack &stack);
 GPUNodeLink *GPU_function_call(StringRefNull function_call);
+GPUNodeLink *GPU_constant(const int *num);
+GPUNodeLink *GPU_uniform(const int *num);
+GPUNodeLink *GPU_constant(const bool *num);
+GPUNodeLink *GPU_uniform(const bool *num);
+GPUNodeLink *GPU_constant(const GPUNodeStack &stack);
+GPUNodeLink *GPU_uniform(const GPUNodeStack &stack);
 GPUNodeLink *GPU_attribute(GPUMaterial *mat, eCustomDataType type, const char *name);
 /**
  * Add a GPU attribute that refers to the default color attribute on a geometry.
@@ -556,6 +865,10 @@ GPUNodeLink *GPU_image(GPUMaterial *mat,
                        Image *ima,
                        ImageUser *iuser,
                        GPUSamplerState sampler_state);
+GPUNodeLink *GPU_image_cube_strip(GPUMaterial *mat,
+                                  Image *ima,
+                                  ImageUser *iuser,
+                                  GPUSamplerState sampler_state);
 GPUNodeLink *GPU_image_3d_lut_strip(GPUMaterial *mat,
                                     Image *ima,
                                     ImageUser *iuser,
@@ -642,12 +955,16 @@ void GPU_material_output_volume(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_displacement(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_thickness(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_depth_offset(GPUMaterial *material, GPUNodeLink *link);
+/** \param link: Packed tessellation parameters (see `node_shader_tessellation_control.cc`). */
+void GPU_material_output_tessellation(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_filter_item(GPUMaterial *material, int identifier, GPUNodeLink *link);
 void GPU_material_output_light_shader(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_glsl_light_shader_eval_set(GPUMaterial *material);
 void GPU_material_shader_info_shadow_classification_set(GPUMaterial *material);
+void GPU_material_node_soft_shadow_set(GPUMaterial *material);
+void GPU_material_node_shadow_cache_set(GPUMaterial *material, int quality);
 void GPU_material_principled_npr_v2_set(GPUMaterial *material);
 void GPU_material_npr_features_add(GPUMaterial *material, eGPUMaterialNPRFeature features);
 void GPU_material_hiz_data_set(GPUMaterial *material);
@@ -668,7 +985,8 @@ void GPU_material_add_output_link_composite(GPUMaterial *material, GPUNodeLink *
 char *GPU_material_split_sub_function(GPUMaterial *material,
                                       GPUType return_type,
                                       GPUNodeLink **link,
-                                      StringRefNull dependency_name);
+                                      StringRefNull dependency_name,
+                                      bool preserve_shading_state = false);
 
 /**
  * Wrap a part of the material graph into a void function with typed inputs and outputs.

@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "util/half.h"
+#include "util/simd.h"
 #include "util/system.h"
 #include <array>
 
@@ -66,7 +67,7 @@ TEST(TEST_CATEGORY_NAME, float_to_half)
   }
 }
 
-TEST(TEST_CATEGORY_NAME, float3_to_half3)
+TEST(TEST_CATEGORY_NAME, float3_to_packed_half3)
 {
   if (!validate_cpu_capabilities()) {
     GTEST_SKIP();
@@ -79,8 +80,8 @@ TEST(TEST_CATEGORY_NAME, float3_to_half3)
 
     const float3 in = make_float3(test_values[i0].f, test_values[i1].f, test_values[i2].f);
 
-    const half3 h = float3_to_half3(in);
-    const float3 out = half3_to_float3(h);
+    const packed_half3 h = float3_to_packed_half3(in);
+    const float3 out = packed_half3_to_float3(h);
 
     EXPECT_EQ(out.x, in.x);
     EXPECT_EQ(out.y, in.y);
@@ -134,7 +135,46 @@ TEST(TEST_CATEGORY_NAME, fallback_float_to_half)
   }
 }
 
-TEST(TEST_CATEGORY_NAME, fallback_float3_to_half3)
+TEST(TEST_CATEGORY_NAME, half_to_float_flush_to_zero)
+{
+  if (!validate_cpu_capabilities()) {
+    GTEST_SKIP();
+    return;
+  }
+
+  const ScopedFlushToZero flush_to_zero;
+
+  for (size_t i = 0; i < test_values.size(); i += 4) {
+    const size_t i0 = i;
+    const size_t i1 = (i + 1) % test_values.size();
+    const size_t i2 = (i + 2) % test_values.size();
+    const size_t i3 = (i + 3) % test_values.size();
+
+    const half4 h = {half(test_values[i0].h),
+                     half(test_values[i1].h),
+                     half(test_values[i2].h),
+                     half(test_values[i3].h)};
+
+    const float4 out = half4_to_float4(h);
+    EXPECT_EQ(out.x, test_values[i0].f);
+    EXPECT_EQ(out.y, test_values[i1].f);
+    EXPECT_EQ(out.z, test_values[i2].f);
+    EXPECT_EQ(out.w, test_values[i3].f);
+
+    const float4 fallback_out = fallback_half4_to_float4(h);
+    EXPECT_EQ(fallback_out.x, test_values[i0].f);
+    EXPECT_EQ(fallback_out.y, test_values[i1].f);
+    EXPECT_EQ(fallback_out.z, test_values[i2].f);
+    EXPECT_EQ(fallback_out.w, test_values[i3].f);
+  }
+
+  for (const HalfTestVal &val : test_values) {
+    EXPECT_EQ(half_to_float(half(val.h)), val.f);
+    EXPECT_EQ(fallback_half_to_float(half(val.h)), val.f);
+  }
+}
+
+TEST(TEST_CATEGORY_NAME, fallback_float3_to_packed_half3)
 {
   if (!validate_cpu_capabilities()) {
     GTEST_SKIP();
@@ -147,8 +187,8 @@ TEST(TEST_CATEGORY_NAME, fallback_float3_to_half3)
 
     const float3 in = make_float3(test_values[i0].f, test_values[i1].f, test_values[i2].f);
 
-    const half3 h = fallback_float3_to_half3(in);
-    const float3 out = fallback_half3_to_float3(h);
+    const packed_half3 h = fallback_float3_to_packed_half3(in);
+    const float3 out = fallback_packed_half3_to_float3(h);
 
     EXPECT_EQ(out.x, in.x);
     EXPECT_EQ(out.y, in.y);

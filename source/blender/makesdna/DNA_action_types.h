@@ -39,6 +39,14 @@ class VertBuf;
 class Batch;
 }  // namespace gpu
 
+namespace bke {
+struct bPoseRuntime;
+}  // namespace bke
+
+namespace bke::motionpath {
+struct Runtime;
+}
+
 /* Forward declarations so the actual declarations can happen top-down. */
 struct ActionLayer;
 struct ActionSlot;
@@ -70,6 +78,8 @@ enum eMotionPathVert_Flag : int {
   /* vert is selected */
   MOTIONPATH_VERT_SEL = (1 << 0),
   MOTIONPATH_VERT_KEY = (1 << 1),
+  /* Set if the vert has been evaluated at least once. */
+  MOTIONPATH_VERT_EVALUATED = (1 << 2),
 };
 ENUM_OPERATORS(eMotionPathVert_Flag);
 
@@ -277,8 +287,8 @@ enum ePchan_BBoneFlag : char {
 enum eRotationModes : short {
   /* quaternion rotations (default, and for older Blender versions) */
   ROT_MODE_QUAT = 0,
-  /* euler rotations - keep in sync with enum in BLI_math_rotation.h */
-  /** Blender 'default' (classic) - must be as 1 to sync with BLI_math_rotation.h defines */
+  /* euler rotations - keep in sync with enum in BLI_math_rotation_c.hh */
+  /** Blender 'default' (classic) - must be as 1 to sync with BLI_math_rotation_c.hh defines */
   ROT_MODE_EUL = 1,
   ROT_MODE_XYZ = 1,
   ROT_MODE_XZY = 2,
@@ -565,7 +575,7 @@ enum DNA_DEPRECATED eAnimEdit_AutoSnap : int {
 };
 
 /* SAction->cache_display */
-enum eTimeline_Cache_Flag : char {
+enum eTimeline_Cache_Flag : uint16_t {
   TIME_CACHE_DISPLAY = (1 << 0),
   TIME_CACHE_SOFTBODY = (1 << 1),
   TIME_CACHE_PARTICLES = (1 << 2),
@@ -573,7 +583,8 @@ enum eTimeline_Cache_Flag : char {
   TIME_CACHE_SMOKE = (1 << 4),
   TIME_CACHE_DYNAMICPAINT = (1 << 5),
   TIME_CACHE_RIGIDBODY = (1 << 6),
-  TIME_CACHE_SIMULATION_NODES = static_cast<char>(1 << 7),
+  TIME_CACHE_SIMULATION_NODES = (1 << 7),
+  TIME_CACHE_COMPOSITOR = (1 << 8),
 };
 ENUM_OPERATORS(eTimeline_Cache_Flag)
 
@@ -620,7 +631,7 @@ struct bMotionPath {
   gpu::VertBuf *points_vbo = nullptr;
   gpu::Batch *batch_line = nullptr;
   gpu::Batch *batch_points = nullptr;
-  void *_pad = nullptr;
+  bke::motionpath::Runtime *runtime = nullptr;
 };
 
 /* Visualization General --------------------------- */
@@ -637,14 +648,14 @@ struct bAnimVizSettings {
   short path_step = 0;
   eMotionPath_Ranges path_range = {};
 
-  eMotionPaths_ViewFlag path_viewflag = {};
+  eMotionPaths_ViewFlag path_viewflag = MOTIONPATH_VIEW_KFRAS | MOTIONPATH_VIEW_KFNOS;
   eMotionPath_BakeFlag path_bakeflag = {};
   char _pad[4] = {};
 
   /** Start and end frames of path-calculation range. Both are inclusive. */
-  int path_sf = 0, path_ef = 0;
+  int path_sf = 1, path_ef = 250;
   /** Number of frames before/after current frame to show. Both are inclusive. */
-  int path_bc = 0, path_ac = 0;
+  int path_bc = 10, path_ac = 10;
 };
 
 /* runtime */
@@ -913,13 +924,6 @@ struct bPoseChannel {
 struct bPose {
   /** List of pose channels, PoseBones in RNA. */
   ListBaseT<bPoseChannel> chanbase = {nullptr, nullptr};
-  /** Use a hash-table for quicker string lookups. */
-  struct GHash *chanhash = nullptr;
-
-  /* Flat array of pose channels. It references pointers from
-   * chanbase. Used for quick pose channel lookup from an index.
-   */
-  bPoseChannel **chan_array = nullptr;
 
   ePose_Flags flag = {};
   char _pad[2] = {};
@@ -938,13 +942,14 @@ struct bPose {
   int active_group = 0;
   /** Ik solver to use. */
   ePose_IKSolverType iksolver = {};
-  /** Temporary IK data, depends on the IK solver. Not saved in file. */
-  void *ikdata = nullptr;
   /** IK solver parameter for ItaSC. */
   bItasc *ikparam = nullptr;
 
   /** Settings for visualization of bone animation. */
   bAnimVizSettings avs;
+
+  /** Non-serialized runtime data, always valid for code handling a #bPose. */
+  bke::bPoseRuntime *runtime = nullptr;
 };
 
 /* IK Solvers ------------------------------------ */
@@ -1195,8 +1200,9 @@ struct SpaceAction {
   char mode_prev = 0;
   /* Snapping now lives on the Scene. */
   DNA_DEPRECATED char autosnap = 0;
+  char _pad1 = {};
   eTimeline_Cache_Flag cache_display = {};
-  char _pad1[6] = {};
+  char _pad2[4] = {};
 
   SpaceActionOverlays overlays;
 

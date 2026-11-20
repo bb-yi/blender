@@ -10,110 +10,42 @@
  * view post-processing; those are rejected by the bake callback before this shader is used.
  */
 
-#include "infos/eevee_geom_infos.hh"
-#include "infos/eevee_nodetree_infos.hh"
 #include "infos/eevee_surf_bake_infos.hh"
 
-FRAGMENT_SHADER_CREATE_INFO(eevee_nodetree)
-FRAGMENT_SHADER_CREATE_INFO(eevee_geom_bake_mesh)
 FRAGMENT_SHADER_CREATE_INFO(eevee_surf_bake_color)
 
-#include "eevee_forward_lib.glsl"
-#include "eevee_nodetree_frag_lib.glsl"
-#include "eevee_sampling_lib.glsl"
-#include "eevee_surf_lib.glsl"
+#include "eevee_forward_lib.bsl.hh"
+#include "eevee_nodetree_lib.bsl.hh"
+#include "eevee_sampling_lib.bsl.hh"
+#include "eevee_surf_common.bsl.hh"
 
-/* Global lighting state used by Shader to RGB and by the final bake output. */
-Thickness g_thickness;
+Closure nodetree_surface(KernelGlobals kg, ShadingData &sd, float closure_rand);
+float nodetree_thickness(KernelGlobals kg, ShadingData &sd);
+float4 bake_lighting_eval(KernelGlobals kg, ShadingData &sd);
 
-uint bake_resource_id_get()
+float bake_closure_rand_get(KernelGlobals kg, ShadingData &sd)
 {
-  draw::ID id{interp_flat.resource_id_raw};
-  return id.resource_id<1>();
+  float noise = texelFetch(utility_tx, int3(int2(sd.frag_co.xy) % UTIL_TEX_SIZE,
+                                         UTIL_BLUE_NOISE_LAYER), 0).r;
+  return fract(noise + eevee_sampling_rng_1D_get(SAMPLING_CLOSURE));
 }
 
-uint bake_view_id_get()
+void bake_closure_tree_reset(KernelGlobals kg, ShadingData &sd, float closure_rand)
 {
-  draw::ID id{interp_flat.resource_id_raw};
-  return id.view_id<1>();
+  closure_weights_reset(kg, sd, closure_rand);
+  sd.bake_principled_depth = 0;
 }
 
-ViewMatrices bake_view_matrices_get()
+float4 bake_closure_to_rgba(KernelGlobals kg, ShadingData &sd)
 {
-  [[resource_table]] const draw::View &views = resource_table_get(draw::View);
-  return views.get(bake_view_id_get());
+  float4 shaded = bake_lighting_eval(kg, sd);
+  bake_closure_tree_reset(kg, sd, bake_closure_rand_get(kg, sd));
+  return shaded;
 }
 
-void bake_init_globals()
+float4 closure_to_rgba(KernelGlobals kg, ShadingData &sd, Closure /*cl_unused*/)
 {
-  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
-  const ViewMatrices view = bake_view_matrices_get();
-
-  g_data.P = interp.P;
-  g_data.Ni = interp.N;
-  g_data.N = safe_normalize(interp.N);
-  g_data.Ng = g_data.N;
-  g_data.is_strand = false;
-  g_data.hair_diameter = 0.0f;
-  g_data.hair_strand_id = 0;
-  g_data.ray_type = uni.pipeline_buf.ray_type;
-  g_data.ray_depth = 0.0f;
-  g_data.ray_length = distance(g_data.P, view.position());
-  g_data.barycentric_coords = float2(0.0f);
-  g_data.barycentric_dists = float3(0.0f);
-
-  g_data.N = gl_FrontFacing ? g_data.N : -g_data.N;
-  g_data.Ni = gl_FrontFacing ? g_data.Ni : -g_data.Ni;
-  g_data.Ng = safe_normalize(cross(gpu_dfdx(g_data.P), gpu_dfdy(g_data.P)));
-  if (uni.pipeline_buf.is_main_view_inverted) {
-    g_data.Ng = -g_data.Ng;
-  }
-}
-
-float bake_closure_rand_get()
-{
-  float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
-  return fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
-}
-
-void bake_closure_tree_reset(float closure_rand)
-{
-  closure_weights_reset(closure_rand);
-  g_closure_reflection_bin = true;
-#ifdef MAT_BAKE_COLOR
-  g_bake_principled_depth = 0;
-#endif
-}
-
-void bake_color_accumulator_reset()
-{
-#ifdef MAT_BAKE_COLOR
-  g_bake_color = float3(0.0f);
-  g_bake_color_weight = 0.0f;
-  g_bake_principled_depth = 0;
-#endif
-}
-
-float4 bake_closure_to_rgba()
-{
-  float3 radiance, transmittance;
-  eevee::forward_lighting_eval(bake_view_matrices_get(),
-                               bake_resource_id_get(),
-                               g_thickness,
-                               gl_FragCoord.xy,
-                               radiance,
-                               transmittance);
-
-  /* Reset for the next closure tree, matching the regular forward path. */
-  bake_closure_tree_reset(bake_closure_rand_get());
-
-  return float4(radiance, saturate(1.0f - average(transmittance)));
-}
-
-float4 closure_to_rgba(Closure cl_unused)
-{
-  UNUSED_VARS(cl_unused);
-  return bake_closure_to_rgba();
+  return bake_closure_to_rgba(kg, sd);
 }
 
 #ifdef NPR_SHADER
@@ -170,7 +102,7 @@ float4 npr_bake_swap_alpha(float4 v)
 
 #  define TEXTURE_HANDLE_EVAL_DEFINED
 
-float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex, float2 offset, bool texel_offset)
 {
   if (!all(equal(offset, float2(0.0f)))) {
     return float4(0.0f);
@@ -192,47 +124,46 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
     case TEX_HANDLE_SPECULAR_INDIRECT:
       return npr_bake_swap_alpha(g_specular_indirect);
     case TEX_HANDLE_POSITION:
-      return float4(g_data.P, 0.0f);
+      return float4(sd.P, 0.0f);
     case TEX_HANDLE_NORMAL:
-      return float4(g_data.N, 0.0f);
+      return float4(sd.N, 0.0f);
     default:
       return float4(0.0f);
   }
 }
 
-float4 TextureHandle_eval(TextureHandle tex)
+float4 TextureHandle_eval(KernelGlobals kg, ShadingData &sd, TextureHandle tex)
 {
-  return TextureHandle_eval(tex, float2(0.0f), true);
+  return TextureHandle_eval(kg, sd, tex, float2(0.0f), true);
 }
 #endif
 
-void main()
+void bake_evaluate(KernelGlobals kg, ShadingData &sd, float3 geom_normal, int primitive_id,
+                   int thickness_mode)
 {
-  int2 texel = int2(gl_FragCoord.xy);
-  if (texelFetch(bake_primitive_tx, texel, 0).r != bake_interp.primitive_id) {
+  int2 texel = int2(sd.frag_co.xy);
+  if (texelFetch(bake_primitive_tx, texel, 0).r != primitive_id) {
     gpu_discard_fragment();
     return;
   }
-
-  material_surface_cull_discard();
-  bake_init_globals();
   /* UV-space front-facing is defined by UV triangle winding, not by the source mesh surface.
    * Keep local material lighting helpers on the evaluated mesh normal. */
-  g_data.Ni = interp.N;
-  g_data.N = safe_normalize(interp.N);
-  g_data.Ng = safe_normalize(bake_interp.Ng);
-  fragment_displacement();
+  sd.N = safe_normalize(sd.Ni);
+  sd.Ng = safe_normalize(geom_normal);
+  fragment_displacement(kg, sd);
 
-  float closure_rand = bake_closure_rand_get();
+  float closure_rand = bake_closure_rand_get(kg, sd);
 
-  g_thickness = Thickness::from(nodetree_thickness(), thickness_mode);
+  sd.thickness = Thickness::from(nodetree_thickness(kg, sd), ThicknessMode(thickness_mode));
 
-  bake_color_accumulator_reset();
-  bake_closure_tree_reset(closure_rand);
-  nodetree_surface(closure_rand);
+  sd.bake_color = float3(0.0f);
+  sd.bake_color_weight = 0.0f;
+  sd.bake_principled_depth = 0;
+  bake_closure_tree_reset(kg, sd, closure_rand);
+  nodetree_surface(kg, sd, closure_rand);
 
-  float3 albedo = bake_color_resolve();
-  float4 shaded = bake_closure_to_rgba();
+  float3 albedo = bake_color_resolve(sd);
+  float4 shaded = bake_closure_to_rgba(kg, sd);
 
 #ifdef NPR_SHADER
   g_combined_color = float4(shaded.rgb, 1.0f);
@@ -242,9 +173,9 @@ void main()
   g_specular_color = float4(0.0f, 0.0f, 0.0f, 1.0f);
   g_specular_direct = float4(0.0f, 0.0f, 0.0f, 1.0f);
   g_specular_indirect = float4(0.0f, 0.0f, 0.0f, 1.0f);
-  g_average_normal = g_data.N;
+  g_average_normal = sd.N;
 
-  out_color = npr_bake_swap_alpha(nodetree_npr());
+  out_color = npr_bake_swap_alpha(nodetree_npr(kg, sd));
 #else
   out_color = shaded;
 #endif

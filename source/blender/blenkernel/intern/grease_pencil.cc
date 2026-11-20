@@ -11,12 +11,13 @@
 
 #include "BKE_action.hh"
 #include "BKE_anim_data.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_asset_edit.hh"
 #include "BKE_attribute_legacy_convert.hh"
 #include "BKE_attribute_storage.hh"
 #include "BKE_attribute_storage_blend_write.hh"
 #include "BKE_bake_data_block_id.hh"
+#include "BKE_brush.hh"
 #include "BKE_curves.hh"
 #include "BKE_customdata.hh"
 #include "BKE_deform.hh"
@@ -33,32 +34,34 @@
 #include "BKE_modifier.hh"
 #include "BKE_object.hh"
 #include "BKE_object_types.hh"
+#include "BKE_paint.hh"
 
 #include "BLI_array_utils.hh"
 #include "BLI_bounds.hh"
 #include "BLI_color_types.hh"
 #include "BLI_delaunay_2d.hh"
 #include "BLI_enumerable_thread_specific.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
+#include "BLI_math_color_c.hh"
 #include "BLI_math_euler_types.hh"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
+#include "BLI_math_geom_c.hh"
 #include "BLI_math_matrix.hh"
+#include "BLI_math_matrix_c.hh"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_memarena.h"
+#include "BLI_memarena.hh"
 #include "BLI_memory_utils.hh"
-#include "BLI_polyfill_2d.h"
+#include "BLI_polyfill_2d.hh"
 #include "BLI_resource_scope.hh"
 #include "BLI_span.hh"
 #include "BLI_stack.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_string_ref.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
 #include "BLI_task.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 #include "BLI_vector_set.hh"
 #include "BLI_virtual_array.hh"
 
@@ -76,15 +79,21 @@
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 
+#include "IMB_colormanagement.hh"
+
 #include "RNA_access.hh"
 #include "RNA_path.hh"
 #include "RNA_prototypes.hh"
 
 #include "MEM_guardedalloc.h"
 
+#include "CLG_log.h"
+
 #include "attribute_storage_access.hh"
 
 namespace blender {
+
+static CLG_LogRef LOG = {"geom.grease_pencil"};
 
 static const char *ATTR_POSITION = "position";
 
@@ -171,9 +180,55 @@ static void grease_pencil_set_runtime_visibilities(ID &id_dst, GreasePencil &gre
   }
 }
 
-static void grease_pencil_initialize_drawing_user_counts_after_read(GreasePencil &grease_pencil)
+/**
+ * End frames have no drawing (`drawing_index` is -1), which much of the code doesn't handle yet.
+ *
+ * They can't be created anymore, but older versions could write them. Replace them with regular
+ * frames using an empty drawing, instead of treating them as corrupt, since there could exist
+ * valid blendfiles containing them.
+ */
+static void grease_pencil_replace_end_frames_after_read(GreasePencil &grease_pencil)
 {
   using namespace blender::bke::greasepencil;
+  int empty_drawing_users = 0;
+  const int empty_drawing_index = grease_pencil.drawings().size();
+  for (Layer *layer : grease_pencil.layers_for_write()) {
+    for (GreasePencilFrame &frame : layer->frames_for_write().values()) {
+      if (frame.is_end()) {
+        empty_drawing_users++;
+        frame.drawing_index = empty_drawing_index;
+        frame.flag |= GP_FRAME_IMPLICIT_HOLD;
+        layer->tag_frames_map_keys_changed();
+      }
+    }
+  }
+  if (empty_drawing_users > 0) {
+    grease_pencil.add_empty_drawings(1);
+    BLI_assert(grease_pencil.drawings().index_range().contains(empty_drawing_index));
+
+    CLOG_WARN(&LOG,
+              "Converted %d end frames to regular frames using an empty drawing in \"%s\"",
+              empty_drawing_users,
+              BKE_id_name(grease_pencil.id));
+  }
+}
+
+static bool grease_pencil_initialize_drawing_user_counts(GreasePencil &grease_pencil)
+{
+  using namespace blender::bke::greasepencil;
+  /* Unknown types have no runtime data, and only the base struct was read. */
+  for (const GreasePencilDrawingBase *drawing_base : grease_pencil.drawings()) {
+    if (!ELEM(drawing_base->type, GP_DRAWING, GP_DRAWING_REFERENCE)) {
+      return false;
+    }
+  }
+  for (const Layer *layer : grease_pencil.layers()) {
+    for (const GreasePencilFrame &value : layer->frames().values()) {
+      if (!grease_pencil.drawings().index_range().contains(value.drawing_index)) {
+        return false;
+      }
+    }
+  }
   const Array<int> user_counts = grease_pencil.count_frame_users_for_drawings();
   BLI_assert(user_counts.size() == grease_pencil.drawings().size());
   for (const int drawing_i : grease_pencil.drawings().index_range()) {
@@ -183,6 +238,7 @@ static void grease_pencil_initialize_drawing_user_counts_after_read(GreasePencil
       drawing.runtime->user_count.store(user_counts[drawing_i]);
     }
   }
+  return true;
 }
 
 static void grease_pencil_copy_data(Main * /*bmain*/,
@@ -227,6 +283,9 @@ static void grease_pencil_copy_data(Main * /*bmain*/,
   }
 
   grease_pencil_set_runtime_visibilities(*id_dst, *grease_pencil_dst);
+
+  /* Duplicating drawings does not copy over their user count. */
+  grease_pencil_initialize_drawing_user_counts(*grease_pencil_dst);
 }
 
 static void grease_pencil_free_data(ID *id)
@@ -295,17 +354,20 @@ static void grease_pencil_blend_write(BlendWriter *writer, ID *id, const void *i
   bke::AttributeStorage::BlendWriteData attribute_data{writer, scope};
   attribute_storage_blend_write_prepare(
       grease_pencil->attribute_storage.wrap(),
-      !BLO_write_is_undo(writer),
+      !writer->is_undo(),
       [&](const AttrDomain /*domain*/) { return grease_pencil->layers().size(); },
       attribute_data);
   grease_pencil->attribute_storage.dna_attributes = attribute_data.attributes.data();
   grease_pencil->attribute_storage.dna_attributes_num = attribute_data.attributes.size();
-  BLO_write_generated_pointer_tag(writer, grease_pencil->attribute_storage.dna_attributes);
+  writer->generated_pointer_tag(grease_pencil->attribute_storage.dna_attributes);
 
   CustomData_reset(&grease_pencil->layers_data_legacy);
 
   /* Write LibData */
-  writer->write_id_struct(id_address, grease_pencil);
+  writer->write_id_struct(
+      id_address, grease_pencil, [](BlendStructWriter<GreasePencil> &struct_writer) {
+        struct_writer.generated_ptr(offsetof(GreasePencil, attribute_storage.dna_attributes));
+      });
   BKE_id_blend_write(writer, &grease_pencil->id);
 
   grease_pencil->attribute_storage.wrap().blend_write(*writer, attribute_data);
@@ -330,8 +392,6 @@ static void grease_pencil_blend_read_data(BlendDataReader *reader, ID *id)
   read_drawing_array(*grease_pencil, reader);
   /* Read layer tree. */
   read_layer_tree(*grease_pencil, reader);
-  /* Initialize drawing user counts */
-  grease_pencil_initialize_drawing_user_counts_after_read(*grease_pencil);
 
   CustomData_blend_read(
       reader, &grease_pencil->layers_data_legacy, grease_pencil->layers().size());
@@ -344,6 +404,20 @@ static void grease_pencil_blend_read_data(BlendDataReader *reader, ID *id)
   BLO_read_struct_list(reader, bDeformGroup, &grease_pencil->vertex_group_names);
 
   grease_pencil->runtime = MEM_new<bke::GreasePencilRuntime>(__func__);
+
+  /* End-frames used to be 'encoded' using an invalid drawing index (`-1`), until Blender 5.3. But
+   * most of GP code does not handle them correctly.
+   *
+   * As backward-compatible solution, they are converted into regular frames pointing at an empty
+   * drawing. This will give the same visual result (for rendering e.g.), until proper
+   * implementation of endframes is reworked for Blender 5.4. */
+  grease_pencil_replace_end_frames_after_read(*grease_pencil);
+
+  /* Initialize drawing user counts. Failure means the file is badly corrupted. Done last, because
+   * the ID gets freed after an invalidated read, which requires all of it to be initialized. */
+  if (!grease_pencil_initialize_drawing_user_counts(*grease_pencil)) {
+    BLO_read_data_invalidate(reader, "Invalid Grease Pencil data");
+  }
 }
 
 IDTypeInfo IDType_ID_GP = {
@@ -366,6 +440,7 @@ IDTypeInfo IDType_ID_GP = {
     .foreach_cache = nullptr,
     .foreach_path = nullptr,
     .foreach_working_space_color = grease_pencil_foreach_working_space_color,
+    .foreach_asset_weak_reference = nullptr,
     .owner_pointer_get = nullptr,
 
     .blend_write = grease_pencil_blend_write,
@@ -475,7 +550,9 @@ static void update_triangle_and_offsets_cache(const Span<float3> positions,
                                               const IndexMask &fill_mask,
                                               const GroupedSpan<int> fills,
                                               Vector<int3> &r_triangles,
-                                              MutableSpan<int> r_triangle_offsets)
+                                              MutableSpan<int> r_triangle_offsets,
+                                              Vector<float3> &r_intersection_points,
+                                              MutableSpan<int> r_intersection_point_offsets)
 {
   struct LocalMemArena {
     MemArena *pf_arena = nullptr;
@@ -490,6 +567,7 @@ static void update_triangle_and_offsets_cache(const Span<float3> positions,
   };
 
   Array<Vector<int3>> triangle_results(fill_mask.size());
+  Array<Vector<float3>> intersection_point_results(fill_mask.size());
 
   threading::EnumerableThreadSpecific<LocalMemArena> all_local_mem_arenas;
   fill_mask.foreach_segment(
@@ -556,46 +634,68 @@ static void update_triangle_and_offsets_cache(const Span<float3> positions,
               continue;
             }
 
-            meshintersect::CDT_input<double> input;
-            input.vert.reinitialize(num_points);
-            input.face.reinitialize(fill.size());
-            input.need_ids = true;
-
+            Array<double2, 64> verts(num_points);
             threading::parallel_for(IndexRange(num_points), 512, [&](const IndexRange range) {
               for (const int i : range) {
-                input.vert[i] = double2(projverts[i]);
+                verts[i] = double2(projverts[i]);
               }
             });
 
             const Span<float2> projverts_span = Span(reinterpret_cast<float2 *>(projverts),
                                                      num_points);
 
-            fill.foreach_index(
-                [&](const int64_t curve_i, const int64_t pos) {
-                  const IndexRange fill_points = fill_points_by_curve[pos];
-                  const IndexRange points = points_by_curve[curve_i];
-                  input.face[pos].resize(points.size());
-                  MutableSpan<int> face = input.face[pos].as_mutable_span();
+            Array<int, 64> face_vert_indices(fill_points_by_curve.total_size());
+            threading::parallel_for(fill.index_range(), 256, [&](const IndexRange range) {
+              for (const int i : range) {
+                const IndexRange fill_points = fill_points_by_curve[i];
+                MutableSpan<int> face = face_vert_indices.as_mutable_span().slice(fill_points);
 
-                  array_utils::fill_index_range<int>(face, fill_points.first());
-                  const Span<float2> projpoints = projverts_span.slice(fill_points);
+                array_utils::fill_index_range<int>(face, fill_points.first());
+                const Span<float2> projpoints = projverts_span.slice(fill_points);
 
-                  /* Curve have to be in a counterclockwise order, so check if a flip is need. */
-                  if (cross_poly_v2(reinterpret_cast<const float (*)[2]>(projpoints.data()),
-                                    projpoints.size()) < 0.0)
-                  {
-                    face.reverse();
-                  }
-                },
-                exec_mode::grain_size(256));
+                /* Curve have to be in a counterclockwise order, so check if a flip is need. */
+                if (cross_poly_v2(reinterpret_cast<const float (*)[2]>(projpoints.data()),
+                                  projpoints.size()) < 0.0)
+                {
+                  face.reverse();
+                }
+              }
+            });
+
+            meshintersect::CDT_input<double> input;
+            input.vert = verts;
+            input.face_offsets = fill_points_by_curve;
+            input.face_vert_indices = face_vert_indices;
+            input.needed_ids = CDT_ORIG_VERTS | CDT_ONLY_ONE_ORIG;
 
             meshintersect::CDT_result<double> result = delaunay_2d_calc(input,
                                                                         CDT_INSIDE_WITH_HOLES);
 
+            Map<int, int> vert_id_to_intersection_point;
+            const float3x3 invert_axis_mat = math::invert(axis_mat);
+            const float3 depth_point = positions[points_by_curve[fill.first()].first()];
+            float2 pos2d;
+            mul_v2_m3v3(pos2d, axis_mat.ptr(), depth_point);
+            const float3 depth_direction = depth_point - invert_axis_mat * float3(pos2d, 0.0f);
+
+            for (const int vert : result.vert.index_range()) {
+              /* The point already exists. */
+              if (!result.vert_orig[vert].is_empty()) {
+                continue;
+              }
+
+              vert_id_to_intersection_point.add_new(vert, intersection_point_results[pos].size());
+
+              const float2 co = float2(result.vert[vert]);
+              intersection_point_results[pos].append(invert_axis_mat * float3(co.x, co.y, 0.0f) +
+                                                     depth_direction);
+            }
+
             auto vert_to_point = [&](const int vert) {
-              /* If the points is a newly added intersection point return invalid. */
+              /* The points is a newly added intersection point. */
               if (result.vert_orig[vert].is_empty()) {
-                return -1;
+                const int inter = vert_id_to_intersection_point.lookup(vert);
+                return -(inter + 1);
               }
               /* Just get the first point if there are multiple at the same position. */
               return int(result.vert_orig[vert].first());
@@ -606,10 +706,8 @@ static void update_triangle_and_offsets_cache(const Span<float3> positions,
               const int3 tri = int3(vert_to_point(result.face[i][0]),
                                     vert_to_point(result.face[i][1]),
                                     vert_to_point(result.face[i][2]));
-              /* Don't add the triangle if any of the point are invalid. */
-              if (tri.x != -1 && tri.y != -1 && tri.z != -1) {
-                triangle_results[pos].append(tri);
-              }
+
+              triangle_results[pos].append(tri);
             }
 
             BLI_memarena_clear(pf_arena);
@@ -623,11 +721,20 @@ static void update_triangle_and_offsets_cache(const Span<float3> positions,
       r_triangle_offsets[i] = triangle_results[i].size();
     }
   });
+  threading::parallel_for(
+      intersection_point_results.index_range(), 512, [&](const IndexRange range) {
+        for (const int i : range) {
+          r_intersection_point_offsets[i] = intersection_point_results[i].size();
+        }
+      });
 
   const OffsetIndices<int> triangle_offsets = offset_indices::accumulate_counts_to_offsets(
       r_triangle_offsets);
+  const OffsetIndices<int> intersection_point_offsets =
+      offset_indices::accumulate_counts_to_offsets(r_intersection_point_offsets);
 
   r_triangles.resize(triangle_offsets.total_size());
+  r_intersection_points.resize(intersection_point_offsets.total_size());
 
   MutableSpan<int3> r_triangles_span = r_triangles.as_mutable_span();
   threading::parallel_for(fill_mask.index_range(), 512, [&](const IndexRange range) {
@@ -636,23 +743,36 @@ static void update_triangle_and_offsets_cache(const Span<float3> positions,
       array_utils::copy(triangle_results[pos].as_span(), r_triangles_span.slice(fill_range));
     }
   });
+
+  MutableSpan<float3> r_intersection_points_span = r_intersection_points.as_mutable_span();
+  threading::parallel_for(fill_mask.index_range(), 512, [&](const IndexRange range) {
+    for (const int pos : range) {
+      const IndexRange fill_range = intersection_point_offsets[pos];
+      array_utils::copy(intersection_point_results[pos].as_span(),
+                        r_intersection_points_span.slice(fill_range));
+    }
+  });
 }
 
-static void ensure_triangle_and_offset_cache(const Drawing &drawing)
+static void ensure_triangle_cache(const Drawing &drawing)
 {
   drawing.runtime->triangle_cache.ensure([&](std::optional<TriangleCache> &r_triangle_cache) {
     if (const std::optional<GroupedSpan<int>> fills = drawing.fills()) {
       TriangleCache triangle_cache;
       triangle_cache.triangle_offsets.resize(fills->size() + 1);
+      triangle_cache.intersection_point_offsets.resize(fills->size() + 1);
 
       const CurvesGeometry &curves = drawing.strokes();
-      update_triangle_and_offsets_cache(curves.evaluated_positions(),
-                                        drawing.curve_plane_normals(),
-                                        curves.evaluated_points_by_curve(),
-                                        fills->index_range(),
-                                        *fills,
-                                        triangle_cache.triangles,
-                                        triangle_cache.triangle_offsets.as_mutable_span());
+      update_triangle_and_offsets_cache(
+          curves.evaluated_positions(),
+          drawing.curve_plane_normals(),
+          curves.evaluated_points_by_curve(),
+          fills->index_range(),
+          *fills,
+          triangle_cache.triangles,
+          triangle_cache.triangle_offsets.as_mutable_span(),
+          triangle_cache.intersection_points,
+          triangle_cache.intersection_point_offsets.as_mutable_span());
 
       r_triangle_cache = std::move(triangle_cache);
     }
@@ -664,13 +784,24 @@ static void ensure_triangle_and_offset_cache(const Drawing &drawing)
 
 std::optional<GroupedSpan<int3>> Drawing::triangles() const
 {
-  ensure_triangle_and_offset_cache(*this);
+  ensure_triangle_cache(*this);
   if (this->runtime->triangle_cache.data().has_value()) {
     const TriangleCache &triangle_cache = *this->runtime->triangle_cache.data();
     return GroupedSpan<int3>(triangle_cache.triangle_offsets.as_span(),
                              triangle_cache.triangles.as_span());
   }
   return std::nullopt;
+}
+
+GroupedSpan<float3> Drawing::intersection_points() const
+{
+  ensure_triangle_cache(*this);
+  if (this->runtime->triangle_cache.data().has_value()) {
+    const TriangleCache &triangle_cache = *this->runtime->triangle_cache.data();
+    return GroupedSpan<float3>(triangle_cache.intersection_point_offsets.as_span(),
+                               triangle_cache.intersection_points.as_span());
+  }
+  return GroupedSpan<float3>({}, {});
 }
 
 static void update_curve_plane_normal_cache(const Span<float3> positions,
@@ -1060,8 +1191,11 @@ static void update_triangle_and_offsets_changed(const Span<float3> positions,
                                                 const IndexMask &changed_curves,
                                                 const std::optional<GroupedSpan<int>> fills,
                                                 const GroupedSpan<int3> src_triangles,
+                                                const GroupedSpan<float3> src_intersection_points,
                                                 Vector<int3> &r_triangles,
-                                                MutableSpan<int> r_triangle_offsets)
+                                                MutableSpan<int> r_triangle_offsets,
+                                                Vector<float3> &r_intersection_points,
+                                                MutableSpan<int> r_intersection_point_offsets)
 {
   const int num_fills = fills.has_value() ? fills->size() : 0;
 
@@ -1072,6 +1206,8 @@ static void update_triangle_and_offsets_changed(const Span<float3> positions,
 
   Array<int> changed_triangle_offsets_data(changed_fills.size() + 1);
   Vector<int3> changed_triangles;
+  Array<int> changed_intersection_point_offsets_data(changed_fills.size() + 1);
+  Vector<float3> changed_intersection_points;
 
   if (fills) {
     update_triangle_and_offsets_cache(positions,
@@ -1080,39 +1216,78 @@ static void update_triangle_and_offsets_changed(const Span<float3> positions,
                                       changed_fills,
                                       *fills,
                                       changed_triangles,
-                                      changed_triangle_offsets_data.as_mutable_span());
+                                      changed_triangle_offsets_data.as_mutable_span(),
+                                      changed_intersection_points,
+                                      changed_intersection_point_offsets_data.as_mutable_span()
+
+    );
   }
 
   const OffsetIndices<int> changed_triangle_offsets = OffsetIndices<int>(
       changed_triangle_offsets_data);
+  const OffsetIndices<int> changed_intersection_point_offsets = OffsetIndices<int>(
+      changed_intersection_point_offsets_data);
 
-  Array<int> all_src_sizes(num_fills);
-  Array<int> changed_sizes(changed_fills.size());
-  copy_group_sizes(src_triangles.offsets, src_triangles.index_range(), all_src_sizes);
+  Array<int> all_src_triangle_sizes(num_fills);
+  Array<int> changed_triangle_sizes(changed_fills.size());
+  Array<int> all_src_intersection_point_sizes(num_fills);
+  Array<int> changed_intersection_point_sizes(changed_fills.size());
+  copy_group_sizes(src_triangles.offsets, src_triangles.index_range(), all_src_triangle_sizes);
   copy_group_sizes(
-      changed_triangle_offsets, changed_triangle_offsets.index_range(), changed_sizes);
+      changed_triangle_offsets, changed_triangle_offsets.index_range(), changed_triangle_sizes);
+  copy_group_sizes(src_intersection_points.offsets,
+                   src_intersection_points.index_range(),
+                   all_src_intersection_point_sizes);
+  copy_group_sizes(changed_intersection_point_offsets,
+                   changed_intersection_point_offsets.index_range(),
+                   changed_intersection_point_sizes);
 
-  Array<int> src_sizes(unchanged_fills.size());
-  array_utils::gather(all_src_sizes.as_span(), unchanged_fills, src_sizes.as_mutable_span());
+  Array<int> src_triangle_sizes(unchanged_fills.size());
+  Array<int> src_intersection_point_sizes(unchanged_fills.size());
+  array_utils::gather(
+      all_src_triangle_sizes.as_span(), unchanged_fills, src_triangle_sizes.as_mutable_span());
+  array_utils::gather(all_src_intersection_point_sizes.as_span(),
+                      unchanged_fills,
+                      src_intersection_point_sizes.as_mutable_span());
 
-  array_utils::scatter(src_sizes.as_span(), unchanged_fills, r_triangle_offsets);
-  array_utils::scatter(changed_sizes.as_span(), changed_fills, r_triangle_offsets);
+  array_utils::scatter(src_triangle_sizes.as_span(), unchanged_fills, r_triangle_offsets);
+  array_utils::scatter(changed_triangle_sizes.as_span(), changed_fills, r_triangle_offsets);
+  array_utils::scatter(
+      src_intersection_point_sizes.as_span(), unchanged_fills, r_intersection_point_offsets);
+  array_utils::scatter(
+      changed_intersection_point_sizes.as_span(), changed_fills, r_intersection_point_offsets);
 
   const OffsetIndices<int> triangle_offsets = offset_indices::accumulate_counts_to_offsets(
       r_triangle_offsets);
+  const OffsetIndices<int> intersection_point_offsets =
+      offset_indices::accumulate_counts_to_offsets(r_intersection_point_offsets);
 
   r_triangles.resize(r_triangle_offsets.last());
+  r_intersection_points.resize(r_intersection_point_offsets.last());
   array_utils::copy_group_to_group(src_triangles.offsets,
                                    triangle_offsets,
                                    unchanged_fills,
                                    src_triangles.data,
                                    r_triangles.as_mutable_span());
+  array_utils::copy_group_to_group(src_intersection_points.offsets,
+                                   intersection_point_offsets,
+                                   unchanged_fills,
+                                   src_intersection_points.data,
+                                   r_intersection_points.as_mutable_span());
 
   changed_fills.foreach_index(
       [&](const int i, const int pos) {
         r_triangles.as_mutable_span()
             .slice(triangle_offsets[i])
             .copy_from(changed_triangles.as_span().slice(changed_triangle_offsets[pos]));
+      },
+      exec_mode::grain_size(512));
+  changed_fills.foreach_index(
+      [&](const int i, const int pos) {
+        r_intersection_points.as_mutable_span()
+            .slice(intersection_point_offsets[i])
+            .copy_from(changed_intersection_points.as_span().slice(
+                changed_intersection_point_offsets[pos]));
       },
       exec_mode::grain_size(512));
 }
@@ -1151,12 +1326,19 @@ void Drawing::tag_positions_changed(const IndexMask &changed_curves)
   /* Fills cache needs to be up-to-date. */
   this->runtime->fill_cache.tag_dirty();
 
-  if (const std::optional<GroupedSpan<int3>> triangles = this->triangles()) {
+  if (const std::optional<TriangleCache> src_triangle_cache = this->runtime->triangle_cache.data())
+  {
     /* Copy the triangle data. */
-    const Array<int> src_triangles_offsets(triangles->offsets.data());
-    const Array<int3> src_triangles_data(triangles->data);
-    const GroupedSpan<int3> src_triangles(src_triangles_offsets.as_span(),
+    const Array<int> src_triangle_offsets(src_triangle_cache->triangle_offsets.as_span());
+    const Array<int3> src_triangles_data(src_triangle_cache->triangles.as_span());
+    const GroupedSpan<int3> src_triangles(src_triangle_offsets.as_span(),
                                           src_triangles_data.as_span());
+    const Array<int> src_intersection_point_offsets(
+        src_triangle_cache->intersection_point_offsets.as_span());
+    const Array<float3> src_intersection_points_data(
+        src_triangle_cache->intersection_points.as_span());
+    const GroupedSpan<float3> src_intersection_points(src_intersection_point_offsets.as_span(),
+                                                      src_intersection_points_data.as_span());
 
     this->runtime->triangle_cache.update([&](std::optional<TriangleCache> &r_triangle_cache) {
       const std::optional<GroupedSpan<int>> fills = this->fills();
@@ -1164,6 +1346,7 @@ void Drawing::tag_positions_changed(const IndexMask &changed_curves)
 
       TriangleCache triangle_cache;
       triangle_cache.triangle_offsets.resize(fills->size() + 1);
+      triangle_cache.intersection_point_offsets.resize(fills->size() + 1);
 
       update_triangle_and_offsets_changed(this->strokes().evaluated_positions(),
                                           this->curve_plane_normals(),
@@ -1171,8 +1354,11 @@ void Drawing::tag_positions_changed(const IndexMask &changed_curves)
                                           changed_curves,
                                           fills,
                                           src_triangles,
+                                          src_intersection_points,
                                           triangle_cache.triangles,
-                                          triangle_cache.triangle_offsets);
+                                          triangle_cache.triangle_offsets,
+                                          triangle_cache.intersection_points,
+                                          triangle_cache.intersection_point_offsets);
       r_triangle_cache = std::move(triangle_cache);
     });
   }
@@ -1220,12 +1406,19 @@ void Drawing::tag_topology_changed(const IndexMask &changed_curves)
   /* Fills cache needs to be up-to-date. */
   this->runtime->fill_cache.tag_dirty();
 
-  if (const std::optional<GroupedSpan<int3>> triangles = this->triangles()) {
+  if (const std::optional<TriangleCache> src_triangle_cache = this->runtime->triangle_cache.data())
+  {
     /* Copy the triangle data. */
-    const Array<int> src_triangles_offsets(triangles->offsets.data());
-    const Array<int3> src_triangles_data(triangles->data);
-    const GroupedSpan<int3> src_triangles(src_triangles_offsets.as_span(),
+    const Array<int> src_triangle_offsets(src_triangle_cache->triangle_offsets.as_span());
+    const Array<int3> src_triangles_data(src_triangle_cache->triangles.as_span());
+    const GroupedSpan<int3> src_triangles(src_triangle_offsets.as_span(),
                                           src_triangles_data.as_span());
+    const Array<int> src_intersection_point_offsets(
+        src_triangle_cache->intersection_point_offsets.as_span());
+    const Array<float3> src_intersection_points_data(
+        src_triangle_cache->intersection_points.as_span());
+    const GroupedSpan<float3> src_intersection_points(src_intersection_point_offsets.as_span(),
+                                                      src_intersection_points_data.as_span());
 
     this->runtime->triangle_cache.update([&](std::optional<TriangleCache> &r_triangle_cache) {
       const std::optional<GroupedSpan<int>> fills = this->fills();
@@ -1233,6 +1426,7 @@ void Drawing::tag_topology_changed(const IndexMask &changed_curves)
 
       TriangleCache triangle_cache;
       triangle_cache.triangle_offsets.resize(fills->size() + 1);
+      triangle_cache.intersection_point_offsets.resize(fills->size() + 1);
 
       update_triangle_and_offsets_changed(this->strokes().evaluated_positions(),
                                           this->curve_plane_normals(),
@@ -1240,8 +1434,11 @@ void Drawing::tag_topology_changed(const IndexMask &changed_curves)
                                           changed_curves,
                                           fills,
                                           src_triangles,
+                                          src_intersection_points,
                                           triangle_cache.triangles,
-                                          triangle_cache.triangle_offsets);
+                                          triangle_cache.triangle_offsets,
+                                          triangle_cache.intersection_points,
+                                          triangle_cache.intersection_point_offsets);
       r_triangle_cache = std::move(triangle_cache);
     });
   }
@@ -1476,6 +1673,9 @@ Layer::Layer(const Layer &other) : Layer()
   /* Tag the frames map, so the frame storage is recreated once the DNA is saved. */
   this->tag_frames_map_changed();
 
+  /* Keep the mapping to the original layer when evaluated data is copied, e.g. by modifiers. */
+  this->runtime->orig_layer_index_ = other.runtime->orig_layer_index_;
+
   /* TODO: what about masks cache? */
 }
 
@@ -1538,9 +1738,10 @@ GreasePencilFrame *Layer::add_frame_internal(const FramesMapKeyT frame_number)
   return nullptr;
 }
 
-GreasePencilFrame *Layer::add_frame(const FramesMapKeyT key, const int duration)
+GreasePencilFrame *Layer::add_frame(const FramesMapKeyT key, /* const */ int duration)
 {
-  BLI_assert(duration >= 0);
+  BLI_assert(duration == 0);
+  duration = 0;
   GreasePencilFrame *frame = this->add_frame_internal(key);
   if (frame == nullptr) {
     return nullptr;
@@ -1593,7 +1794,8 @@ bool Layer::remove_frame(const FramesMapKeyT key)
     const GreasePencilFrame &prev_frame = this->frames().lookup(*prev_key_it);
     /* If the previous frame is not an implicit hold (e.g. it has a fixed duration) and it's not an
      * end frame, we cannot just delete the frame. We need to replace it with an end frame. */
-    if (!prev_frame.is_implicit_hold() && !prev_frame.is_end()) {
+    /* FIXME: Disabled for now, do not create end frames ever. */
+    if (false && !prev_frame.is_implicit_hold() && !prev_frame.is_end()) {
       this->frames_for_write().lookup(key) = GreasePencilFrame::end();
       this->tag_frames_map_changed();
       /* Since the original frame was replaced with an end frame, we consider the frame to be
@@ -1738,7 +1940,11 @@ int Layer::get_frame_duration_at(const int frame_number) const
   if (frame->is_end()) {
     return -1;
   }
-  /* Compute the distance in frames between this key and the next key. */
+  /* Last frame without a following end frame (end frames are not created anymore), it is
+   * effectively held indefinitely. */
+  if (std::next(it) == this->sorted_keys().end()) {
+    return 0;
+  } /* Compute the distance in frames between this key and the next key. */
   const int next_frame_number = *(std::next(it));
   return math::distance(key, next_frame_number);
 }
@@ -1992,13 +2198,13 @@ void LayerGroup::move_node_down(TreeNode &node, const int step)
 void LayerGroup::move_node_top(TreeNode &node)
 {
   BLI_remlink(&this->children, &node);
-  BLI_insertlinkafter(&this->children, this->children.last, &node);
+  BLI_insertlinkafter(&this->children, this->children.last(), &node);
   this->tag_nodes_cache_dirty();
 }
 void LayerGroup::move_node_bottom(TreeNode &node)
 {
   BLI_remlink(&this->children, &node);
-  BLI_insertlinkbefore(&this->children, this->children.first, &node);
+  BLI_insertlinkbefore(&this->children, this->children.first(), &node);
   this->tag_nodes_cache_dirty();
 }
 
@@ -2023,9 +2229,8 @@ bool LayerGroup::unlink_node(TreeNode &link, const bool keep_children)
     /* Take ownership of the children of `link` by replacing the node with the listbase of its
      * children. */
     ListBaseT<GreasePencilLayerTreeNode> link_children = link.as_group().children;
-    GreasePencilLayerTreeNode *first = static_cast<GreasePencilLayerTreeNode *>(
-        link_children.first);
-    GreasePencilLayerTreeNode *last = static_cast<GreasePencilLayerTreeNode *>(link_children.last);
+    GreasePencilLayerTreeNode *first = link_children.first();
+    GreasePencilLayerTreeNode *last = link_children.last();
 
     /* Rewrite the parent pointers. */
     for (GreasePencilLayerTreeNode &child : link_children) {
@@ -2043,11 +2248,11 @@ bool LayerGroup::unlink_node(TreeNode &link, const bool keep_children)
     }
 
     /* Update first and/or last link(s). */
-    if (this->children.last == &link) {
-      this->children.last = last;
+    if (this->children.last() == &link) {
+      this->children.last_ = last;
     }
-    if (this->children.first == &link) {
-      this->children.first = first;
+    if (this->children.first() == &link) {
+      this->children.first_ = first;
     }
 
     /* Listbase has been inserted in `this->children` we can clear the pointers in `link`. */
@@ -2401,6 +2606,9 @@ void BKE_grease_pencil_nomain_to_grease_pencil(GreasePencil *grease_pencil_src,
 
   grease_pencil_dst->attribute_storage.wrap() = std::move(
       grease_pencil_src->attribute_storage.wrap());
+
+  /* Duplicating drawings does not copy over their user count. */
+  grease_pencil_initialize_drawing_user_counts(*grease_pencil_dst);
 
   DEG_id_tag_update(&grease_pencil_dst->id, ID_RECALC_GEOMETRY);
 
@@ -2906,7 +3114,7 @@ static Material *grease_pencil_object_material_ensure_from_brush_pinned(Main *bm
 {
   Material *ma = (brush->gpencil_settings) ? brush->gpencil_settings->material : nullptr;
 
-  if (ma) {
+  if (ma && BKE_object_material_index_get(ob, ma) < 0) {
     /* Ensure we assign a local datablock if this is an editable asset. */
     ma = reinterpret_cast<Material *>(bke::asset_edit_id_ensure_local(*bmain, ma->id));
   }
@@ -3038,6 +3246,79 @@ bool BKE_grease_pencil_material_index_used(GreasePencil *grease_pencil, int inde
   return false;
 }
 
+void BKE_grease_pencil_brush_material_set(Brush *brush, Material *ma)
+{
+  BLI_assert(brush);
+  BLI_assert(brush->gpencil_settings);
+  if (brush->gpencil_settings->material != ma) {
+    if (brush->gpencil_settings->material) {
+      id_us_min(&brush->gpencil_settings->material->id);
+    }
+    if (ma) {
+      id_us_plus(&ma->id);
+    }
+    brush->gpencil_settings->material = ma;
+    BKE_brush_tag_unsaved_changes(brush);
+  }
+}
+
+/** \} */
+
+/* ------------------------------------------------------------------- */
+/** \name Grease Pencil palette functions
+ * \{ */
+
+void BKE_grease_pencil_palette_ensure(Main *bmain, Scene *scene)
+{
+  const char *hexcol[] = {
+      "FFFFFF", "F2F2F2", "E6E6E6", "D9D9D9", "CCCCCC", "BFBFBF", "B2B2B2", "A6A6A6", "999999",
+      "8C8C8C", "808080", "737373", "666666", "595959", "4C4C4C", "404040", "333333", "262626",
+      "1A1A1A", "000000", "F2FC24", "FFEA00", "FEA711", "FE8B68", "FB3B02", "FE3521", "D00000",
+      "A81F3D", "780422", "2B0000", "F1E2C5", "FEE4B3", "FEDABB", "FEC28E", "D88F57", "BD6340",
+      "A2402B", "63352D", "6B2833", "34120C", "E7CB8F", "D1B38B", "C1B17F", "D7980B", "FFB100",
+      "FE8B00", "FF6A00", "B74100", "5F3E1D", "3B2300", "FECADA", "FE65CB", "FE1392", "DD3062",
+      "C04A6D", "891688", "4D2689", "441521", "2C1139", "241422", "FFFF7D", "FFFF00", "FF7F00",
+      "FF7D7D", "FF7DFF", "FF00FE", "FF007F", "FF0000", "7F0000", "0A0A00", "F6FDFF", "E9F7FF",
+      "CFE6FE", "AAC7FE", "77B3FE", "1E74FD", "0046AA", "2F4476", "003052", "0E0E25", "EEF5F0",
+      "D6E5DE", "ACD8B9", "6CADC6", "42A9AF", "007F7F", "49675C", "2E4E4E", "1D3239", "0F1C21",
+      "D8FFF4", "B8F4F5", "AECCB5", "76C578", "358757", "409B68", "468768", "1F512B", "2A3C37",
+      "122E1D", "EFFFC9", "E6F385", "BCF51C", "D4DC18", "82D322", "5C7F00", "59932B", "297F00",
+      "004320", "1C3322", "00FF7F", "00FF00", "7DFF7D", "7DFFFF", "00FFFF", "7D7DFF", "7F00FF",
+      "0000FF", "3F007F", "00007F"};
+
+  ToolSettings *ts = scene->toolsettings;
+  if (ts->gp_paint->paint.palette != nullptr) {
+    return;
+  }
+
+  /* Try to find the default palette. */
+  const char *palette_id = "Palette";
+  Palette *palette = static_cast<Palette *>(
+      BLI_findstring(&bmain->palettes, palette_id, offsetof(ID, name) + 2));
+
+  if (palette == nullptr) {
+    /* Fall back to the first palette. */
+    palette = bmain->palettes.first();
+  }
+
+  if (palette == nullptr) {
+    /* Fall back to creating a palette. */
+    palette = BKE_palette_add(bmain, palette_id);
+    id_us_min(&palette->id);
+
+    /* Create Colors. */
+    for (int i = 0; i < ARRAY_SIZE(hexcol); i++) {
+      PaletteColor *palcol = BKE_palette_color_add(palette);
+      hex_to_rgb(hexcol[i], palcol->color, palcol->color + 1, palcol->color + 2);
+      IMB_colormanagement_srgb_to_scene_linear_v3(palcol->color, palcol->color);
+    }
+  }
+
+  BLI_assert(palette != nullptr);
+  BKE_paint_palette_set(&ts->gp_paint->paint, palette);
+  BKE_paint_palette_set(&ts->gp_vertexpaint->paint, palette);
+}
+
 /** \} */
 
 /* ------------------------------------------------------------------- */
@@ -3144,6 +3425,12 @@ MutableSpan<GreasePencilDrawingBase *> GreasePencil::drawings()
 
 static void delete_drawing(GreasePencilDrawingBase *drawing_base)
 {
+  /* Unknown types from corrupt files, only the base struct was read. */
+  if (!ELEM(drawing_base->type, GP_DRAWING, GP_DRAWING_REFERENCE)) {
+    MEM_delete(drawing_base);
+    return;
+  }
+
   switch (GreasePencilDrawingType(drawing_base->type)) {
     case GP_DRAWING: {
       GreasePencilDrawing *drawing = reinterpret_cast<GreasePencilDrawing *>(drawing_base);
@@ -3280,7 +3567,7 @@ bool GreasePencil::insert_duplicate_frame(bke::greasepencil::Layer &layer,
    * If we want to make an instance of the source frame, the drawing index gets copied from the
    * source frame. Otherwise, we set the drawing index to the size of the drawings array, since we
    * are going to add a new drawing copied from the source drawing. */
-  const int duration = layer.get_frame_duration_at(src_frame_number);
+  const int duration = 0 /* layer.get_frame_duration_at(src_frame_number) */;
   GreasePencilFrame *dst_frame = layer.add_frame(dst_frame_number, duration);
   if (dst_frame == nullptr) {
     return false;
@@ -3351,9 +3638,7 @@ bool GreasePencil::remove_frames(bke::greasepencil::Layer &layer, Span<int> fram
     return true;
   }
 #ifndef NDEBUG
-  else {
-    this->validate_drawing_user_counts();
-  }
+  this->validate_drawing_user_counts();
 #endif
   return false;
 }
@@ -3591,7 +3876,7 @@ void GreasePencil::move_duplicate_frames(bke::greasepencil::Layer &layer,
     if (!src_frame) {
       continue;
     }
-    const int duration = src_layer_frames_durations.lookup_default(src_frame_number, 0);
+    const int duration = 0 /* src_layer_frames_durations.lookup_default(src_frame_number, 0) */;
 
     /* Add and overwrite the frame at the destination number. */
     if (layer.frames().contains(dst_frame_number)) {
@@ -4032,7 +4317,7 @@ bke::greasepencil::Layer &GreasePencil::duplicate_layer(
   new_layer->frames_for_write().clear();
   if (duplicate_frames) {
     for (auto [frame_number, frame] : duplicate_layer.frames().items()) {
-      const int duration = duplicate_layer.get_frame_duration_at(frame_number);
+      const int duration = 0 /* duplicate_layer.get_frame_duration_at(frame_number) */;
       bke::greasepencil::Drawing *dst_drawing = this->insert_frame(
           *new_layer, frame_number, duration, eBezTriple_KeyframeType(frame.type));
       if (duplicate_drawings) {
@@ -4372,7 +4657,12 @@ void GreasePencil::rename_node(Main &bmain,
 
   /* Update layer name dependencies. */
   if (node.is_layer()) {
-    BKE_animdata_fix_paths_rename_all(&this->id, "layers", old_name.c_str(), node.name().c_str());
+    BKE_animdata_fix_paths(this->id,
+                           "layers",
+                           RNA_path_name_to_infix(old_name),
+                           RNA_path_name_to_infix(node.name()),
+                           /*verify_paths=*/true,
+                           bmain);
     /* Update names in layer masks. */
     for (bke::greasepencil::Layer *layer : this->layers_for_write()) {
       for (GreasePencilLayerMask &mask : layer->masks) {
@@ -4503,7 +4793,7 @@ void GreasePencil::remove_group(bke::greasepencil::LayerGroup &group, const bool
   if (&group.as_node() == this->get_active_node()) {
     /* If we keep the children and there is at least one child, make it the active node. */
     if (keep_children && !group.is_empty()) {
-      this->set_active_node(reinterpret_cast<TreeNode *>(group.children.last));
+      this->set_active_node(reinterpret_cast<TreeNode *>(group.children.last()));
     }
     else {
       update_active_node_from_node_to_remove(*this, group.as_node());
@@ -4587,13 +4877,36 @@ bke::MutableAttributeAccessor GreasePencil::attributes_for_write()
 /** \name Drawing array read/write functions
  * \{ */
 
+static size_t drawing_struct_size(const GreasePencilDrawingType type)
+{
+  switch (type) {
+    case GP_DRAWING:
+      return sizeof(GreasePencilDrawing);
+    case GP_DRAWING_REFERENCE:
+      return sizeof(GreasePencilDrawingReference);
+  }
+  return sizeof(GreasePencilDrawingBase);
+}
+
 static void read_drawing_array(GreasePencil &grease_pencil, BlendDataReader *reader)
 {
   BLO_read_pointer_array_and_validate_size(
       reader, &grease_pencil.drawing_array, &grease_pencil.drawing_array_num);
   for (int i = 0; i < grease_pencil.drawing_array_num; i++) {
-    BLO_read_struct(reader, GreasePencilDrawingBase, &grease_pencil.drawing_array[i]);
+    BLO_read_struct_with_type_size<GreasePencilDrawingBase>(
+        reader, &grease_pencil.drawing_array[i], [](const GreasePencilDrawingBase &drawing) {
+          return drawing_struct_size(GreasePencilDrawingType(drawing.type));
+        });
     GreasePencilDrawingBase *drawing_base = grease_pencil.drawing_array[i];
+
+    /* Replace drawings that failed to read from corrupt files by an empty drawing, since further
+     * reading code expects valid drawings. */
+    if (drawing_base == nullptr) {
+      grease_pencil.drawing_array[i] = reinterpret_cast<GreasePencilDrawingBase *>(
+          MEM_new<bke::greasepencil::Drawing>(__func__));
+      continue;
+    }
+
     switch (GreasePencilDrawingType(drawing_base->type)) {
       case GP_DRAWING: {
         GreasePencilDrawing *drawing = reinterpret_cast<GreasePencilDrawing *>(drawing_base);
@@ -4623,10 +4936,16 @@ static void write_drawing_array(GreasePencil &grease_pencil,
         bke::CurvesGeometry &curves = drawing_copy.geometry.wrap();
 
         bke::CurvesGeometry::BlendWriteData write_data(writer, scope);
-        curves.blend_write_prepare(write_data, !BLO_write_is_undo(writer));
+        curves.blend_write_prepare(write_data, !writer->is_undo());
         drawing_copy.runtime = nullptr;
 
-        writer->write_struct_at_address_cast<GreasePencilDrawing>(drawing_base, &drawing_copy);
+        writer->write_struct_at_address_cast<GreasePencilDrawing>(
+            drawing_base,
+            &drawing_copy,
+            [](BlendStructWriter<GreasePencilDrawing> &struct_writer) {
+              struct_writer.generated_ptr(
+                  offsetof(GreasePencilDrawing, geometry.attribute_storage.dna_attributes));
+            });
         curves.blend_write(*writer, grease_pencil.id, write_data);
         break;
       }
@@ -4683,6 +5002,17 @@ static void read_layer(BlendDataReader *reader,
   node->wrap().update_from_dna_read();
 }
 
+static size_t layer_tree_node_struct_size(const GreasePencilLayerTreeNodeType type)
+{
+  switch (type) {
+    case GP_LAYER_TREE_LEAF:
+      return sizeof(GreasePencilLayer);
+    case GP_LAYER_TREE_GROUP:
+      return sizeof(GreasePencilLayerTreeGroup);
+  }
+  return sizeof(GreasePencilLayerTreeNode);
+}
+
 static void read_layer_tree_group(BlendDataReader *reader,
                                   GreasePencilLayerTreeGroup *node,
                                   GreasePencilLayerTreeGroup *parent)
@@ -4690,7 +5020,10 @@ static void read_layer_tree_group(BlendDataReader *reader,
   BLO_read_string(reader, &node->base.name);
   node->base.parent = parent;
   /* Read list of children. */
-  BLO_read_struct_list(reader, GreasePencilLayerTreeNode, &node->children);
+  BLO_read_struct_list_with_type_size<GreasePencilLayerTreeNode>(
+      reader, &node->children, [](const GreasePencilLayerTreeNode &child) {
+        return layer_tree_node_struct_size(child.type);
+      });
   for (GreasePencilLayerTreeNode &child : node->children) {
     switch (child.type) {
       case GP_LAYER_TREE_LEAF: {
@@ -4721,9 +5054,9 @@ static void read_layer_tree(GreasePencil &grease_pencil, BlendDataReader *reader
     grease_pencil.set_active_node(nullptr);
     return;
   }
-  /* Read active layer. */
-  BLO_read_struct(reader, GreasePencilLayerTreeNode, &grease_pencil.active_node);
   read_layer_tree_group(reader, grease_pencil.root_group_ptr, nullptr);
+  /* Read active layer after the tree, so it is null if its node failed to read. */
+  BLO_read_struct(reader, GreasePencilLayerTreeNode, &grease_pencil.active_node);
 
   grease_pencil.root_group_ptr->wrap().update_from_dna_read();
 }

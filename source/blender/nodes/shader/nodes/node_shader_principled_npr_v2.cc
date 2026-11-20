@@ -116,7 +116,7 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
     if (!input.link && input.type == GPU_FLOAT) {
       /* Match native Principled's disabled-lobe pruning. Keep ordinary values
        * uniform, so dragging within an enabled range reuses the same shader. */
-      if (input.vec[0] == 0.0f) {
+      if (std::get<float>(input.value) == 0.0f) {
         for (const char *disabled : {"metallic", "transmission_weight", "subsurface_weight",
                                     "coat_weight", "sheen_weight", "thin_wall",
                                     "metallic_body_preservation", "emission_strength",
@@ -128,7 +128,7 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
           }
         }
       }
-      if (input.vec[0] == 1.0f &&
+      if (std::get<float>(input.value) == 1.0f &&
           (std::strcmp(id, "profile_softness") == 0 || std::strcmp(id, "alpha") == 0 ||
            std::strcmp(id, "metallic") == 0))
       {
@@ -147,13 +147,14 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
   eGPUMaterialNPRFeature features = GPU_MAT_NPR_FEATURE_NONE;
   const GPUNodeStack &highlight_strength = GPU_node_get_input(*node, in, "highlight_strength");
   /* The shader uses an exact positive test, not socket_not_zero's near-zero threshold. */
-  if (highlight_strength.link || highlight_strength.vec[0] > 0.0f) {
+  if (highlight_strength.link || std::get<float>(highlight_strength.value) > 0.0f) {
     if (storage.highlight_light_shape == SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED) {
       features |= GPU_MAT_NPR_FINITE_HIGHLIGHT;
     }
     const GPUNodeStack &softness = GPU_node_get_input(*node, in, "profile_softness");
     const GPUNodeStack &offset = GPU_node_get_input(*node, in, "profile_offset");
-    if (softness.link || softness.vec[0] != 1.0f || offset.link || offset.vec[0] != 0.0f ||
+    if (softness.link || std::get<float>(softness.value) != 1.0f || offset.link ||
+        std::get<float>(offset.value) != 0.0f ||
         storage.specular_mapping == SHD_PRINCIPLED_NPR_SPECULAR_RAMP)
     {
       features |= GPU_MAT_NPR_REFERENCE_HIGHLIGHT;
@@ -211,11 +212,11 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
 
   GPUNodeStack &normal = GPU_node_get_input(*node, in, "normal");
   if (!normal.link) {
-    GPU_link(mat, "world_normals_get", &normal.link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &normal.link);
   }
   GPUNodeStack &coat_normal = GPU_node_get_input(*node, in, "coat_normal");
   if (!coat_normal.link) {
-    GPU_link(mat, "world_normals_get", &coat_normal.link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &coat_normal.link);
   }
   GPUNodeStack &tangent = GPU_node_get_input(*node, in, "tangent");
   if (!tangent.link) {
@@ -224,6 +225,8 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
              GPU_attribute(mat, CD_TANGENT, ""),
              GPU_attribute(mat, CD_ORCO, ""),
              normal.link,
+             GPU_kernel_globals(),
+             GPU_shading_data(),
              &tangent.link);
   }
 
@@ -450,7 +453,7 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
                   table,
                   specular_table,
                   GPU_constant(table_data),
-                  execution,
+                  execution,GPU_kernel_globals(), GPU_shading_data(),
                   &out[0].link,
                   &out[1].link,
                   &out[2].link,

@@ -70,6 +70,7 @@ set(LIB
   PRIVATE bf::sequencer
   PRIVATE bf::windowmanager
   PRIVATE bf::dependencies::optional::audaspace
+  PRIVATE bf::intern::clog
 )
 
 if(WITH_INPUT_IME)

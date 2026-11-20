@@ -14,16 +14,16 @@
 
 #include "CLG_log.h"
 
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 #include "BLI_mutex.hh"
-#include "BLI_string.h"
-#include "BLI_system.h"
+#include "BLI_string.hh"
+#include "BLI_system.hh"
 
 /* for backtrace and gethostname/GetComputerName */
 #if defined(WIN32)
 #  include <intrin.h>
 
-#  include "BLI_winstuff.h"
+#  include "BLI_winstuff.hh"
 #else
 #  if defined(HAVE_EXECINFO_H)
 #    include <execinfo.h>
@@ -233,7 +233,7 @@ void BLI_system_max_open_files_ensure()
     ok = _setmaxstdio(max_open_files) == max_open_files;
   }
 #else
-  struct rlimit limit;
+  rlimit limit;
   ok = getrlimit(RLIMIT_NOFILE, &limit) == 0;
   if (ok && limit.rlim_cur < rlim_t(max_open_files)) {
     limit.rlim_cur = std::min(rlim_t(max_open_files), limit.rlim_max);

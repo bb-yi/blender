@@ -2,11 +2,15 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup geo
+ */
+
 #include "DNA_object_types.h"
 
 #include "BLI_enumerable_thread_specific.hh"
 #include "BLI_index_mask.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "PRF_profile.hh"
 
 #include "BKE_attribute.hh"

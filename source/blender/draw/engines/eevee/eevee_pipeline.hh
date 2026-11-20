@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include "BLI_math_bits.h"
+#include "BLI_math_bits.hh"
 
 #include "DRW_render.hh"
 
@@ -23,8 +23,9 @@
 #include "eevee_subsurface.hh"
 #include "eevee_uniform_shared.hh"
 
-#include <memory>
+#include <chrono>
 #include <map>
+#include <memory>
 
 namespace blender {
 
@@ -150,6 +151,8 @@ class ShadowPipeline {
 
   /* Shadow update pass. */
   PassMain render_ps_ = {"Shadow.Surface"};
+  /* Reuse the exact same draws and transparency samples to resolve full-depth caster IDs. */
+  int caster_id_pass_ = 0;
   /* Shadow surface render sub-passes. */
   PassMain::Sub *surface_double_sided_ps_ = nullptr;
   PassMain::Sub *surface_single_sided_ps_ = nullptr;
@@ -270,9 +273,30 @@ class Prepass {
  * Handles alpha blended surfaces and NPR materials (using Closure to RGBA).
  * \{ */
 
-class ForwardPipeline {
+struct ForwardShared {
+  struct TransparencyBuffer {
+    /* Channels are packed separately for technical reason (see eevee_surf_forward_frag.glsl for
+     * explanation). In the case of monochromatic transparency, the #r_channel_tx actually
+     * contains the whole RGBA and the other textures are dummy texture not attached to the
+     * frame-buffer. The #a_channel_tx is only allocated if holdout or film transparency is
+     * enabled. */
+    TextureFromPool r_channel_tx;
+    TextureFromPool g_channel_tx;
+    TextureFromPool b_channel_tx;
+    TextureFromPool a_channel_tx;
+
+    void acquire(int2 extent, bool use_colored_transparency);
+    void release();
+  } transp_buffer;
+  PassSimple resolve_ps = {"Forward.Resolve"};
+  TextureFromPool resolve_input_tx = {"Forward.Resolve.Input"};
+  bool32_t accumulate_transparent = false;
+};
+
+class ForwardLayer {
  private:
   Instance &inst_;
+  ForwardShared &shared_;
 
   PassSortable stencil_ps_ = {"Stencil"};
   Prepass prepass_{inst_};
@@ -294,9 +318,6 @@ class ForwardPipeline {
 
   PassMain outline_occlusion_ps_ = {"Forward.OutlineOcclusion"};
 
-  PassSimple resolve_ps_ = {"Forward.Resolve"};
-  TextureFromPool resolve_input_tx_ = {"Forward.Resolve.Input"};
-
   bool has_opaque_ = false;
   bool has_transparent_ = false;
   bool has_no_depth_ = false;
@@ -305,23 +326,11 @@ class ForwardPipeline {
   bool has_outline_occluders_ = false;
   bool has_stencil_ = false;
 
-  struct TransparencyBuffer {
-    /* Channels are packed separately for technical reason (see eevee_surf_forward_frag.glsl for
-     * explanation). In the case of monochromatic transparency, the #r_channel_tx actually
-     * contains the whole RGBA and the other textures are dummy texture not attached to the
-     * frame-buffer. The #a_channel_tx is only allocated if holdout or film transparency is
-     * enabled. */
-    TextureFromPool r_channel_tx;
-    TextureFromPool g_channel_tx;
-    TextureFromPool b_channel_tx;
-    TextureFromPool a_channel_tx;
 
-    void acquire(int2 extent, bool use_colored_transparency);
-    void release();
-  } transp_buffer_;
 
  public:
-  ForwardPipeline(Instance &inst) : inst_(inst) {}
+  ForwardLayer(Instance &inst, ForwardShared &shared) : inst_(inst), shared_(shared) {}
+  bool rendered = false;
 
   void sync();
   void end_sync();
@@ -346,7 +355,8 @@ class ForwardPipeline {
                        blender::Material *blender_mat,
                        GPUMaterial *gpumat,
                        PassMain::Sub *&r_prepass_subpass,
-                       PassMain::Sub *&r_material_subpass);
+                       PassMain::Sub *&r_material_subpass,
+                       const SurfaceDrawState *state_override = nullptr);
   PassMain::Sub *outline_occlusion_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 
   bool use_colored_transparency() const;
@@ -357,12 +367,156 @@ class ForwardPipeline {
            has_outline_occluders_;
   }
   void render_outline_occlusion(View &view, Framebuffer &outline_occlusion_fb);
+  void render_dlss_guides(View &view, Framebuffer &framebuffer);
+
+  void render_prepass_only(View &view, Framebuffer &prepass_fb);
 
   void render(View &view,
               gpu::Texture *depth_tx,
               Framebuffer &prepass_fb,
               Framebuffer &transparent_fb,
               Framebuffer &combined_fb,
+              int2 extent);
+};
+
+/** Per-layer draw lists; all layers share the same transient transparency targets. */
+class ForwardPipeline {
+ private:
+  Instance &inst_;
+  ForwardShared shared_;
+  ForwardLayer final_;
+  std::map<short, std::unique_ptr<ForwardLayer>> layers_;
+  int max_consumer_layer_ = -32769;
+  bool layered_active_ = false;
+  bool volume_resolved_ = false;
+  bool background_resolved_ = false;
+  TextureFromPool coverage_ = {"NPR Layer Coverage"};
+  TextureFromPool background_color_ = {"NPR Forward Background"};
+  /* Retained through the next Deferred layer's Hi-Z swap, then released after NPR consumption. */
+  gpu::Texture *background_depth_ = nullptr;
+  TextureFromPool volume_input_ = {"NPR Layer Volume Input"};
+  Framebuffer npr_fb_ = {"NPR Covered Layer"};
+  Framebuffer covered_gbuffer_fb_ = {"NPR Covered GBuffer"};
+  bool profile_enabled_ = false;
+  int profile_batches_ = 0;
+  int profile_snapshots_ = 0;
+  uint64_t profile_peak_texture_bytes_ = 0;
+  uint64_t profile_peak_feature_texture_bytes_ = 0;
+  std::chrono::steady_clock::time_point profile_start_;
+  void profile_memory();
+  gpu::Texture *coverage_ref_ = nullptr;
+  bool coverage_enabled_ = false;
+  void volume_transform(View &view, Framebuffer &fb, int operation);
+
+ public:
+  ForwardPipeline(Instance &inst) : inst_(inst), final_(inst, shared_) {}
+  ForwardLayer &layer_for(const Object *ob);
+  void sync();
+  void end_sync();
+  bool layered_active() const
+  {
+    return layered_active_;
+  }
+  bool coverage_enabled() const
+  {
+    return coverage_enabled_;
+  }
+  bool volume_resolved() const
+  {
+    return volume_resolved_;
+  }
+  bool background_resolved() const
+  {
+    return background_resolved_;
+  }
+  gpu::Texture *background_color() const
+  {
+    return background_color_;
+  }
+  gpu::Texture *background_depth() const
+  {
+    return background_depth_;
+  }
+  void begin_view();
+  void begin_deferred_layer(int2 extent);
+  void end_deferred_layer(View &view, Framebuffer &fb);
+  Framebuffer &npr_framebuffer(Framebuffer &fallback);
+  Framebuffer &gbuffer_framebuffer(Framebuffer &fallback);
+  void resolve_background_volume(View &view, int2 extent, bool &volume_compute_done);
+  void snapshot_background();
+  void render_before(short layer,
+                     View &view,
+                     gpu::Texture *depth,
+                     Framebuffer &prepass,
+                     Framebuffer &transparent,
+                     Framebuffer &combined,
+                     int2 extent);
+  void filter_volume_begin(View &view, Framebuffer &fb);
+  void filter_volume_end(View &view, Framebuffer &fb);
+
+  PassMain::Sub *prepass_opaque_add(const Object *ob,
+                                    const SurfaceDrawState &state,
+                                    GPUMaterial *mat,
+                                    bool motion)
+  {
+    return layer_for(ob).prepass_opaque_add(state, mat, motion);
+  }
+  PassMain::Sub *stencil_opaque_add(
+      const Object *ob, blender::Material *mat, GPUMaterial *gpu, bool motion, bool write_id)
+  {
+    return layer_for(ob).stencil_opaque_add(mat, gpu, motion, write_id);
+  }
+  PassMain::Sub *material_opaque_add(const Object *ob,
+                                     const SurfaceDrawState &state,
+                                     GPUMaterial *gpu)
+  {
+    return layer_for(ob).material_opaque_add(ob, state, gpu);
+  }
+  PassMain::Sub *material_no_depth_add(const Object *ob,
+                                       blender::Material *mat,
+                                       const SurfaceDrawState &state,
+                                       GPUMaterial *gpu)
+  {
+    return layer_for(ob).material_no_depth_add(ob, mat, state, gpu);
+  }
+  void transparent_add(const Object *ob,
+                       const float3 &location,
+                       blender::Material *mat,
+                       GPUMaterial *gpu,
+                       PassMain::Sub *&prepass,
+                       PassMain::Sub *&surface,
+                       const SurfaceDrawState *state = nullptr)
+  {
+    layer_for(ob).transparent_add(ob, location, mat, gpu, prepass, surface, state);
+  }
+  PassMain::Sub *outline_occlusion_add(blender::Material *mat, GPUMaterial *gpu)
+  {
+    return final_.outline_occlusion_add(mat, gpu);
+  }
+  bool use_colored_transparency() const
+  {
+    return true;
+  }
+  bool has_outline_occluders() const
+  {
+    return final_.has_outline_occluders();
+  }
+  bool has_surface_draws() const
+  {
+    /* Layered forward surfaces can alter the depth/radiance used by the specular resolve. */
+    return layered_active_ || final_.has_surface_draws();
+  }
+  void render_outline_occlusion(View &view, Framebuffer &fb)
+  {
+    final_.render_outline_occlusion(view, fb);
+  }
+  void render_dlss_guides(View &view, Framebuffer &fb);
+  void render_prepass_only(View &view, Framebuffer &fb);
+  void render(View &view,
+              gpu::Texture *depth,
+              Framebuffer &prepass,
+              Framebuffer &transparent,
+              Framebuffer &combined,
               int2 extent);
 };
 
@@ -389,9 +543,11 @@ struct DeferredLayerBase {
                                      GPUMaterial *gpumat,
                                      const bool use_hybrid_resources)
   {
+    const bool is_hybrid = GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) ||
+                           GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHTING);
     const bool has_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
 
-    return gbuffer_subpasses_[use_hybrid_resources][has_raycast][int(state.cull_method)];
+    return gbuffer_subpasses_[use_hybrid_resources || is_hybrid][has_raycast][int(state.cull_method)];
   }
 
   PassMain npr_ps_ = {"NPR"};
@@ -514,18 +670,17 @@ class DeferredLayer : DeferredLayerBase {
    * BSDF color and do additive blending for each of the lighting step.
    *
    * NOTE: Not to be confused with the render passes.
-   * NOTE: Using array of texture instead of texture array to allow to use TextureFromPool.
    */
-  TextureFromPool direct_radiance_txs_[3] = {
-      {"direct_radiance_1"}, {"direct_radiance_2"}, {"direct_radiance_3"}};
-  /* NOTE: Only used when `use_split_radiance` is true. */
-  TextureFromPool indirect_radiance_txs_[3] = {
-      {"indirect_radiance_1"}, {"indirect_radiance_2"}, {"indirect_radiance_3"}};
+  TextureFromPool direct_radiance_txs_ = {"direct_radiance"};
+  /* NPR uses the three stable closure-bin slots, including potentially empty bins. */
+  gpu::Texture *direct_radiance_npr_views_[3] = {};
   /* Used when there is no indirect radiance buffer. */
   Texture dummy_black = {"dummy_black"};
   /* Reference to ray-tracing results. */
   gpu::Texture *radiance_feedback_tx_ = nullptr;
   gpu::Texture *radiance_back_tx_ = nullptr;
+  gpu::Texture *npr_background_depth_tx_ = nullptr;
+  bool32_t npr_background_resolved_ = false;
   gpu::Texture *npr_radiance_input_tx_ = nullptr;
 
   /**
@@ -592,8 +747,15 @@ class DeferredLayer : DeferredLayerBase {
 
   /* Do we compute indirect lighting inside the light eval pass. */
   static bool do_merge_direct_indirect_eval(const Instance &inst);
+  /* Do the clamp or light intensity settings change the radiance in the combine pass.
+   * If so, the radiance cannot be fed back to the next layer as-is. */
+  static bool do_modify_radiance(const Instance &inst);
   /* Is the radiance split for the lighting pass. */
   static bool do_split_direct_indirect_radiance(const Instance &inst);
+
+  void render_dlss_guides(View &view, Framebuffer &framebuffer);
+  void render_prepass_only(View &render_view, Framebuffer &prepass_fb);
+  void render_gbuffer_only(View &render_view, Framebuffer &prepass_fb, Framebuffer &gbuffer_fb);
 
   /* Returns the radiance buffer to feed the next layer. */
   gpu::Texture *render(View &main_view,
@@ -605,6 +767,7 @@ class DeferredLayer : DeferredLayerBase {
                        RayTraceBuffer &rt_buffer,
                        gpu::Texture *radiance_behind_tx,
                        bool &volume_compute_done,
+                       bool early_stencil_stage = false,
                        bool scene_final_hardware_specular = false);
 };
 
@@ -621,6 +784,19 @@ class DeferredPipeline {
 
   PassSimple debug_draw_ps_ = {"debug_gbuffer"};
 
+  PassSortable early_stencil_ps_ = {"Stencil.EarlyMarkers"};
+  PassSimple stencil_snapshot_ps_ = {"Stencil.Snapshot"};
+  PassMain stencil_surface_ps_ = {"Stencil.WriterSurface"};
+  Framebuffer early_stencil_fb_ = {"Stencil.EarlyMarkers"};
+  Framebuffer stencil_snapshot_fb_ = {"Stencil.Snapshot"};
+  Framebuffer stencil_surface_fb_ = {"Stencil.WriterSurface"};
+  int2 stencil_surface_extent_ = int2(1);
+  bool has_stencil_surface_writers_ = false;
+  bool has_stencil_surface_readers_ = false;
+  gpu::Texture *stencil_source_tx_ = nullptr;
+  bool has_early_stencil_ = false;
+  bool has_stencil_readers_ = false;
+
   bool use_combined_lightprobe_eval = false;
 
  public:
@@ -629,6 +805,10 @@ class DeferredPipeline {
 
   void begin_sync();
   void end_sync();
+
+  PassMain::Sub *early_stencil_add(blender::Material *material, GPUMaterial *gpumat);
+  PassMain::Sub *stencil_surface_add(blender::Material *material, GPUMaterial *gpumat);
+  void bind_stencil_read_resources(PassMain::Sub &pass, GPUMaterial *gpumat);
 
   PassMain::Sub *prepass_add(blender::Material *blender_mat,
                              const SurfaceDrawState &state,
@@ -661,6 +841,11 @@ class DeferredPipeline {
 
   /** Whether the main view can retain this GBuffer for Nuru's whole-frame specular phase. */
   bool use_scene_final_hardware_specular() const;
+
+  void render_prepass_only(View &render_view, Framebuffer &prepass_fb);
+  void render_gbuffer_only(View &render_view, Framebuffer &prepass_fb, Framebuffer &gbuffer_fb);
+
+  void render_dlss_guides(View &view, Framebuffer &framebuffer);
 
   /* Return the maximum amount of gbuffer layer needed. */
   int header_layer_count() const
@@ -710,6 +895,7 @@ class DeferredPipeline {
 
  private:
   void debug_pass_sync();
+  void render_early_stencil(View &view, Framebuffer &prepass_fb);
   DeferredLayer &get_refraction_layer(short index);
 };
 
@@ -954,7 +1140,9 @@ class CapturePipeline {
  public:
   CapturePipeline(Instance &inst) : inst_(inst) {};
 
-  PassMain::Sub *surface_material_add(blender::Material *blender_mat, GPUMaterial *gpumat);
+  PassMain::Sub *surface_material_add(Object *ob,
+                                      blender::Material *blender_mat,
+                                      GPUMaterial *gpumat);
 
   void sync();
   void render(View &view);

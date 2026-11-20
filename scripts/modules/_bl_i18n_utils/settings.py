@@ -54,7 +54,7 @@ LANGUAGES = (
     (22, "Bulgarian - Български", "bg_BG"),
     (23, "Greek - Ελληνικά", "el_GR"),
     (24, "Korean - 한국어", "ko_KR"),
-    # 25 is free, used to be "Nepali - नेपाली", ("ne_NP").
+    (25, "Azerbaijani - Azərbaycan dili", "az"),
     # Using the utf8 flipped form of Persian (فارسی).
     (26, "Persian - ﯽﺳﺭﺎﻓ", "fa_IR"),
     (27, "Indonesian - Bahasa indonesia", "id_ID"),
@@ -274,6 +274,10 @@ PYGETTEXT_KEYWORDS = (() +
                            context_override='BLT_I18NCONTEXT_OPERATOR_DEFAULT')
           for it in ("ED_undo_push", "ED_undo_grouped_push")) +
 
+    # File handler labels
+    (PyGettextKeyword(r"STRNCPY_UTF8\(fh->label,\s*" + _msg_re + r"\s*\)",
+                      context_override='BLT_I18NCONTEXT_OPERATOR_DEFAULT'),) +
+
     # bmesh operator errors
     tuple(PyGettextKeyword(("{}\\((?:[^\"',]+,){{3}}\\s*" + _msg_re + r"\s*\)").format(it))
           for it in ("BMO_error_raise",)) +
@@ -342,16 +346,14 @@ PYGETTEXT_KEYWORDS = (() +
 
 # autopep8: on
 
-
-# Check printf mismatches between msgid and msgstr.
-CHECK_PRINTF_FORMAT = (
-    r"(?!<%)(?:%%)*%"          # Beginning, with handling for crazy things like '%%%%%s'
-    r"[-+#0]?"                 # Flags (note: do not add the ' ' (space) flag here, generates too much false positives!)
-    r"(?:\*|[0-9]+)?"          # Width
-    r"(?:\.(?:\*|[0-9]+))?"    # Precision
-    r"(?:[hljztL]|hh|ll)?"     # Length
-    r"[tldiuoxXfFeEgGaAcspn]"  # Specifiers (note we have Blender-specific %t and %l ones too)
-)
+# The few rare message strings that use a 'format-like' syntax outside of formatting context.
+# Ensure that they are skipped when checking for valid formatting tokens and order in the translated strings.
+MSGID_FORMATTING_VALIDATION_SKIP = {
+    "Property is a path which supports the \"{variable_name}\" variable expression syntax, "
+    "which substitutes the value of the referenced variable in place of the expression",
+    "Empty identifier cannot be used when explicit identifier was used before. For "
+    "example, \"{} {x}\" is ok but \"{x} {}\" is not.",
+}
 
 # Should po parser warn when finding a first letter not capitalized?
 WARN_MSGID_NOT_CAPITALIZED = True

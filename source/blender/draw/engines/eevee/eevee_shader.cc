@@ -14,12 +14,11 @@
 #include "BKE_material.hh"
 #include "BKE_node_runtime.hh"
 
-#include "DNA_world_types.h"
 #include "DNA_light_types.h"
+#include "DNA_world_types.h"
 
-#include "gpu_shader_create_info.hh"
 #include "gpu_codegen.hh"
-#include "BLI_string.h"
+#include "gpu_shader_create_info.hh"
 
 #include "NOD_shader.h"
 
@@ -27,14 +26,15 @@
 
 #include "eevee_shadow.hh"
 
-#include "BLI_assert.h"
-#include "BLI_math_bits.h"
+#include "BLI_assert.hh"
+#include "BLI_math_bits.hh"
 #include "BLI_set.hh"
+#include "BLI_string.hh"
 #include <fmt/format.h>
 
 namespace blender::eevee {
 
-static bool material_output_has_depth_offset(bNodeTree *nodetree)
+bool material_output_has_depth_offset(bNodeTree *nodetree)
 {
   if (nodetree == nullptr) {
     return false;
@@ -66,17 +66,17 @@ static uint64_t shader_node_tree_key_get(const bNodeTree *tree)
 static bool material_pipeline_supports_depth_offset(eMaterialPipeline pipeline_type,
                                                     eMaterialGeometry geometry_type)
 {
-  return geometry_type_has_surface(geometry_type) &&
-         ELEM(pipeline_type,
-              MAT_PIPE_PREPASS_FORWARD_VELOCITY,
-              MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
-              MAT_PIPE_PREPASS_OVERLAP,
-              MAT_PIPE_PREPASS_FORWARD,
-              MAT_PIPE_PREPASS_DEFERRED,
-              MAT_PIPE_PREPASS_PLANAR,
-              MAT_PIPE_DEFERRED,
-              MAT_PIPE_DEFERRED_NPR,
-              MAT_PIPE_FORWARD);
+  return geometry_type_has_surface(geometry_type) && ELEM(pipeline_type,
+                                                          MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+                                                          MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+                                                          MAT_PIPE_PREPASS_OVERLAP,
+                                                          MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH,
+                                                          MAT_PIPE_PREPASS_FORWARD,
+                                                          MAT_PIPE_PREPASS_DEFERRED,
+                                                          MAT_PIPE_PREPASS_PLANAR,
+                                                          MAT_PIPE_DEFERRED,
+                                                          MAT_PIPE_DEFERRED_NPR,
+                                                          MAT_PIPE_FORWARD);
 }
 
 static const GPUMaterialGeneratedSource *material_generated_source_find(
@@ -105,6 +105,11 @@ static void material_generated_dependency_append(const GPUMaterial *gpumat,
   const GPUMaterialGeneratedSource *generated_source = material_generated_source_find(
       gpumat, dependency_name);
   if (generated_source == nullptr) {
+    if (dependency_name == "gpu_shader_material_shader_info.glsl" &&
+        GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADOW_FILTER_METHODS))
+    {
+      r_static_dependencies.add("eevee_shadow_filter_methods.bsl.hh");
+    }
     r_static_dependencies.add(dependency_name);
     return;
   }
@@ -438,18 +443,32 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
   {
     /* These are the slowest shaders by far. Submitting them first make sure they overlap with
      * other shaders compilation. */
-    const eShaderType shader_list[] = {DEFERRED_LIGHT_TRIPLE,
-                                       DEFERRED_LIGHT_SINGLE,
-                                       DEFERRED_LIGHT_DOUBLE,
-                                       DEFERRED_COMBINE,
-                                       DEFERRED_AOV_CLEAR,
-                                       DEFERRED_TILE_CLASSIFY,
-                                       OUTLINE_DETECT,
-                                       OUTLINE_JFA_INIT,
-                                       OUTLINE_FACTOR_BLUR,
-                                       OUTLINE_JFA_STEP,
-                                       OUTLINE_RESOLVE,
-                                       OUTLINE_FREESTYLE};
+    const eShaderType shader_list[] = {
+        DEFERRED_LIGHT_TRIPLE,
+        DEFERRED_LIGHT_SINGLE,
+        DEFERRED_LIGHT_DOUBLE,
+        DEFERRED_COMBINE,
+        DEFERRED_AOV_CLEAR,
+        (GPU_stencil_export_support() ? DEFERRED_TILE_CLASSIFY : DEFERRED_TILE_CLASSIFY_FALLBACK),
+        OUTLINE_DETECT,
+        OUTLINE_DETECT_CACHED,
+        OUTLINE_DETECT_SCALED,
+        OUTLINE_DETECT_SCALED_CACHED,
+        OUTLINE_CLASSIFY,
+        OUTLINE_DISPATCH,
+        OUTLINE_JFA_INIT,
+        OUTLINE_JFA_INIT_PACKED,
+        OUTLINE_FACTOR_BLUR,
+        OUTLINE_FACTOR_BLUR_SCALED,
+        OUTLINE_JFA_STEP,
+        OUTLINE_JFA_STEP_PACKED,
+        OUTLINE_JFA_STEP_VISIBLE,
+        OUTLINE_JFA_STEP_VISIBLE_PACKED,
+        OUTLINE_RESOLVE,
+        OUTLINE_RESOLVE_PACKED,
+        OUTLINE_RESOLVE_SCALED,
+        OUTLINE_RESOLVE_SCALED_PACKED,
+        OUTLINE_UPSAMPLE};
     request(DEFERRED_LIGHTING_SHADERS, AS_SPAN(shader_list));
   }
   {
@@ -462,11 +481,15 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        RENDER_TEXTURE_EXTRACT_RGBA32F,
                                        RENDER_TEXTURE_EXTRACT_R16F,
                                        RENDER_TEXTURE_EXTRACT_R32F,
+                                       RENDER_TEXTURE_EXPORT_COLOR,
+                                       RENDER_TEXTURE_EXPORT_VALUE,
                                        NATIVE_POSTFX_OUTPUT_EXTRACT,
                                        NATIVE_POSTFX_OUTPUT_PACK_COLOR,
                                        NATIVE_POSTFX_OUTPUT_PACK_VALUE,
                                        FILM_COPY,
                                        FILM_COMP,
+                                       FILM_PRE_FX_CAPTURE,
+                                       FILM_COMP_PANORAMIC,
                                        FILM_CRYPTOMATTE_POST,
                                        FILM_FRAG,
                                        FILM_PASS_CONVERT_COMBINED,
@@ -585,10 +608,12 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        SHADOW_PAGE_DEFRAG,
                                        SHADOW_PAGE_FREE,
                                        SHADOW_PAGE_MASK,
+                                       SHADOW_PAGE_DILATE,
                                        SHADOW_MASK_FILTER,
                                        SHADOW_MASK_FILTER_LAYERED,
                                        SHADOW_TILEMAP_AMEND,
                                        SHADOW_TILEMAP_BOUNDS,
+                                       SHADOW_TILEMAP_BOUNDS_STABILIZE,
                                        SHADOW_TILEMAP_FINALIZE,
                                        SHADOW_TILEMAP_RENDERMAP,
                                        SHADOW_TILEMAP_INIT,
@@ -599,6 +624,15 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        SHADOW_TILEMAP_TAG_USAGE_TRANSPARENT,
                                        SHADOW_VIEW_VISIBILITY};
     request(SHADOW_SHADERS, AS_SPAN(shader_list));
+  }
+  {
+    const eShaderType shader_list[] = {SHADOW_NODE_CACHE_RESOLVE,
+                                       SHADOW_NODE_CACHE_RESOLVE_CLASSIFIED};
+    request(NODE_SHADOW_CACHE_SHADERS, AS_SPAN(shader_list));
+  }
+  {
+    const eShaderType shader_list[] = {SHADOW_MOMENT_SAT};
+    request(SHADOW_MOMENT_SHADERS, AS_SPAN(shader_list));
   }
   {
     const eShaderType shader_list[] = {SUBSURFACE_CONVOLVE, SUBSURFACE_SETUP};
@@ -712,6 +746,10 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_film_copy_frag";
     case FILM_COMP:
       return "eevee_film_comp";
+    case FILM_PRE_FX_CAPTURE:
+      return "eevee_film_pre_fx_capture";
+    case FILM_COMP_PANORAMIC:
+      return "eevee_film_comp_panoramic";
     case FILM_CRYPTOMATTE_POST:
       return "eevee_film_cryptomatte_post";
     case FILM_FRAG:
@@ -740,6 +778,22 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_filter_graph_input_copy";
     case FILTER_GRAPH_RESOLVE:
       return "eevee_filter_graph_resolve";
+    case GEOMETRY_LINES_ACCUMULATE:
+      return "eevee_geometry_lines_accumulate";
+    case GEOMETRY_LINES_COMPOSITE:
+      return "eevee_geometry_lines_composite";
+    case GEOMETRY_LINES_DRAW:
+      return "eevee_geometry_lines_draw";
+    case GEOMETRY_LINES_DRAW_SAMPLES:
+      return "eevee_geometry_lines_draw_samples";
+    case GEOMETRY_LINES_EXPAND:
+      return "eevee_geometry_lines_expand";
+    case GEOMETRY_LINES_MASK_RESOLVE:
+      return "eevee_geometry_lines_mask_resolve";
+    case GEOMETRY_LINES_MASK_RESOLVE_SAMPLES:
+      return "eevee_geometry_lines_mask_resolve_samples";
+    case GEOMETRY_LINES_PRESENT:
+      return "eevee_geometry_lines_present";
     case DEFERRED_COMBINE:
       return "eevee_deferred_combine";
     case DEFERRED_LIGHT_SINGLE:
@@ -750,16 +804,42 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_deferred_light_triple";
     case OUTLINE_DETECT:
       return "eevee_outline_detect";
+    case OUTLINE_DETECT_CACHED:
+      return "eevee_outline_detect_cached";
+    case OUTLINE_DETECT_SCALED:
+      return "eevee_outline_detect_scaled";
+    case OUTLINE_DETECT_SCALED_CACHED:
+      return "eevee_outline_detect_scaled_cached";
+    case OUTLINE_CLASSIFY:
+      return "eevee_outline_classify";
+    case OUTLINE_DISPATCH:
+      return "eevee_outline_dispatch";
     case OUTLINE_JFA_INIT:
       return "eevee_outline_jfa_init";
+    case OUTLINE_JFA_INIT_PACKED:
+      return "eevee_outline_jfa_init_packed";
     case OUTLINE_FACTOR_BLUR:
       return "eevee_outline_factor_blur";
+    case OUTLINE_FACTOR_BLUR_SCALED:
+      return "eevee_outline_factor_blur_scaled";
     case OUTLINE_JFA_STEP:
       return "eevee_outline_jfa_step";
+    case OUTLINE_JFA_STEP_PACKED:
+      return "eevee_outline_jfa_step_packed";
+    case OUTLINE_JFA_STEP_VISIBLE:
+      return "eevee_outline_jfa_step_visible";
+    case OUTLINE_JFA_STEP_VISIBLE_PACKED:
+      return "eevee_outline_jfa_step_visible_packed";
     case OUTLINE_RESOLVE:
       return "eevee_outline_resolve";
-    case OUTLINE_FREESTYLE:
-      return "eevee_outline_freestyle";
+    case OUTLINE_RESOLVE_PACKED:
+      return "eevee_outline_resolve_packed";
+    case OUTLINE_RESOLVE_SCALED:
+      return "eevee_outline_resolve_scaled";
+    case OUTLINE_RESOLVE_SCALED_PACKED:
+      return "eevee_outline_resolve_scaled_packed";
+    case OUTLINE_UPSAMPLE:
+      return "eevee_outline_upsample";
     case DEFERRED_AOV_CLEAR:
       return "eevee_deferred_aov_clear";
     case DEFERRED_CAPTURE_EVAL:
@@ -772,6 +852,10 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_deferred_tile_classify";
     case STENCIL_VALUE_VISUALIZE:
       return "eevee_stencil_value_visualize";
+    case DEFERRED_TILE_CLASSIFY_FALLBACK:
+      return "eevee_deferred_tile_classify_fallback";
+    case STENCIL_SNAPSHOT_VISUALIZE:
+      return "eevee_stencil_snapshot_visualize";
     case HIZ_DEBUG:
       return "eevee_hiz_debug";
     case HIZ_UPDATE:
@@ -916,6 +1000,8 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_nuru_nis_adam";
     case RENDERPASS_CLEAR:
       return "eevee_renderpass_clear";
+    case STENCIL_SNAPSHOT:
+      return "eevee_stencil_snapshot";
     case RENDER_TEXTURE_EXTRACT_RGBA16F:
       return "eevee_render_texture_extract_rgba16f";
     case RENDER_TEXTURE_EXTRACT_RGBA32F:
@@ -924,6 +1010,10 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_render_texture_extract_r16f";
     case RENDER_TEXTURE_EXTRACT_R32F:
       return "eevee_render_texture_extract_r32f";
+    case RENDER_TEXTURE_EXPORT_COLOR:
+      return "eevee_render_texture_export_color";
+    case RENDER_TEXTURE_EXPORT_VALUE:
+      return "eevee_render_texture_export_value";
     case LIGHTPROBE_IRRADIANCE_BOUNDS:
       return "eevee_lightprobe_volume_bounds";
     case LIGHTPROBE_IRRADIANCE_OFFSET:
@@ -948,12 +1038,18 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_shadow_tilemap_bounds_init";
     case SHADOW_DEBUG:
       return "eevee_shadow_debug";
+    case SHADOW_NODE_CACHE_RESOLVE:
+      return "eevee_shadow_node_cache_resolve";
+    case SHADOW_NODE_CACHE_RESOLVE_CLASSIFIED:
+      return "eevee_shadow_node_cache_resolve_classified";
     case SHADOW_MASK_FILTER:
       return "eevee_shadow_mask_filter";
     case SHADOW_MASK_FILTER_LAYERED:
       return "eevee_shadow_mask_filter_layered";
     case SHADOW_PAGE_ALLOCATE:
       return "eevee_shadow_page_allocate";
+    case SHADOW_MOMENT_SAT:
+      return "eevee_shadow_moment_sat";
     case SHADOW_PAGE_CLEAR:
       return "eevee_shadow_page_clear";
     case SHADOW_PAGE_DEFRAG:
@@ -962,10 +1058,14 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_shadow_page_free";
     case SHADOW_PAGE_MASK:
       return "eevee_shadow_page_mask";
+    case SHADOW_PAGE_DILATE:
+      return "eevee_shadow_page_dilate";
     case SHADOW_TILEMAP_AMEND:
       return "eevee_shadow_tilemap_amend";
     case SHADOW_TILEMAP_BOUNDS:
       return "eevee_shadow_tilemap_bounds";
+    case SHADOW_TILEMAP_BOUNDS_STABILIZE:
+      return "eevee_shadow_tilemap_bounds_stabilize";
     case SHADOW_TILEMAP_FINALIZE:
       return "eevee_shadow_tilemap_finalize";
     case SHADOW_TILEMAP_RENDERMAP:
@@ -1018,6 +1118,8 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_volume_occupancy_convert";
     case VOLUME_RESOLVE:
       return "eevee_volume_resolve";
+    case NPR_LAYER_VOLUME:
+      return "eevee_volume_layer_resolve";
     case VOLUME_SCATTER:
       return "eevee_volume_scatter";
     case VOLUME_SCATTER_WITH_LIGHTS:
@@ -1051,41 +1153,55 @@ class SlotAllocator {
   bool sampler_overflow_ = false;
 
   uint32_t available_vertex_id_ = ~uint32_t(0u);
-  uint32_t available_storage_slots_ = 0xFFFFu;
+  uint32_t available_storage_slots_ = ~uint32_t(0u);
   bool storage_overflow_ = false;
   bool vertex_id_overflow_ = false;
 
   Set<std::string> visited_infos;
 
   void reserve_slots_recursive(const gpu::shader::ShaderCreateInfo &info,
+                               const Span<gpu::shader::CompilationConstant> constants,
+                               const gpu::shader::ShaderCreateInfo::Conditions &info_conditions,
                                bool is_gpumat_info = true)
   {
+    using namespace blender::gpu::shader;
+    /* The same info can be included with different conditions. */
+    if (!info_conditions.is_empty() && info_conditions.evaluate(constants) == false) {
+      return;
+    }
+
     if (!visited_infos.add_overwrite(info.name_)) {
       /* Avoid infinite recursion or visiting an info more than once. */
       return;
     }
-    using namespace blender::gpu::shader;
+
+    auto is_used = [&](const ShaderCreateInfo::Resource &res) {
+      ShaderCreateInfo::Conditions conditions = res.conditions;
+      conditions.extend(info_conditions);
+      return conditions.evaluate(constants);
+    };
+
     for (const ShaderCreateInfo::VertIn &vert_in : info.vertex_inputs_) {
       available_vertex_id_ &= ~(uint32_t(1) << vert_in.index);
     }
     for (const ShaderCreateInfo::Resource &res : info.pass_resources_) {
-      if (res.bind_type == ShaderCreateInfo::Resource::STORAGE_BUFFER) {
+      if (res.bind_type == ShaderCreateInfo::Resource::STORAGE_BUFFER && is_used(res)) {
         available_storage_slots_ &= ~(uint32_t(1) << res.slot);
       }
-      if (res.bind_type == ShaderCreateInfo::Resource::SAMPLER) {
-        available_samplers_ &= ~(uint64_t(1) << res.slot);
+      if (res.bind_type == ShaderCreateInfo::Resource::SAMPLER && is_used(res)) {
+        reserve_sampler_slot(res.slot);
       }
     }
     for (const ShaderCreateInfo::Resource &res : info.geometry_resources_) {
-      if (res.bind_type == ShaderCreateInfo::Resource::STORAGE_BUFFER) {
+      if (res.bind_type == ShaderCreateInfo::Resource::STORAGE_BUFFER && is_used(res)) {
         available_storage_slots_ &= ~(uint32_t(1) << res.slot);
       }
-      if (res.bind_type == ShaderCreateInfo::Resource::SAMPLER) {
-        available_samplers_ &= ~(uint64_t(1) << res.slot);
+      if (res.bind_type == ShaderCreateInfo::Resource::SAMPLER && is_used(res)) {
+        reserve_sampler_slot(res.slot);
       }
     }
     for (const ShaderCreateInfo::Resource &res : info.batch_resources_) {
-      if (res.bind_type == ShaderCreateInfo::Resource::STORAGE_BUFFER) {
+      if (res.bind_type == ShaderCreateInfo::Resource::STORAGE_BUFFER && is_used(res)) {
         available_storage_slots_ &= ~(uint32_t(1) << res.slot);
       }
     }
@@ -1093,17 +1209,22 @@ class SlotAllocator {
       /* Don't assign slots for material textures until all the internal engine slots are reserved,
        * they may overlap with our internal slots. */
       for (const ShaderCreateInfo::Resource &res : info.batch_resources_) {
-        if (res.bind_type == ShaderCreateInfo::Resource::SAMPLER) {
-          available_samplers_ &= ~(uint64_t(1) << res.slot);
+        if (res.bind_type == ShaderCreateInfo::Resource::SAMPLER && is_used(res)) {
+          reserve_sampler_slot(res.slot);
         }
       }
     }
 
-    for (const auto &[info_name, _] : info.additional_infos_) {
-      const ShaderCreateInfo *info = reinterpret_cast<const ShaderCreateInfo *>(
-          GPU_shader_create_info_get(info_name.c_str()));
+    for (const auto &additional_info : info.additional_infos_) {
+      const ShaderCreateInfo &other_info = *reinterpret_cast<const ShaderCreateInfo *>(
+          GPU_shader_create_info_get(additional_info.name.c_str()));
+
+      ShaderCreateInfo::Conditions conditions = additional_info.conditions;
+      /* Combine the condition on the current info onto its additional infos. */
+      conditions.extend(info_conditions);
+
       /** WATCH: Recursive. */
-      reserve_slots_recursive(*info, false);
+      reserve_slots_recursive(other_info, constants, conditions, false);
     }
   }
 
@@ -1124,10 +1245,16 @@ class SlotAllocator {
     return storage_overflow_;
   }
 
+  void reserve_slots(const gpu::shader::ShaderCreateInfo &info,
+                     const Span<gpu::shader::CompilationConstant> constants)
+  {
+    reserve_slots_recursive(info, constants, {});
+  }
+
   void reserve_slots(const gpu::shader::ShaderCreateInfo &info)
   {
     visited_infos.clear();
-    reserve_slots_recursive(info);
+    reserve_slots_recursive(info, info.compilation_constants_, {});
   }
 
   void assign_material_samplers(gpu::shader::ShaderCreateInfo &info)
@@ -1139,6 +1266,11 @@ class SlotAllocator {
         resource.slot = get_next_sampler();
       }
     }
+  }
+
+  void reserve_sampler_slot(int slot)
+  {
+    reserve_sampler(slot);
   }
 
   bool sampler_overflow() const
@@ -1199,14 +1331,17 @@ class SlotAllocator {
   }
 };
 
-static bool create_info_contains_additional_info(
-    const gpu::shader::ShaderCreateInfo &info,
-    const StringRefNull create_info_name,
-    Set<StringRefNull> &visited_infos)
+static bool create_info_contains_additional_info(const gpu::shader::ShaderCreateInfo &info,
+                                                 const StringRefNull create_info_name,
+                                                 Set<StringRefNull> &visited_infos,
+                                                 Span<gpu::shader::CompilationConstant> constants)
 {
   using namespace blender::gpu::shader;
 
   for (const ShaderCreateInfo::AdditionalInfo &additional_info : info.additional_infos_) {
+    if (!additional_info.conditions.evaluate(constants)) {
+      continue;
+    }
     if (additional_info.name == create_info_name) {
       return true;
     }
@@ -1215,8 +1350,8 @@ static bool create_info_contains_additional_info(
     }
     const ShaderCreateInfo *nested_info = reinterpret_cast<const ShaderCreateInfo *>(
         GPU_shader_create_info_get(additional_info.name.c_str()));
-    if (nested_info != nullptr &&
-        create_info_contains_additional_info(*nested_info, create_info_name, visited_infos))
+    if (nested_info != nullptr && create_info_contains_additional_info(
+                                      *nested_info, create_info_name, visited_infos, constants))
     {
       return true;
     }
@@ -1228,7 +1363,8 @@ static bool create_info_contains_additional_info(const gpu::shader::ShaderCreate
                                                  const StringRefNull create_info_name)
 {
   Set<StringRefNull> visited_infos;
-  return create_info_contains_additional_info(info, create_info_name, visited_infos);
+  return create_info_contains_additional_info(
+      info, create_info_name, visited_infos, info.compilation_constants_);
 }
 
 static void add_create_info_and_reserve(gpu::shader::ShaderCreateInfo &info,
@@ -1246,7 +1382,7 @@ static void add_create_info_and_reserve(gpu::shader::ShaderCreateInfo &info,
   if (!create_info_contains_additional_info(info, create_info_name)) {
     info.additional_info(create_info_name);
   }
-  slots.reserve_slots(*create_info);
+  slots.reserve_slots(*create_info, info.compilation_constants_);
 }
 
 static void reserve_deferred_npr_pass_samplers(SlotAllocator &slots)
@@ -1301,10 +1437,13 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
     case MAT_PIPE_BAKE_COLOR:
       return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_BAKE;
     case MAT_PIPE_HIT_EVAL:
-      return 8; /* Utility, depth, and five sparse-hit payload textures. */
+      return 9;
+    case MAT_PIPE_OUTLINE_FREESTYLE:
+      return OUTLINE_INFO_TEX_SLOT;
     case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
     case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
     case MAT_PIPE_PREPASS_OVERLAP:
+    case MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH:
     case MAT_PIPE_PREPASS_FORWARD:
     case MAT_PIPE_PREPASS_DEFERRED:
     case MAT_PIPE_PREPASS_PLANAR:
@@ -1321,26 +1460,79 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
 }
 
 static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &info,
-                                               eMaterialPipeline pipeline_type,
-                                               eMaterialGeometry geometry_type,
-                                               const bool use_shader_to_rgba,
-                                               const bool has_depth_offset,
-                                               const bool use_lightprobe_data)
+                                              eMaterialPipeline pipeline_type,
+                                              eMaterialGeometry geometry_type,
+                                              const bool use_shader_to_rgba,
+                                              const bool has_depth_offset,
+                                              const bool use_lightprobe_data,
+                                              const bool use_lighting_nodes,
+                                              const bool use_ao_node,
+                                              const bool use_raycast,
+                                              const bool use_additional_data)
 {
   using namespace blender::gpu::shader;
+  using gpu::shader::Type;
+
+  const bool is_hybrid = pipeline_type == MAT_PIPE_DEFERRED &&
+                         (use_shader_to_rgba || use_lighting_nodes);
+
+  /* NPR snippets also consume these tags in legacy GLSL helpers. */
+  if (geometry_type == MAT_GEOM_WORLD) {
+    info.define("MAT_GEOM_WORLD");
+  }
+  if (pipeline_type == MAT_PIPE_SHADOW) {
+    info.define("MAT_SHADOW");
+  }
+  if (pipeline_type == MAT_PIPE_CAPTURE) {
+    info.define("MAT_CAPTURE");
+  }
+  if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
+    info.define("MAT_BAKE_COLOR");
+  }
+  if (pipeline_type == MAT_PIPE_VOLUME_MATERIAL) {
+    info.define("MAT_VOLUME");
+  }
+  if (ELEM(pipeline_type,
+           MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+           MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+           MAT_PIPE_PREPASS_FORWARD,
+           MAT_PIPE_PREPASS_DEFERRED,
+           MAT_PIPE_PREPASS_PLANAR,
+           MAT_PIPE_PREPASS_OVERLAP,
+           MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH))
+  {
+    info.define("MAT_DEPTH");
+  }
+
+  info.compilation_constant(Type::bool_t, "is_mesh", geometry_type == MAT_GEOM_MESH);
+  info.compilation_constant(Type::bool_t, "is_curves", geometry_type == MAT_GEOM_CURVES);
+  info.compilation_constant(Type::bool_t, "is_pointcloud", geometry_type == MAT_GEOM_POINTCLOUD);
+  info.compilation_constant(Type::bool_t, "is_gsplat", geometry_type == MAT_GEOM_GSPLAT);
+  info.compilation_constant(Type::bool_t, "is_world", geometry_type == MAT_GEOM_WORLD);
+
+  info.compilation_constant(Type::bool_t, "is_volume_object", geometry_type == MAT_GEOM_VOLUME);
 
   info.compilation_constant(
-      gpu::shader::Type::bool_t, "is_shadow_pipe", pipeline_type == MAT_PIPE_SHADOW);
+      Type::bool_t, "is_volume_pipe", pipeline_type == MAT_PIPE_VOLUME_MATERIAL);
+  info.compilation_constant(Type::bool_t, "is_shadow_pipe", pipeline_type == MAT_PIPE_SHADOW);
+  info.compilation_constant(Type::bool_t, "is_capture_pipe", pipeline_type == MAT_PIPE_CAPTURE);
+  if (pipeline_type == MAT_PIPE_SHADOW) {
+    info.compilation_constant(Type::bool_t, "use_multi_viewport", GPU_multi_viewport_support());
+  }
   info.compilation_constant(
-      gpu::shader::Type::bool_t, "use_clip_plane", pipeline_type == MAT_PIPE_PREPASS_PLANAR);
-
-  /* WORKAROUND: BSL do not support disabling builtins from compilation constant.
-   * In the common case, we need to no use viewport index to avoid geometry shader injection on
-   * some platform. */
-  info.builtins(BuiltinBits::NO_VIEWPORT_INDEX);
+      Type::bool_t, "is_occupancy_pipe", pipeline_type == MAT_PIPE_VOLUME_OCCUPANCY);
+  info.compilation_constant(
+      Type::bool_t, "use_clip_plane", pipeline_type == MAT_PIPE_PREPASS_PLANAR);
+  info.compilation_constant(Type::bool_t, "use_ambient_occlusion", use_ao_node);
+  info.compilation_constant(Type::bool_t,
+                            "use_forward_lighting",
+                            ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) ||
+                                ((pipeline_type == MAT_PIPE_DEFERRED) && use_shader_to_rgba));
+  info.compilation_constant(Type::bool_t, "use_raycast", use_raycast);
+  info.compilation_constant(Type::bool_t, "use_lightprobe_data", use_lightprobe_data);
+  info.compilation_constant(Type::bool_t, "use_additional_data", use_additional_data);
 
   StringRefNull pipeline_info_name;
-  StringRefNull additional_info_name;
   /* Pipeline Info. */
   switch (geometry_type) {
     case MAT_GEOM_WORLD:
@@ -1348,17 +1540,17 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
         case MAT_PIPE_VOLUME_MATERIAL:
           pipeline_info_name = "eevee_surf_volume_infos_";
           info.name_ += "_world_volume";
-          info.define("MAT_VOLUME");
-          info.compilation_constant(gpu::shader::Type::bool_t, "is_homogenous", false); /* TODO? */
-          info.compilation_constant(gpu::shader::Type::bool_t, "is_volume_object", false);
-          info.compilation_constant(gpu::shader::Type::bool_t, "is_world", true);
+          info.compilation_constant(Type::bool_t, "is_homogenous", false); /* TODO? */
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
           info.fragment_source("eevee_surf_volume.bsl.hh");
           info.fragment_function("eevee_surf_volume");
           break;
         case MAT_PIPE_FILTER:
-          pipeline_info_name = "eevee_filter_material";
+          pipeline_info_name = "eevee_filter_material_infos_";
+          info.fragment_source("eevee_filter_material.bsl.hh");
+          info.fragment_function("eevee_filter_material");
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
           info.name_ += "_world_filter";
           break;
         default:
@@ -1374,75 +1566,94 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
       break;
     default:
       switch (pipeline_type) {
+        case MAT_PIPE_OUTLINE_FREESTYLE:
+          pipeline_info_name = "eevee_outline_freestyle_infos_";
+          info.name_ += "_outline_freestyle";
+          info.define("closure_to_rgba", "closure_to_rgba_depth");
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
+          info.fragment_source("eevee_outline_freestyle.bsl.hh");
+          info.fragment_function("eevee_outline_freestyle");
+          break;
         case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
         case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
-          pipeline_info_name = "eevee_surf_depthTtrue_infos_";
-          additional_info_name = "eevee_GeometryVelocity";
+          pipeline_info_name = (has_depth_offset ? "eevee_surf_depth_offsetTtrue_infos_" :
+                                                   "eevee_surf_depthTtrue_infos_");
           info.name_ += "_depth_velocity";
-          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", true);
-          info.define("MAT_DEPTH");
+          info.compilation_constant(Type::bool_t, "use_velocity", true);
           info.define("closure_to_rgba", "closure_to_rgba_depth");
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
           info.fragment_source("eevee_surf_depth.bsl.hh");
-          info.fragment_function("eevee_surf_depthTtrue");
+          info.fragment_function(
+              (has_depth_offset ? "eevee_surf_depth_offsetTtrue" : "eevee_surf_depthTtrue"));
+          break;
+        case MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH:
+          pipeline_info_name = (has_depth_offset ? "eevee_surf_depth_offsetTfalse_infos_" :
+                                                   "eevee_surf_depthTfalse_infos_");
+          info.name_ += "_outline_shell_self_depth";
+          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
+          info.define("closure_to_rgba", "closure_to_rgba_depth");
+          info.fragment_source("eevee_surf_depth.bsl.hh");
+          info.fragment_function(
+              (has_depth_offset ? "eevee_surf_depth_offsetTfalse" : "eevee_surf_depthTfalse"));
           break;
         case MAT_PIPE_PREPASS_OVERLAP:
-          pipeline_info_name = "eevee_surf_depthTfalse_infos_";
+          pipeline_info_name = (has_depth_offset ? "eevee_surf_depth_offsetTfalse_infos_" :
+                                                   "eevee_surf_depthTfalse_infos_");
           info.name_ += "_outline_occlusion_depth";
           info.define("MAT_OUTLINE_OCCLUSION");
           info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
-          info.define("MAT_DEPTH");
           info.define("closure_to_rgba", "closure_to_rgba_depth");
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
           info.fragment_source("eevee_surf_depth.bsl.hh");
-          info.fragment_function("eevee_surf_depthTfalse");
+          info.fragment_function(
+              (has_depth_offset ? "eevee_surf_depth_offsetTfalse" : "eevee_surf_depthTfalse"));
           break;
         case MAT_PIPE_PREPASS_FORWARD:
         case MAT_PIPE_PREPASS_DEFERRED:
-          pipeline_info_name = "eevee_surf_depthTfalse_infos_";
+          pipeline_info_name = (has_depth_offset ? "eevee_surf_depth_offsetTfalse_infos_" :
+                                                   "eevee_surf_depthTfalse_infos_");
           info.name_ += "_depth";
-          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
-          info.define("MAT_DEPTH");
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
+          info.compilation_constant(Type::bool_t, "use_lighting_nodes", false);
           info.define("closure_to_rgba", "closure_to_rgba_depth");
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
           info.fragment_source("eevee_surf_depth.bsl.hh");
-          info.fragment_function("eevee_surf_depthTfalse");
+          info.fragment_function(
+              (has_depth_offset ? "eevee_surf_depth_offsetTfalse" : "eevee_surf_depthTfalse"));
           break;
         case MAT_PIPE_PREPASS_PLANAR:
-          pipeline_info_name = "eevee_surf_depthTfalse_infos_";
-          additional_info_name = "eevee_clip_plane";
+          pipeline_info_name = (has_depth_offset ? "eevee_surf_depth_offsetTfalse_infos_" :
+                                                   "eevee_surf_depthTfalse_infos_");
           info.name_ += "_depth_clip";
-          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
-          info.define("MAT_DEPTH");
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
+          info.compilation_constant(Type::bool_t, "use_lighting_nodes", false);
           info.define("closure_to_rgba", "closure_to_rgba_depth");
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
           info.fragment_source("eevee_surf_depth.bsl.hh");
-          info.fragment_function("eevee_surf_depthTfalse");
+          info.fragment_function(
+              (has_depth_offset ? "eevee_surf_depth_offsetTfalse" : "eevee_surf_depthTfalse"));
           break;
         case MAT_PIPE_SHADOW:
           pipeline_info_name = "eevee_surf_shadow_infos_";
           info.name_ += "_shadow";
-          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
+          info.compilation_constant(Type::bool_t, "use_lighting_nodes", false);
           info.define("DRW_VIEW_LEN", STRINGIFY(SHADOW_VIEW_MAX));
-          info.define("MAT_SHADOW");
           info.define("closure_to_rgba", "closure_to_rgba_shadow");
-          /* WORKAROUND: Enable viewport index for shadows. */
-          info.builtins_ &= ~BuiltinBits::NO_VIEWPORT_INDEX;
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
           info.fragment_source("eevee_surf_shadow.bsl.hh");
           info.fragment_function("eevee_surf_shadow");
-          info.additional_info("eevee_shadow_iface_info");
           break;
         case MAT_PIPE_VOLUME_OCCUPANCY:
           pipeline_info_name = "eevee_surf_occupancy_infos_";
           info.name_ += "_occupancy";
-          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
-          info.define("MAT_OCCUPANCY");
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
+          info.compilation_constant(Type::bool_t, "use_lighting_nodes", false);
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
           info.fragment_source("eevee_surf_occupancy.bsl.hh");
@@ -1450,14 +1661,10 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           break;
         case MAT_PIPE_VOLUME_MATERIAL:
           pipeline_info_name = "eevee_surf_volume_infos_";
-          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
-          info.compilation_constant(gpu::shader::Type::bool_t, "is_homogenous", false); /* TODO? */
-          info.compilation_constant(gpu::shader::Type::bool_t,
-                                    "is_volume_object",
-                                    geometry_type == eMaterialGeometry::MAT_GEOM_VOLUME);
-          info.compilation_constant(gpu::shader::Type::bool_t, "is_world", false);
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
+          info.compilation_constant(Type::bool_t, "use_lighting_nodes", false);
+          info.compilation_constant(Type::bool_t, "is_homogenous", false); /* TODO? */
           info.name_ += "_volume";
-          info.define("MAT_VOLUME");
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
           info.fragment_source("eevee_surf_volume.bsl.hh");
@@ -1466,8 +1673,8 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
         case MAT_PIPE_CAPTURE:
           pipeline_info_name = "eevee_surf_capture_infos_";
           info.name_ += "_capture";
-          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
-          info.define("MAT_CAPTURE");
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
+          info.compilation_constant(Type::bool_t, "use_lighting_nodes", false);
           info.define("closure_to_rgba", "closure_to_rgba_capture");
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
@@ -1475,22 +1682,30 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           info.fragment_function("eevee_surf_capture");
           break;
         case MAT_PIPE_BAKE_COLOR:
-          pipeline_info_name = "eevee_surf_bake_color";
+          pipeline_info_name = "eevee_surf_bake_color_infos_";
           info.name_ += "_bake_color";
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
+          info.fragment_source("eevee_surf_bake_color.bsl.hh");
+          info.fragment_function("eevee_surf_bake_color");
           break;
         case MAT_PIPE_HIT_EVAL:
-          pipeline_info_name = "eevee_surf_hit_eval";
+          pipeline_info_name = "eevee_surf_hit_eval_infos_";
           info.name_ += "_hit_eval";
           info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
+          info.fragment_source("eevee_surf_hit_eval.bsl.hh");
+          info.fragment_function("eevee_surf_hit_eval");
           break;
         case MAT_PIPE_DEFERRED:
           info.define("MAT_DEFERRED");
-          if (use_shader_to_rgba) {
+          if (is_hybrid) {
             pipeline_info_name = has_depth_offset ? "eevee_surf_hybrid_depth_offset_infos_" :
                                                     "eevee_surf_hybrid_infos_";
-            info.define("closure_to_rgba", "closure_to_rgba_hybrid");
+            if (use_shader_to_rgba) {
+              info.define("closure_to_rgba", "closure_to_rgba_hybrid");
+            }
             info.name_ += "_deferred_hybrid";
-            info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
+            info.compilation_constant(Type::bool_t, "use_velocity", false);
+            info.compilation_constant(Type::bool_t, "use_lighting_nodes", use_lighting_nodes);
             /* Until every vertex shader are ported, we need to bridge the gap here by defining the
              * pipeline. */
             info.fragment_source("eevee_surf_hybrid.bsl.hh");
@@ -1499,32 +1714,28 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           }
           else {
             info.name_ += "_deferred";
-            info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
+            info.compilation_constant(Type::bool_t, "use_velocity", false);
+            info.compilation_constant(Type::bool_t, "use_lighting_nodes", false);
             /* Until every vertex shader are ported, we need to bridge the gap here by defining the
              * pipeline. */
             info.fragment_source("eevee_surf_deferred.bsl.hh");
-            if (use_lightprobe_data) {
-              pipeline_info_name = has_depth_offset ?
-                                       "eevee_surf_deferred_lightprobe_depth_offset_infos_" :
-                                       "eevee_surf_deferred_lightprobe_infos_";
-              info.fragment_function(has_depth_offset ?
-                                         "eevee_surf_deferred_lightprobe_depth_offset" :
-                                         "eevee_surf_deferred_lightprobe");
-            }
-            else {
-              pipeline_info_name = has_depth_offset ? "eevee_surf_deferred_depth_offset_infos_" :
-                                                      "eevee_surf_deferred_infos_";
-              info.fragment_function(has_depth_offset ? "eevee_surf_deferred_depth_offset" :
-                                                        "eevee_surf_deferred");
-            }
+            /* Probe resources are selected by use_lightprobe_data in KernelGlobals. */
+            pipeline_info_name = has_depth_offset ? "eevee_surf_deferred_depth_offset_infos_" :
+                                                    "eevee_surf_deferred_infos_";
+            info.fragment_function(has_depth_offset ? "eevee_surf_deferred_depth_offset" :
+                                                      "eevee_surf_deferred");
           }
-          /* Enable the access to `nt.crypto_hash`.
-           * Necessary workaround for static shader compilation tests. */
-          info.define("CREATE_INFO_eevee_nodetree");
           break;
         case MAT_PIPE_DEFERRED_NPR:
-          pipeline_info_name = has_depth_offset ? "eevee_surf_npr_depth_offset" :
-                                                  "eevee_surf_npr";
+          pipeline_info_name = has_depth_offset ? "eevee_surf_npr_depth_offset_infos_" :
+                                                  "eevee_surf_npr_infos_";
+          info.fragment_source("eevee_surf_npr.bsl.hh");
+          info.fragment_function(has_depth_offset ? "eevee_surf_npr_depth_offset" :
+                                                    "eevee_surf_npr");
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
+          if (has_depth_offset) {
+            info.depth_write(gpu::shader::DepthWrite::ANY);
+          }
           info.name_ += "_deferred_npr";
           break;
         case MAT_PIPE_FORWARD:
@@ -1532,7 +1743,9 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
                                                   "eevee_surf_forward_infos_";
           info.define("MAT_FORWARD");
           info.define("closure_to_rgba", "closure_to_rgba_forward");
-          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
+          info.compilation_constant(Type::bool_t, "use_velocity", false);
+          info.compilation_constant(
+              gpu::shader::Type::bool_t, "use_lighting_nodes", use_lighting_nodes);
           info.name_ += "_forward";
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
@@ -1553,7 +1766,6 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
     case MAT_GEOM_WORLD:
       geometry_info_name = "eevee_geom_world_infos_";
       info.name_ += "_world";
-      info.define("MAT_GEOM_WORLD");
       /* Until every vertex shader are ported, we need to bridge the gap here by defining the
        * pipeline. */
       info.vertex_source("eevee_geom_world.bsl.hh");
@@ -1562,20 +1774,32 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
     case MAT_GEOM_CURVES:
       geometry_info_name = "eevee_geom_curves_infos_";
       info.name_ += "_curves";
-      info.define("MAT_GEOM_CURVES");
       /* Until every vertex shader are ported, we need to bridge the gap here by defining the
        * pipeline. */
       info.vertex_source("eevee_geom_curves.bsl.hh");
       info.vertex_function("eevee_geom_curves");
       break;
+    case MAT_GEOM_GSPLAT:
+      geometry_info_name = "eevee_geom_gsplat_infos_";
+      info.name_ += "_gsplat";
+      /* Until every vertex shader are ported, we need to bridge the gap here by defining the
+       * pipeline. */
+      info.vertex_source("eevee_geom_gsplat.bsl.hh");
+      info.vertex_function("eevee_geom_gsplat");
+      break;
     case MAT_GEOM_MESH:
       if (pipeline_type == MAT_PIPE_HIT_EVAL) {
-        geometry_info_name = "eevee_geom_hit_mesh";
+        geometry_info_name = "eevee_geom_hit_mesh_infos_";
         info.name_ += "_hit_mesh";
+        info.vertex_source("eevee_surf_hit_eval.bsl.hh");
+        info.vertex_function("eevee_geom_hit_mesh");
       }
       else if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
-        geometry_info_name = "eevee_geom_bake_mesh";
+        geometry_info_name = "eevee_geom_bake_mesh_infos_";
         info.name_ += "_bake_mesh";
+        info.define("MAT_GEOM_MESH");
+        info.vertex_source("eevee_geom_bake_mesh.bsl.hh");
+        info.vertex_function("eevee_geom_bake_mesh");
       }
       else {
         geometry_info_name = "eevee_geom_mesh_infos_";
@@ -1587,10 +1811,16 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
         info.vertex_function("eevee_geom_mesh");
       }
       break;
+    case MAT_GEOM_MESH_TESS:
+      geometry_info_name = "eevee_geom_mesh_tess_infos_";
+      info.name_ += "_mesh_tess";
+      info.define("MAT_GEOM_MESH");
+      info.vertex_source("eevee_geom_mesh_tess.bsl.hh");
+      info.vertex_function("eevee_geom_mesh_tess");
+      break;
     case MAT_GEOM_POINTCLOUD:
       geometry_info_name = "eevee_geom_pointcloud_infos_";
       info.name_ += "_pointcloud";
-      info.define("MAT_GEOM_POINTCLOUD");
       /* Until every vertex shader are ported, we need to bridge the gap here by defining the
        * pipeline. */
       info.vertex_source("eevee_geom_pointcloud.bsl.hh");
@@ -1599,7 +1829,6 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
     case MAT_GEOM_VOLUME:
       geometry_info_name = "eevee_geom_volume_infos_";
       info.name_ += "_volume";
-      info.define("MAT_GEOM_VOLUME");
       /* Until every vertex shader are ported, we need to bridge the gap here by defining the
        * pipeline. */
       info.vertex_source("eevee_geom_volume.bsl.hh");
@@ -1608,16 +1837,39 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
   }
 
   SlotAllocator available_slots;
+  info.compilation_constant(gpu::shader::Type::bool_t,
+                            "use_aov_output",
+                            ELEM(pipeline_type,
+                                 MAT_PIPE_DEFERRED,
+                                 MAT_PIPE_DEFERRED_NPR,
+                                 MAT_PIPE_FORWARD));
+
   if (!pipeline_info_name.is_empty()) {
     add_create_info_and_reserve(info, available_slots, pipeline_info_name);
-  }
-  if (!additional_info_name.is_empty()) {
-    add_create_info_and_reserve(info, available_slots, additional_info_name);
   }
   if (!geometry_info_name.is_empty()) {
     add_create_info_and_reserve(info, available_slots, geometry_info_name);
   }
+  if (pipeline_type == MAT_PIPE_HIT_EVAL && geometry_type == MAT_GEOM_MESH) {
+    add_create_info_and_reserve(info, available_slots, "eevee_geom_hit_mesh");
+  }
   available_slots.reserve_slots(info);
+
+  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
+      !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME))
+  {
+    /* While only needed for the AO node, we always bind the hiz globally for these pipelines.
+     * To ensure no user textures will reuse the slot binding, we add the info unconditionally. */
+    available_slots.reserve_sampler_slot(HIZ_TEX_SLOT);
+  }
+  if (is_hybrid) {
+    /* WORKAROUND(fclem): These resources are bound once per hybrid sub-pass rather than per
+     * material, so their slots must not be reused by material textures, even for materials that
+     * don't use them. */
+    available_slots.reserve_sampler_slot(HIZ_PREVIOUS_LAYER_TEX_SLOT);
+    available_slots.reserve_sampler_slot(RADIANCE_PREVIOUS_LAYER_TEX_SLOT);
+  }
+
   return available_slots;
 }
 
@@ -1626,6 +1878,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   using namespace blender::gpu::shader;
 
   uint64_t shader_uuid = GPU_material_uuid_get(gpumat);
+  const bool use_lighting_nodes = GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHTING);
   eMaterialPipeline pipeline_type;
   eMaterialGeometry geometry_type;
   eMaterialDisplacement displacement_type;
@@ -1646,6 +1899,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                  uuid_depth_offset_affect_lighting,
                                  outline_shell);
   UNUSED_VARS(uuid_depth_offset_affect_lighting);
+
+  /* Match the extra-key offset in shader_uuid_from_material_type(). */
+  const bool stencil_writer_surface = pipeline_type == MAT_PIPE_PREPASS_DEFERRED &&
+                                      geometry_type_has_surface(geometry_type) &&
+                                      ((shader_uuid >> 25u) & 1u) != 0;
 
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
@@ -1687,12 +1945,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   /* The existing ObjectAttribute SSBO is shared by ordinary attributes and referenced objects. */
   const bool uses_uniform_attributes = GPU_material_uniform_attributes(gpumat) != nullptr;
   const bool uses_referenced_object_data = GPU_material_uses_referenced_object_data(gpumat);
-  if (uses_uniform_attributes || uses_referenced_object_data) {
-    info.additional_info("draw_object_attributes");
+  if (uses_uniform_attributes || uses_referenced_object_data ||
+      GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHT_ATTRIBUTE))
+  {
+    info.additional_info("draw_Attributes");
+    info.additional_info("draw_Infos");
   }
 
   /* WORKAROUND: Remove the old object attribute UBO when ordinary attributes are used. */
-  if (uses_uniform_attributes) {
+  if (uses_uniform_attributes || GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHT_ATTRIBUTE)) {
 
     /* Search and remove the old object attribute UBO which would creating bind point collision. */
     for (auto &resource_info : info.batch_resources_) {
@@ -1707,32 +1968,57 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.define("UNI_ATTR(a)", "float4(0.0)");
   }
 
-  bool use_ao_node = false;
-
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_AO) &&
-      ELEM(pipeline_type,
-           MAT_PIPE_FORWARD,
-           MAT_PIPE_DEFERRED,
-           MAT_PIPE_DEFERRED_NPR,
-           MAT_PIPE_BAKE_COLOR) &&
-      geometry_type_has_surface(geometry_type))
+  /* WORKAROUND: Remove nodetree decl from the codegen. It is already defined in BSL. */
   {
-    info.define("MAT_AMBIENT_OCCLUSION");
-    use_ao_node = true;
+    for (auto &resource_info : info.batch_resources_) {
+      if (resource_info.bind_type == ShaderCreateInfo::Resource::BindType::UNIFORM_BUFFER &&
+          resource_info.uniformbuf.name == GPU_UBO_BLOCK_NAME)
+      {
+        info.batch_resources_.remove_first_occurrence_and_reorder(resource_info);
+        break;
+      }
+    }
   }
 
+  bool use_ao_node = (GPU_material_flag_get(gpumat, GPU_MATFLAG_AO) &&
+                      ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_DEFERRED) &&
+                      geometry_type_has_surface(geometry_type));
+
   bool use_transparency = false;
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT)) {
+  const blender::Material *blender_mat = GPU_material_get_material(gpumat);
+  const bool shell_blended = outline_shell && blender_mat->outline_shell_transparency_method ==
+                                                  MA_OUTLINE_SHELL_BLENDED;
+  if (outline_shell) {
+    info.define("MAT_OUTLINE_SHELL");
+    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_AOV)) {
+      info.define("MAT_OUTLINE_SHELL_AOV");
+    }
+    if (shell_blended) {
+      info.define("MAT_OUTLINE_SHELL_BLENDED");
+    }
+  }
+  const bool shell_self_occlusion = outline_shell && pipeline_type != MAT_PIPE_SHADOW &&
+                                    (blender_mat->outline_shell_flag &
+                                     MA_OUTLINE_SHELL_SELF_OCCLUSION);
+  if (shell_self_occlusion) {
+    info.define("MAT_OUTLINE_SHELL_SELF_OCCLUSION");
+  }
+  if (pipeline_type != MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH &&
+      (outline_shell ? GPU_material_outline_shell_has_alpha(gpumat) :
+                       (GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) ||
+                        geometry_type == MAT_GEOM_GSPLAT)))
+  {
     if (pipeline_type != MAT_PIPE_SHADOW || transparent_shadows) {
-      info.define("MAT_TRANSPARENT");
       use_transparency = true;
     }
     /* Transparent material do not have any velocity specific pipeline. */
-    if (pipeline_type == MAT_PIPE_PREPASS_FORWARD_VELOCITY) {
+    if (pipeline_type == MAT_PIPE_PREPASS_FORWARD_VELOCITY && !outline_shell) {
       pipeline_type = MAT_PIPE_PREPASS_FORWARD;
     }
   }
   info.compilation_constant(gpu::shader::Type::bool_t, "use_transparency", use_transparency);
+  info.compilation_constant(
+      gpu::shader::Type::bool_t, "is_stencil_writer_surface", stencil_writer_surface);
 
   const bool use_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST) &&
                            ELEM(pipeline_type,
@@ -1740,14 +2026,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                 MAT_PIPE_DEFERRED_NPR,
                                 MAT_PIPE_FORWARD,
                                 MAT_PIPE_BAKE_COLOR);
-  const bool use_hiz_data =
-      (GPU_material_uses_hiz_data(gpumat) || use_raycast ||
-       material_codegen_uses_hiz_data(gpumat, codegen)) &&
-      ELEM(pipeline_type,
-           MAT_PIPE_DEFERRED,
-           MAT_PIPE_DEFERRED_NPR,
-           MAT_PIPE_FORWARD,
-           MAT_PIPE_BAKE_COLOR);
+  const bool use_hiz_data = (GPU_material_uses_hiz_data(gpumat) || use_raycast ||
+                             material_codegen_uses_hiz_data(gpumat, codegen)) &&
+                            ELEM(pipeline_type,
+                                 MAT_PIPE_DEFERRED,
+                                 MAT_PIPE_DEFERRED_NPR,
+                                 MAT_PIPE_FORWARD,
+                                 MAT_PIPE_BAKE_COLOR);
 
   if (probe_capture != MAT_PROBE_NONE) {
     info.define("MAT_PROBE_CAPTURE");
@@ -1763,7 +2048,6 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
-  const blender::Material *blender_mat = GPU_material_get_material(gpumat);
   const bool depth_offset_affect_lighting = material_depth_offset_affects_lighting(blender_mat);
   const bool has_depth_offset = GPU_material_has_depth_offset_output(gpumat) &&
                                 material_pipeline_supports_depth_offset(pipeline_type,
@@ -1771,31 +2055,34 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const bool depth_offset_uses_light_access =
       has_depth_offset &&
       material_depth_offset_graph_uses_supported_light_access(gpumat, codegen_->depth_offset);
+  const bool supports_surface_light_access = geometry_type_has_surface(geometry_type) &&
+                                             ELEM(pipeline_type,
+                                                  MAT_PIPE_DEFERRED,
+                                                  MAT_PIPE_DEFERRED_NPR,
+                                                  MAT_PIPE_FORWARD,
+                                                  MAT_PIPE_BAKE_COLOR);
   const bool surface_graph_uses_glsl_light_access =
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) &&
+      supports_surface_light_access && pipeline_type != MAT_PIPE_DEFERRED_NPR &&
       (material_graph_uses_glsl_light_access(gpumat, codegen.surface) ||
        GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS));
   const bool npr_graph_uses_glsl_light_access =
+      supports_surface_light_access &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_BAKE_COLOR) &&
       material_graph_uses_glsl_light_access(gpumat, codegen.npr);
   const bool surface_pass_uses_glsl_light_access = surface_graph_uses_glsl_light_access ||
                                                    npr_graph_uses_glsl_light_access;
-  bool material_pass_uses_glsl_light_access =
-      surface_pass_uses_glsl_light_access ||
-      (ELEM(pipeline_type,
-            MAT_PIPE_DEFERRED,
-            MAT_PIPE_DEFERRED_NPR,
-            MAT_PIPE_FORWARD,
-            MAT_PIPE_BAKE_COLOR) &&
-       (material_graph_uses_glsl_light_access(gpumat, codegen.filter) ||
-        material_graph_uses_glsl_light_access(gpumat, codegen.thickness) ||
-        material_graph_uses_glsl_light_access(gpumat, codegen.volume)));
-  for (const GPUGraphOutput &graph : codegen.filter_outputs) {
-    material_pass_uses_glsl_light_access |= material_graph_uses_glsl_light_access(gpumat, graph);
-  }
-  for (const GPUGraphOutput &graph : codegen.material_functions) {
+  bool material_pass_uses_glsl_light_access = surface_pass_uses_glsl_light_access;
+  /* Extracted surface callbacks may be emitted in depth and shadow variants even when they
+   * aren't evaluated there. Keep their light helpers on the fallback path in those variants.
+   * The independently evaluated Depth Offset graph opts into direct lights separately. */
+  if (supports_surface_light_access) {
     material_pass_uses_glsl_light_access |=
-        material_graph_uses_glsl_light_access(gpumat, graph);
+        material_graph_uses_glsl_light_access(gpumat, codegen.filter) ||
+        material_graph_uses_glsl_light_access(gpumat, codegen.thickness) ||
+        material_graph_uses_glsl_light_access(gpumat, codegen.volume);
+    for (const GPUGraphOutput &graph : codegen.material_functions) {
+      material_pass_uses_glsl_light_access |= material_graph_uses_glsl_light_access(gpumat, graph);
+    }
   }
   const bool uses_glsl_light_access = material_pass_uses_glsl_light_access ||
                                       depth_offset_uses_light_access;
@@ -1816,21 +2103,33 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       pipeline_type == MAT_PIPE_BAKE_COLOR ||
       (material_graph_uses_lightprobe_data &&
        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD));
+  const GPUGraphOutput &planar_graph = pipeline_type == MAT_PIPE_DEFERRED_NPR ? codegen.npr :
+                                                                                codegen.surface;
+  bool planar_graph_reads_capture = material_graph_serialized_contains(planar_graph,
+                                                                       "node_planar_probe(");
+  for (const GPUGraphOutput &graph : codegen.material_functions) {
+    planar_graph_reads_capture |= material_graph_serialized_contains(graph, "node_planar_probe(");
+  }
+  const bool use_planar_probe_data =
+      GPU_material_planar_probe_used(gpumat) && planar_graph_reads_capture &&
+      probe_capture == MAT_PROBE_NONE && !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD, MAT_PIPE_DEFERRED_NPR);
+  /* GPU execution supplies an early hint; inactive graphs must not acquire resources. */
+  GPU_material_planar_probe_used_set(gpumat, use_planar_probe_data);
   const bool pipeline_create_info_has_lightprobe_data = ELEM(
       pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD);
 
-  const bool use_front_light_shader_in_surface_pass =
-      use_shader_to_rgba || surface_graph_uses_glsl_light_access || surface_pass_uses_shader_info;
+  const bool use_front_light_shader_in_surface_pass = use_shader_to_rgba ||
+                                                      surface_graph_uses_glsl_light_access ||
+                                                      surface_pass_uses_shader_info;
 
   /* Forward and hybrid BSL entry points expose LightEvalIterator, which already contains the
    * light and shadow resource tables. */
-  const bool has_bsl_light_eval_resources =
-      pipeline_type == MAT_PIPE_FORWARD ||
-      (pipeline_type == MAT_PIPE_DEFERRED && use_front_light_shader_in_surface_pass);
-  const bool use_npr_foreach_shadow =
-      pipeline_type == MAT_PIPE_DEFERRED_NPR &&
-      GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT);
-
+  const bool has_bsl_light_eval_resources = pipeline_type == MAT_PIPE_FORWARD ||
+                                            (pipeline_type == MAT_PIPE_DEFERRED &&
+                                             use_front_light_shader_in_surface_pass);
+  const bool use_npr_foreach_shadow = pipeline_type == MAT_PIPE_DEFERRED_NPR &&
+                                      GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT);
   const bool has_bsl_previous_layer_resources =
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
       GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) &&
@@ -1839,6 +2138,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.additional_info("eevee_PreviousLayerHiZ");
     info.additional_info("eevee_PreviousLayerRadiance");
   }
+  const bool use_additional_data = GPU_material_flag_get(gpumat, GPU_MATFLAG_REFRACT) ||
+                                   GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE) ||
+                                   GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSLUCENT) ||
+                                   separate_depth_offset_lighting;
 
   const bool has_bsl_hiz_resource = ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
                                     !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME);
@@ -1851,14 +2154,192 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   auto vertex_inputs = info.vertex_inputs_;
   info.vertex_inputs_.clear();
 
+  info.compilation_constant(
+      gpu::shader::Type::bool_t, "use_hiz_data", use_hiz_data || has_depth_offset);
+  info.compilation_constant(
+      gpu::shader::Type::bool_t,
+      "use_screenspace_info",
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD) &&
+          GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO));
+  using gpuType = gpu::shader::Type;
+  info.compilation_constant(
+      gpuType::bool_t, "use_diffuse", GPU_material_flag_get(gpumat, GPU_MATFLAG_DIFFUSE));
+  info.compilation_constant(
+      gpuType::bool_t, "use_refraction", GPU_material_flag_get(gpumat, GPU_MATFLAG_REFRACT));
+  info.compilation_constant(
+      gpuType::bool_t, "use_translucent", GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSLUCENT));
+  info.compilation_constant(
+      gpuType::bool_t, "use_reflection", GPU_material_flag_get(gpumat, GPU_MATFLAG_GLOSSY));
+  info.compilation_constant(
+      gpuType::bool_t, "use_clearcoat", GPU_material_flag_get(gpumat, GPU_MATFLAG_COAT));
+  info.compilation_constant(
+      gpuType::bool_t, "use_sss", GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE));
+
+  const eClosureBits closure_bits = shader_closure_bits_from_flag(gpumat);
+
+  int32_t closure_bin_count = to_gbuffer_bin_count(closure_bits);
+  info.compilation_constant(gpu::shader::Type::int_t, "closure_bin_count", closure_bin_count);
+  info.compilation_constant(
+      gpu::shader::Type::int_t, "closure_bin_len", max(1, closure_bin_count));
+
+  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR)) {
+    if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+      /* NPR reads the already-written material GBuffer, so it cannot be specialized to the
+       * NPR tree's own closures. */
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_reflection", true);
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_refraction", true);
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_subsurface", true);
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_translucent", true);
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_reflection_colorless", false);
+      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_refraction_colorless", false);
+      info.compilation_constant(gpu::shader::Type::int_t, "gbuffer_layer_max", 3);
+    }
+    else {
+      info.compilation_constant(gpu::shader::Type::bool_t,
+                                "gbuffer_has_reflection",
+                                GPU_material_flag_get(gpumat, GPU_MATFLAG_GLOSSY));
+      info.compilation_constant(gpu::shader::Type::bool_t,
+                                "gbuffer_has_refraction",
+                                GPU_material_flag_get(gpumat, GPU_MATFLAG_REFRACT));
+      info.compilation_constant(gpu::shader::Type::bool_t,
+                                "gbuffer_has_subsurface",
+                                GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE));
+      info.compilation_constant(gpu::shader::Type::bool_t,
+                                "gbuffer_has_translucent",
+                                GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSLUCENT));
+      info.compilation_constant(
+          gpu::shader::Type::bool_t,
+          "gbuffer_reflection_colorless",
+          GPU_material_flag_get(gpumat, GPU_MATFLAG_REFLECTION_MAYBE_COLORED) == false);
+      info.compilation_constant(
+          gpu::shader::Type::bool_t,
+          "gbuffer_refraction_colorless",
+          GPU_material_flag_get(gpumat, GPU_MATFLAG_REFRACTION_MAYBE_COLORED) == false);
+      info.compilation_constant(
+          gpu::shader::Type::int_t, "gbuffer_layer_max", max(1, closure_bin_count));
+    }
+
+    bool use_simple_layout = false;
+    if (closure_bin_count == 2 && pipeline_type != MAT_PIPE_DEFERRED_NPR) {
+      /* In a lot of cases, we can predict that we do not need the extra GBuffer layers. This
+       * simplifies the shader code and improves compilation time (see #145347). */
+      const bool colorless_reflection = !GPU_material_flag_get(
+          gpumat, GPU_MATFLAG_REFLECTION_MAYBE_COLORED);
+      const bool colorless_refraction = !GPU_material_flag_get(
+          gpumat, GPU_MATFLAG_REFRACTION_MAYBE_COLORED);
+      int closure_layer_count = 0;
+      if (closure_bits & CLOSURE_DIFFUSE) {
+        closure_layer_count += 1;
+      }
+      if (closure_bits & CLOSURE_SSS) {
+        closure_layer_count += 2;
+      }
+      if (closure_bits & CLOSURE_REFLECTION) {
+        closure_layer_count += colorless_reflection ? 1 : 2;
+      }
+      if (closure_bits & CLOSURE_REFRACTION) {
+        closure_layer_count += colorless_refraction ? 1 : 2;
+      }
+      if (closure_bits & CLOSURE_TRANSLUCENT) {
+        closure_layer_count += 1;
+      }
+      if (closure_bits & CLOSURE_CLEARCOAT) {
+        closure_layer_count += colorless_reflection ? 1 : 2;
+      }
+
+      if (closure_layer_count <= 2) {
+        use_simple_layout = true;
+      }
+    }
+
+    info.compilation_constant(
+        gpu::shader::Type::bool_t, "gbuffer_simple_layout", use_simple_layout);
+  }
+
+  int transmit_eval_count = 0;
+  const bool use_light_shader_texture_eval = ELEM(pipeline_type,
+                                                  MAT_PIPE_FORWARD,
+                                                  MAT_PIPE_BAKE_COLOR) ||
+                                             use_front_light_shader_in_surface_pass ||
+                                             use_lighting_nodes;
+  if (use_light_shader_texture_eval) {
+    transmit_eval_count = (closure_bits &
+                           (CLOSURE_REFRACTION | CLOSURE_TRANSLUCENT | CLOSURE_SSS)) ?
+                              1 :
+                              0;
+
+    info.compilation_constant(
+        gpu::shader::Type::bool_t, "use_light_shader_texture_eval", use_light_shader_texture_eval);
+    info.compilation_constant(gpu::shader::Type::bool_t,
+                              "use_npr_light_policy",
+                              GPU_material_principled_npr_v2_has(gpumat));
+    info.compilation_constant(
+        gpu::shader::Type::int_t, "light_closure_eval_count_reflect", closure_bin_count);
+    info.compilation_constant(
+        gpu::shader::Type::int_t, "light_closure_eval_count_transmit", transmit_eval_count);
+  }
+
+  if (use_light_shader_texture_eval || use_npr_foreach_shadow) {
+    info.compilation_constant(gpu::shader::Type::bool_t, "shadow_random", true);
+  }
+  info.compilation_constant(gpu::shader::Type::bool_t, "use_node_moment_atlas",
+                            GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADOW_MOMENTS));
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADOW_FILTER_METHODS)) {
+    info.define("MAT_NODE_SHADOW_FILTER_METHODS");
+  }
+
+  /* Always need to be defined. */
+  info.compilation_constant(
+      gpu::shader::Type::int_t, "light_closure_count_reflect", max(1, closure_bin_count));
+  info.compilation_constant(
+      gpu::shader::Type::int_t, "light_closure_count_transmit", max(1, transmit_eval_count));
+
+  /* Enabling barycentric coordinate only works for triangle primitives. */
+  bool use_barycentric = !is_hit_eval_mesh && GPU_material_flag_get(gpumat, GPU_MATFLAG_BARYCENTRIC) &&
+                         ELEM(geometry_type, MAT_GEOM_MESH, MAT_GEOM_MESH_TESS);
+  info.compilation_constant(gpu::shader::Type::bool_t, "use_barycentric", use_barycentric);
+
+  if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+    info.additional_info("eevee_LightprobeRenderData");
+  }
+  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_BAKE_COLOR) &&
+      (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
+       GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
+       GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS)))
+  {
+    /* Let BSL own these declarations before legacy pass infos can claim them. */
+    info.additional_info("eevee_ShadowRenderData");
+  }
+
   SlotAllocator slots = add_pipeline_create_info(info,
                                                  pipeline_type,
                                                  geometry_type,
                                                  use_front_light_shader_in_surface_pass,
                                                  has_depth_offset,
-                                                 use_lightprobe_data);
+                                                 use_lightprobe_data,
+                                                 use_lighting_nodes,
+                                                 use_ao_node,
+                                                 use_raycast,
+                                                 use_additional_data);
+  if (shell_self_occlusion) {
+    add_create_info_and_reserve(info, slots, "eevee_OutlineShellOcclusionData");
+  }
   if (material_codegen_uses_render_info(codegen)) {
     add_create_info_and_reserve(info, slots, "eevee_sampling_data");
+  }
+  if (GPU_material_stencil_value_used(gpumat) && probe_capture == MAT_PROBE_NONE &&
+      !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+  {
+    GPU_material_stencil_value_readable_set(gpumat);
+    info.define("MAT_STENCIL_VALUE");
+  }
+  if (GPU_material_stencil_surface_used(gpumat) && probe_capture == MAT_PROBE_NONE &&
+      !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+  {
+    GPU_material_stencil_surface_readable_set(gpumat);
+    info.define("MAT_STENCIL_SURFACE");
   }
   if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
     reserve_deferred_npr_pass_samplers(slots);
@@ -1867,6 +2348,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                                 material_texture_reserved_slot_last(pipeline_type, geometry_type));
   }
+  slots.reserve_sampler(SHADOW_MOMENT_SAT_TEX_SLOT);
   if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD)) {
     slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
   }
@@ -1903,28 +2385,23 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     add_create_info_and_reserve(info, slots, "eevee_raycast");
   }
 
-  /* Deferred and forward materials write render passes here. NPR binds the in/out variant in its
-   * base info. */
-  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD)) {
-    info.additional_info("eevee_render_pass_out");
-    if (pipeline_type == MAT_PIPE_DEFERRED) {
-      info.additional_info("eevee_cryptomatte_out");
-    }
-  }
+  /* BSL owns the render-pass and cryptomatte resources. The culling helper is also called by
+   * legacy NPR shaders, whose resource usage cannot be inferred by the BSL compiler. */
+  info.additional_info("MaterialSurfaceCull");
   const bool has_outline_output = GPU_material_has_outline_output(gpumat);
   /* Outline is a screen-space main-view effect. Do not emit it into probe captures, or planar
    * and reflection probes will bake the outline overlay into their radiance textures. */
   const bool use_outline_support = use_outline && (probe_capture == MAT_PROBE_NONE);
-  const bool clears_outline_output =
-      pipeline_type == MAT_PIPE_FORWARD ||
-      (pipeline_type == MAT_PIPE_DEFERRED && blender_mat != nullptr &&
-       (blender_mat->blend_flag & MA_BL_SS_REFRACTION) != 0);
-  if (use_outline_support &&
-      (has_outline_output || clears_outline_output) &&
+  const bool clears_outline_output = pipeline_type == MAT_PIPE_FORWARD ||
+                                     (pipeline_type == MAT_PIPE_DEFERRED &&
+                                      blender_mat != nullptr &&
+                                      (blender_mat->blend_flag & MA_BL_SS_REFRACTION) != 0);
+  if (use_outline_support && (has_outline_output || clears_outline_output) &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
   {
-    info.additional_info((pipeline_type == MAT_PIPE_FORWARD) ? "eevee_surf_forward_outline_out" :
-                                                              "eevee_outline_out");
+    /* Refraction receiver masks preserve any underlying outline style, just like Forward. */
+    info.additional_info(clears_outline_output ? "eevee_surf_forward_outline_out" :
+                                                 "eevee_outline_out");
     info.define("MAT_OUTLINE_OUTPUT");
     if (clears_outline_output) {
       info.define("MAT_OUTLINE_CLEAR");
@@ -1984,21 +2461,20 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       info.define("CREATE_INFO_eevee_LightRenderData");
     }
     if (!has_bsl_light_eval_resources) {
-      add_create_info_and_reserve(info, slots, "eevee_shadow_data");
-      if (use_npr_foreach_shadow) {
-        /* The legacy material create-info above binds the same resources used by the generated BSL
-         * table. Enable its bridge for the NPR shadow output without changing Shader Info paths. */
-        add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
-        info.define("CREATE_INFO_eevee_ShadowRenderData");
-        info.define("CREATE_INFO_UtilityTexture");
-      }
+      /* BSL shadow helpers need their declarations before their function bodies. */
+      add_create_info_and_reserve(info, slots, "eevee_ShadowRenderData");
     }
   }
   /* Classification is requested by Shader Info Self/Cast outputs and by native nodes such as
    * Principled NPR Cast Only. It must not require GPU_MATFLAG_SHADER_INFO. */
+  if (GPU_material_has_node_soft_shadow(gpumat) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+  {
+    info.define("MAT_NODE_SOFT_SHADOW");
+  }
   if (use_shader_info_shadow_classification) {
     info.define("SHADOW_CASTER_CLASSIFY");
-    if (!has_bsl_light_eval_resources && !use_npr_foreach_shadow) {
+    if (!has_bsl_light_eval_resources && !has_shader_info_light_resources) {
       add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
     }
   }
@@ -2012,12 +2488,18 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
 
     if (!has_shader_info_light_resources && !has_bsl_light_eval_resources) {
-      add_create_info_and_reserve(info, slots, "eevee_light_data");
+      /* NPR and bake still declare lights in their legacy entry-point infos. Native passes
+       * need the BSL table: an unused legacy declaration has no expansion point there. */
+      add_create_info_and_reserve(info,
+                                  slots,
+                                  ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_BAKE_COLOR) ?
+                                      "eevee_light_data" :
+                                      "eevee_LightRenderData");
     }
     if (material_pass_uses_glsl_light_access) {
       info.define("MAT_GLSL_LIGHT_SHADOW_ACCESS");
       if (!has_shader_info_light_resources && !has_bsl_light_eval_resources) {
-        add_create_info_and_reserve(info, slots, "eevee_shadow_data");
+        add_create_info_and_reserve(info, slots, "eevee_ShadowRenderData");
       }
     }
     if (surface_pass_uses_glsl_light_access) {
@@ -2026,11 +2508,47 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       GPU_material_glsl_light_shader_eval_set(gpumat);
     }
   }
+  if (use_planar_probe_data) {
+    info.define("MAT_PLANAR_PROBE_ACCESS");
+    /* Native plane resources are conditional on Forward lighting. The sampling node also
+     * needs them in an otherwise unlit Deferred material. */
+    add_create_info_and_reserve(info, slots, "eevee_LightprobePlaneRenderData");
+    slots.reserve_sampler(PLANAR_PROBE_RADIANCE_TEX_SLOT);
+    slots.reserve_sampler(PLANAR_PROBE_DEPTH_TEX_SLOT);
+  }
   if (use_lightprobe_data && !pipeline_create_info_has_lightprobe_data) {
     add_create_info_and_reserve(info, slots, "eevee_LightprobeRenderData");
     if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
       add_create_info_and_reserve(info, slots, "eevee_LightprobePlaneRenderData");
     }
+  }
+
+  if (GPU_material_has_node_shadow_cache(gpumat) &&
+      ELEM(geometry_type, MAT_GEOM_MESH, MAT_GEOM_MESH_TESS) &&
+      !GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) &&
+      !GPU_material_has_depth_offset_output(gpumat) && probe_capture == MAT_PROBE_NONE)
+  {
+    if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR)) {
+      info.define("MAT_NODE_SHADOW_CACHE");
+      slots.reserve_slots(info);
+      info.sampler(slots.get_next_sampler(), ImageType::Float2DArray, "node_shadow_cache_tx");
+    }
+    if (ELEM(pipeline_type, MAT_PIPE_PREPASS_DEFERRED, MAT_PIPE_PREPASS_DEFERRED_VELOCITY)) {
+      info.define("MAT_NODE_SHADOW_CACHE_RECEIVER");
+    }
+  }
+
+  if (GPU_material_stencil_value_readable(gpumat)) {
+    /* Use the same allocator as material textures, after all engine resources are known. A high
+     * fixed binding can exceed the OpenGL texture-binding API limit even with few samplers. */
+    slots.reserve_slots(info);
+    info.sampler(slots.get_next_sampler(), ImageType::Uint2D, "stencil_value_tx");
+  }
+  if (GPU_material_stencil_surface_readable(gpumat)) {
+    slots.reserve_slots(info);
+    info.sampler(slots.get_next_sampler(), ImageType::Uint2D, "stencil_surface_value_tx");
+    info.sampler(slots.get_next_sampler(), ImageType::Float2D, "stencil_surface_depth_tx");
+    info.push_constant(gpu::shader::Type::int2_t, "stencil_surface_extent");
   }
 
   for (auto &resource : info.batch_resources_) {
@@ -2091,9 +2609,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   if (npr_features & GPU_MAT_NPR_DRIVEN_RAMP) {
     info.define("MAT_NPR_DRIVEN_RAMP");
   }
-  const eGPUMaterialNPRFeature npr_shadow =
-      npr_features & (GPU_MAT_NPR_SHADOW_STABLE | GPU_MAT_NPR_SHADOW_TEMPORAL |
-                      GPU_MAT_NPR_SHADOW_SOFT);
+  const eGPUMaterialNPRFeature npr_shadow = npr_features & (GPU_MAT_NPR_SHADOW_STABLE |
+                                                            GPU_MAT_NPR_SHADOW_TEMPORAL |
+                                                            GPU_MAT_NPR_SHADOW_SOFT);
   if (npr_shadow == GPU_MAT_NPR_FEATURE_NONE) {
     info.define("MAT_NPR_SHADOW_NONE");
   }
@@ -2119,167 +2637,80 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.define("MAT_CLEARCOAT");
   }
 
-  info.compilation_constant(
-      gpu::shader::Type::bool_t, "use_sss", GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE));
-
-  const eClosureBits closure_bits = shader_closure_bits_from_flag(gpumat);
-
-  int32_t closure_bin_count = to_gbuffer_bin_count(closure_bits);
-  switch (closure_bin_count) {
-    /* These need to be separated since the strings need to be static. */
-    case 0:
-    case 1:
-      info.define("CLOSURE_BIN_COUNT", "1");
-      break;
-    case 2:
-      info.define("CLOSURE_BIN_COUNT", "2");
-      break;
-    case 3:
-      info.define("CLOSURE_BIN_COUNT", "3");
-      break;
-    default:
-      BLI_assert_unreachable();
-      break;
-  }
-  info.compilation_constant(gpu::shader::Type::int_t, "closure_bin_count", closure_bin_count);
-
-  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR)) {
-    if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
-      /* NPR reads the already-written material GBuffer, so it cannot be specialized to the
-       * NPR tree's own closures. */
-      info.define("GBUFFER_LAYER_MAX", "3");
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_reflection", true);
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_refraction", true);
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_subsurface", true);
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_has_translucent", true);
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_reflection_colorless", false);
-      info.compilation_constant(gpu::shader::Type::bool_t, "gbuffer_refraction_colorless", false);
-      info.compilation_constant(gpu::shader::Type::int_t, "gbuffer_layer_max", 3);
-    }
-    else {
-      info.compilation_constant(gpu::shader::Type::bool_t,
-                                "gbuffer_has_reflection",
-                                GPU_material_flag_get(gpumat, GPU_MATFLAG_GLOSSY));
-      info.compilation_constant(gpu::shader::Type::bool_t,
-                                "gbuffer_has_refraction",
-                                GPU_material_flag_get(gpumat, GPU_MATFLAG_REFRACT));
-      info.compilation_constant(gpu::shader::Type::bool_t,
-                                "gbuffer_has_subsurface",
-                                GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE));
-      info.compilation_constant(gpu::shader::Type::bool_t,
-                                "gbuffer_has_translucent",
-                                GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSLUCENT));
-      info.compilation_constant(
-          gpu::shader::Type::bool_t,
-          "gbuffer_reflection_colorless",
-          GPU_material_flag_get(gpumat, GPU_MATFLAG_REFLECTION_MAYBE_COLORED) == false);
-      info.compilation_constant(
-          gpu::shader::Type::bool_t,
-          "gbuffer_refraction_colorless",
-          GPU_material_flag_get(gpumat, GPU_MATFLAG_REFRACTION_MAYBE_COLORED) == false);
-      info.compilation_constant(
-          gpu::shader::Type::int_t, "gbuffer_layer_max", max(1, closure_bin_count));
-      switch (closure_bin_count) {
-        /* These need to be separated since the strings need to be static. */
-        case 0:
-        case 1:
-          info.define("GBUFFER_LAYER_MAX", "1");
-          break;
-        case 2:
-          info.define("GBUFFER_LAYER_MAX", "2");
-          break;
-        case 3:
-          info.define("GBUFFER_LAYER_MAX", "3");
-          break;
-        default:
-          BLI_assert_unreachable();
-          break;
-      }
-    }
-
-    bool use_simple_layout = false;
-    if (closure_bin_count == 2 && pipeline_type != MAT_PIPE_DEFERRED_NPR) {
-      /* In a lot of cases, we can predict that we do not need the extra GBuffer layers. This
-       * simplifies the shader code and improves compilation time (see #145347). */
-      const bool colorless_reflection = !GPU_material_flag_get(
-          gpumat, GPU_MATFLAG_REFLECTION_MAYBE_COLORED);
-      const bool colorless_refraction = !GPU_material_flag_get(
-          gpumat, GPU_MATFLAG_REFRACTION_MAYBE_COLORED);
-      int closure_layer_count = 0;
-      if (closure_bits & CLOSURE_DIFFUSE) {
-        closure_layer_count += 1;
-      }
-      if (closure_bits & CLOSURE_SSS) {
-        closure_layer_count += 2;
-      }
-      if (closure_bits & CLOSURE_REFLECTION) {
-        closure_layer_count += colorless_reflection ? 1 : 2;
-      }
-      if (closure_bits & CLOSURE_REFRACTION) {
-        closure_layer_count += colorless_refraction ? 1 : 2;
-      }
-      if (closure_bits & CLOSURE_TRANSLUCENT) {
-        closure_layer_count += 1;
-      }
-      if (closure_bits & CLOSURE_CLEARCOAT) {
-        closure_layer_count += colorless_reflection ? 1 : 2;
-      }
-
-      if (closure_layer_count <= 2) {
-        use_simple_layout = true;
-      }
-    }
-
-    info.compilation_constant(
-        gpu::shader::Type::bool_t, "gbuffer_simple_layout", use_simple_layout);
-  }
-
-  const bool use_light_shader_texture_eval =
-      ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) ||
-      use_front_light_shader_in_surface_pass;
-  if (use_light_shader_texture_eval) {
-    const int transmit_eval_count = (closure_bits &
-                                     (CLOSURE_REFRACTION | CLOSURE_TRANSLUCENT | CLOSURE_SSS)) ?
-                                        1 :
-                                        0;
-
-    info.compilation_constant(
-        gpu::shader::Type::bool_t, "use_light_shader_texture_eval", use_light_shader_texture_eval);
-    info.compilation_constant(gpu::shader::Type::bool_t,
-                              "use_npr_light_policy",
-                              GPU_material_principled_npr_v2_has(gpumat));
-    info.compilation_constant(
-        gpu::shader::Type::int_t, "light_closure_eval_count_reflect", closure_bin_count);
-    info.compilation_constant(
-        gpu::shader::Type::int_t, "light_closure_eval_count_transmit", transmit_eval_count);
-  }
-
-  if (use_light_shader_texture_eval || use_npr_foreach_shadow) {
-    info.compilation_constant(gpu::shader::Type::bool_t, "shadow_random", true);
-  }
-
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_BARYCENTRIC) && !is_hit_eval_mesh) {
-    switch (geometry_type) {
-      case MAT_GEOM_MESH:
-        /* Support using gpu builtin barycentrics. */
-        info.define("USE_BARYCENTRICS");
-        info.builtins(BuiltinBits::BARYCENTRIC_COORD);
-        break;
-      case MAT_GEOM_CURVES:
-        /* Support using one float2 attribute. See #hair_get_barycentric(). */
-        info.define("USE_BARYCENTRICS");
-        break;
-      default:
-        /* No support */
-        break;
-    }
-  }
-
   /* Allow to use Reverse-Z on OpenGL. Does nothing in other backend. */
   info.builtins(BuiltinBits::CLIP_CONTROL);
 
   std::stringstream global_vars;
+  /* Interpolation of the material attributes of tessellated meshes. */
+  std::stringstream tess_attr_interp;
+  bool tess_attr_overflow = false;
   switch (geometry_type) {
+    case MAT_GEOM_MESH_TESS: {
+      /* Attributes are read from the mesh batch bound as storage buffers and interpolated into
+       * global variables named after the vertex inputs, used by #attrib_load. */
+      auto &codegen_info = *reinterpret_cast<GPUCodegenCreateInfo *>(codegen.create_info);
+      int slot = MAT_TESS_ATTR_BUF_SLOT_FIRST;
+      for (auto &input : vertex_inputs) {
+        global_vars << input.type << " " << input.name << ";\n";
+        if (slot > MAT_TESS_ATTR_BUF_SLOT_LAST) {
+          tess_attr_overflow = true;
+          continue;
+        }
+        char name[32];
+        SNPRINTF(name, "vbo_%s[]", input.name.c_str());
+        info.storage_buf(slot,
+                         Qualifier::read,
+                         "uint",
+                         codegen_info.name_buffer.append_sampler_name(name),
+                         Frequency::GEOMETRY);
+        SNPRINTF(name, "gpu_attr_%d", slot);
+        info.push_constant(gpu::shader::Type::int2_t,
+                           codegen_info.name_buffer.append_sampler_name(name));
+        SNPRINTF(name, "gpu_attr_%d_meta", slot);
+        info.push_constant(gpu::shader::Type::int_t,
+                           codegen_info.name_buffer.append_sampler_name(name));
+        const std::string fetch = fmt::format(
+            "gpu_attr_fetch_float4(vbo_{0}, gpu_attr_{1}, gpu_attr_{1}_meta, ",
+            input.name.c_str(),
+            slot);
+        /* float(float4) is not a valid constructor. Swizzle, then construct. */
+        const char *swizzle = "";
+        switch (input.type) {
+          case gpu::shader::Type::float_t:
+          case gpu::shader::Type::int_t:
+          case gpu::shader::Type::uint_t:
+          case gpu::shader::Type::bool_t:
+            swizzle = ".x";
+            break;
+          case gpu::shader::Type::float2_t:
+          case gpu::shader::Type::int2_t:
+          case gpu::shader::Type::uint2_t:
+            swizzle = ".xy";
+            break;
+          case gpu::shader::Type::float3_t:
+          case gpu::shader::Type::int3_t:
+          case gpu::shader::Type::uint3_t:
+            swizzle = ".xyz";
+            break;
+          default:
+            break;
+        }
+        tess_attr_interp << "  " << input.name << " = " << input.type << "(" << fetch
+                         << "vertices.x)" << swizzle << ") * weights.x + " << input.type << "("
+                         << fetch << "vertices.y)" << swizzle << ") * weights.y + " << input.type
+                         << "(" << fetch << "vertices.z)" << swizzle << ") * weights.z;\n";
+        if (input.name == "orco") {
+          /* An undeformed mesh has no ORCO VBO. Match the generic vertex attribute's W=1
+           * sentinel so attr_load_orco uses MeshVertex::orco_default instead of constant .5. */
+          tess_attr_interp << "  if (gpu_attr_" << slot << "_meta == 0) {\n"
+                           << "    orco = float4(0.0f, 0.0f, 0.0f, 1.0f);\n"
+                           << "  }\n";
+        }
+        slot++;
+      }
+      vertex_inputs.clear();
+      break;
+    }
     case MAT_GEOM_MESH:
       if (pipeline_type == MAT_PIPE_VOLUME_MATERIAL) {
         /* If mesh has a volume output, it can receive volume grid attributes from smoke
@@ -2324,6 +2755,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       }
       break;
     case MAT_GEOM_POINTCLOUD:
+      /* Fall through to the curves case. */
+      ATTR_FALLTHROUGH;
+    case MAT_GEOM_GSPLAT:
+      /* Fall through to the curves case. */
+      ATTR_FALLTHROUGH;
     case MAT_GEOM_CURVES:
       /** Hair attributes come from sampler buffer. Transfer attributes to sampler. */
       for (auto &input : vertex_inputs) {
@@ -2377,7 +2813,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   if (!do_vertex_attrib_load && !info.vertex_out_interfaces_.is_empty()) {
     /* Codegen outputs only one interface. */
-    const StageInterfaceInfo &iface = *info.vertex_out_interfaces_.first();
+    const StageInterfaceInfo &iface = *info.vertex_out_interfaces_.first().iface;
     /* Globals the attrib_load() can write to when it is in the fragment shader. */
     global_vars << "struct " << iface.name << " {\n";
     for (const auto &inout : iface.inouts) {
@@ -2393,10 +2829,14 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const char *domain_type_vert = "";
   switch (geometry_type) {
     case MAT_GEOM_MESH:
+    case MAT_GEOM_MESH_TESS:
       domain_type_frag = (pipeline_type == MAT_PIPE_VOLUME_MATERIAL) ? "VolumePoint" :
                                                                        "MeshVertex";
       domain_type_vert = "MeshVertex";
       break;
+    case MAT_GEOM_GSPLAT:
+      /* Fall through to point-clouds, reuse their attribute domain. */
+      ATTR_FALLTHROUGH;
     case MAT_GEOM_POINTCLOUD:
       domain_type_frag = (pipeline_type == MAT_PIPE_VOLUME_MATERIAL) ? "VolumePoint" :
                                                                        "PointCloudPoint";
@@ -2446,10 +2886,35 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const bool use_vertex_displacement = !codegen.displacement.empty() &&
                                        (displacement_type != MAT_DISPLACEMENT_BUMP) &&
                                        !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME);
+  const bool use_tessellation_graph = (geometry_type == MAT_GEOM_MESH_TESS) &&
+                                      codegen.tessellation.has_value() &&
+                                      !codegen.tessellation->empty();
+  if (geometry_type == MAT_GEOM_MESH_TESS) {
+    /* Shade tessellated meshes using the normal of the displaced surface instead of bump. */
+    ShaderTessellationSettings tessellation_settings;
+    if (use_vertex_displacement &&
+        material_tessellation_settings_get(GPU_material_get_material(gpumat),
+                                           tessellation_settings) &&
+        tessellation_settings.normal_mode == SHD_TESSELLATION_NORMAL_GEOMETRY)
+    {
+      info.define("TESS_NORMAL_GEOMETRY");
+    }
+    if (tess_attr_overflow) {
+      std::cerr << "Error: EEVEE: Tessellated material " << GPU_material_get_name(gpumat)
+                << " uses too many attributes." << std::endl;
+      /* Fail the shader compilation explicitly, rather than reading unbound buffers. */
+      info.vertex_source_generated += "\n#error Tessellated material attribute limit exceeded\n";
+    }
+  }
+  if (use_vertex_displacement && geometry_type == MAT_GEOM_MESH) {
+    /* Shade displaced meshes with the normal of the displaced surface, not the displacement
+     * height field approximation (which is only meaningful along the surface normal). */
+    info.define("MAT_DISPLACEMENT_GEOM_NORMAL");
+  }
 
   std::stringstream vert_gen, frag_gen;
 
-  if (do_vertex_attrib_load || is_hit_eval_mesh) {
+  if (do_vertex_attrib_load) {
     vert_gen << global_vars.str() << "void attrib_load(" << domain_type_vert << " domain)"
              << attr_load.str();
   }
@@ -2489,55 +2954,86 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   generated_resource_header += "#endif\n";
   generated_resource_header += "\n";
 
-  info.generated_sources.append({"eevee_nodetree_type_lib.glsl", {}, generated_resource_header});
+  info.generated_sources.append({"eevee_nodetree_type.bsl.hh", {}, generated_resource_header});
+  info.generated_sources.append({"gpu_shader_material_interface.bsl.hh", {}, ""});
 
   {
     Set<StringRefNull> generated_dependencies;
     Set<StringRefNull> emitted_generated_sources;
     std::stringstream generated_source_block;
 
+    generated_dependencies.add("eevee_geom_types_lib.bsl.hh");
+    generated_dependencies.add("eevee_nodetree_lib.bsl.hh");
+    generated_dependencies.add("eevee_bevel_lib.bsl.hh");
+    if (uses_referenced_object_data || uses_glsl_light_access) {
+      generated_dependencies.add("draw_referenced_object_lib.glsl");
+    }
     if (use_vertex_displacement) {
-      generated_dependencies.add("eevee_geom_types_lib.bsl.hh");
-      generated_dependencies.add("eevee_nodetree_lib.bsl.hh");
       material_graph_dependencies_append(gpumat,
                                          codegen.displacement.dependencies,
                                          generated_dependencies,
                                          emitted_generated_sources,
                                          generated_source_block);
     }
+    if (use_tessellation_graph) {
+      material_graph_dependencies_append(gpumat,
+                                         codegen.tessellation->dependencies,
+                                         generated_dependencies,
+                                         emitted_generated_sources,
+                                         generated_source_block);
+    }
 
+    if (use_vertex_displacement || use_tessellation_graph) {
+      for (const auto &graph : codegen.material_functions) {
+        material_graph_dependencies_append(gpumat,
+                                           graph.dependencies,
+                                           generated_dependencies,
+                                           emitted_generated_sources,
+                                           generated_source_block);
+      }
+    }
     vert_gen << generated_source_block.str();
-    vert_gen << "float3 nodetree_displacement()\n";
+    if (use_vertex_displacement || use_tessellation_graph) {
+      for (const auto &graph : codegen.material_functions) {
+        vert_gen << graph.serialized;
+      }
+    }
+    vert_gen << "#line 1 \"" __FILE__ "\"\n";
+    vert_gen << "#line " STRINGIFY(__LINE__) "\n";
+    vert_gen << "float3 nodetree_displacement(KernelGlobals kg, _ref(ShadingData, sd))\n";
     vert_gen << "{\n";
     vert_gen << ((use_vertex_displacement) ? codegen.displacement.serialized :
                                              "return float3(0);\n");
     vert_gen << "}\n\n";
 
-    Vector<StringRefNull> dependencies = use_vertex_displacement ?
-                                             material_dependencies_finalize(generated_dependencies) :
-                                             Vector<StringRefNull>{};
-    if (is_hit_eval_mesh) {
-      dependencies.append("eevee_hit_attr_lib.glsl");
+    if (geometry_type == MAT_GEOM_MESH_TESS) {
+      /* Packed settings of the Tessellation Control node. Defaults to no subdivision. */
+      vert_gen << "float4 nodetree_tessellation(KernelGlobals kg, _ref(ShadingData, sd))\n";
+      vert_gen << "{\n";
+      vert_gen << (use_tessellation_graph ? codegen.tessellation->serialized :
+                                            "return float4(17.0f, 0.0f, 0.0f, 0.0f);\n");
+      vert_gen << "}\n\n";
+      vert_gen << "void tess_attr_interp(uint3 vertices, float3 weights)\n";
+      vert_gen << "{\n";
+      vert_gen << tess_attr_interp.str();
+      vert_gen << "}\n\n";
     }
 
-    info.generated_sources.append({"eevee_nodetree_vert_lib.glsl", dependencies, vert_gen.str()});
+    Vector<StringRefNull> dependencies = material_dependencies_finalize(generated_dependencies);
+
+    info.generated_sources.append(
+        {"eevee_nodetree_vert_lib.bsl.hh", dependencies, vert_gen.str()});
   }
 
   if (pipeline_type != MAT_PIPE_VOLUME_OCCUPANCY) {
     Set<StringRefNull> dependencies_set;
     if (is_hit_eval_mesh) {
       dependencies_set.add("eevee_hit_attr_lib.glsl");
-      if (GPU_material_principled_npr_v2_has(gpumat)) {
-        /* NPR's shared helper library declares shadow evaluators even when replay only consumes
-         * its transport closures. Supply their definitions without enabling main-view shading. */
-        dependencies_set.add("eevee_shadow_tracing.bsl.hh");
-      }
+      dependencies_set.add("eevee_surf_hit_eval_frag.glsl");
     }
     Set<StringRefNull> emitted_generated_sources;
     std::stringstream generated_source_block;
-    if (use_ao_node) {
-      dependencies_set.add("eevee_fast_gi.bsl.hh");
-    }
+    dependencies_set.add("eevee_nodetree_type.bsl.hh");
     const bool pipeline_uses_light_eval =
         (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT)) &&
@@ -2559,15 +3055,39 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if (material_pass_uses_glsl_light_access) {
       dependencies_set.add("eevee_shadow_tracing.bsl.hh");
     }
+    if (use_planar_probe_data) {
+      dependencies_set.add("eevee_lightprobe_plane.bsl.hh");
+      dependencies_set.add("eevee_reverse_z_lib.bsl.hh");
+    }
     if (use_lightprobe_data || pipeline_type == MAT_PIPE_DEFERRED_NPR) {
       dependencies_set.add("eevee_lightprobe.bsl.hh");
     }
     dependencies_set.add("eevee_geom_types_lib.bsl.hh");
     dependencies_set.add("eevee_nodetree_lib.bsl.hh");
+    dependencies_set.add("eevee_bevel_lib.bsl.hh");
+    if (uses_referenced_object_data || uses_glsl_light_access) {
+      dependencies_set.add("draw_referenced_object_lib.glsl");
+    }
+    if (has_outline_output) {
+      dependencies_set.add("eevee_outline_lib.glsl");
+    }
+    /* BSL owns the stage interfaces; retain the existing NPR/filter/bake evaluator libraries. */
+    if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+      dependencies_set.add("eevee_surf_deferred_npr_frag.glsl");
+    }
+    if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
+      dependencies_set.add("eevee_surf_bake_color_frag.glsl");
+    }
+    if (pipeline_type == MAT_PIPE_FILTER) {
+      dependencies_set.add("eevee_filter_material_frag.glsl");
+    }
 
     for (const auto &graph : codegen.material_functions) {
-      material_graph_dependencies_append(
-          gpumat, graph.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+      material_graph_dependencies_append(gpumat,
+                                         graph.dependencies,
+                                         dependencies_set,
+                                         emitted_generated_sources,
+                                         generated_source_block);
     }
     if (!codegen.displacement.empty()) {
       material_graph_dependencies_append(gpumat,
@@ -2576,10 +3096,16 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                          emitted_generated_sources,
                                          generated_source_block);
     }
-    material_graph_dependencies_append(
-        gpumat, codegen.surface.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
-    material_graph_dependencies_append(
-        gpumat, codegen.npr.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+    material_graph_dependencies_append(gpumat,
+                                       codegen.surface.dependencies,
+                                       dependencies_set,
+                                       emitted_generated_sources,
+                                       generated_source_block);
+    material_graph_dependencies_append(gpumat,
+                                       codegen.npr.dependencies,
+                                       dependencies_set,
+                                       emitted_generated_sources,
+                                       generated_source_block);
     if (!codegen.filter_outputs.is_empty()) {
       for (const GPUGraphOutput &filter_output : codegen.filter_outputs) {
         material_graph_dependencies_append(gpumat,
@@ -2590,11 +3116,17 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       }
     }
     else {
-      material_graph_dependencies_append(
-          gpumat, codegen.filter.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+      material_graph_dependencies_append(gpumat,
+                                         codegen.filter.dependencies,
+                                         dependencies_set,
+                                         emitted_generated_sources,
+                                         generated_source_block);
     }
-    material_graph_dependencies_append(
-        gpumat, codegen.thickness.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+    material_graph_dependencies_append(gpumat,
+                                       codegen.thickness.dependencies,
+                                       dependencies_set,
+                                       emitted_generated_sources,
+                                       generated_source_block);
     if (has_depth_offset && codegen.depth_offset.has_value() &&
         !material_depth_offset_graph_has_unsupported_dependencies(gpumat, *codegen.depth_offset))
     {
@@ -2604,8 +3136,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                          emitted_generated_sources,
                                          generated_source_block);
     }
-    material_graph_dependencies_append(
-        gpumat, codegen.volume.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+    material_graph_dependencies_append(gpumat,
+                                       codegen.volume.dependencies,
+                                       dependencies_set,
+                                       emitted_generated_sources,
+                                       generated_source_block);
 
     frag_gen << generated_source_block.str();
     for (const auto &graph : codegen.material_functions) {
@@ -2613,10 +3148,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
 
     if (!codegen.displacement.empty() && !outline_shell) {
-      /* Bump displacement. Needed to recompute normals after displacement. */
+      /* Bump displacement. Needed to recompute normals after displacement.
+       * With #TESS_NORMAL_GEOMETRY, computes the normal of the displaced surface instead. */
       info.define("MAT_DISPLACEMENT_BUMP");
 
-      frag_gen << "float3 nodetree_displacement()\n";
+      frag_gen << "#line 1 \"" __FILE__ "\"\n";
+      frag_gen << "#line " STRINGIFY(__LINE__) "\n";
+      frag_gen << "float3 nodetree_displacement(KernelGlobals kg, _ref(ShadingData, sd))\n";
       frag_gen << "{\n";
       frag_gen << codegen.displacement.serialized;
       frag_gen << "}\n\n";
@@ -2626,13 +3164,24 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     frag_gen << "#line 1 \"" __FILE__ "\"\n";
     frag_gen << "#line " STRINGIFY(__LINE__) "\n";
 
-    frag_gen << "Closure nodetree_surface(float closure_rand)\n";
+    frag_gen << "Closure nodetree_surface(KernelGlobals kg, _ref(ShadingData, sd), float "
+                "closure_rand)\n";
     frag_gen << "{\n";
-    frag_gen << "  closure_weights_reset(closure_rand);\n";
-    frag_gen << codegen.surface.serialized_or_default("return Closure(0);\n");
+    frag_gen << "  closure_weights_reset(kg, sd, closure_rand);\n";
+    const GPUGraphOutput &surface_graph = codegen.outline_shell_surface.has_value() ?
+                                              *codegen.outline_shell_surface :
+                                              codegen.surface;
+    frag_gen << surface_graph.serialized_or_default("return Closure(0);\n");
     frag_gen << "}\n\n";
 
-    frag_gen << "float4 nodetree_npr()\n";
+    if (codegen.outline_shell_aov.has_value()) {
+      frag_gen << "void nodetree_outline_shell_aov(KernelGlobals kg, _ref(ShadingData, sd), float closure_rand)\n{\n";
+      frag_gen << "closure_weights_reset(kg, sd, closure_rand);\n";
+      frag_gen << codegen.outline_shell_aov->serialized_or_default("");
+      frag_gen << "}\n\n";
+    }
+
+    frag_gen << "float4 nodetree_npr(KernelGlobals kg, _ref(ShadingData, sd))\n";
     frag_gen << "{\n";
     frag_gen << codegen.npr.serialized_or_default("return float4(0.0f);\n");
     frag_gen << "}\n\n";
@@ -2645,22 +3194,23 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       filter_outputs.append(codegen.filter);
     }
     for (const int i : filter_outputs.index_range()) {
-      frag_gen << "float4 nodetree_filter_output_" << i << "()\n";
+      frag_gen << "float4 nodetree_filter_output_" << i
+               << "(KernelGlobals kg, _ref(ShadingData, sd))\n";
       frag_gen << "{\n";
       frag_gen << filter_outputs[i].serialized_or_default("return float4(0.0f);\n");
       frag_gen << "}\n\n";
     }
-    frag_gen << "float4 nodetree_filter()\n";
+    frag_gen << "float4 nodetree_filter(KernelGlobals kg, _ref(ShadingData, sd))\n";
     frag_gen << "{\n";
-    frag_gen << "  return nodetree_filter_output_0();\n";
+    frag_gen << "  return nodetree_filter_output_0(kg, sd);\n";
     frag_gen << "}\n\n";
-    frag_gen << "void nodetree_filter_outputs()\n";
+    frag_gen << "void nodetree_filter_outputs(KernelGlobals kg, _ref(ShadingData, sd))\n";
     frag_gen << "{\n";
     frag_gen << "#if defined(MAT_FILTER)\n";
     for (const int i : filter_outputs.index_range()) {
-      frag_gen << "  float4 filter_result_" << i << " = nodetree_filter_output_" << i << "();\n";
-      frag_gen << "  float4 filter_store_" << i
-               << " = float4(filter_result_" << i
+      frag_gen << "  float4 filter_result_" << i << " = nodetree_filter_output_" << i
+               << "(kg, sd);\n";
+      frag_gen << "  float4 filter_store_" << i << " = float4(filter_result_" << i
                << ".rgb, saturate(filter_result_" << i << ".a));\n";
       frag_gen << "  imageStore(filter_graph_output_img, int3(int2(gl_FragCoord.xy), " << i
                << "), filter_store_" << i << ");\n";
@@ -2674,10 +3224,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     frag_gen << "#endif\n";
     frag_gen << "}\n\n";
 
-    /* TODO(fclem): Find a way to pass material parameters inside the material UBO. */
-    info.define("thickness_mode", thickness_type == MAT_THICKNESS_SLAB ? "false" : "true");
-
-    frag_gen << "float nodetree_thickness()\n";
+    frag_gen << "float nodetree_thickness(KernelGlobals kg, _ref(ShadingData, sd))\n";
     frag_gen << "{\n";
     if (codegen.thickness.empty()) {
       /* Check presence of closure needing thickness to not add mandatory dependency on obinfos. */
@@ -2689,12 +3236,12 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       else {
         /* TODO(fclem): Should use `to_scale` but the gpu_shader_math_matrix_lib.glsl isn't
          * included everywhere yet. */
-        frag_gen << "ObjectMatrices obj = object_matrices_get();\n";
+        frag_gen << "ObjectMatrices obj = _object_matrices_get(kg, sd);\n";
         frag_gen << "float3 ob_scale;\n";
         frag_gen << "ob_scale.x = length(obj.model[0].xyz);\n";
         frag_gen << "ob_scale.y = length(obj.model[1].xyz);\n";
         frag_gen << "ob_scale.z = length(obj.model[2].xyz);\n";
-        frag_gen << "ObjectInfos infos = object_infos_get();\n";
+        frag_gen << "ObjectInfos infos = _object_infos_get(kg, sd);\n";
         frag_gen << "float3 ls_dimensions = safe_rcp(abs(infos.orco_mul.xyz));\n";
         frag_gen << "float3 ws_dimensions = ob_scale * ls_dimensions;\n";
         /* Choose the minimum axis so that cuboids are better represented. */
@@ -2708,9 +3255,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
     if (has_depth_offset) {
       BLI_assert(codegen.depth_offset.has_value());
-      frag_gen << "float nodetree_depth_offset()\n";
+      frag_gen << "float nodetree_depth_offset(KernelGlobals kg, _ref(ShadingData, sd))\n";
       frag_gen << "{\n";
-      if (material_depth_offset_graph_has_unsupported_dependencies(gpumat, *codegen.depth_offset)) {
+      if (material_depth_offset_graph_has_unsupported_dependencies(gpumat, *codegen.depth_offset))
+      {
         frag_gen << "return 0.0f;\n";
       }
       else {
@@ -2719,14 +3267,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       frag_gen << "}\n\n";
     }
 
-    frag_gen << "Closure nodetree_volume()\n";
+    frag_gen << "Closure nodetree_volume(KernelGlobals kg, _ref(ShadingData, sd))\n";
     frag_gen << "{\n";
-    frag_gen << "  closure_weights_reset(0.0);\n";
+    frag_gen << "  closure_weights_reset(kg, sd, 0.0);\n";
     frag_gen << codegen.volume.serialized_or_default("return Closure(0);\n");
     frag_gen << "}\n\n";
 
     Vector<StringRefNull> dependencies = material_dependencies_finalize(dependencies_set);
-    info.generated_sources.append({"eevee_nodetree_frag_lib.glsl", dependencies, frag_gen.str()});
+    info.generated_sources.append(
+        {"eevee_nodetree_frag_lib.bsl.hh", dependencies, frag_gen.str()});
   }
 
   const char *material_name = (info.name_.c_str() + 2);
@@ -2828,9 +3377,9 @@ static void light_create_info_amend(GPUMaterial *gpumat,
   const bool uses_glsl_light_access = codegen.light_shader.has_value() &&
                                       material_graph_uses_glsl_light_access(gpumat,
                                                                             *codegen.light_shader);
-  const bool uses_glsl_light_shadow =
-      uses_glsl_light_access &&
-      material_graph_dependency_source_contains(gpumat, *codegen.light_shader, "glsl_light_shadow");
+  const bool uses_glsl_light_shadow = uses_glsl_light_access &&
+                                      material_graph_dependency_source_contains(
+                                          gpumat, *codegen.light_shader, "glsl_light_shadow");
   if (uses_glsl_light_access) {
     info.define("MAT_GLSL_LIGHT_ACCESS");
   }
@@ -2839,6 +3388,47 @@ static void light_create_info_amend(GPUMaterial *gpumat,
     add_create_info_and_reserve(info, slots, "eevee_shadow_data");
   }
   info.name_ += pipeline_info.name_suffix;
+
+  /* Light graphs evaluate without mesh interfaces or surface closure storage. */
+  for (const char *name : {"is_mesh",
+                           "is_curves",
+                           "is_pointcloud",
+                           "is_gsplat",
+                           "use_ambient_occlusion",
+                           "use_hiz_data",
+                           "use_velocity",
+                           "use_transparency",
+                           "use_clip_plane",
+                           "use_diffuse",
+                           "use_translucent",
+                           "use_reflection",
+                           "use_refraction",
+                           "use_clearcoat",
+                           "use_sss",
+                           "use_aov_output",
+                           "use_raycast",
+                           "use_additional_data",
+                           "is_volume_pipe",
+                           "is_shadow_pipe",
+                           "is_capture_pipe",
+                           "is_occupancy_pipe",
+                           "use_forward_lighting",
+                           "use_lightprobe_data",
+                           "use_screenspace_info",
+                           "use_multi_viewport",
+                           "use_barycentric"})
+  {
+    info.compilation_constant(gpu::shader::Type::bool_t, name, false);
+  }
+  info.compilation_constant(gpu::shader::Type::bool_t, "is_world", true);
+  info.compilation_constant(
+      gpu::shader::Type::bool_t, "use_lighting_nodes", uses_glsl_light_access);
+  info.compilation_constant(gpu::shader::Type::int_t, "closure_bin_count", 0);
+  info.compilation_constant(gpu::shader::Type::int_t, "closure_bin_len", 1);
+  /* Light evaluation types still require non-empty arrays in light-access graphs. */
+  info.compilation_constant(gpu::shader::Type::int_t, "light_closure_count_reflect", 1);
+  info.compilation_constant(gpu::shader::Type::int_t, "light_closure_count_transmit", 1);
+  add_create_info_and_reserve(info, slots, "KernelGlobals");
 
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
@@ -2871,15 +3461,19 @@ static void light_create_info_amend(GPUMaterial *gpumat,
   generated_resource_header += "CREATE_INFO_RES_GEOMETRY_eevee_node_tree\n";
   generated_resource_header += "#endif\n";
   generated_resource_header += "\n";
-  info.generated_sources.append({"eevee_nodetree_type_lib.glsl", {}, generated_resource_header});
+  info.generated_sources.append({"eevee_nodetree_type.bsl.hh", {}, generated_resource_header});
 
   Set<StringRefNull> dependencies_set;
   Set<StringRefNull> emitted_generated_sources;
   std::stringstream generated_source_block;
   dependencies_set.add("eevee_geom_types_lib.bsl.hh");
-  dependencies_set.add("eevee_attributes_world_lib.glsl");
+  dependencies_set.add("eevee_attributes_world_lib.bsl.hh");
   dependencies_set.add("eevee_light_lib.glsl");
   dependencies_set.add("eevee_nodetree_lib.bsl.hh");
+  dependencies_set.add("eevee_bevel_lib.bsl.hh");
+  if (GPU_material_uses_referenced_object_data(gpumat) || uses_glsl_light_access) {
+    dependencies_set.add("draw_referenced_object_lib.glsl");
+  }
   if (uses_glsl_light_shadow) {
     dependencies_set.add("eevee_shadow_tracing.bsl.hh");
   }
@@ -2894,7 +3488,7 @@ static void light_create_info_amend(GPUMaterial *gpumat,
   std::stringstream comp_gen;
   comp_gen << "void attrib_load(WorldPoint domain) {}\n\n";
   comp_gen << generated_source_block.str();
-  comp_gen << "float4 nodetree_light_shader()\n";
+  comp_gen << "float4 nodetree_light_shader(KernelGlobals kg, _ref(ShadingData, sd))\n";
   comp_gen << "{\n";
   comp_gen << (codegen.light_shader.has_value() ?
                    codegen.light_shader->serialized_or_default("return float4(1.0f);\n") :
@@ -2902,7 +3496,8 @@ static void light_create_info_amend(GPUMaterial *gpumat,
   comp_gen << "}\n\n";
 
   Vector<StringRefNull> dependencies = material_dependencies_finalize(dependencies_set);
-  info.generated_sources.append({"eevee_nodetree_frag_lib.glsl", dependencies, comp_gen.str()});
+  info.generated_sources.append({"eevee_nodetree_frag_lib.bsl.hh", dependencies, comp_gen.str()});
+  info.generated_sources.append({"gpu_shader_material_interface.bsl.hh", {}, ""});
 
   const char *material_name = (info.name_.c_str() + 2);
   if (slots.sampler_overflow()) {
@@ -2974,17 +3569,22 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
 
   bool has_vertex_displacement = GPU_material_has_displacement_output(mat) &&
                                  displacement_type != eMaterialDisplacement::MAT_DISPLACEMENT_BUMP;
-  bool has_transparency = GPU_material_flag_get(mat, GPU_MATFLAG_TRANSPARENT);
+  bool has_transparency = outline_shell ? GPU_material_outline_shell_has_alpha(mat) :
+                                          GPU_material_flag_get(mat, GPU_MATFLAG_TRANSPARENT) ||
+                                              geometry_type == MAT_GEOM_GSPLAT;
   bool has_shadow_transparency = has_transparency && transparent_shadows;
   bool has_raytraced_transmission = blender_mat && (blender_mat->blend_flag & MA_BL_SS_REFRACTION);
   bool has_raycast = GPU_material_flag_get(mat, GPU_MATFLAG_RAYCAST);
   bool has_depth_offset = GPU_material_has_depth_offset_output(mat);
 
-  bool can_use_default = (is_shadow_pass &&
-                          (!has_vertex_displacement && !has_shadow_transparency)) ||
-                         (is_prepass && (!has_vertex_displacement && !has_transparency &&
-                                         !has_raytraced_transmission && !has_raycast &&
-                                         !has_depth_offset));
+  /* Tessellated geometry reads its settings from the material uniforms and must be identical
+   * in every pass. */
+  const bool is_tessellated = geometry_type == MAT_GEOM_MESH_TESS;
+  bool can_use_default =
+      !is_tessellated &&
+      ((is_shadow_pass && (!has_vertex_displacement && !has_shadow_transparency)) ||
+       (is_prepass && (!has_vertex_displacement && !has_transparency &&
+                       !has_raytraced_transmission && !has_raycast && !has_depth_offset)));
   if (can_use_default) {
     GPUMaterial *mat = thunk->shader_module->material_shader_get(thunk->default_mat,
                                                                  thunk->default_mat->nodetree,
@@ -3014,7 +3614,7 @@ static void store_node_tree_errors(GPUMaterialFromNodeTreeResult &material_from_
     if (const bNodeTree *tree_orig = DEG_get_original(&tree)) {
       std::lock_guard lock(tree_orig->runtime->shader_node_errors_mutex);
       tree_orig->runtime->shader_node_errors.lookup_or_add_default(error.node->identifier)
-          .add(error.message);
+          .add({nodes::NodeWarningType(error.type), error.message});
     }
   }
 }
@@ -3027,18 +3627,23 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
                                                bool deferred_compilation,
                                                blender::Material *default_mat,
                                                bool use_outline,
-                                               bool outline_shell)
+                                               bool outline_shell,
+                                               const MaterialNodeTreeInfo *node_tree_info,
+                                               bool stencil_writer_surface)
 {
-  eMaterialDisplacement displacement_type = outline_shell ?
-                                                MAT_DISPLACEMENT_VERTEX_WITH_BUMP :
-                                                to_displacement_type(
-                                                    blender_mat->displacement_method);
+  eMaterialDisplacement displacement_type = outline_shell ? MAT_DISPLACEMENT_VERTEX_WITH_BUMP :
+                                                            to_displacement_type(
+                                                                blender_mat->displacement_method);
   eMaterialThickness thickness_type = to_thickness_type(blender_mat->thickness_mode);
   const bool has_depth_offset_output = !outline_shell &&
-                                       material_output_has_depth_offset(nodetree) &&
+                                       (node_tree_info ?
+                                            node_tree_info->has_depth_offset :
+                                            material_output_has_depth_offset(nodetree)) &&
                                        material_pipeline_supports_depth_offset(pipeline_type,
                                                                                geometry_type);
-  bNodeTree *npr_tree = outline_shell ? nullptr : npr_tree_get(nodetree);
+  bNodeTree *npr_tree = outline_shell ?
+                            nullptr :
+                            (node_tree_info ? node_tree_info->npr_tree : npr_tree_get(nodetree));
   const bool compile_npr_graph = (pipeline_type == MAT_PIPE_DEFERRED_NPR) ||
                                  (pipeline_type == MAT_PIPE_BAKE_COLOR && npr_tree != nullptr);
   const uint64_t npr_tree_key = (compile_npr_graph && npr_tree != nullptr) ?
@@ -3050,23 +3655,54 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
   /* NPR passes normally only need the attached NPR tree, but true displacement lives on the
    * primary material output. Depth Offset is also a material output and must use the same custom
    * depth for DEPTH_EQUAL and screen-space position reads. */
-  const bool compile_surface_graph = outline_shell ||
-                                     (pipeline_type != MAT_PIPE_DEFERRED_NPR) ||
-                                     needs_npr_vertex_displacement || needs_npr_depth_offset;
+  /* Tessellation settings also live on the primary material output and must match the
+   * draw-call expansion in every pass. */
+  const bool needs_npr_tessellation = compile_npr_graph && geometry_type == MAT_GEOM_MESH_TESS;
+  /* The self-depth pipeline must execute material output nodes too: they carry displacement,
+   * tessellation and Depth Offset. Its fragment entry point never calls nodetree_surface(), so
+   * body Alpha and full surface shading are still excluded from the depth draw. */
+  const bool compile_surface_graph = outline_shell || (pipeline_type != MAT_PIPE_DEFERRED_NPR) ||
+                                     needs_npr_vertex_displacement || needs_npr_depth_offset ||
+                                     needs_npr_tessellation;
+  /* The tessellation settings are uniforms, so the normal mode doesn't change the node graph
+   * code. It changes the generated shader and must be part of the shader key. */
+  ShaderTessellationSettings tessellation_settings;
+  if (node_tree_info) {
+    tessellation_settings = node_tree_info->tessellation;
+  }
+  const bool use_tessellation_geometry_normal =
+      geometry_type == MAT_GEOM_MESH_TESS &&
+      (node_tree_info ? node_tree_info->has_tessellation :
+                        material_tessellation_settings_get(blender_mat, tessellation_settings)) &&
+      tessellation_settings.normal_mode == SHD_TESSELLATION_NORMAL_GEOMETRY;
 
+  /* Shell modes are independent of the body's transparency settings. Shell graphs do not
+   * use an NPR tree key, so reserve their extra-key space for shell options. */
+  const uint64_t graph_key = outline_shell ?
+                                 uint64_t(blender_mat->outline_shell_transparency_method) |
+                                     (uint64_t(pipeline_type != MAT_PIPE_SHADOW &&
+                                               bool(blender_mat->outline_shell_flag &
+                                                    MA_OUTLINE_SHELL_SELF_OCCLUSION))
+                                      << 2) :
+                                 npr_tree_key;
+  const char blend_flags = outline_shell ? (blender_mat->blend_flag | MA_BL_TRANSPARENT_SHADOW) :
+                                           blender_mat->blend_flag;
   uint64_t shader_uuid = shader_uuid_from_material_type(
       pipeline_type,
       geometry_type,
       displacement_type,
       thickness_type,
       probe_capture,
-      blender_mat->blend_flag,
+      blend_flags,
       outline_shell ? false : use_outline,
       outline_shell ? false : material_depth_offset_affects_lighting(blender_mat),
-      npr_tree_key,
+      (graph_key << 2) | (uint64_t(use_tessellation_geometry_normal) << 1) |
+          uint64_t(stencil_writer_surface),
       outline_shell);
 
-  bool is_default_material = default_mat == nullptr;
+  /* GSplats require transparency independent of the material type; default material must
+   * be replaced for e.g. transmittance to be present. */
+  bool is_default_material = default_mat == nullptr && geometry_type != MAT_GEOM_GSPLAT;
   BLI_assert(blender_mat != default_mat);
 
   CallbackThunk thunk = {this, default_mat};
@@ -3085,8 +3721,22 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       deferred_compilation,
       codegen_callback,
       &thunk,
-      is_default_material ? nullptr : pass_replacement_cb,
+      (is_default_material || stencil_writer_surface) ? nullptr : pass_replacement_cb,
       outline_shell);
+  /* A cached GPUPass bypasses create-info amendment. Resource demand belongs to every material
+   * instance/lookup, not just the first shader compilation. */
+  if (GPU_material_stencil_value_used(material_from_tree.material) &&
+      probe_capture == MAT_PROBE_NONE && !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+  {
+    GPU_material_stencil_value_readable_set(material_from_tree.material);
+  }
+  if (GPU_material_stencil_surface_used(material_from_tree.material) &&
+      probe_capture == MAT_PROBE_NONE && !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+  {
+    GPU_material_stencil_surface_readable_set(material_from_tree.material);
+  }
   store_node_tree_errors(material_from_tree);
   return material_from_tree.material;
 }
@@ -3244,6 +3894,34 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
   constexpr GPUPrimType prim_type = GPU_PRIM_TRIS;
 
   switch (pipeline_type) {
+    case MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH: {
+      r_info.pipeline_state()
+          .primitive(prim_type)
+          .state(GPU_WRITE_DEPTH,
+                 GPU_BLEND_NONE,
+                 GPU_CULL_NONE,
+                 GPU_DEPTH_GREATER_EQUAL,
+                 GPU_STENCIL_NONE,
+                 GPU_STENCIL_OP_NONE,
+                 GPU_VERTEX_LAST)
+          .viewports(1)
+          .depth_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH);
+      break;
+    }
+    case MAT_PIPE_OUTLINE_FREESTYLE: {
+      r_info.pipeline_state()
+          .primitive(GPU_PRIM_LINES)
+          .state(GPU_WRITE_COLOR,
+                 GPU_BLEND_NONE,
+                 GPU_CULL_NONE,
+                 GPU_DEPTH_NONE,
+                 GPU_STENCIL_NONE,
+                 GPU_STENCIL_OP_NONE,
+                 GPU_VERTEX_LAST)
+          .viewports(1)
+          .color_format(gpu::TextureTargetFormat::SFLOAT_16_16_16_16);
+      break;
+    }
     case MAT_PIPE_PREPASS_DEFERRED: {
       /* DeferredLayer pipeline. */
       r_info.pipeline_state()

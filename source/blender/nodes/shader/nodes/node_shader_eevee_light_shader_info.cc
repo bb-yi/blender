@@ -26,7 +26,7 @@ static int node_shader_gpu_eevee_light_shader_info(GPUMaterial *mat,
                                                    GPUNodeStack *in,
                                                    GPUNodeStack *out)
 {
-  return GPU_stack_link(mat, node, "node_eevee_light_shader_info", in, out);
+  return GPU_stack_link(mat, node, "node_eevee_light_shader_info", in, out, GPU_kernel_globals(), GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_eevee_light_shader_info_cc

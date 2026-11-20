@@ -39,7 +39,7 @@ enum eMaterialGPencilStyle_Flag : short {
   /* mix fill texture */
   GP_MATERIAL_FILL_TEX_MIX = (1 << 5),
   /* Flip fill colors */
-  GP_MATERIAL_FLIP_FILL = (1 << 6),
+  GP_MATERIAL_FLIP_FILL = (1 << 6), /* Deprecated. Only used for compatibility. */
   /* Stroke Texture is a pattern */
   GP_MATERIAL_STROKE_PATTERN = (1 << 7),
   GP_MATERIAL_STROKE_SHOW = (1 << 8), /* Deprecated. Only used for compatibility. */
@@ -185,9 +185,17 @@ enum eMaterial_OutlineShellRenderMethod : char {
   MA_OUTLINE_SHELL_FORWARD = 1,
 };
 
+/** #Material::outline_shell_transparency_method */
+enum eMaterial_OutlineShellTransparencyMethod : char {
+  MA_OUTLINE_SHELL_DITHERED = 0,
+  MA_OUTLINE_SHELL_CLIP = 1,
+  MA_OUTLINE_SHELL_BLENDED = 2,
+};
+
 /** #Material::outline_shell_flag */
 enum eMaterial_OutlineShellFlag : char {
   MA_OUTLINE_SHELL_CAST_SHADOW = 1 << 0,
+  MA_OUTLINE_SHELL_SELF_OCCLUSION = 1 << 1,
 };
 
 /** #Material::volume_intersection_method */
@@ -236,6 +244,13 @@ enum eMaterialZTestMode {
   MA_ZTEST_NOT_EQUAL = 5,
   MA_ZTEST_ALWAYS = 6,
   MA_ZTEST_NEVER = 7,
+};
+
+/** #Material::stencil_mode */
+enum eMaterialStencilMode {
+  MA_STENCIL_STANDARD = 0,
+  MA_STENCIL_EARLY_MARKER = 1,
+  MA_STENCIL_MARKER_ONLY = 2,
 };
 
 /** #Material::stencil_test */
@@ -355,7 +370,7 @@ struct MaterialGPencilStyle {
   float mix_rgba[4] = {};
   /** Settings. */
   eMaterialGPencilStyle_Flag flag = {};
-  /** Custom index for passes. */
+  /** Pass index (only used for modifiers to restrict their influence). */
   short index = 0;
   /** Style for drawing strokes (used to select shader type). */
   eMaterialGPencilStyle_StrokeStyle stroke_style = GP_MATERIAL_STROKE_STYLE_SOLID;
@@ -413,6 +428,9 @@ struct MaterialGPencilStyle {
 
   float random_noise_scale = 0;
   char _pad3[4] = {};
+
+  /** Color gradient. */
+  struct ColorBand *gradient = nullptr;
 };
 
 struct MaterialLineArt {
@@ -541,8 +559,11 @@ struct Material {
   char outline_shell_ztest_mode = MA_ZTEST_LESS_EQUAL;
   char outline_shell_depth_write = true;
   char outline_shell_flag = 0;
-
-  char _pad4[7] = {};
+  eMaterial_OutlineShellTransparencyMethod outline_shell_transparency_method =
+      MA_OUTLINE_SHELL_DITHERED;
+  char stencil_mode = MA_STENCIL_STANDARD;
+  char _pad4[1] = {};
+  float outline_shell_alpha_threshold = 0.5f;
 };
 
 #ifdef __cplusplus

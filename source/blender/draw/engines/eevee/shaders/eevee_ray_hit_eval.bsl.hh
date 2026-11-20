@@ -4,12 +4,13 @@
 
 #pragma once
 
+#include "draw_command_shared.hh"
 #include "draw_view.bsl.hh"
 #include "eevee_defines.hh"
 #include "eevee_reverse_z_lib.bsl.hh"
 #include "eevee_uniform.bsl.hh"
 #include "gpu_shader_codegen_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_utildefines.bsl.hh"
 
 namespace eevee::raytracing {
 
@@ -122,9 +123,7 @@ struct HitEvalCompact {
     direction.x += direction.x >= 0.0f ? -t : t;
     direction.y += direction.y >= 0.0f ? -t : t;
     direction = normalize(direction);
-    if (!(isfinite(direction.x) && isfinite(direction.y) && isfinite(direction.z)) ||
-        !(dot(direction, direction) > 1.0e-10f))
-    {
+    if (any(isinf(direction)) || !(dot(direction, direction) > 1.0e-10f)) {
       return primary_P;
     }
     return hit_P - direction * distance;

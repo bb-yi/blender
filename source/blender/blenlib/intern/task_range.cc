@@ -15,9 +15,9 @@
 #include "BLI_array.hh"
 #include "BLI_lazy_threading.hh"
 #include "BLI_offset_indices.hh"
-#include "BLI_task.h"
 #include "BLI_task.hh"
-#include "BLI_threads.h"
+#include "BLI_task_c.hh"
+#include "BLI_threads.hh"
 #include "BLI_vector.hh"
 
 #include "atomic_ops.h"
@@ -312,6 +312,27 @@ void memory_bandwidth_bound_task_impl(const FunctionRef<void()> function)
 
   arena.execute(function);
 #else
+  function();
+#endif
+}
+
+void max_threads_task_impl(const int max_threads, const FunctionRef<void()> function)
+{
+  BLI_assert(max_threads >= 1);
+
+#ifdef WITH_TBB
+  if (max_threads >= BLI_task_scheduler_num_threads()) {
+    function();
+    return;
+  }
+
+  tbb::task_arena arena{max_threads};
+  lazy_threading::send_hint();
+  lazy_threading::ReceiverIsolation isolation;
+
+  arena.execute(function);
+#else
+  UNUSED_VARS(max_threads);
   function();
 #endif
 }

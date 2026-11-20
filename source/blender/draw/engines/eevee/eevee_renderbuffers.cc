@@ -38,10 +38,16 @@ void RenderBuffers::init()
 
   data.normal_id = pass_index_get(EEVEE_RENDER_PASS_NORMAL, EEVEE_RENDER_PASS_AO);
   data.position_id = pass_index_get(EEVEE_RENDER_PASS_POSITION);
-  data.diffuse_light_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_LIGHT);
-  data.diffuse_color_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_COLOR);
-  data.specular_light_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_LIGHT);
-  data.specular_color_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_COLOR);
+  /* Custom lighting in the hybrid pipeline requires both passes, so the combine pass can
+   * reconstruct the radiance. */
+  data.diffuse_light_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_LIGHT,
+                                         EEVEE_RENDER_PASS_DIFFUSE_COLOR);
+  data.diffuse_color_id = pass_index_get(EEVEE_RENDER_PASS_DIFFUSE_COLOR,
+                                         EEVEE_RENDER_PASS_DIFFUSE_LIGHT);
+  data.specular_light_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_LIGHT,
+                                          EEVEE_RENDER_PASS_SPECULAR_COLOR);
+  data.specular_color_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_COLOR,
+                                          EEVEE_RENDER_PASS_SPECULAR_LIGHT);
   data.volume_light_id = pass_index_get(EEVEE_RENDER_PASS_VOLUME_LIGHT);
   data.emission_id = pass_index_get(EEVEE_RENDER_PASS_EMIT);
   data.environment_id = pass_index_get(EEVEE_RENDER_PASS_ENVIRONMENT);
@@ -49,11 +55,17 @@ void RenderBuffers::init()
   data.ambient_occlusion_id = pass_index_get(EEVEE_RENDER_PASS_AO);
   data.transparent_id = pass_index_get(EEVEE_RENDER_PASS_TRANSPARENT);
   data.outline_id = pass_index_get(EEVEE_RENDER_PASS_OUTLINE);
+  data.denoising_depth_id = (enabled_passes & EEVEE_RENDER_PASS_DENOISING_DEPTH) ? 0 : -1;
+  data.denoising_normal_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_NORMAL);
+  data.denoising_roughness_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_ROUGHNESS);
+  data.denoising_diffuse_albedo_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_DIFFUSE_ALBEDO);
+  data.denoising_specular_albedo_id = pass_index_get(EEVEE_RENDER_PASS_DENOISING_SPECULAR_ALBEDO);
 
   data.aovs = inst_.film.aovs_info;
+  data.line_aov_marker_info = int4(-1, 0, 0, 0);
 }
 
-void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
+int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
 {
   const eViewLayerEEVEEPassType enabled_passes = inst_.film.render_buffer_passes_get();
 
@@ -68,7 +80,10 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
                                            GPU_TEXTURE_USAGE_ATTACHMENT;
 
   /* Depth and combined are always needed. */
-  depth_tx.ensure_2d(depth_format, extent, usage_attachment_read);
+  /* Texture usage must include views from the first allocation: ensure_2d does not compare usage.
+   */
+  int created = depth_tx.ensure_2d(
+      depth_format, extent, usage_attachment_read | GPU_TEXTURE_USAGE_FORMAT_VIEW);
   /* TODO(fclem): depth_tx should ideally be a texture from pool but we need stencil_view
    * which is currently unsupported by pool textures. */
   // depth_tx.acquire(extent, depth_format);
@@ -108,15 +123,34 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
                   inst_.native_postfx_outputs.color_len_get();
   int value_len = data.value_len + data.aovs.value_len +
                   inst_.native_postfx_outputs.value_len_get();
+  data.line_aov_marker_info.x = inst_.geometry_lines.uses_aov() ? color_len : -1;
+  for (int i = 0; i < AOV_MAX; i++) {
+    int &marker = data.line_aov_marker_layers[i / 4][i % 4];
+    marker = -1;
+    if (i < data.aovs.color_len + data.aovs.value_len &&
+        inst_.geometry_lines.uses_aov(data.aovs.hash[i / 4][i % 4], i >= data.aovs.color_len))
+    {
+      marker = color_len;
+      color_len += 2;
+    }
+  }
 
-  rp_color_tx.ensure_2d_array(color_format,
-                              (color_len > 0) ? extent : int2(1),
-                              math::max(1, color_len),
-                              usage_attachment_read_write);
-  rp_value_tx.ensure_2d_array(float_format,
-                              (value_len > 0) ? extent : int2(1),
-                              math::max(1, value_len),
-                              usage_attachment_read_write);
+  created += rp_color_tx.ensure_2d_array(color_format,
+                                         (color_len > 0) ? extent : int2(1),
+                                         math::max(1, color_len),
+                                         usage_attachment_read_write);
+  created += rp_value_tx.ensure_2d_array(float_format,
+                                         (value_len > 0) ? extent : int2(1),
+                                         math::max(1, value_len),
+                                         usage_attachment_read_write);
+  if (data.line_aov_marker_info.x >= 0) {
+    /* Only requested by a live brush AOV field. Zero is an unwritten marker,
+     * independent of the AOV's numerical value. Clear every sample. */
+    rp_color_tx.clear(float4(0));
+  }
+  /* acquire() follows the main-view uniform upload; publish the current optional
+   * marker layout before any Deferred surface shader writes an AOV. */
+  inst_.uniform_data.data.push_update();
 
   const gpu::TextureFormat cryptomatte_format = gpu::TextureFormat::SFLOAT_32_32_32_32;
   cryptomatte_tx.acquire_2d(pass_extent(EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT |
@@ -131,17 +165,25 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
   const int2 outline_extent = use_outline_buffers ? extent : int2(1);
   outline_color_tx.acquire_2d(
       outline_extent, gpu::TextureFormat::SFLOAT_16_16_16_16, outline_usage);
-  outline_info_tx.acquire_2d(outline_extent, gpu::TextureFormat::UINT_32_32_32_32, outline_usage);
+  /* Keep source data in one image binding: the optional third layer holds source and receiver
+   * instance IDs. This also works on backends limited to the existing eight image slots. */
+  outline_info_tx.acquire_2d_array(
+      outline_extent,
+      use_outline_buffers && inst_.scene->eevee.outline_surface_identity == 1 ? 3 : 2,
+      gpu::TextureFormat::UINT_32_32_32_32,
+      outline_usage);
   outline_color_tx.clear(float4(0.0f));
   outline_info_tx.clear(uint4(0u));
+  return created;
 }
 
 void RenderBuffers::release()
 {
-  /* TODO(fclem): depth_tx should ideally be a texture from pool but we need stencil_view
-   * which is currently unsupported by pool textures. */
-  // depth_tx.release();
+  /* Persistent depth owns stencil views and is reused by the next acquire(). */
   combined_tx.release();
+  stencil_value_tx.release();
+  stencil_surface_value_tx.release();
+  stencil_surface_depth_tx.release();
 
   const bool do_motion_vectors_swizzle = vector_tx_format() == gpu::TextureFormat::SFLOAT_16_16;
   if (do_motion_vectors_swizzle) {
@@ -160,6 +202,9 @@ void RenderBuffers::release()
 
 gpu::TextureFormat RenderBuffers::vector_tx_format()
 {
+  if (inst_.is_dlss_guide_render) {
+    return gpu::TextureFormat::SFLOAT_16_16;
+  }
   const eViewLayerEEVEEPassType enabled_passes = inst_.film.render_buffer_passes_get();
   bool do_full_vector_render_pass = ((enabled_passes & EEVEE_RENDER_PASS_VECTOR) ||
                                      inst_.motion_blur.postfx_enabled()) &&

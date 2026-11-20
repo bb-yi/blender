@@ -145,12 +145,31 @@ void ErrorHandler::report(Token tok, std::string_view message)
   if (tok.is_valid()) {
     full_report += "\n";
     full_report += tok.line_str() + "\n";
-    if (tok.str().size() > 0) {
+    if (!tok.str().empty()) {
       full_report += std::string(tok.char_number(), ' ') + "^" +
                      std::string(tok.str().size() - 1, '~');
     }
   }
   err = {std::string(message), full_report};
+}
+
+void ErrorHandler::report(const std::vector<std::pair<Token, std::string>> &reports)
+{
+  /* Only log the first error. */
+  if (err) {
+    return;
+  }
+
+  std::string message = reports.front().second;
+  std::string full_report;
+
+  for (const auto &[tok, msg] : reports) {
+    report(tok, msg);
+    full_report += "\n" + err->full_report;
+    err = std::nullopt;
+  }
+
+  err = {message, full_report};
 }
 
 void ErrorHandler::report(int row, int column, std::string line, std::string_view message)
@@ -201,15 +220,28 @@ static always_inline TokenType multi_tok_lookup(TokenType input, std::string_vie
         case '&':
           return (s[1] == '&') ? LogicalAnd : input;
         case '<':
-          return (s[1] == '=') ? LEqual : input;
+          return (s[1] == '<') ? LShift : ((s[1] == '=') ? LEqual : input);
         case '>':
-          return (s[1] == '=') ? GEqual : input;
+          return (s[1] == '>') ? RShift : ((s[1] == '=') ? GEqual : input);
         case '+':
-          return (s[1] == '+') ? Increment : input;
+          return (s[1] == '+') ? Increment : ((s[1] == '=') ? AssignAdd : input);
         case '-':
-          return (s[1] == '-') ? Decrement : input;
+          return (s[1] == '-') ? Decrement : ((s[1] == '=') ? AssignSub : input);
+        case '*':
+          return (s[1] == '=') ? AssignMul : input;
+        case '/':
+          return (s[1] == '=') ? AssignDiv : input;
         case '#':
           return (s[1] == '#') ? DoubleHash : input;
+        default:
+          return input;
+      }
+    case 3:
+      switch (s[0]) {
+        case '<':
+          return (s[1] == '<' && s[2] == '=') ? AssignLShift : input;
+        case '>':
+          return (s[1] == '>' && s[2] == '=') ? AssignRShift : input;
         default:
           return input;
       }
@@ -220,7 +252,8 @@ static always_inline TokenType multi_tok_lookup(TokenType input, std::string_vie
 
 constexpr always_inline uint8_t perfect_hash(std::string_view s)
 {
-  return s.size() * (s[0] - s.back() * 2);
+  int sz = s.size();
+  return s.size() * (s[0] - s[std::min(1, sz - 1)] * 2 - s.back() * 2);
 }
 
 static always_inline TokenType type_lookup(std::string_view s)
@@ -264,12 +297,16 @@ static always_inline TokenType type_lookup(std::string_view s)
       return (s == "struct") ? Struct : Word;
     case perfect_hash("switch"):
       return (s == "switch") ? Switch : Word;
+    case perfect_hash("default"):
+      return (s == "default") ? Default : Word;
     case perfect_hash("private"):
       return (s == "private") ? Private : Word;
     case perfect_hash("continue"):
       return (s == "continue") ? Continue : Word;
     case perfect_hash("template"):
       return (s == "template") ? Template : Word;
+    case perfect_hash("typename"):
+      return (s == "typename") ? Typename : Word;
     case perfect_hash("constexpr"):
       return (s == "constexpr") ? Constexpr : Word;
     case perfect_hash("namespace"):
@@ -388,7 +425,7 @@ struct ScopeStack {
 void ParserBase::build_token_to_scope_map()
 {
   token_scope.clear();
-  token_scope.resize(scope_ranges[0].size);
+  token_scope.resize(this->size() + 1);
 
   int scope_id = 0;
   for (const IndexRange &range : scope_ranges) {
@@ -409,7 +446,7 @@ Token ParserBase::operator[](int i) const
 void ParserBase::update_string_view()
 {
   assert(this->scope_types.data() != nullptr);
-  assert(this->scope_types.size() > 0);
+  assert(!this->scope_types.empty());
   this->scope_types_str = std::string_view(reinterpret_cast<char *>(this->scope_types.data()),
                                            this->scope_types.size());
 }

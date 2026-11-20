@@ -16,10 +16,10 @@
 #include "DNA_scene_types.h"
 #include "DNA_windowmanager_enums.h"
 
-#include "BLI_assert.h"
-#include "BLI_listbase.h"
+#include "BLI_assert.hh"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BKE_action.hh"
 #include "BKE_armature.hh"
@@ -208,7 +208,7 @@ static Bone *get_new_active_child(Bone &parent_bone)
       return &child;
     }
   }
-  return static_cast<Bone *>(parent_bone.childbase.first);
+  return parent_bone.childbase.first();
 }
 
 /**
@@ -1189,7 +1189,7 @@ static bool pose_select_same_keyingset(bContext *C, ReportList *reports, bool ex
     return false;
   }
   if (validate_keyingset(C, nullptr, ks) != ModifyKeyReturn::SUCCESS) {
-    if (ks->paths.first == nullptr) {
+    if (ks->paths.first_ == nullptr) {
       if ((ks->flag & KEYINGSET_ABSOLUTE) == 0) {
         BKE_report(reports,
                    RPT_ERROR,

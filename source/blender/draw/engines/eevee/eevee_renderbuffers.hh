@@ -31,6 +31,9 @@ class RenderBuffers {
   static constexpr gpu::TextureFormat prepass_normal_format = gpu::TextureFormat::UNORM_10_10_10_2;
 
   Texture depth_tx;
+  TextureFromPool stencil_value_tx;
+  TextureFromPool stencil_surface_value_tx;
+  TextureFromPool stencil_surface_depth_tx;
   TextureFromPool combined_tx;
 
   // TextureFromPool mist_tx; /* Derived from depth_tx during accumulation. */
@@ -41,7 +44,7 @@ class RenderBuffers {
   TextureFromPool cryptomatte_tx;
   TextureFromPool outline_color_tx;
   TextureFromPool outline_info_tx;
-  /* TODO(fclem): Use texture from pool once they support texture array. */
+  /* Auxiliary views exchange these with persistent capture-owned buffers. */
   Texture rp_color_tx;
   Texture rp_value_tx;
 
@@ -61,6 +64,8 @@ class RenderBuffers {
       case EEVEE_RENDER_PASS_MIST:
       case EEVEE_RENDER_PASS_SHADOW:
       case EEVEE_RENDER_PASS_AO:
+      case EEVEE_RENDER_PASS_DENOISING_DEPTH:
+      case EEVEE_RENDER_PASS_DENOISING_ROUGHNESS:
         return PASS_STORAGE_VALUE;
       case EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT:
       case EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET:
@@ -73,8 +78,8 @@ class RenderBuffers {
 
   void init();
 
-  /* Acquires (also ensures) the render buffer before rendering to them. */
-  void acquire(int2 extent, gpu::TextureFormat raycast_depth_format = depth_format);
+  /* Acquire render buffers and return the number of persistent textures recreated. */
+  int acquire(int2 extent, gpu::TextureFormat raycast_depth_format = depth_format);
   void release();
 
   /* Return the size of the allocated render buffers. Undefined if called before `acquire()`. */

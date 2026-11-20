@@ -8,8 +8,8 @@
 
 #pragma once
 
-#include "BLI_assert.h"
-#include "BLI_compiler_compat.h"
+#include "BLI_assert.hh"
+#include "BLI_compiler_compat.hh"
 
 #include "BKE_subdiv.hh"
 
@@ -121,6 +121,11 @@ BLI_INLINE float crease_to_sharpness(float crease)
 BLI_INLINE float sharpness_to_crease(float sharpness)
 {
   return sqrt(sharpness * 0.1f);
+}
+
+BLI_INLINE float4 quad_weights_from_uv(float u, float v)
+{
+  return {(1.0f - u) * (1.0f - v), u * (1.0f - v), u * v, (1.0f - u) * v};
 }
 
 }  // namespace blender::bke::subdiv

@@ -98,6 +98,12 @@ void RayTraceModule::init()
         GPU_TEXTURE_USAGE_SHADER_READ, visibility);
   }
 
+  /* TODO: Support raytracing for panoramic camera. */
+  if (use_raytracing_ && inst_.camera.is_panoramic()) {
+    use_raytracing_ = false;
+    inst_.info_append_i18n("Raytracing is not supported with panoramic camera yet");
+  }
+
   float4 data(0.0f);
   radiance_dummy_black_tx_.ensure_2d(
       gpu::TextureFormat::RAYTRACE_RADIANCE_FORMAT, int2(1), GPU_TEXTURE_USAGE_SHADER_READ, data);
@@ -583,7 +589,7 @@ RayTraceResult RayTraceModule::render_phase(RayTraceBuffer &rt_buffer,
       1, power_of_2_max_i(inst_.scene->eevee.fast_gi_resolution));
 
   const int2 group_size(RAYTRACE_GROUP_SIZE);
-  const int2 extent = inst_.film.render_extent_get();
+  const int2 extent = inst_.render_extent_get();
   const int2 tracing_res = math::divide_ceil(extent, int2(resolution_scale));
   /* Just like HiZ, the FastGI needs a multiple of its dispatch size in order to use MipMaps. */
   const int2 tracing_res_fast_gi = math::ceil_to_multiple(

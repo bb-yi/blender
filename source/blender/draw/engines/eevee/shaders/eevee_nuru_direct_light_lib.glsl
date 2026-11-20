@@ -31,6 +31,34 @@ ObjectInfos hwrt_object_infos_get(uint index)
   return infos.get(index);
 }
 
+LightData hardware_direct_light_resolved(uint light_index)
+{
+  LightData light = light_buf[light_index];
+  light.color = abs(light.color);
+  const uint local_lights_len = raytrace_buf.hardware_direct_light.local_lights_len;
+  const uint sun_lights_len = raytrace_buf.hardware_direct_light.sun_lights_len;
+  if (sun_lights_len < 2u || light_index < local_lights_len || light_index >= local_lights_len + 2u) {
+    return light;
+  }
+
+  const LightData first = light_buf[local_lights_len];
+  const LightData second = light_buf[local_lights_len + 1u];
+  const float3 color_delta = abs(first.color) - abs(second.color);
+  const bool split_pair = dot(color_delta, color_delta) <= 1.0e-6f &&
+                          dot(light_sun_data_get(first).direction,
+                              light_sun_data_get(second).direction) >= 0.9999f &&
+                          ((first.power_factor[LIGHT_DIFFUSE] == 0.0f &&
+                            second.power_factor[LIGHT_SPECULAR] == 0.0f) ||
+                           (first.power_factor[LIGHT_SPECULAR] == 0.0f &&
+                            second.power_factor[LIGHT_DIFFUSE] == 0.0f));
+  if (split_pair) {
+    const LightData peer = light_buf[light_index == local_lights_len ? local_lights_len + 1u :
+                                                                    local_lights_len];
+    light.power_factor = max(light.power_factor, peer.power_factor);
+  }
+  return light;
+}
+
 #ifdef HWRT_DIRECT_VISIBILITY
 float3 hardware_direct_visibility(int2 texel, int layer)
 {
@@ -43,7 +71,6 @@ float3 hardware_direct_visibility(int2 texel, int layer)
 #ifdef HWRT_DIRECT_EVALUATION
 #include "eevee_closure.bsl.hh"
 #include "eevee_gbuffer_read_lib.glsl"
-#include "eevee_light_eval.bsl.hh"
 
 int2 shadow_dispatch_texel_fullres;
 float3 direct_last_unshadowed;
@@ -54,19 +81,21 @@ float3 hardware_direct_evaluate(uint light_index, LightData light, bool directio
 {
   [[resource_table]] eevee::LightEvalData &srt = resource_table_get(eevee::LightEvalData);
   [[resource_table]] const UtilityTexture &util = resource_table_get(UtilityTexture);
+  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
   const int2 texel = shadow_dispatch_texel_fullres;
   const gbuffer::Header header = gbuffer::read_header(texel);
-  eevee::light::EvalCtx<false> ctx;
+  eevee::light::EvalCtx<false> ctx = {};
   ctx.stack.cl[0] = closure_light_new(util, cl, V);
   ctx.P = P;
   ctx.Ng = Ng;
-  ctx.V = V;
   ctx.texel = float2(texel) + 0.5f;
   ctx.thickness = gbuffer::read_thickness(header, texel);
   ctx.receiver_light_set = receiver_light_set;
   ctx.receiver_id = header.use_object_id() ? gbuffer::read_object_id(texel) : 0u;
   ctx.terminator_normal_offset = 0.0f;
   ctx.terminator_geometry_offset = 0.0f;
+  ctx.ray_count = uni.uniform_buf.shadow.ray_count;
+  ctx.ray_step_count = uni.uniform_buf.shadow.step_count;
   if (header.use_object_id()) {
     ObjectInfos info = hwrt_object_infos_get(ctx.receiver_id);
     ctx.terminator_normal_offset = info.shadow_terminator_normal_offset;

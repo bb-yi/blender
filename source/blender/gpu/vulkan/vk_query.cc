@@ -21,7 +21,7 @@ VKQueryPool::~VKQueryPool()
 
   while (!vk_query_pools_.is_empty()) {
     VkQueryPool vk_query_pool = vk_query_pools_.pop_last();
-    vkDestroyQueryPool(device.vk_handle(), vk_query_pool, nullptr);
+    device.functions.vkDestroyQueryPool(device.vk_handle(), vk_query_pool, nullptr);
   }
 }
 
@@ -54,7 +54,7 @@ void VKQueryPool::begin_query()
     create_info.queryCount = query_chunk_len_;
 
     VkQueryPool vk_query_pool = VK_NULL_HANDLE;
-    vkCreateQueryPool(device.vk_handle(), &create_info, nullptr, &vk_query_pool);
+    device.functions.vkCreateQueryPool(device.vk_handle(), &create_info, nullptr, &vk_query_pool);
     vk_query_pools_.append(vk_query_pool);
   }
   BLI_assert(pool_index < vk_query_pools_.size());
@@ -92,26 +92,35 @@ void VKQueryPool::get_occlusion_result(MutableSpan<uint32_t> r_values)
   /* During selection the frame buffer is still rendering. It needs to finish the render scope to
    * ensure the END_RENDERING node */
   context.rendering_end();
-  context.flush_render_graph(RenderGraphFlushFlags::SUBMIT |
-                             RenderGraphFlushFlags::WAIT_FOR_COMPLETION |
-                             RenderGraphFlushFlags::RENEW_RENDER_GRAPH);
+  const TimelineValue timeline = context.flush_render_graph(
+      RenderGraphFlushFlags::SUBMIT | RenderGraphFlushFlags::WAIT_FOR_COMPLETION |
+      RenderGraphFlushFlags::RENEW_RENDER_GRAPH);
+  if (timeline == 0) {
+    r_values.fill(0);
+    return;
+  }
 
   int queries_left = queries_issued_;
   int pool_index = 0;
   VKBackend &backend = VKBackend::get();
-  const VKDevice &device = backend.device;
+  VKDevice &device = backend.device;
   while (queries_left) {
     VkQueryPool vk_query_pool = vk_query_pools_[pool_index];
     uint32_t *r_values_chunk = &r_values[pool_index * query_chunk_len_];
     uint32_t values_chunk_size = min_ii(queries_left, query_chunk_len_);
-    vkGetQueryPoolResults(device.vk_handle(),
-                          vk_query_pool,
-                          0,
-                          values_chunk_size,
-                          values_chunk_size * sizeof(uint32_t),
-                          r_values_chunk,
-                          sizeof(uint32_t),
-                          VK_QUERY_RESULT_WAIT_BIT);
+    const VkResult result = device.functions.vkGetQueryPoolResults(device.vk_handle(),
+                                                  vk_query_pool,
+                                                  0,
+                                                  values_chunk_size,
+                                                  values_chunk_size * sizeof(uint32_t),
+                                                  r_values_chunk,
+                                                  sizeof(uint32_t),
+                                                  VK_QUERY_RESULT_WAIT_BIT);
+    device.submission_error_set(result, "vkGetQueryPoolResults");
+    if (result != VK_SUCCESS) {
+      r_values.fill(0);
+      return;
+    }
 
     queries_left = max_ii(queries_left - query_chunk_len_, 0);
     pool_index += 1;

@@ -10,7 +10,7 @@
 
 #include "BLI_color.hh"
 #include "BLI_math_quaternion_types.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "DNA_curve_types.h"
 #include "DNA_pointcloud_types.h"
@@ -246,6 +246,7 @@ class AttributeTexts : Overlay {
         if constexpr (std::is_same_v<T, bool>) {
           char numstr[64];
           const size_t numstr_len = STRNCPY_UTF8_RLEN(numstr, value ? "True" : "False");
+          ui::theme::get_color_blend_3ubv(TH_TEXT_HI, value ? TH_SUCCESS : TH_ERROR, 0.5f, col);
           add_text_to_cache(dt, position, StringRef(numstr, numstr_len), col);
         }
         else if constexpr (std::is_same_v<T, int8_t>) {

@@ -12,7 +12,7 @@
 #include "DNA_key_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_math_rotation.h"
+#include "BLI_math_rotation_c.hh"
 
 #include "BLT_translation.hh"
 
@@ -183,9 +183,9 @@ static const EnumPropertyItem curve2d_fill_mode_items[] = {
 
 #  include "DNA_object_types.h"
 
-#  include "BLI_listbase.h"
-#  include "BLI_math_vector.h"
-#  include "BLI_string_utf8.h"
+#  include "BLI_listbase.hh"
+#  include "BLI_math_vector_c.hh"
+#  include "BLI_string_utf8.hh"
 
 #  include "BKE_curve.hh"
 #  include "BKE_curveprofile.h"
@@ -211,7 +211,7 @@ static Nurb *curve_nurb_from_point(Curve *cu, const void *point, int *nu_index, 
   Nurb *nu;
   int i = 0;
 
-  for (nu = static_cast<Nurb *>(nurbs->first); nu; nu = nu->next, i++) {
+  for (nu = nurbs->first(); nu; nu = nu->next, i++) {
     if (nu->type == CU_BEZIER) {
       if (point >= static_cast<void *>(nu->bezt) &&
           point < static_cast<void *>(nu->bezt + nu->pntsu))
@@ -470,7 +470,7 @@ static PointerRNA rna_Curve_bevelObject_get(PointerRNA *ptr)
     return RNA_id_pointer_create(reinterpret_cast<ID *>(ob));
   }
 
-  return PointerRNA_NULL;
+  return {};
 }
 
 static void rna_Curve_bevelObject_set(PointerRNA *ptr, PointerRNA value, ReportList * /*reports*/)
@@ -543,7 +543,7 @@ static PointerRNA rna_Curve_taperObject_get(PointerRNA *ptr)
     return RNA_id_pointer_create(reinterpret_cast<ID *>(ob));
   }
 
-  return PointerRNA_NULL;
+  return {};
 }
 
 static void rna_Curve_taperObject_set(PointerRNA *ptr, PointerRNA value, ReportList * /*reports*/)
@@ -789,7 +789,7 @@ static PointerRNA rna_Curve_active_spline_get(PointerRNA *ptr)
     return RNA_pointer_create_with_parent(*ptr, RNA_Spline, nu);
   }
 
-  return PointerRNA_NULL;
+  return {};
 }
 
 static void rna_Curve_active_spline_set(PointerRNA *ptr,
@@ -1576,6 +1576,7 @@ static void rna_def_curve_splines(BlenderRNA *brna, PropertyRNA *cprop)
   parm = RNA_def_enum(func, "type", curve_type_items, CU_POLY, "", "type for the new spline");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
   parm = RNA_def_pointer(func, "spline", "Spline", "", "The newly created spline");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 
   func = RNA_def_function(srna, "remove", "rna_Curve_spline_remove");

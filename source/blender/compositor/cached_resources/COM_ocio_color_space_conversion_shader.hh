@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include "BLI_map.hh"
@@ -14,6 +15,8 @@
 #include "COM_cached_resource.hh"
 
 namespace blender {
+
+struct NodeCompositorLUT;
 
 namespace gpu {
 class Shader;
@@ -43,6 +46,34 @@ bool operator==(const OCIOColorSpaceConversionShaderKey &a,
                 const OCIOColorSpaceConversionShaderKey &b);
 
 class GPUShaderCreator;
+
+/* A slice atlas has N*N*N pixels, tiled into complete N by N slices, with no padding. */
+int ocio_lut_image_size(int width, int height);
+
+/* A file LUT owns one OCIO processor shared by CPU evaluation and GPU shader generation.
+ * File snapshots are immutable, so reloading never invalidates unrelated OCIO processors. */
+class OCIOLUT : public CachedResource {
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+
+ public:
+  OCIOLUT(Context &context, const NodeCompositorLUT &settings, const std::string &filepath);
+  ~OCIOLUT();
+  const std::string &error() const;
+  void apply_rgb(float rgb[3]) const;
+  gpu::Shader *bind_shader_and_resources();
+  void unbind_shader_and_resources();
+};
+
+class OCIOLUTContainer : CachedResourceContainer {
+ private:
+  Map<std::string, std::unique_ptr<OCIOLUT>> map_;
+
+ public:
+  void reset() override;
+  OCIOLUT &get(Context &context, const NodeCompositorLUT &settings, const std::string &filepath);
+};
 
 /* -------------------------------------------------------------------------------------------------
  * OCIO Color Space Conversion Shader.

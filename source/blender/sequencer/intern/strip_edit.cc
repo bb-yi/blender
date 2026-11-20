@@ -11,13 +11,14 @@
 #include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 
 #include "BLT_translation.hh"
 
+#include "BKE_animsys.hh"
 #include "BKE_sound.hh"
 
 #include "strip_time.hh"
@@ -86,7 +87,9 @@ bool edit_strip_swap(Scene *scene, Strip *strip_a, Strip *strip_b, const char **
   std::swap(strip_a->next, strip_b->next);
   std::swap(strip_a->start, strip_b->start);
   std::swap(strip_a->startofs, strip_b->startofs);
-  std::swap(strip_a->endofs, strip_b->endofs);
+  const float tmp_offset = strip_a->end_offset();
+  strip_a->end_offset_set(strip_b->end_offset());
+  strip_b->end_offset_set(tmp_offset);
   std::swap(strip_a->channel, strip_b->channel);
   strip_time_effect_range_set(scene, strip_a);
   strip_time_effect_range_set(scene, strip_b);
@@ -127,7 +130,7 @@ void edit_update_muting(Editing *ed)
 {
   if (ed) {
     /* mute all sounds up to current metastack list */
-    MetaStack *ms = static_cast<MetaStack *>(ed->metastack.last);
+    MetaStack *ms = ed->metastack.last();
 
     if (ms) {
       strip_update_muting_recursive(&ed->channels, &ed->seqbase, ms->parent_strip, true);
@@ -150,11 +153,9 @@ void edit_flag_for_removal(Scene *scene, Strip *strip)
   VectorSet<Strip *> strips_to_delete;
   strips_to_delete.add_new(strip);
 
-  /* Delete effects that use `strip` as an input (either directly or through another effect).
-   * Effect inputs are always in the same seqbase as the effect. */
-  iterator_set_expand(ed, strips_to_delete, query_strip_direct_effect_chain);
-  /* Delete meta strip contents. */
-  iterator_set_expand(ed, strips_to_delete, query_strip_recursive);
+  /* Delete effects that use `strip` as an input (either directly or through another effect), and
+   * the contents of any meta strip. Effect inputs are always in the same seqbase as the effect. */
+  expand_strips(ed, strips_to_delete, StripRelation::Effects | StripRelation::MetaContents);
 
   for (Strip *strip_to_mark : strips_to_delete) {
     strip_to_mark->runtime->flag |= StripRuntimeFlag::MarkForDelete;
@@ -197,9 +198,7 @@ bool edit_move_strip_to_seqbase(Scene *scene,
   relations_invalidate_cache(scene, strip);
 
   /* Update meta. */
-  if (transform_test_overlap(scene, dst_seqbase, strip)) {
-    transform_seqbase_shuffle(dst_seqbase, strip, scene);
-  }
+  transform_shuffle_vertical(dst_seqbase, {strip}, scene);
 
   return true;
 }
@@ -240,7 +239,7 @@ bool edit_move_strip_to_meta(Scene *scene,
 
   VectorSet<Strip *> strips;
   strips.add(src_strip);
-  iterator_set_expand(seqbase, strips, query_strip_effect_chain);
+  expand_strips(ed, strips, StripRelation::EffectChain);
 
   for (Strip *strip : strips) {
     /* Move to meta. */
@@ -268,14 +267,13 @@ static void seq_split_set_right_hold_offset(Main *bmain,
   }
   /* Adjust within range of strip contents. */
   else if ((timeline_frame >= content_start) && (timeline_frame <= content_end)) {
-    strip->endofs = 0;
+    strip->end_offset_set(0);
     const float scene_fps = float(scene->r.frs_sec) / float(scene->r.frs_sec_base);
     const float speed_factor = strip->media_playback_rate_factor(scene_fps);
     strip->anim_endofs += round_fl_to_int((content_end - timeline_frame) * speed_factor);
   }
 
-  /* Needed only to set `strip->len`. */
-  add_reload_new_file(bmain, scene, strip, false);
+  add_update_content_length(bmain, scene, strip);
   strip->right_handle_set(scene, timeline_frame);
 }
 
@@ -299,19 +297,46 @@ static void seq_split_set_left_hold_offset(Main *bmain,
   else if (timeline_frame > content_end) {
     const float offset = timeline_frame - content_end + 1;
     strip->start += offset;
-    strip->endofs += offset;
+    strip->end_offset_set(strip->end_offset() + offset);
   }
 
-  /* Needed only to set `strip->len`. */
-  add_reload_new_file(bmain, scene, strip, false);
+  add_update_content_length(bmain, scene, strip);
   strip->left_handle_set(scene, timeline_frame);
 }
 
-static bool seq_edit_split_intersect_check(const Scene *scene,
-                                           const Strip *strip,
-                                           const int timeline_frame)
+bool edit_frame_splits_strip(const Scene *scene, const Strip *strip, const int timeline_frame)
 {
   return timeline_frame > strip->left_handle() && timeline_frame < strip->right_handle(scene);
+}
+
+Vector<Strip *> edit_split_strips_get(Scene *scene,
+                                      const int frame,
+                                      const std::optional<int> channel,
+                                      const bool only_selected)
+{
+  Editing *ed = editing_get(scene);
+  const ListBaseT<SeqTimelineChannel> *channels = channels_displayed_get(ed);
+
+  Vector<Strip *> strips;
+  for (Strip &strip : *ed->current_strips()) {
+    if (!edit_frame_splits_strip(scene, &strip, frame)) {
+      continue;
+    }
+    if (only_selected && (strip.flag & SEQ_SELECT) == 0) {
+      continue;
+    }
+    if (channel) {
+      if (strip.channel == *channel) {
+        return {&strip};
+      }
+      continue;
+    }
+    if (!only_selected && transform_is_locked(channels, &strip)) {
+      continue;
+    }
+    strips.append(&strip);
+  }
+  return strips;
 }
 
 static void seq_edit_split_handle_strip_offsets(Main *bmain,
@@ -321,7 +346,7 @@ static void seq_edit_split_handle_strip_offsets(Main *bmain,
                                                 const int timeline_frame,
                                                 const eSplitMethod method)
 {
-  if (seq_edit_split_intersect_check(scene, right_strip, timeline_frame)) {
+  if (edit_frame_splits_strip(scene, right_strip, timeline_frame)) {
     switch (method) {
       case SPLIT_SOFT:
         right_strip->left_handle_set(scene, timeline_frame);
@@ -332,7 +357,7 @@ static void seq_edit_split_handle_strip_offsets(Main *bmain,
     }
   }
 
-  if (seq_edit_split_intersect_check(scene, left_strip, timeline_frame)) {
+  if (edit_frame_splits_strip(scene, left_strip, timeline_frame)) {
     switch (method) {
       case SPLIT_SOFT:
         left_strip->right_handle_set(scene, timeline_frame);
@@ -350,14 +375,14 @@ static bool seq_edit_split_effect_inputs_intersect(const Scene *scene,
 {
   bool input_does_intersect = false;
   if (strip->input1) {
-    input_does_intersect |= seq_edit_split_intersect_check(scene, strip->input1, timeline_frame);
+    input_does_intersect |= edit_frame_splits_strip(scene, strip->input1, timeline_frame);
     if (strip->input1->is_effect()) {
       input_does_intersect |= seq_edit_split_effect_inputs_intersect(
           scene, strip->input1, timeline_frame);
     }
   }
   if (strip->input2) {
-    input_does_intersect |= seq_edit_split_intersect_check(scene, strip->input2, timeline_frame);
+    input_does_intersect |= edit_frame_splits_strip(scene, strip->input2, timeline_frame);
     if (strip->input2->is_effect()) {
       input_does_intersect |= seq_edit_split_effect_inputs_intersect(
           scene, strip->input2, timeline_frame);
@@ -374,13 +399,13 @@ static bool seq_edit_split_operation_permitted_check(const Scene *scene,
   for (Strip *strip : strips) {
     const ListBaseT<SeqTimelineChannel> *channels = channels_displayed_get(editing_get(scene));
     if (transform_is_locked(channels, strip)) {
-      *r_error = "Strip is locked.";
+      *r_error = "Strip is locked, cannot split";
       return false;
     }
     if (!strip->is_effect()) {
       continue;
     }
-    if (!seq_edit_split_intersect_check(scene, strip, timeline_frame)) {
+    if (!edit_frame_splits_strip(scene, strip, timeline_frame)) {
       continue;
     }
     if (strip->effect_num_inputs_get() <= 1) {
@@ -398,44 +423,45 @@ static bool seq_edit_split_operation_permitted_check(const Scene *scene,
   return true;
 }
 
-Strip *edit_strip_split(Main *bmain,
-                        Scene *scene,
-                        ListBaseT<Strip> *seqbase,
-                        Strip *strip,
-                        const int timeline_frame,
-                        const eSplitMethod method,
-                        const bool ignore_connections,
-                        const char **r_error)
+Vector<Strip *> edit_strips_split(Main *bmain,
+                                  Scene *scene,
+                                  ListBaseT<Strip> *seqbase,
+                                  const Span<Strip *> strips_to_split,
+                                  const int timeline_frame,
+                                  const eSplitMethod method,
+                                  const StripRelation include,
+                                  const char **r_error)
 {
-  if (!seq_edit_split_intersect_check(scene, strip, timeline_frame)) {
-    return nullptr;
-  }
-
   /* Whole strip effect chain must be duplicated in order to preserve relationships. */
   VectorSet<Strip *> strips;
-  strips.add(strip);
-  iterator_set_expand(seqbase,
-                      strips,
-                      ignore_connections ? query_strip_effect_chain :
-                                           query_strip_connected_and_effect_chain);
-
-  if (!seq_edit_split_operation_permitted_check(scene, strips, timeline_frame, r_error)) {
-    return nullptr;
+  for (Strip *strip : strips_to_split) {
+    if (strips.contains(strip) || !edit_frame_splits_strip(scene, strip, timeline_frame)) {
+      continue;
+    }
+    VectorSet<Strip *> chain;
+    chain.add(strip);
+    expand_strips(editing_get(scene), chain, include);
+    if (seq_edit_split_operation_permitted_check(scene, chain, timeline_frame, r_error)) {
+      strips.add_multiple(chain.as_span());
+    }
+  }
+  if (strips.is_empty()) {
+    return {};
   }
 
   /* Store `F-Curves`, so original ones aren't renamed. */
   AnimationBackup animation_backup{};
   animation_backup_original(scene, &animation_backup);
 
+  /* This group of strips can keep its connections since they're all split at the same frame,
+   * producing copies that match one another. Any outside strips that reference in must be cut. */
+  cut_outside_connections(strips);
+
   ListBaseT<Strip> left_strips = {nullptr, nullptr};
   for (Strip *strip_iter : strips) {
     /* Move strips in collection from seqbase to new ListBase. */
     BLI_remlink(seqbase, strip_iter);
     BLI_addtail(&left_strips, strip_iter);
-
-    if (ignore_connections) {
-      disconnect(strip_iter);
-    }
 
     /* Duplicate curves from backup, so they can be renamed along with split strips. */
     animation_duplicate_backup_to_scene(scene, strip_iter, &animation_backup);
@@ -446,9 +472,9 @@ Strip *edit_strip_split(Main *bmain,
   seqbase_duplicate_recursive(
       bmain, scene, scene, &right_strips, &left_strips, StripDuplicate::All, 0);
 
-  Strip *left_strip = static_cast<Strip *>(left_strips.first);
-  Strip *right_strip = static_cast<Strip *>(right_strips.first);
-  Strip *return_strip = nullptr;
+  Strip *left_strip = left_strips.first();
+  Strip *right_strip = right_strips.first();
+  Vector<Strip *> return_strips;
 
   /* Move strips from detached `ListBase`, otherwise they can't be flagged for removal. */
   BLI_movelisttolist(seqbase, &left_strips);
@@ -458,7 +484,7 @@ Strip *edit_strip_split(Main *bmain,
    * strips to seqbase, for lookup cache to work correctly. */
   Strip *strip_rename = right_strip;
   for (; strip_rename; strip_rename = strip_rename->next) {
-    ensure_unique_name(strip_rename, scene);
+    ensure_unique_name(strip_rename, scene, {});
   }
 
   /* Split strips. */
@@ -469,9 +495,8 @@ Strip *edit_strip_split(Main *bmain,
     else if (right_strip->right_handle(scene) <= timeline_frame) {
       edit_flag_for_removal(scene, right_strip);
     }
-    else if (return_strip == nullptr) {
-      /* Store return value - pointer to strip that will not be removed. */
-      return_strip = right_strip;
+    else {
+      return_strips.append(right_strip);
     }
 
     seq_edit_split_handle_strip_offsets(
@@ -483,7 +508,23 @@ Strip *edit_strip_split(Main *bmain,
   edit_remove_flagged_strips(scene, seqbase);
   animation_restore_original(scene, &animation_backup);
 
-  return return_strip;
+  return return_strips;
+}
+
+Strip *edit_strip_split(Main *bmain,
+                        Scene *scene,
+                        ListBaseT<Strip> *seqbase,
+                        Strip *strip,
+                        const int timeline_frame,
+                        const eSplitMethod method,
+                        const bool ignore_connections,
+                        const char **r_error)
+{
+  const StripRelation include = ignore_connections ? StripRelation::EffectChain :
+                                                     StripRelation::ConnectedEffectChain;
+  const Vector<Strip *> right_strips = edit_strips_split(
+      bmain, scene, seqbase, {strip}, timeline_frame, method, include, r_error);
+  return right_strips.is_empty() ? nullptr : right_strips.first();
 }
 
 bool edit_remove_gaps(Scene *scene,
@@ -500,12 +541,12 @@ bool edit_remove_gaps(Scene *scene,
 
   if (remove_all_gaps) {
     while (gap_info.gap_exists) {
-      transform_offset_after_frame(scene, seqbase, -gap_info.gap_length, gap_info.gap_start_frame);
+      transform_strips_after_frame(scene, seqbase, gap_info.gap_start_frame, -gap_info.gap_length);
       seq_time_gap_info_get(scene, seqbase, initial_frame, &gap_info);
     }
   }
   else {
-    transform_offset_after_frame(scene, seqbase, -gap_info.gap_length, gap_info.gap_start_frame);
+    transform_strips_after_frame(scene, seqbase, gap_info.gap_start_frame, -gap_info.gap_length);
   }
   return true;
 }

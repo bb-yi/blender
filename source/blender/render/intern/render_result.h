@@ -19,7 +19,7 @@ namespace blender {
 
 struct ColorManagedDisplaySettings;
 struct ColorManagedViewSettings;
-struct ExrHandle;
+struct ExrReadHandle;
 struct ImBuf;
 struct Render;
 struct RenderData;
@@ -47,7 +47,7 @@ void render_result_passes_allocated_ensure(struct RenderResult *rr);
  * From `imbuf`, if a handle was returned and
  * it's not a single-layer multi-view we convert this to render result.
  */
-struct RenderResult *render_result_new_from_exr(ExrHandle *exrhandle,
+struct RenderResult *render_result_new_from_exr(ExrReadHandle *exrhandle,
                                                 const char *colorspace,
                                                 bool predivide,
                                                 int rectx,
@@ -145,9 +145,7 @@ void render_result_free_gpu_texture_caches(struct RenderResult *rr);
 #define FOREACH_VIEW_LAYER_TO_RENDER_BEGIN(re_, iter_) \
   { \
     ViewLayer *iter_; \
-    for (iter_ = static_cast<ViewLayer *>((re_)->scene->view_layers.first); iter_ != NULL; \
-         iter_ = iter_->next) \
-    { \
+    for (iter_ = (re_)->scene->view_layers.first(); iter_ != NULL; iter_ = iter_->next) { \
       if (!G.background && (re_)->r.scemode & R_SINGLE_LAYER) { \
         if (!STREQ(iter_->name, re->single_view_layer)) { \
           continue; \

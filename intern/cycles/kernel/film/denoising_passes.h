@@ -31,16 +31,36 @@ ccl_device_forceinline float denoising_depth_compute(KernelGlobals kg,
     depth = new_depth - prev_depth;
   }
 
+  /* Include nearclip distance for the first bounce only to make sure that the depth value will
+   * never be lower than the near clip plane. OIDN expects the denoising depth to be in the range
+   * [near, far]. For orthographic cameras this is skipped, as `nearclip = -farclip / 2` is used
+   * and OIDN does not accept negative near clip planes.*/
+  if (INTEGRATOR_STATE(state, path, bounce) == 0 &&
+      INTEGRATOR_STATE(state, path, transparent_bounce) == 0 &&
+      INTEGRATOR_STATE(state, path, volume_bounds_bounce) == 0 && kernel_data.cam.nearclip > 0.0f)
+  {
+    if (follow_reflections && kernel_data.cam.type == CAMERA_PERSPECTIVE) {
+      /* Depth is a ray length here, so add the ray length from the camera to the near clip plane
+       * rather than the near clip z-depth. */
+      const Transform cameratoworld = kernel_data.cam.cameratoworld;
+      const float3 camD = make_float3(cameratoworld.x.z, cameratoworld.y.z, cameratoworld.z.z);
+      depth += kernel_data.cam.nearclip / dot(-sd->wi, camD);
+    }
+    else {
+      depth += kernel_data.cam.nearclip;
+    }
+  }
+
   return ensure_finite(depth * average(denoising_feature_throughput));
 }
 
 ccl_device_forceinline void film_write_denoising_features_surface(KernelGlobals kg,
                                                                   IntegratorState state,
+                                                                  const uint32_t path_flag,
                                                                   const ccl_private ShaderData *sd,
                                                                   ccl_global float *ccl_restrict
                                                                       render_buffer)
 {
-  const uint32_t path_flag = INTEGRATOR_STATE(state, path, flag);
   if (!(path_flag & PATH_RAY_DENOISING_FEATURES)) {
     return;
   }
@@ -77,8 +97,8 @@ ccl_device_forceinline void film_write_denoising_features_surface(KernelGlobals 
       continue;
     }
 
-    const Spectrum closure_albedo = bsdf_albedo(kg, sd, sc, true, true);
-    const float closure_weight = average(closure_albedo);
+    const Spectrum albedo = closure_albedo(kg, sd, sc, true, true);
+    const float closure_weight = average(albedo);
 
     /* All closures contribute to the normal feature, but only diffuse-like ones to the albedo. */
     /* If far-field hair, use fiber tangent as feature instead of normal. */
@@ -95,14 +115,14 @@ ccl_device_forceinline void film_write_denoising_features_surface(KernelGlobals 
                                      smoothstep(0.0f, 0.15f, roughness);
 
     if (use_albedo_roughness_weighting) {
-      diffuse_albedo += closure_albedo * diffuse_weight;
-      specular_albedo += closure_albedo * (1.0f - diffuse_weight);
+      diffuse_albedo += albedo * diffuse_weight;
+      specular_albedo += albedo * (1.0f - diffuse_weight);
     }
     else if (CLOSURE_IS_BSDF_DIFFUSE(sc->type) || CLOSURE_IS_BSSRDF(sc->type)) {
-      diffuse_albedo += closure_albedo;
+      diffuse_albedo += albedo;
     }
     else if (CLOSURE_IS_BSDF_GLOSSY(sc->type) || CLOSURE_IS_GLASS(sc->type)) {
-      specular_albedo += closure_albedo;
+      specular_albedo += albedo;
     }
     /* Apply sqrtf again to convert GGX alpha to perceptual roughness. */
     specular_roughness += sqrtf(roughness) * closure_weight;
@@ -126,6 +146,8 @@ ccl_device_forceinline void film_write_denoising_features_surface(KernelGlobals 
     feature_weight = smoothstep(0.0f, 0.5f, sum_nonspecular_weight / sum_weight);
   }
 
+  float deferred_feature_weight = 1.0f - feature_weight;
+
   /* Whether to defer features to the next bounce for individual passes. */
   const bool follow_reflections = (kernel_data.film.denoising_pass_options_flag &
                                    DENOISING_PASS_FOLLOW_REFLECTIONS) != 0;
@@ -133,37 +155,34 @@ ccl_device_forceinline void film_write_denoising_features_surface(KernelGlobals 
     feature_weight = 1.0f;
   }
 
-  const Spectrum denoising_feature_throughput = INTEGRATOR_STATE(
-      state, path, denoising_feature_throughput);
   const bool is_first_bounce = INTEGRATOR_STATE(state, path, bounce) == 0;
 
-  if (kernel_data.film.pass_denoising_depth != PASS_UNUSED &&
-      (is_first_bounce || follow_reflections))
-  {
-    const float denoising_depth = denoising_depth_compute(
-        kg, state, sd, denoising_feature_throughput, follow_reflections);
-    film_write_pass_float(buffer + kernel_data.film.pass_denoising_depth, denoising_depth);
-  }
+  const Spectrum denoising_feature_throughput = INTEGRATOR_STATE(
+      state, path, denoising_feature_throughput);
 
-  if (kernel_data.film.pass_denoising_normal != PASS_UNUSED && feature_weight > 0.0f &&
-      (is_first_bounce || follow_reflections))
-  {
-    /* Transform normal into camera space. */
-    const Transform worldtocamera = kernel_data.cam.worldtocamera;
-    float3 denoising_normal = transform_direction(&worldtocamera, normal);
-    const float opaque_fraction = (total_weight > 0.0f) ? (sum_weight / total_weight) : 1.0f;
+  if (is_first_bounce || follow_reflections) {
+    if (kernel_data.film.pass_denoising_depth != PASS_UNUSED) {
+      const float denoising_depth = denoising_depth_compute(
+          kg, state, sd, denoising_feature_throughput, follow_reflections);
+      film_write_pass_float(buffer + kernel_data.film.pass_denoising_depth, denoising_depth);
+    }
 
-    denoising_normal = ensure_finite(denoising_normal * opaque_fraction * feature_weight *
-                                     average(denoising_feature_throughput));
-    film_write_pass_float3(buffer + kernel_data.film.pass_denoising_normal, denoising_normal);
-  }
+    if (kernel_data.film.pass_denoising_normal != PASS_UNUSED && feature_weight > 0.0f) {
+      /* Transform normal into camera space. */
+      const Transform worldtocamera = kernel_data.cam.worldtocamera;
+      float3 denoising_normal = transform_direction(&worldtocamera, normal);
+      const float opaque_fraction = (total_weight > 0.0f) ? (sum_weight / total_weight) : 1.0f;
 
-  if (kernel_data.film.pass_denoising_albedo != PASS_UNUSED && feature_weight > 0.0f &&
-      (is_first_bounce || follow_reflections))
-  {
-    const Spectrum denoising_albedo = ensure_finite(diffuse_albedo * feature_weight *
-                                                    denoising_feature_throughput);
-    film_write_pass_spectrum(buffer + kernel_data.film.pass_denoising_albedo, denoising_albedo);
+      denoising_normal = ensure_finite(denoising_normal * opaque_fraction * feature_weight *
+                                       average(denoising_feature_throughput));
+      film_write_pass_float3(buffer + kernel_data.film.pass_denoising_normal, denoising_normal);
+    }
+
+    if (kernel_data.film.pass_denoising_albedo != PASS_UNUSED && feature_weight > 0.0f) {
+      const Spectrum denoising_albedo = ensure_finite(diffuse_albedo * feature_weight *
+                                                      denoising_feature_throughput);
+      film_write_pass_spectrum(buffer + kernel_data.film.pass_denoising_albedo, denoising_albedo);
+    }
   }
 
   if (is_first_bounce) {
@@ -181,19 +200,49 @@ ccl_device_forceinline void film_write_denoising_features_surface(KernelGlobals 
                                denoising_specular_albedo);
     }
 
-    if (kernel_data.film.pass_denoising_backward_motion != PASS_UNUSED) {
+    if (kernel_data.film.pass_denoising_backward_motion != PASS_UNUSED &&
+        /* Only write motion for a single hit, using the same logic as film_write_data_passes
+         * (which also sets PATH_RAY_SINGLE_PASS_DONE afterwards). */
+        !(path_flag & PATH_RAY_SINGLE_PASS_DONE) &&
+        (!(sd->runtime_flag & (SR_TRANSPARENT | SR_RAY_PORTAL)) ||
+         kernel_data.film.pass_alpha_threshold == 0.0f ||
+         average(surface_shader_alpha(sd)) >= kernel_data.film.pass_alpha_threshold))
+    {
       const float3 backward_motion = primitive_motion_vector_backward_depth_delta(kg, sd);
       film_write_pass_float3(buffer + kernel_data.film.pass_denoising_backward_motion,
                              backward_motion);
     }
   }
+  else if (INTEGRATOR_STATE(state, path, bounce) == 1 && (path_flag & PATH_RAY_REFLECT)) {
+    if (kernel_data.film.pass_denoising_specular_motion != PASS_UNUSED) {
+      const float3 reflector_P = INTEGRATOR_STATE(state, ray, P);
+      const float3 reflector_N = INTEGRATOR_STATE(state, path, mis_origin_n);
+
+      const float4 denoising_specular_motion = primitive_motion_vector_reflection(
+          kg, reflector_P, reflector_N, sd);
+      film_write_pass_float(buffer + kernel_data.film.pass_denoising_specular_motion + 0,
+                            denoising_specular_motion.x);
+      film_write_pass_float(buffer + kernel_data.film.pass_denoising_specular_motion + 1,
+                            denoising_specular_motion.y);
+    }
+  }
 
   /* Portion deferred to the next bounce. Specularity uses the feature weight, transparent
    * always passes through. */
-  const Spectrum deferred_albedo = specular_albedo * (1.0f - feature_weight) + transparent_albedo;
+  Spectrum deferred_albedo = specular_albedo * deferred_feature_weight + transparent_albedo;
 
+  /* When not following reflections, but the specular motion pass is enabled, still need to
+   * continue to the first bounce, but with no weight for the albedo pass. */
+  if (!follow_reflections && kernel_data.film.pass_denoising_specular_motion == PASS_UNUSED) {
+    deferred_albedo = transparent_albedo;
+  }
   if (reduce_max(fabs(deferred_albedo)) > 1e-4f) {
-    INTEGRATOR_STATE_WRITE(state, path, denoising_feature_throughput) *= deferred_albedo;
+    if (!follow_reflections) {
+      deferred_albedo = transparent_albedo;
+    }
+    const Spectrum throughput = INTEGRATOR_STATE(state, path, denoising_feature_throughput);
+    INTEGRATOR_STATE_WRITE(state, path, denoising_feature_throughput) = throughput *
+                                                                        deferred_albedo;
   }
   else {
     INTEGRATOR_STATE_WRITE(state, path, flag) &= ~PATH_RAY_DENOISING_FEATURES;
@@ -212,15 +261,15 @@ ccl_device_forceinline void film_write_denoising_features_surface_volume(
                                    DENOISING_PASS_FOLLOW_REFLECTIONS) != 0;
   const bool is_first_bounce = INTEGRATOR_STATE(state, path, bounce) == 0;
 
-  if (kernel_data.film.pass_denoising_depth != PASS_UNUSED &&
-      (is_first_bounce || follow_reflections))
-  {
-    const Spectrum denoising_feature_throughput = INTEGRATOR_STATE(
-        state, path, denoising_feature_throughput);
+  const Spectrum denoising_feature_throughput = INTEGRATOR_STATE(
+      state, path, denoising_feature_throughput);
 
-    const float denoising_depth = denoising_depth_compute(
-        kg, state, sd, denoising_feature_throughput, follow_reflections);
-    film_write_pass_float(buffer + kernel_data.film.pass_denoising_depth, denoising_depth);
+  if (is_first_bounce || follow_reflections) {
+    if (kernel_data.film.pass_denoising_depth != PASS_UNUSED) {
+      const float denoising_depth = denoising_depth_compute(
+          kg, state, sd, denoising_feature_throughput, follow_reflections);
+      film_write_pass_float(buffer + kernel_data.film.pass_denoising_depth, denoising_depth);
+    }
   }
 }
 
@@ -232,6 +281,7 @@ ccl_device_forceinline void film_write_denoising_features_volume(KernelGlobals k
                                                                      render_buffer)
 {
   ccl_global float *buffer = film_pass_pixel_render_buffer(kg, state, render_buffer);
+
   const Spectrum denoising_feature_throughput = INTEGRATOR_STATE(
       state, path, denoising_feature_throughput);
 
@@ -251,11 +301,15 @@ ccl_device_forceinline void film_write_denoising_features_volume(KernelGlobals k
   }
 }
 
-ccl_device_forceinline void film_write_denoising_features_background(
-    KernelGlobals kg, IntegratorState state, ccl_global float *ccl_restrict render_buffer)
+ccl_device_forceinline void film_write_denoising_features_background(KernelGlobals kg,
+                                                                     IntegratorState state,
+                                                                     const uint32_t path_flag,
+                                                                     ccl_global float *ccl_restrict
+                                                                         render_buffer)
 {
-  const uint32_t path_flag = INTEGRATOR_STATE(state, path, flag);
-  if (!(path_flag & PATH_RAY_DENOISING_FEATURES)) {
+  /* Don't write denoising passes for paths that were split off for shadow catchers
+   * to avoid double-counting. */
+  if (!(path_flag & PATH_RAY_DENOISING_FEATURES) || (path_flag & PATH_RAY_SHADOW_CATCHER_PASS)) {
     return;
   }
 
@@ -267,7 +321,66 @@ ccl_device_forceinline void film_write_denoising_features_background(
   ccl_global float *buffer = film_pass_pixel_render_buffer(kg, state, render_buffer);
 
   if (kernel_data.film.pass_denoising_depth != PASS_UNUSED) {
-    film_overwrite_pass_float(buffer + kernel_data.film.pass_denoising_depth, FLT_MAX);
+    const Spectrum denoising_feature_throughput = INTEGRATOR_STATE(
+        state, path, denoising_feature_throughput);
+
+    /* Transparent surfaces and volumes keep `bounce == 0` and the first of them already wrote the
+     * near clip distance as part of their depth segment. */
+    const bool wrote_first_segment = INTEGRATOR_STATE(state, path, transparent_bounce) != 0 ||
+                                     INTEGRATOR_STATE(state, path, volume_bounds_bounce) != 0;
+
+    float farclip_depth;
+    /* Add nearclip only when the depth is measured from the camera and nothing was written yet.
+     * Skip it for orthographic cameras (nearclip < 0.0f), when cliplength is FLT_MAX (to avoid
+     * numerical issues), or once the first segment already covered the near clip distance. */
+    if (kernel_data.cam.nearclip < 0.0f || kernel_data.cam.cliplength == FLT_MAX ||
+        wrote_first_segment)
+    {
+      farclip_depth = kernel_data.cam.cliplength;
+    }
+    else {
+      farclip_depth = kernel_data.cam.nearclip + kernel_data.cam.cliplength;
+    }
+
+    if (kernel_data.cam.cliplength == FLT_MAX) {
+      film_overwrite_pass_float(buffer + kernel_data.film.pass_denoising_depth, farclip_depth);
+    }
+    else {
+      /* No shading point at the background, so use the ray directly. Transparent surfaces and
+       * volume boundaries keep `bounce == 0` and only advance `tmin`, leaving the ray origin and
+       * direction unchanged, so `ray_P` is still the camera near clip point. */
+      const float3 ray_P = INTEGRATOR_STATE(state, ray, P);
+      const float3 ray_D = INTEGRATOR_STATE(state, ray, D);
+
+      /* Only cover the distance not already written for this path, so the accumulated value stays
+       * within [near, far]. A ray reaching the background directly has not written any depth. */
+      if (wrote_first_segment) {
+        const float3 prev_P = ray_P + ray_D * INTEGRATOR_STATE(state, ray, tmin);
+        farclip_depth -= camera_z_depth(kg, prev_P) - camera_z_depth(kg, ray_P);
+      }
+
+      /* Convert the camera z distance to a ray length if necessary. */
+      const bool follow_reflections = (kernel_data.film.denoising_pass_options_flag &
+                                       DENOISING_PASS_FOLLOW_REFLECTIONS) != 0;
+      if (follow_reflections && kernel_data.cam.type == CAMERA_PERSPECTIVE) {
+        const Transform cameratoworld = kernel_data.cam.cameratoworld;
+        const float3 camD = make_float3(cameratoworld.x.z, cameratoworld.y.z, cameratoworld.z.z);
+        farclip_depth = farclip_depth / dot(ray_D, camD);
+      }
+
+      farclip_depth = ensure_finite(farclip_depth * average(denoising_feature_throughput));
+      film_write_pass_float(buffer + kernel_data.film.pass_denoising_depth, farclip_depth);
+    }
+  }
+
+  if (kernel_data.film.pass_denoising_backward_motion != PASS_UNUSED &&
+      !(path_flag & PATH_RAY_SINGLE_PASS_DONE))
+  {
+    const float4 speed = camera_motion_vector_direction(
+        kg, INTEGRATOR_STATE(state, ray, P), INTEGRATOR_STATE(state, ray, D));
+    const float3 backward_motion = make_float3(speed.x, speed.y, 0.0f);
+    film_write_pass_float3(buffer + kernel_data.film.pass_denoising_backward_motion,
+                           backward_motion);
   }
 
   /* 'pass_denoising_albedo' is written by 'film_write_emission_or_background_pass' */

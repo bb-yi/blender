@@ -16,6 +16,7 @@
 
 #include "BLI_bounds_types.hh"
 #include "BLI_enum_flags.hh"
+#include "BLI_math_quaternion_types.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_memory_counter_fwd.hh"
 #include "BLI_span.hh"
@@ -26,20 +27,28 @@ namespace blender {
 template<typename T> class Span;
 namespace bke {
 class AttributeAccessor;
-struct BVHTreeFromPointCloud;
 class MutableAttributeAccessor;
 struct PointCloudRuntime;
+namespace bvh {
+class Tree;
+}
 }  // namespace bke
 
 namespace draw {
 struct PointCloudBatchCache;
-}
+struct GSplatBatchCache;
+}  // namespace draw
 
 /** #PointCloud.flag */
 enum ePointCloud_Flag : int {
   PT_DS_EXPAND = (1 << 0),
 };
 ENUM_OPERATORS(ePointCloud_Flag)
+
+enum class PointCloudType : short {
+  Points = 0,
+  GSplat = 1,
+};
 
 struct PointCloud {
 #ifdef __cplusplus
@@ -49,6 +58,9 @@ struct PointCloud {
 
   ID id;
   struct AnimData *adt = nullptr; /* animation data (must be immediately after id) */
+
+  PointCloudType type = PointCloudType::Points;
+  short _pad1[3] = {};
 
   ePointCloud_Flag flag = {};
 
@@ -61,7 +73,7 @@ struct PointCloud {
   /* Custom Data */
   struct CustomData pdata_legacy;
   /** Set to -1 when none is active. */
-  int attributes_active_index = 0;
+  int attributes_active_index = -1;
   int _pad4 = {};
 
   /* Material */
@@ -87,15 +99,17 @@ struct PointCloud {
   /** Get the largest material index used by the point-cloud or `nullopt` if it is empty. */
   std::optional<int> material_index_max() const;
 
-  bke::BVHTreeFromPointCloud bvh_tree() const;
+  /** BVH tree of the points, which can be used for closest point queries. Radii are ignored. */
+  const bke::bvh::Tree &bvh_tree() const;
 
   void count_memory(MemoryCounter &memory) const;
 #endif
 
   bke::PointCloudRuntime *runtime = nullptr;
 
-  /* Draw Cache */
-  draw::PointCloudBatchCache *batch_cache = nullptr;
+  /* Draw Caches */
+  draw::PointCloudBatchCache *pointcloud_batch_cache = nullptr;
+  draw::GSplatBatchCache *gsplat_batch_cache = nullptr;
 };
 
 /* Only one material supported currently. */

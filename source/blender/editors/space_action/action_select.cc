@@ -14,8 +14,8 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_lasso_2d.hh"
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_utildefines.hh"
 
 #include "DNA_anim_types.h"
 #include "DNA_gpencil_legacy_types.h"
@@ -486,9 +486,7 @@ static void box_select_elem(
     case ANIMTYPE_MASKDATABLOCK: {
       Mask *mask = static_cast<Mask *>(ale->data);
       MaskLayer *masklay;
-      for (masklay = static_cast<MaskLayer *>(mask->masklayers.first); masklay;
-           masklay = masklay->next)
-      {
+      for (masklay = mask->masklayers.first(); masklay; masklay = masklay->next) {
         ED_masklayer_frames_select_box(masklay, xmin, xmax, sel_data->selectmode);
       }
       break;
@@ -566,9 +564,7 @@ static void box_select_action(bAnimContext *ac,
   const float channel_step = ANIM_UI_get_channel_step();
 
   /* loop over data, doing box select */
-  for (ale = static_cast<bAnimListElem *>(anim_data.first); ale;
-       ale = ale->next, ymax -= channel_step)
-  {
+  for (ale = anim_data.first(); ale; ale = ale->next, ymax -= channel_step) {
     /* get new vertical minimum extent of channel */
     float ymin = ymax - channel_step;
 
@@ -577,8 +573,13 @@ static void box_select_action(bAnimContext *ac,
       /* if channel is mapped in NLA, apply correction */
       if (ANIM_nla_mapping_allowed(ale)) {
         sel_data.ked.iterflags &= ~(KED_F1_NLA_UNMAP | KED_F2_NLA_UNMAP);
-        sel_data.ked.f1 = ANIM_nla_tweakedit_remap(ale, rectf.xmin, NLATIME_CONVERT_UNMAP);
-        sel_data.ked.f2 = ANIM_nla_tweakedit_remap(ale, rectf.xmax, NLATIME_CONVERT_UNMAP);
+        const float f1 = ANIM_nla_tweakedit_remap(ale, rectf.xmin, NLATIME_CONVERT_UNMAP);
+        const float f2 = ANIM_nla_tweakedit_remap(ale, rectf.xmax, NLATIME_CONVERT_UNMAP);
+
+        /* Make sure f1 & f2 are in order (e.g. in case of NLASTRIP_FLAG_REVERSE). Note: will still
+         * fail for the Summary (since that is excluded from NLA remapping). */
+        sel_data.ked.f1 = math::min(f1, f2);
+        sel_data.ked.f2 = math::max(f1, f2);
       }
       else {
         sel_data.ked.iterflags |= (KED_F1_NLA_UNMAP | KED_F2_NLA_UNMAP); /* for summary tracks */
@@ -618,7 +619,16 @@ static wmOperatorStatus actkeys_box_select_invoke(bContext *C,
     }
   }
 
-  return WM_gesture_box_invoke(C, op, event);
+  /* `SPACE_ACTION` clamps view at draw-time (foot-gun, draw code should probably be
+   * read-only...), so prevent panning past that. We shouldn't limit horizontal range to
+   * `tot`, however, because for timelines it is the scene playback range. */
+  const wmOperatorStatus opstatus = WM_gesture_box_invoke(C, op, event);
+  wmGesture *gesture = static_cast<wmGesture *>(op->customdata);
+  if (gesture->edge_pan_data && ac.region) {
+    gesture->edge_pan_data->limit.ymin = ac.region->v2d.tot.ymin;
+    gesture->edge_pan_data->limit.ymax = ac.region->v2d.tot.ymax;
+  }
+  return opstatus;
 }
 
 static wmOperatorStatus actkeys_box_select_exec(bContext *C, wmOperator *op)
@@ -762,9 +772,7 @@ static void region_select_elem(RegionSelectData *sel_data, bAnimListElem *ale, b
     case ANIMTYPE_MASKDATABLOCK: {
       Mask *mask = static_cast<Mask *>(ale->data);
       MaskLayer *masklay;
-      for (masklay = static_cast<MaskLayer *>(mask->masklayers.first); masklay;
-           masklay = masklay->next)
-      {
+      for (masklay = mask->masklayers.first(); masklay; masklay = masklay->next) {
         ED_masklayer_frames_select_region(
             &sel_data->ked, masklay, sel_data->mode, sel_data->selectmode);
       }
@@ -852,9 +860,7 @@ static void region_select_action_keys(bAnimContext *ac,
   const float channel_step = ANIM_UI_get_channel_step();
 
   /* loop over data, doing region select */
-  for (ale = static_cast<bAnimListElem *>(anim_data.first); ale;
-       ale = ale->next, ymax -= channel_step)
-  {
+  for (ale = anim_data.first(); ale; ale = ale->next, ymax -= channel_step) {
     /* get new vertical minimum extent of channel */
     const float ymin = ymax - channel_step;
 
@@ -869,8 +875,13 @@ static void region_select_action_keys(bAnimContext *ac,
      */
     if (ANIM_nla_mapping_allowed(ale)) {
       sel_data.ked.iterflags &= ~(KED_F1_NLA_UNMAP | KED_F2_NLA_UNMAP);
-      sel_data.ked.f1 = ANIM_nla_tweakedit_remap(ale, rectf.xmin, NLATIME_CONVERT_UNMAP);
-      sel_data.ked.f2 = ANIM_nla_tweakedit_remap(ale, rectf.xmax, NLATIME_CONVERT_UNMAP);
+      const float f1 = ANIM_nla_tweakedit_remap(ale, rectf.xmin, NLATIME_CONVERT_UNMAP);
+      const float f2 = ANIM_nla_tweakedit_remap(ale, rectf.xmax, NLATIME_CONVERT_UNMAP);
+
+      /* Make sure f1 & f2 are in order (e.g. in case of NLASTRIP_FLAG_REVERSE). Note: will still
+       * fail for the Summary (since that is excluded from NLA remapping). */
+      sel_data.ked.f1 = math::min(f1, f2);
+      sel_data.ked.f2 = math::max(f1, f2);
     }
     else {
       sel_data.ked.iterflags |= (KED_F1_NLA_UNMAP | KED_F2_NLA_UNMAP); /* for summary tracks */
@@ -1103,7 +1114,8 @@ static void markers_selectkeys_between(bAnimContext *ac)
         ED_masklayer_frames_select_box(static_cast<MaskLayer *>(ale.data), min, max, SELECT_ADD);
         break;
 
-      case ANIMTYPE_FCURVE: {
+      case ANIMTYPE_FCURVE:
+      case ANIMTYPE_NLACURVE: {
         FCurve *fcurve = static_cast<FCurve *>(ale.key_data);
         ANIM_nla_mapping_apply_if_needed_fcurve(&ale, fcurve, false, true);
         ANIM_fcurve_keyframes_loop(&ked, fcurve, ok_cb, select_cb, nullptr);
@@ -1551,7 +1563,8 @@ static void actkeys_select_leftright(bAnimContext *ac,
             static_cast<MaskLayer *>(ale.data), ked.f1, ked.f2, select_mode);
         break;
 
-      case ANIMTYPE_FCURVE: {
+      case ANIMTYPE_FCURVE:
+      case ANIMTYPE_NLACURVE: {
         FCurve *fcurve = static_cast<FCurve *>(ale.key_data);
         ANIM_nla_mapping_apply_if_needed_fcurve(&ale, fcurve, false, true);
         ANIM_fcurve_keyframes_loop(&ked, fcurve, ok_cb, select_cb, nullptr);

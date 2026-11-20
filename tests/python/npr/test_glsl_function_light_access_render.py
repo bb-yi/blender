@@ -66,7 +66,7 @@ vec4 shadow_mask(vec3 normal)
 POSITION_SOURCE = """
 vec4 debug_light_position()
 {
-  GLSLLight light = glsl_light_get(0);
+  GLSLLight light = glsl_light_get(/* numeric argument after a comment */ 0);
   return vec4(light.position, 1.0);
 }
 """

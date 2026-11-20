@@ -2,9 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "node_function_util.hh"
+#include "node_shader_util.hh"
 
 namespace blender::nodes::node_fn_reverse_string_cc {
 
@@ -44,7 +45,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  fn_cmp_node_type_base(&ntype, "FunctionNodeReverseString"_ustr);
+  common_node_type_base(&ntype, "FunctionNodeReverseString"_ustr);
   ntype.ui_name = "Reverse String";
   ntype.ui_description = "Reverse the order of the characters in a string";
   ntype.nclass = NODE_CLASS_CONVERTER;

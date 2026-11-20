@@ -12,6 +12,8 @@
 
 #include "BLI_string_ref.hh"
 
+#include "DNA_outliner_types.h"
+
 #include "tree_element.hh"
 
 namespace blender {
@@ -40,7 +42,16 @@ class TreeElementOverridesBase final : public AbstractTreeElement {
  public:
   ID &id;
 
+  static constexpr eTreeStoreElemType element_type = TSE_LIBRARY_OVERRIDE_BASE;
+
   TreeElementOverridesBase(TreeElement &legacy_te, ID &id);
+
+  /** The ID identifying this element in the tree-store, see #AbstractTreeDisplay::add_element().
+   */
+  static ID *owner_id(ID &id)
+  {
+    return &id;
+  }
 
   void expand(SpaceOutliner & /*soops*/) const override;
 
@@ -60,9 +71,20 @@ class TreeElementOverridesProperty : public AbstractTreeElement {
   StringRefNull rna_path;
   bool is_rna_path_valid;
 
+  static constexpr eTreeStoreElemType element_type = TSE_LIBRARY_OVERRIDE;
+
   TreeElementOverridesProperty(TreeElement &legacy_te, TreeElementOverridesData &override_data);
 
+  /** The ID identifying this element in the tree-store, see #AbstractTreeDisplay::add_element().
+   */
+  static ID *owner_id(TreeElementOverridesData &override_data);
+
   StringRefNull get_warning() const override;
+
+  std::optional<BIFIconID> get_icon() const override
+  {
+    return ICON_LIBRARY_DATA_OVERRIDE;
+  }
 
   /** Return the liboverride property matching this tree element, for the given ID. */
   IDOverrideLibraryProperty *get_override_property_from_id(ID &id) const;
@@ -81,6 +103,12 @@ class TreeElementOverridesPropertyOperation final : public TreeElementOverridesP
   std::unique_ptr<IDOverrideLibraryPropertyOperation> operation_;
 
  public:
+  static constexpr eTreeStoreElemType element_type = TSE_LIBRARY_OVERRIDE_OPERATION;
+
+  /** The ID identifying this element in the tree-store, see #AbstractTreeDisplay::add_element().
+   */
+  static ID *owner_id(TreeElementOverridesData &override_data);
+
   TreeElementOverridesPropertyOperation(TreeElement &legacy_te,
                                         TreeElementOverridesData &override_data);
 

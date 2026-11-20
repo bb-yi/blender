@@ -14,6 +14,28 @@ void node_light_parameter_float(float fallback, float uid, float lo, float hi, f
 }
 
 [[node]]
+void node_light_parameter_int(int fallback, float uid, float lo, float hi, float type,
+                              out int value, out float valid)
+{
+  float4 data;
+  bool found = light_shader_parameter_read(floatBitsToUint(uid), floatBitsToUint(lo),
+                                           floatBitsToUint(hi), uint(type), data);
+  valid = found ? 1.0f : 0.0f;
+  value = found ? int(data.x) : fallback;
+}
+
+[[node]]
+void node_light_parameter_bool(bool fallback, float uid, float lo, float hi, float type,
+                               out bool value, out float valid)
+{
+  float4 data;
+  bool found = light_shader_parameter_read(floatBitsToUint(uid), floatBitsToUint(lo),
+                                           floatBitsToUint(hi), uint(type), data);
+  valid = found ? 1.0f : 0.0f;
+  value = found ? (data.x != 0.0f) : fallback;
+}
+
+[[node]]
 void node_light_parameter_vec2(float2 fallback, float uid, float lo, float hi, float type,
                                out float2 value, out float valid)
 {
@@ -47,7 +69,39 @@ void node_light_parameter_vec4(float4 fallback, float uid, float lo, float hi, f
 }
 
 [[node]]
-void node_light_info(float light_uid,
+void node_light_info_transform(float light_uid,
+                               out float3 origin,
+                               out float3 x_axis,
+                               out float3 y_axis,
+                               out float3 z_axis)
+{
+  origin = float3(0.0f);
+  x_axis = float3(0.0f);
+  y_axis = float3(0.0f);
+  z_axis = float3(0.0f);
+
+  const uint record_index = referenced_object_data_find(floatBitsToUint(light_uid));
+  if (record_index == 0xFFFFFFFFu) {
+    return;
+  }
+  const ObjectAttribute metadata = referenced_object_data_lane_at(record_index, 0u);
+  if (floatBitsToInt(metadata.data_y) < 0) {
+    return;
+  }
+
+  /* Keep the evaluated matrix columns intact, including reflection and parent shear. */
+  const ObjectAttribute x = referenced_object_data_lane_at(record_index, 1u);
+  const ObjectAttribute y = referenced_object_data_lane_at(record_index, 2u);
+  const ObjectAttribute z = referenced_object_data_lane_at(record_index, 3u);
+  const ObjectAttribute t = referenced_object_data_lane_at(record_index, 4u);
+  origin = float3(t.data_x, t.data_y, t.data_z);
+  x_axis = float3(x.data_x, x.data_y, x.data_z);
+  y_axis = float3(y.data_x, y.data_y, y.data_z);
+  z_axis = float3(z.data_x, z.data_y, z.data_z);
+}
+
+[[node]]
+void node_npr_light_info(float light_uid,
                      out float4 color,
                      out float power,
                      out float type,

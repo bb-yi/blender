@@ -1,5 +1,5 @@
-#include "gpu_shader_common_hash.glsl"
-#include "gpu_shader_math_vector_safe_lib.glsl"
+#include "gpu_shader_common_hash.bsl.hh"
+#include "gpu_shader_math_vector_safe.bsl.hh"
 
 #define HRATIO 1.1547005f
 #define HSQRT3 1.7320508f

@@ -9,7 +9,7 @@
 #include <cstddef>
 #include <cstring>
 
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -98,7 +98,7 @@ static void deform_verts(ModifierData *md,
   ParticleSystemModifierData *psmd = reinterpret_cast<ParticleSystemModifierData *>(md);
   ParticleSystem *psys = nullptr;
 
-  if (ctx->object->particlesystem.first) {
+  if (ctx->object->particlesystem.first()) {
     psys = psmd->psys;
   }
   else {
@@ -153,11 +153,9 @@ static void deform_verts(ModifierData *md,
     Mesh *mesh_original = nullptr;
 
     if (ctx->object->type == OB_MESH) {
-      BMEditMesh *em = BKE_editmesh_from_object(ctx->object);
-
-      if (em) {
+      if (BMesh *bm = BKE_editmesh_bmesh_get_for_write(ctx->object)) {
         /* In edit mode get directly from the edit mesh. */
-        psmd->mesh_original = BKE_mesh_from_bmesh_for_eval_nomain(em->bm, nullptr, mesh);
+        psmd->mesh_original = BKE_mesh_from_bmesh_for_eval_nomain(bm, nullptr, mesh);
       }
       else {
         /* Otherwise get regular mesh. */

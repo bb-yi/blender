@@ -12,8 +12,8 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_ghash.h"
-#include "BLI_listbase.h"
+#include "BLI_ghash.hh"
+#include "BLI_listbase.hh"
 
 #include "WM_message.hh"
 #include "WM_types.hh"
@@ -48,11 +48,7 @@ static void wm_msg_static_gset_key_free(void *key_p)
 {
   wmMsgSubscribeKey *key = static_cast<wmMsgSubscribeKey *>(key_p);
   wmMsgSubscribeValueLink *msg_lnk_next;
-  for (wmMsgSubscribeValueLink *msg_lnk =
-           static_cast<wmMsgSubscribeValueLink *>(key->values.first);
-       msg_lnk;
-       msg_lnk = msg_lnk_next)
-  {
+  for (wmMsgSubscribeValueLink *msg_lnk = key->values.first(); msg_lnk; msg_lnk = msg_lnk_next) {
     msg_lnk_next = msg_lnk->next;
     BLI_remlink(&key->values, msg_lnk);
     MEM_delete(msg_lnk);

@@ -21,16 +21,16 @@
 #include "DNA_space_types.h"
 #include "DNA_windowmanager_types.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_set.hh"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_action.hh"
 #include "BKE_anim_data.hh"
+#include "BKE_annotations.h"
 #include "BKE_context.hh"
 #include "BKE_fcurve.hh"
-#include "BKE_gpencil_legacy.h"
 #include "BKE_grease_pencil.hh"
 #include "BKE_screen.hh"
 #include "BKE_workspace.hh"
@@ -81,7 +81,7 @@ void ANIM_list_elem_update(Main *bmain, Scene *scene, bAnimListElem *ale)
   /* update data */
   fcu = static_cast<FCurve *>((ale->datatype == ALE_FCURVE) ? ale->key_data : nullptr);
 
-  if (fcu && fcu->rna_path) {
+  if (fcu && !fcu->rna_path().is_empty()) {
     /* If we have an fcurve, call the update for the property we
      * are editing, this is then expected to do the proper redraws
      * and depsgraph updates. */
@@ -90,7 +90,7 @@ void ANIM_list_elem_update(Main *bmain, Scene *scene, bAnimListElem *ale)
 
     PointerRNA id_ptr = RNA_id_pointer_create(id);
 
-    if (RNA_path_resolve_property(&id_ptr, fcu->rna_path, &ptr, &prop)) {
+    if (RNA_path_resolve_property(&id_ptr, fcu->rna_path_parsed(), &ptr, &prop)) {
       RNA_property_update_main(bmain, scene, &ptr, prop);
     }
   }
@@ -190,7 +190,9 @@ static void animchan_sync_fcurve_scene(bAnimListElem *ale)
 
   /* Only affect if F-Curve involves sequence_editor.strips. */
   char strip_name[sizeof(strip->name)];
-  if (!BLI_str_quoted_substr(fcu->rna_path, "strips_all[", strip_name, sizeof(strip_name))) {
+  if (!BLI_str_quoted_substr(
+          fcu->rna_path().c_str(), "strips_all[", strip_name, sizeof(strip_name)))
+  {
     return;
   }
 
@@ -224,7 +226,11 @@ static void animchan_sync_fcurve(bAnimListElem *ale)
   /* major priority is selection status, so refer to the checks done in `anim_filter.cc`
    * #skip_fcurve_selected_data() for reference about what's going on here.
    */
-  if (ELEM(nullptr, fcu, fcu->rna_path, owner_id)) {
+  if (ELEM(nullptr, fcu, owner_id)) {
+    return;
+  }
+
+  if (fcu->rna_path().is_empty()) {
     return;
   }
 
@@ -365,7 +371,7 @@ void ANIM_animdata_update(bAnimContext *ac, ListBaseT<bAnimListElem> *anim_data)
       if (ale.update & ANIM_UPDATE_ORDER) {
         ale.update &= ~ANIM_UPDATE_ORDER;
         if (gpl) {
-          BKE_gpencil_layer_frames_sort(gpl, nullptr);
+          BKE_annotations_layer_frames_sort(gpl, nullptr);
         }
       }
 
@@ -467,7 +473,7 @@ void ANIM_animdata_freelist(ListBaseT<bAnimListElem> *anim_data)
 {
 #ifndef NDEBUG
   bAnimListElem *ale, *ale_next;
-  for (ale = static_cast<bAnimListElem *>(anim_data->first); ale; ale = ale_next) {
+  for (ale = anim_data->first(); ale; ale = ale_next) {
     ale_next = ale->next;
     BLI_assert(ale->update == 0);
     MEM_delete(ale);

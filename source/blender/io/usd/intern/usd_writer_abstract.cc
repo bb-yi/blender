@@ -13,7 +13,7 @@
 #include <pxr/usd/usdGeom/scope.h>
 #include <pxr/usd/usdUI/accessibilityAPI.h>
 
-#include "BLI_assert.h"
+#include "BLI_assert.hh"
 #include "BLI_bounds_types.hh"
 
 #include "DNA_material_types.h"
@@ -455,9 +455,7 @@ void USDAbstractWriter::write_user_properties(const pxr::UsdPrim &prim,
   const std::string default_namespace(
       usd_export_context_.export_params.custom_properties_namespace);
 
-  for (IDProperty *prop = static_cast<IDProperty *>(properties->data.group.first); prop;
-       prop = prop->next)
-  {
+  for (IDProperty *prop = properties->data.group.first(); prop; prop = prop->next) {
     if (displayName_identifier == prop->name) {
       if (prop->type == IDP_STRING && prop->data.pointer) {
         prim.SetDisplayName(static_cast<char *>(prop->data.pointer));

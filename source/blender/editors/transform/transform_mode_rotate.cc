@@ -9,9 +9,9 @@
 #include <cstdlib>
 #include <optional>
 
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_task.hh"
 
 #include "BKE_context.hh"
@@ -186,6 +186,10 @@ static float RotationBetween(TransInfo *t, const float p1[3], const float p2[3])
     mul_m3_v3(mtx, start);
 
     angle = (atan2f(start[1], start[0]) - atan2f(end[1], end[0]));
+
+    if (t->flag & T_VIEW_NEGATIVE) {
+      angle = -angle;
+    }
   }
 
   if (angle > float(M_PI)) {
@@ -398,7 +402,7 @@ static void initRotation(TransInfo *t, wmOperator * /*op*/)
 
   if (transform_mode_affect_only_locations(t)) {
     WorkspaceStatus status(t->context);
-    status.item(TIP_("Transform is set to only affect location"), ICON_ERROR);
+    status.item(TIP_("Transform is set to only affect location"), ICON_STATUS_WARNING_FILLED);
     initMouseInputMode(t, &t->mouse, INPUT_ERROR_DASH);
   }
   else {
@@ -432,6 +436,7 @@ TransModeInfo TransMode_rotate = {
     /*snap_distance_fn*/ RotationBetween,
     /*snap_apply_fn*/ ApplySnapRotation,
     /*draw_fn*/ nullptr,
+    /*status_fn*/ nullptr,
 };
 
 }  // namespace blender::ed::transform

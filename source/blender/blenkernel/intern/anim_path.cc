@@ -14,8 +14,8 @@
 #include "DNA_key_types.h"
 #include "DNA_object_types.h"
 
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BKE_anim_path.h"
 #include "BKE_curve.hh"
@@ -45,7 +45,7 @@ int BKE_anim_path_get_array_size(const CurveCache *curve_cache)
 {
   BLI_assert(curve_cache != nullptr);
 
-  BevList *bl = static_cast<BevList *>(curve_cache->bev.first);
+  BevList *bl = curve_cache->bev.first();
 
   BLI_assert(bl != nullptr && bl->nr > 1);
 
@@ -72,7 +72,7 @@ void BKE_anim_path_calc_data(Object *ob)
   MEM_SAFE_DELETE(ob->runtime->curve_cache->anim_path_accum_length);
 
   /* We only use the first curve. */
-  BevList *bl = static_cast<BevList *>(ob->runtime->curve_cache->bev.first);
+  BevList *bl = ob->runtime->curve_cache->bev.first();
   /* There are no points. */
   if (bl == nullptr) {
     return;
@@ -188,7 +188,7 @@ static bool binary_search_anim_path(const float *accum_len_arr,
 
   /* Special case, for a single segment accessing the `right_len`
    * would be an invalid index, see: #132976. */
-  if (UNLIKELY(seg_size == 1)) {
+  if (seg_size == 1) [[unlikely]] {
     *r_idx = 0;
     *r_frac = goal_len / accum_len_arr[0];
     return true;
@@ -212,7 +212,7 @@ static bool binary_search_anim_path(const float *accum_len_arr,
       return true;
     }
 
-    if (UNLIKELY(cur_step == 0)) {
+    if (cur_step == 0) [[unlikely]] {
       /* This should never happen unless there is something horribly wrong. */
       CLOG_ERROR(&LOG, "Couldn't find any valid point on the animation path!");
       BLI_assert_msg(0, "Couldn't find any valid point on the animation path!");
@@ -250,7 +250,7 @@ bool BKE_where_on_path(const Object *ob,
     return false;
   }
   /* We only use the first curve. */
-  BevList *bl = static_cast<BevList *>(ob->runtime->curve_cache->bev.first);
+  BevList *bl = ob->runtime->curve_cache->bev.first();
   if (bl == nullptr || !bl->nr) {
     CLOG_WARN(&LOG, "No bev list data!");
     return false;
@@ -299,7 +299,7 @@ bool BKE_where_on_path(const Object *ob,
     int idx;
     const bool found_idx = binary_search_anim_path(accum_len_arr, seg_size, goal_len, &idx, &frac);
 
-    if (UNLIKELY(!found_idx)) {
+    if (!found_idx) [[unlikely]] {
       return false;
     }
     get_curve_points_from_idx(idx, bl, is_cyclic, &p0, &p1, &p2, &p3);
@@ -329,7 +329,7 @@ bool BKE_where_on_path(const Object *ob,
   if (!nurbs) {
     nurbs = &cu->nurb;
   }
-  const Nurb *nu = static_cast<const Nurb *>(nurbs->first);
+  const Nurb *nu = nurbs->first();
 
   /* Make sure that first and last frame are included in the vectors here. */
   if (ELEM(nu->type, CU_POLY, CU_BEZIER, CU_NURBS)) {

@@ -5,9 +5,9 @@
 #include "node_geometry_util.hh"
 
 #include "BLI_generic_key_string.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_memory_cache_file_load.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BKE_instances.hh"
 #include "BKE_report.hh"
@@ -30,7 +30,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 class LoadObjCache : public memory_cache::CachedValue {
  public:
   GeometrySet geometry;
-  Vector<eval_log::NodeWarning> warnings;
+  Vector<NodeWarning> warnings;
 
   void count_memory(MemoryCounter &counter) const override
   {
@@ -78,7 +78,7 @@ static void node_geo_exec(GeoNodeExecParams params)
         return cached_value;
       });
 
-  for (const eval_log::NodeWarning &warning : cached_value->warnings) {
+  for (const NodeWarning &warning : cached_value->warnings) {
     params.error_message_add(warning.type, warning.message);
   }
 

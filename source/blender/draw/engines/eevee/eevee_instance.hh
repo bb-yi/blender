@@ -14,7 +14,7 @@
 
 #include "CLG_log.h"
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BLT_translation.hh"
 
@@ -26,6 +26,8 @@
 
 #include "DNA_view3d_types.h"
 #include "DRW_render.hh"
+
+#include "GPU_work_in_flight.hh"
 
 #include "eevee_ambient_occlusion.hh"
 #include "eevee_camera.hh"
@@ -48,6 +50,8 @@
 #include "eevee_motion_blur.hh"
 #include "eevee_native_postfx_output.hh"
 #include "eevee_outline.hh"
+#include "eevee_geometry_lines.hh"
+#include "eevee_outline_shell.hh"
 #include "eevee_pipeline.hh"
 #include "eevee_raytrace.hh"
 #include "eevee_render_texture.hh"
@@ -61,6 +65,10 @@
 #include "eevee_view.hh"
 #include "eevee_volume.hh"
 #include "eevee_world.hh"
+
+namespace blender::gpu {
+class WorkInFlight;
+}  // namespace blender::gpu
 
 namespace blender::eevee
 {
@@ -128,6 +136,7 @@ namespace blender::eevee
 
     /** Info string displayed at the top of the render / viewport, or the console when baking. */
     std::string info_ = "";
+    std::string display_info_;
 
   public:
     ShaderModule& shaders;
@@ -150,6 +159,8 @@ namespace blender::eevee
     RenderTextureModule render_textures;
     FilterMaterialModule filter_materials;
     OutlineModule outline;
+    GeometryLineModule geometry_lines{*this};
+    OutlineShellModule outline_shell;
     Dlss5Module dlss5;
     DlssSrModule dlss_sr;
     NativePostFXOutputModule native_postfx_outputs;
@@ -195,6 +206,8 @@ namespace blender::eevee
     bool is_color_bake = false;
     /** True if the instance is created for either viewport image render or final image render. */
     bool is_image_render = false;
+    /** Unjittered depth/velocity only, for one resolved offline NR image. */
+    bool is_dlss_guide_render = false;
     /** True if the instance is created only for viewport image render. */
     bool is_viewport_image_render = false;
     /** True if current viewport is drawn during playback. */
@@ -206,7 +219,7 @@ namespace blender::eevee
     /** True if current viewport is drawn during transforming operator. */
     bool is_transforming = false;
     /** True if viewport compositor is enabled when drawing with this instance. */
-    bool is_viewport_compositor_enabled = false;
+    bool is_viewport_compositor_used = false;
     /** True if overlays need to be displayed (only for viewport). */
     bool draw_overlays = false;
 
@@ -222,6 +235,9 @@ namespace blender::eevee
 
     /** Debug mode from debug value. */
     eDebugMode debug_mode = eDebugMode::DEBUG_NONE;
+
+  /** For limiting number of submitted samples in flight on the GPU. */
+  gpu::WorkInFlightPtr samples_in_flight;
 
   public:
     explicit Instance(std::shared_ptr<TelemetrySourceState> telemetry_source = nullptr)
@@ -243,6 +259,7 @@ namespace blender::eevee
       render_textures(*this),
       filter_materials(*this),
       outline(*this),
+      outline_shell(*this),
       dlss5(*this),
       dlss_sr(*this),
       native_postfx_outputs(*this),
@@ -270,6 +287,11 @@ namespace blender::eevee
 
     bool performance_capture_requested(const DRWContext &draw_ctx) const final;
     void performance_frame_end(const DrawPerformanceMetrics &metrics) final;
+  bool uses_render_border() const final
+  {
+    return true;
+  }
+
 
     /* Render & Viewport. */
     /* TODO(fclem): Split for clarity. */
@@ -293,6 +315,11 @@ namespace blender::eevee
     bool is_loaded(ShaderGroups groups) const
     {
       return (loaded_shaders & groups) == groups;
+    }
+
+    bool render_is_ready() const
+    {
+      return !skip_render_ && is_loaded(needed_shaders) && film.is_valid_render_extent();
     }
 
     bool discard_viewport_history() const
@@ -327,7 +354,8 @@ namespace blender::eevee
 
     void render_sync();
     void wait_for_material_passes();
-    void render_frame(RenderEngine* engine, RenderLayer* render_layer, const char* view_name);
+    bool render_frame(RenderEngine* engine, RenderLayer* render_layer, const char* view_name);
+    static constexpr const char *pre_fx_pass_name = "Pre-FX";
     void store_metadata(RenderResult* render_result);
 
     int2 render_extent_get() const
@@ -391,7 +419,13 @@ namespace blender::eevee
 
     const char* info_get()
     {
-      return info_.c_str();
+      display_info_ = info_;
+      if (geometry_lines.is_quick_preview()) {
+        display_info_ += RPT_("Geometry Lines: Quick Preview (approximate depth, no intersections or joining)");
+      }
+      const std::string timing = geometry_lines.timing_info();
+      if (!timing.empty()) { display_info_ += "\n" + timing; }
+      return display_info_.c_str();
     }
 
     bool is_viewport() const

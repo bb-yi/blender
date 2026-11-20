@@ -23,7 +23,7 @@
 #include "BKE_icons.hh"
 
 #ifndef NDEBUG
-#  include "BLI_threads.h"
+#  include "BLI_threads.hh"
 #endif
 
 #include "BLO_read_write.hh"
@@ -518,9 +518,15 @@ void BKE_previewimg_render_end(PreviewImage *prv,
     prv->runtime->tag[size] |= PRV_TAG_DEFERRED_INVALID;
   }
 
-  /* When job is cancelled for e.g. undo, PRV_RENDERING remains so that
-   * it can resume when going back to that undo step. */
-  if (status != PRV_RENDER_STATUS_CANCELLED) {
+  /* When job is cancelled for e.g. undo, PRV_RENDERING remains so that it can resume
+   * when going back to that undo step. Also tag for restart in the current state, if
+   * the ID itself was not modified in the undo step but still had its preview cancelled. */
+  if (status == PRV_RENDER_STATUS_CANCELLED) {
+    if (!(prv->flag[size] & PRV_USER_EDITED)) {
+      prv->runtime->tag[size] |= PRV_TAG_RESTART_RENDERING;
+    }
+  }
+  else {
     prv->flag[size] &= ~PRV_RENDERING;
   }
 
@@ -584,14 +590,18 @@ void BKE_previewimg_blend_write(BlendWriter *writer, const PreviewImage *prv)
     return;
   }
 
-  PreviewImage prv_copy = dna::shallow_copy(*prv);
-  prv_copy.runtime = nullptr;
-  writer->write_struct_at_address(prv, &prv_copy);
-  if (prv_copy.rect[0]) {
-    writer->write_uint32_array(prv_copy.w[0] * prv_copy.h[0], prv_copy.rect[0]);
+  writer->write_struct(prv, [writer](BlendStructWriter<PreviewImage> &struct_writer) {
+    struct_writer.shallow_data.runtime = nullptr;
+    if (!writer->is_undo()) {
+      struct_writer.shallow_data.changed_timestamp[0] = 0;
+      struct_writer.shallow_data.changed_timestamp[1] = 0;
+    }
+  });
+  if (prv->rect[0]) {
+    writer->write_uint32_array(prv->w[0] * prv->h[0], prv->rect[0]);
   }
-  if (prv_copy.rect[1]) {
-    writer->write_uint32_array(prv_copy.w[1] * prv_copy.h[1], prv_copy.rect[1]);
+  if (prv->rect[1]) {
+    writer->write_uint32_array(prv->w[1] * prv->h[1], prv->rect[1]);
   }
 }
 

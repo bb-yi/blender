@@ -6,11 +6,11 @@
  * \ingroup edmesh
  */
 
-#include "BLI_array_utils.h"
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
+#include "BLI_array_utils_c.hh"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 #include "BKE_global.hh"
@@ -284,9 +284,9 @@ static void gizmo_mesh_extrude_refresh(const bContext *C, wmGizmoGroup *gzgroup)
 
   /* Adjust current operator. */
   /* Don't use 'WM_operator_last_redo' because selection actions will be ignored. */
-  wmOperator *op = static_cast<wmOperator *>(CTX_wm_manager(C)->runtime->operators.last);
+  wmOperator *op = CTX_wm_manager(C)->runtime->operators.last();
   bool has_redo = (op && op->type == ggd->ot_extrude);
-  wmOperator *op_xform = static_cast<wmOperator *>(has_redo ? op->macro.last : nullptr);
+  wmOperator *op_xform = has_redo ? op->macro.last() : nullptr;
 
   bool adjust_is_flip = false;
   wmGizmo *gz_adjust = nullptr;

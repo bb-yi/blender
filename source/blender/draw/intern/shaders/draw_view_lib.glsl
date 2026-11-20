@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup draw
+ */
+
 #pragma once
 
 /* Marker so EEVEE's BSL material library (eevee_nodetree_lib.bsl.hh) can detect that the legacy

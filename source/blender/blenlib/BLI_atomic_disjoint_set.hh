@@ -35,12 +35,13 @@ class AtomicDisjointSet {
 
   /**
    * An #Item per element. It's important that the entire item is in a single atomic, so that it
-   * can be updated atomically. */
+   * can be updated atomically.
+   */
   mutable Array<std::atomic<Item>> items_;
 
  public:
   /**
-   * Create a new disjoing set with the given set. Initially, every element is in a separate set.
+   * Create a new disjoint set with the given set. Initially, every element is in a separate set.
    */
   AtomicDisjointSet(const int size);
 
@@ -82,7 +83,7 @@ class AtomicDisjointSet {
 
       if (x_rank == y_rank) {
         /* Increase rank of item y. This may fail when another thread has updated item y in the
-         * meantime. That may lead to worse behavior with the union by rank heurist, but seems to
+         * meantime. That may lead to worse behavior with the union by rank heuristic, but seems to
          * be ok in practice. */
         Item y_item_old{y, y_rank};
         const Item y_item_new{y, y_rank + 1};

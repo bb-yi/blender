@@ -15,8 +15,8 @@
 #include <Python.h>
 #include <structmember.h>
 
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 
 #include "bpy_utils_units.hh"
 
@@ -188,7 +188,7 @@ static PyObject *bpyunits_to_value(PyObject * /*self*/, PyObject *args, PyObject
       "s"  /* `unit_system` */
       "s"  /* `unit_category` */
       "s#" /* `str_input` */
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "z"  /* `str_ref_unit` */
       ":to_value",
       _keywords,
@@ -276,7 +276,7 @@ static PyObject *bpyunits_to_string(PyObject * /*self*/, PyObject *args, PyObjec
       "s"  /* `unit_system` */
       "s"  /* `unit_category` */
       "d"  /* `value` */
-      "|$" /* Optional keyword only arguments. */
+      "|$" /* Optional, keyword only arguments. */
       "i"  /* `precision` */
       "O&" /* `split_unit` */
       "O&" /* `compatible_unit` */

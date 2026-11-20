@@ -2,7 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/**
+/** \file
+ * \ingroup draw
+ *
  * File that contains the output of `openSubdiv_getGLSLPatchBasisSource`.
  * The structures here are copy of the latest version only to satisfy building without OSL enabled.
  */
@@ -34,3 +36,22 @@ struct [[host_shared]] OsdPatchCoord {
   float s;
   float t;
 };
+
+bool OsdPatchParamIsRegular(OsdPatchParam /*param*/)
+{
+  return false;
+}
+
+int OsdEvaluatePatchBasis(int /*patchType*/,
+                          OsdPatchParam /*param*/,
+                          float /*s*/,
+                          float /*t*/,
+                          float /*wP*/[20],
+                          float /*wDs*/[20],
+                          float /*wDt*/[20],
+                          float /*wDss*/[20],
+                          float /*wDst*/[20],
+                          float /*wDtt*/[20])
+{
+  return 0;
+}

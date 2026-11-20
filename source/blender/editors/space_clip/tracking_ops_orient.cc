@@ -11,9 +11,9 @@
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BKE_constraint.h"
 #include "BKE_context.hh"
@@ -413,7 +413,7 @@ static wmOperatorStatus set_plane_exec(bContext *C, wmOperator *op)
   /* Get 3 bundles to use as reference. */
   {
     const MovieTrackingTrack *track = static_cast<const MovieTrackingTrack *>(
-        tracking_object->tracks.first);
+        tracking_object->tracks.first_);
     while (track && tot < 3) {
       if (track->flag & TRACK_HAS_BUNDLE && TRACK_VIEW_SELECTED(sc, track)) {
         mul_v3_m4v3(vec[tot], mat, track->bundle_pos);
@@ -542,7 +542,7 @@ static wmOperatorStatus set_axis_exec(bContext *C, wmOperator *op)
   }
 
   const MovieTrackingTrack *track = static_cast<const MovieTrackingTrack *>(
-      tracking_object->tracks.first);
+      tracking_object->tracks.first_);
   while (track) {
     if (TRACK_VIEW_SELECTED(sc, track) && (track->flag & TRACK_HAS_BUNDLE)) {
       break;

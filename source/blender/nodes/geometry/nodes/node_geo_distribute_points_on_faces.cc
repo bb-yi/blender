@@ -2,10 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_kdtree.hh"
-#include "BLI_math_geom.h"
+#include "BLI_kdtree_new.hh"
+#include "BLI_math_geom_c.hh"
 #include "BLI_math_quaternion.hh"
-#include "BLI_math_rotation.h"
+#include "BLI_math_rotation_c.hh"
 #include "BLI_noise.hh"
 #include "BLI_rand.hh"
 #include "BLI_task.hh"
@@ -204,20 +204,6 @@ static void sample_bary_coords(const Mesh &mesh,
           [&](const IndexRange range) { return points_by_tri[range].size(); }));
 }
 
-BLI_NOINLINE static KDTree<float3> *build_kdtree(Span<float3> positions)
-{
-  KDTree<float3> *kdtree = kdtree_new<float3>(positions.size());
-
-  int i_point = 0;
-  for (const float3 position : positions) {
-    kdtree_insert<float3>(kdtree, i_point, position);
-    i_point++;
-  }
-
-  kdtree_balance<float3>(kdtree);
-  return kdtree;
-}
-
 BLI_NOINLINE static void update_elimination_mask_for_close_points(
     Span<float3> positions, const float minimum_distance, MutableSpan<bool> elimination_mask)
 {
@@ -225,23 +211,19 @@ BLI_NOINLINE static void update_elimination_mask_for_close_points(
     return;
   }
 
-  KDTree<float3> *kdtree = build_kdtree(positions);
-  BLI_SCOPED_DEFER([&]() { kdtree_free<float3>(kdtree); });
+  const KDTreeNew<float3> tree(positions);
 
   for (const int i : positions.index_range()) {
     if (elimination_mask[i]) {
       continue;
     }
 
-    kdtree_range_search_cb<float3>(kdtree,
-                                   positions[i],
-                                   minimum_distance,
-                                   [&](int index, const float3 & /*co*/, float /*dist_sq*/) {
-                                     if (index != i) {
-                                       elimination_mask[index] = true;
-                                     }
-                                     return true;
-                                   });
+    tree.foreach_in_radius(
+        positions[i], minimum_distance, [&](const int index, const float /*distance_sq*/) {
+          if (index != i) {
+            elimination_mask[index] = true;
+          }
+        });
   }
 }
 
@@ -348,12 +330,13 @@ BLI_NOINLINE static void propagate_attributes(const Mesh &mesh,
     if (iter.is_builtin && !point_attributes.is_builtin(name)) {
       return;
     }
-    if (name == "position") {
+    if (ELEM(name, "position", ".select_vert")) {
       return;
     }
     if (filter.allow_skip(name)) {
       return;
     }
+    const StringRef dst_name = name == ".select_poly" ? ".selection" : name;
     GAttributeReader src = iter.get();
     if (!src) {
       return;
@@ -361,12 +344,12 @@ BLI_NOINLINE static void propagate_attributes(const Mesh &mesh,
     const CommonVArrayInfo info = src.varray.common_info();
     if (info.type == CommonVArrayInfo::Type::Single) {
       const bke::AttributeInitValue init(GPointer(src.varray.type(), info.data));
-      if (point_attributes.add(iter.name, AttrDomain::Point, iter.data_type, init)) {
+      if (point_attributes.add(dst_name, AttrDomain::Point, iter.data_type, init)) {
         return;
       }
     }
     GSpanAttributeWriter dst = point_attributes.lookup_or_add_for_write_only_span(
-        name, AttrDomain::Point, iter.data_type);
+        dst_name, AttrDomain::Point, iter.data_type);
     if (!dst) {
       return;
     }
@@ -549,7 +532,8 @@ static PointCloud *create_points_random(const Mesh &mesh,
   Vector<int> tri_indices;
   sample_bary_coords(mesh, seed, points_by_tri, positions, bary_coords, tri_indices);
 
-  PointCloud *pointcloud = bke::pointcloud_new_no_attributes(positions.size());
+  PointCloud *pointcloud = bke::pointcloud_new_no_attributes(PointCloudType::Points,
+                                                             positions.size());
   bke::MutableAttributeAccessor point_attributes = pointcloud->attributes_for_write();
   VectorData<float3, GuardedAllocator> positions_data = positions.release();
   const auto *attr_data = implicit_sharing::info_for_mem_free(positions_data.data);
@@ -609,7 +593,8 @@ static PointCloud *create_points_poisson_disk(const Mesh &mesh,
     return nullptr;
   }
 
-  PointCloud *pointcloud = bke::pointcloud_new_no_attributes(positions.size());
+  PointCloud *pointcloud = bke::pointcloud_new_no_attributes(PointCloudType::Points,
+                                                             positions.size());
   bke::MutableAttributeAccessor point_attributes = pointcloud->attributes_for_write();
   pointcloud->positions_for_write().copy_from(positions);
   point_attributes.add<float>("radius", bke::AttrDomain::Point, bke::AttributeInitValue(0.05f));

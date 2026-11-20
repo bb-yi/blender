@@ -2,48 +2,28 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "infos/eevee_geom_infos.hh"
-#include "infos/eevee_nodetree_infos.hh"
 #include "infos/eevee_surf_hit_eval_infos.hh"
 
-FRAGMENT_SHADER_CREATE_INFO(eevee_nodetree)
 FRAGMENT_SHADER_CREATE_INFO(eevee_geom_hit_mesh)
 FRAGMENT_SHADER_CREATE_INFO(eevee_surf_hit_eval)
 
 #define HWRT_HIT_IDENTITY_PRINCIPLED_LAYERED_SCENE_FINAL 32u
 #define HWRT_HIT_IDENTITY_METALLIC_BSDF_SCENE_FINAL 64u
 
-bool g_hit_eval_front_facing;
-
-#include "eevee_attributes_mesh_lib.glsl"
 #include "eevee_gbuffer_types.bsl.hh"
 #include "eevee_hit_attr_lib.glsl"
-
-#include "eevee_nodetree_frag_lib.glsl"
-#include "eevee_surf_lib.glsl"
+#include "eevee_nodetree_lib.bsl.hh"
 #include "gpu_shader_index_load_lib.glsl"
-#include "gpu_shader_math_vector_reduce_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_vector_reduce.bsl.hh"
+#include "gpu_shader_math_vector_safe.bsl.hh"
 
-float4 closure_to_rgba(Closure /*cl*/)
+void attrib_load(HitMeshVertex domain);
+Closure nodetree_surface(KernelGlobals kg, ShadingData &sd, float closure_rand);
+float nodetree_thickness(KernelGlobals kg, ShadingData &sd);
+
+float4 closure_to_rgba(KernelGlobals /*kg*/, ShadingData & /*sd*/, Closure /*cl*/)
 {
   return float4(0.0f);
-}
-
-int2 hit_eval_texel_get()
-{
-  return int2(unpackUvec2x16(hit_flat.packed_texel));
-}
-
-float3 hit_eval_direction_unpack(float2 packed_dir)
-{
-  packed_dir = packed_dir * 2.0f - 1.0f;
-  float3 dir = float3(
-      packed_dir.x, packed_dir.y, 1.0f - abs(packed_dir.x) - abs(packed_dir.y));
-  float t = clamp(-dir.z, 0.0f, 1.0f);
-  dir.x += (dir.x >= 0.0f) ? -t : t;
-  dir.y += (dir.y >= 0.0f) ? -t : t;
-  return normalize(dir);
 }
 
 float3 hit_eval_barycentric_expand(float2 barycentric_coords)
@@ -53,34 +33,23 @@ float3 hit_eval_barycentric_expand(float2 barycentric_coords)
                 barycentric_coords.y);
 }
 
-void hit_eval_init_globals(float3 P, float3 N)
+void hit_eval_init_globals(ShadingData &sd, float3 P, float3 N)
 {
-  g_data.P = P;
-  g_data.Ni = N;
-  g_data.N = safe_normalize(N);
-  g_data.Ng = g_data.N;
-  g_data.is_strand = false;
-  g_data.hair_diameter = 0.0f;
-  g_data.hair_strand_id = 0;
-  g_data.ray_type = pipeline_buf.ray_type;
-  g_data.ray_depth = 0.0f;
-  g_data.ray_length = distance(g_data.P, hit_flat.view_origin);
-  g_data.barycentric_coords = float2(0.0f);
-  g_data.barycentric_dists = float3(0.0f);
-
-  const bool is_front_facing = g_hit_eval_front_facing;
-  g_data.N = is_front_facing ? g_data.N : -g_data.N;
-  g_data.Ni = is_front_facing ? g_data.Ni : -g_data.Ni;
+  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
+  sd.P = P;
+  sd.displacement_base = P;
+  sd.forward_lighting_P = P;
+  sd.Ni = sd.front_facing ? N : -N;
+  sd.N = safe_normalize(sd.Ni);
+  sd.ray_type = uni.pipeline_buf.ray_type;
+  sd.ray_length = distance(P, sd.hit_view_origin);
+  sd.thickness = Thickness::zero();
+  sd.npr_diffusion_weight = 1.0f;
   /* Hit-eval replays the material on a tiny screen-space proxy triangle around the destination
    * pixel. Deriving the geometric normal from that proxy leaks the raw traced triangle plane back
    * into smooth hits, which is especially visible on reflected / refracted curved surfaces. Keep a
    * smooth-facing geometry proxy here instead of rebuilding `Ng` from the proxy triangle. */
-  g_data.Ng = is_front_facing ? g_data.Ng : -g_data.Ng;
-  if (pipeline_buf.is_main_view_inverted) {
-    g_data.Ng = -g_data.Ng;
-  }
-
-  init_globals_mesh();
+  sd.Ng = uni.pipeline_buf.is_main_view_inverted ? -float3(sd.N) : float3(sd.N);
 }
 
 bool hit_eval_closure_is_specular_family(ClosureType type)
@@ -100,18 +69,18 @@ bool hit_eval_closure_has_energy(ClosureUndetermined cl)
   return (cl.type != CLOSURE_NONE_ID) && (dot(cl.color, cl.color) > 1.0e-10f);
 }
 
-ClosureUndetermined hit_eval_closure_select_family(bool want_specular)
+ClosureUndetermined hit_eval_closure_select_family(const ShadingData &sd,
+                                                   bool want_specular)
 {
+  [[resource_table]] const eevee::PipelineConstants &pipe =
+      resource_table_get(eevee::PipelineConstants);
   ClosureUndetermined best = closure_new(CLOSURE_NONE_ID);
-  best.weight = 0.0f;
-  best.color = float3(0.0f);
-  best.N = g_data.N;
-  best.data = float4(0.0f);
+  best.N = sd.N;
 
   float best_score = 0.0f;
-  for (int i = 0; i < CLOSURE_BIN_COUNT; i++) {
-    ClosureUndetermined candidate = g_closure_get_resolved(uchar(i), 1.0f);
-    if (candidate.type == CLOSURE_NONE_ID || candidate.weight <= CLOSURE_WEIGHT_CUTOFF) {
+  for (int i = 0; i < pipe.closure_bin_count; i++) {
+    ClosureUndetermined candidate = sd.closure_get_resolved(pipe, uchar(i), 1.0f);
+    if (candidate.type == CLOSURE_NONE_ID || candidate.weight() <= CLOSURE_WEIGHT_CUTOFF) {
       continue;
     }
 
@@ -121,12 +90,7 @@ ClosureUndetermined hit_eval_closure_select_family(bool want_specular)
       continue;
     }
 
-    float score = average(abs(candidate.color));
-    if (want_specular) {
-      /* Keep the replayed secondary hit on the dominant reflective family rather than letting a
-       * weaker transmission lobe win just because its tint is brighter. */
-      score *= max(candidate.weight, 0.0f);
-    }
+    const float score = average(abs(candidate.color));
     const bool prefer_reflection_tie =
         want_specular && (candidate.type == CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID) &&
         (best.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&
@@ -137,24 +101,21 @@ ClosureUndetermined hit_eval_closure_select_family(bool want_specular)
     }
   }
 
-  if (best.type == CLOSURE_NONE_ID) {
-    best.N = g_data.N;
-  }
   return best;
 }
 
-ClosureUndetermined hit_eval_closure_select_type(ClosureType wanted_type)
+ClosureUndetermined hit_eval_closure_select_type(const ShadingData &sd,
+                                                 ClosureType wanted_type)
 {
+  [[resource_table]] const eevee::PipelineConstants &pipe =
+      resource_table_get(eevee::PipelineConstants);
   ClosureUndetermined best = closure_new(CLOSURE_NONE_ID);
-  best.weight = 0.0f;
-  best.color = float3(0.0f);
-  best.N = g_data.N;
-  best.data = float4(0.0f);
+  best.N = sd.N;
 
   float best_score = 0.0f;
-  for (int i = 0; i < CLOSURE_BIN_COUNT; i++) {
-    ClosureUndetermined candidate = g_closure_get_resolved(uchar(i), 1.0f);
-    if (candidate.type != wanted_type || candidate.weight <= CLOSURE_WEIGHT_CUTOFF) {
+  for (int i = 0; i < pipe.closure_bin_count; i++) {
+    ClosureUndetermined candidate = sd.closure_get_resolved(pipe, uchar(i), 1.0f);
+    if (candidate.type != wanted_type || candidate.weight() <= CLOSURE_WEIGHT_CUTOFF) {
       continue;
     }
 
@@ -165,13 +126,11 @@ ClosureUndetermined hit_eval_closure_select_type(ClosureType wanted_type)
     }
   }
 
-  if (best.type == CLOSURE_NONE_ID) {
-    best.N = g_data.N;
-  }
   return best;
 }
 
-ClosureUndetermined hit_eval_closure_select_specular(ClosureType traced_specular_type,
+ClosureUndetermined hit_eval_closure_select_specular(const ShadingData &sd,
+                                                     ClosureType traced_specular_type,
                                                      ClosureUndetermined secondary_cl)
 {
   /* Proxy fallback can only carry one dominant closure family, so dielectric Principled hits can
@@ -188,30 +147,20 @@ ClosureUndetermined hit_eval_closure_select_specular(ClosureType traced_specular
   if (!hit_eval_closure_has_energy(secondary_cl) &&
       hit_eval_closure_is_specular_family(traced_specular_type))
   {
-    ClosureUndetermined exact = hit_eval_closure_select_type(traced_specular_type);
+    ClosureUndetermined exact = hit_eval_closure_select_type(sd, traced_specular_type);
     if (exact.type != CLOSURE_NONE_ID) {
       return exact;
     }
   }
-  return hit_eval_closure_select_family(true);
+  return hit_eval_closure_select_family(sd, true);
 }
 
-ClosureUndetermined hit_eval_closure_select_transmission()
-{
-  return hit_eval_closure_select_type(CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID);
-}
-
-ClosureUndetermined hit_eval_closure_select_reflection()
-{
-  return hit_eval_closure_select_type(CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID);
-}
-
-ClosureUndetermined hit_eval_clear_refraction_closure(float monochromatic_transmittance)
+ClosureUndetermined hit_eval_clear_refraction_closure(float3 N,
+                                                      float monochromatic_transmittance)
 {
   ClosureUndetermined cl = closure_new(CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID);
-  cl.weight = 1.0f;
   cl.color = float3(saturate(monochromatic_transmittance));
-  cl.N = g_data.N;
+  cl.N = N;
   cl.data = float4(0.0f);
   cl.data.x = 0.0f;
   cl.data.y = 1.0f;
@@ -223,8 +172,9 @@ float hit_eval_reflection_layer_opacity(ClosureUndetermined base_cl, ClosureUnde
   if (specular_cl.type != CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID) {
     return 0.0f;
   }
-  const float base_weight = max(base_cl.weight, 0.0f);
-  const float specular_weight = max(specular_cl.weight, 0.0f);
+  /* The resolved colors already include the closure reservoir weights. */
+  const float base_weight = average(abs(base_cl.color));
+  const float specular_weight = average(abs(specular_cl.color));
   const float total_weight = base_weight + specular_weight;
   return (total_weight > 1.0e-6f) ? saturate(specular_weight / total_weight) :
                                     float(hit_eval_closure_has_energy(specular_cl));
@@ -269,9 +219,8 @@ float4 hit_eval_specular_color_pack(ClosureUndetermined cl, Thickness thickness)
   return float4(max(cl.color, float3(0.0f)), gbuffer::thickness_pack(thickness));
 }
 
-void main()
+void hit_eval_material(KernelGlobals kg, ShadingData &sd, int2 texel, ThicknessMode mode)
 {
-  const int2 texel = hit_eval_texel_get();
   const float ray_time = texelFetch(ray_time_tx, texel, 0).x;
   if (!(ray_time > 0.0f)) {
     return;
@@ -303,7 +252,6 @@ void main()
 
   float2 packed_direction = float2(imageLoadFast(hit_material_img, texel).w,
                                    imageLoadFast(hit_normal_img, texel).w);
-  const float3 ray_direction = hit_eval_direction_unpack(packed_direction);
 
   /* Hit primitive ids are relative to the per-material index subrange the BLAS was built from. */
   const uint primitive_index = primitive_id * 3u + uint(max(hit_eval_index_start, 0));
@@ -319,8 +267,8 @@ void main()
   const float3 nor1 = hit_attr_fetch_float3(nor, gpu_attr_1, gpu_attr_1_meta, i1);
   const float3 nor2 = hit_attr_fetch_float3(nor, gpu_attr_1, gpu_attr_1_meta, i2);
 
-  const ObjectMatrices obj = object_matrices_get();
-  const ObjectInfos ob_infos = object_infos_get();
+  const ObjectMatrices obj = kg.object_matrices_get(sd);
+  const ObjectInfos ob_infos = kg.object_infos_get(sd);
   float3 object_P = imageLoadFast(hit_position_img, texel).xyz;
   float3 world_P = obj.point_object_to_world(object_P);
   const float3 traced_world_P = texelFetch(hit_world_position_tx, texel, 0).xyz;
@@ -338,30 +286,29 @@ void main()
    * Re-deriving this from the replay normal can diverge on subdivided geometry and make glass hits
    * shade as if they crossed to the opposite side, which shows up as a grey fallback in
    * reflections. */
-  g_hit_eval_front_facing = (hit_flat.front_facing != 0);
-  hit_eval_init_globals(world_P, world_N);
+  hit_eval_init_globals(sd, world_P, world_N);
   HitMeshVertex domain = HitMeshVertex{
       MeshVertex{object_P, to_float3x3(obj.model_inverse),
                  object_P * ob_infos.orco_mul + ob_infos.orco_add},
       int3(i0, i1, i2), barycentric};
   attrib_load(domain);
-  fragment_displacement();
+  fragment_displacement(kg, sd);
   const float closure_rand = 0.5f;
-  nodetree_surface(closure_rand);
+  nodetree_surface(kg, sd, closure_rand);
 
-  Thickness thickness = Thickness::from(nodetree_thickness(), thickness_mode);
+  Thickness thickness = Thickness::from(nodetree_thickness(kg, sd), mode);
   eObjectInfoFlag ob_flag = ob_infos.flag;
   if (flag_test(ob_flag, OBJECT_HOLDOUT)) {
-    g_holdout = 1.0f - average(g_transmittance);
+    sd.holdout = 1.0f - average(sd.transmittance);
   }
-  g_holdout = saturate(g_holdout);
-  float holdout_visibility = 1.0f - g_holdout;
-  const float transparent_transmittance = saturate(average(g_transmittance));
+  const float holdout_visibility = 1.0f - saturate(sd.holdout);
+  const float transparent_transmittance = saturate(average(sd.transmittance));
 
-  ClosureUndetermined secondary_cl = hit_eval_closure_select_family(false);
-  ClosureUndetermined transmission_cl = hit_eval_closure_select_transmission();
-  ClosureUndetermined specular_cl = hit_eval_closure_select_specular(traced_specular_type,
-                                                                     secondary_cl);
+  ClosureUndetermined secondary_cl = hit_eval_closure_select_family(sd, false);
+  ClosureUndetermined transmission_cl = hit_eval_closure_select_type(
+      sd, CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID);
+  ClosureUndetermined specular_cl = hit_eval_closure_select_specular(
+      sd, traced_specular_type, secondary_cl);
   if ((traced_specular_type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&
       !hit_eval_closure_has_energy(specular_cl) && !hit_eval_closure_has_energy(transmission_cl) &&
       (transparent_transmittance > 1.0e-4f))
@@ -369,7 +316,8 @@ void main()
     /* Alpha-transparent materials are already captured into the HWRT scene as a clear refraction
      * proxy. Replay the same contract here instead of leaving direct mirror hits with no usable
      * specular/transmission closure, which collapses them to black. */
-    ClosureUndetermined clear_refraction = hit_eval_clear_refraction_closure(transparent_transmittance);
+    ClosureUndetermined clear_refraction = hit_eval_clear_refraction_closure(
+        sd.N, transparent_transmittance);
     specular_cl = clear_refraction;
     transmission_cl = clear_refraction;
   }
@@ -378,7 +326,8 @@ void main()
      * separate layers. Apply the same rule to preserved scene-final hits and their additional
      * receiver payloads so replay does not hand the only specular slot to refraction once
      * transmission becomes dominant. */
-    ClosureUndetermined reflection_cl = hit_eval_closure_select_reflection();
+    ClosureUndetermined reflection_cl = hit_eval_closure_select_type(
+        sd, CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID);
     if (reflection_cl.type != CLOSURE_NONE_ID) {
       specular_cl = reflection_cl;
     }
@@ -403,9 +352,8 @@ void main()
      * refractive texture color into the receiver base layer so HWRT lighting resolves the other
      * side of the surface as a textured hit. */
     ClosureUndetermined receiver_texture_cl = closure_new(CLOSURE_BSDF_DIFFUSE_ID);
-    receiver_texture_cl.weight = 1.0f;
     receiver_texture_cl.color = max(max(secondary_cl.color, transmission_cl.color), float3(0.0f));
-    receiver_texture_cl.N = g_data.N;
+    receiver_texture_cl.N = sd.N;
     receiver_texture_cl.data = float4(0.0f);
     secondary_cl = receiver_texture_cl;
   }
@@ -414,16 +362,12 @@ void main()
      * texture as the reflected receiver. If we keep it as a specular closure, the continuation
      * mirror proxy wins and replaces the texture with flat grey mirror. */
     ClosureUndetermined receiver_texture_cl = closure_new(CLOSURE_BSDF_DIFFUSE_ID);
-    receiver_texture_cl.weight = 1.0f;
     receiver_texture_cl.color = max(max(secondary_cl.color, specular_cl.color), float3(0.0f));
-    receiver_texture_cl.N = g_data.N;
+    receiver_texture_cl.N = sd.N;
     receiver_texture_cl.data = float4(0.0f);
     secondary_cl = receiver_texture_cl;
     specular_cl = closure_new(CLOSURE_NONE_ID);
-    specular_cl.weight = 0.0f;
-    specular_cl.color = float3(0.0f);
-    specular_cl.N = g_data.N;
-    specular_cl.data = float4(0.0f);
+    specular_cl.N = sd.N;
   }
   const bool specular_texture_tint_only_replay =
       (preserved_layered_scene_final && !preserved_principled_layered_scene_final &&
@@ -439,10 +383,7 @@ void main()
       specular_cl.color = max(specular_cl.color, secondary_cl.color);
     }
     secondary_cl = closure_new(CLOSURE_NONE_ID);
-    secondary_cl.weight = 0.0f;
-    secondary_cl.color = float3(0.0f);
-    secondary_cl.N = g_data.N;
-    secondary_cl.data = float4(0.0f);
+    secondary_cl.N = sd.N;
   }
   const float reflection_layer_opacity = hit_eval_reflection_layer_opacity(secondary_cl, specular_cl);
   /* Keep the base-family closure intact even when glass exposes both reflection and refraction.
@@ -473,9 +414,9 @@ void main()
     transmission_layer_color *= path_tint;
   }
 
-  float3 shading_normal = g_data.N;
+  float3 shading_normal = sd.N;
   if (!(dot(shading_normal, shading_normal) > 1.0e-10f)) {
-    shading_normal = g_data.Ni;
+    shading_normal = sd.Ni;
   }
 
   imageStoreFast(hit_albedo_img, texel, hit_eval_base_pack(secondary_cl));
@@ -494,12 +435,13 @@ void main()
                           has_transmission_layer ? 1.0f : 0.0f));
   }
 
-  float3 history_ndc = project_point(raytrace_buf.history_persmat, g_data.P);
+  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
+  float3 history_ndc = project_point(uni.raytrace_buf.history_persmat, sd.P);
   float2 history_uv = history_ndc.xy * 0.5f + 0.5f;
   uint packed_uv = 0u;
   /* Raster reuse must fail closed near the screen border. Clamping a reflected hit back into the
    * viewport can turn an off-screen projection into a moving screen-space band inside the mirror. */
-  float2 history_margin = raytrace_buf.full_resolution_inv * 2.0f;
+  float2 history_margin = uni.raytrace_buf.full_resolution_inv * 2.0f;
   if (all(lessThan(abs(history_ndc.xy), float2(1.0f))) &&
       all(greaterThan(history_uv, history_margin)) &&
       all(lessThan(history_uv, float2(1.0f) - history_margin)))
@@ -515,7 +457,7 @@ void main()
   const float4 emission_replay = texelFetch(hit_emission_replay_tx, texel, 0);
   radiance.rgb = max(radiance.rgb - emission_replay.rgb * hit_proxy_emission * emission_replay.a,
                     float3(0.0f));
-  radiance.rgb += emission_replay.rgb * max(g_emission, float3(0.0f)) * holdout_visibility;
+  radiance.rgb += emission_replay.rgb * max(sd.emission, float3(0.0f)) * holdout_visibility;
   radiance.a = uintBitsToFloat(packed_uv);
   imageStoreFast(ray_radiance_img, texel, radiance);
 }

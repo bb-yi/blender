@@ -85,7 +85,7 @@ ccl_device_inline OrenNayarParam bsdf_oren_nayar_param(const Spectrum color,
   /* Compute energy compensation term (except for (1.0f - El) factor since it depends on wo). */
   const Spectrum albedo = saturate(color);
   const float Eavg = a * M_PI_F + ((M_2PI_F - 5.6f) / 3.0f) * b;
-  const Spectrum Ems = M_1_PI_F * sqr(albedo) * (Eavg / (1.0f - Eavg)) /
+  const Spectrum Ems = M_1_PI_F * albedo * (Eavg / (1.0f - Eavg)) /
                        (one_spectrum() - albedo * (1.0f - Eavg));
   const float Ev = a * M_PI_F + b * bsdf_oren_nayar_G(max(nv, 0.0f));
 
@@ -107,7 +107,7 @@ ccl_device void bsdf_oren_nayar_setup(ccl_private ShaderData *sd,
     bsdf->N = N;
     bsdf->type = CLOSURE_BSDF_OREN_NAYAR_ID;
     bsdf->param = bsdf_oren_nayar_param(color, dot(bsdf->N, sd->wi), roughness);
-    sd->flag |= SD_BSDF | SD_BSDF_HAS_EVAL;
+    sd->runtime_flag |= SR_BSDF | SR_BSDF_HAS_EVAL;
   }
 }
 
@@ -199,7 +199,7 @@ ccl_device_inline void bsdf_thin_subsurface_setup(ccl_private ShaderData *sd,
       bsdf->type = CLOSURE_BSDF_OREN_NAYAR_ID;
       bsdf->N = N;
       bsdf->param = param;
-      sd->flag |= SD_BSDF | SD_BSDF_HAS_EVAL;
+      sd->runtime_flag |= SR_BSDF | SR_BSDF_HAS_EVAL;
     }
   }
 
@@ -211,7 +211,7 @@ ccl_device_inline void bsdf_thin_subsurface_setup(ccl_private ShaderData *sd,
       bsdf->type = CLOSURE_BSDF_ROUGH_TRANSLUCENT_ID;
       bsdf->N = -N;
       bsdf->param = param;
-      sd->flag |= SD_BSDF | SD_BSDF_HAS_EVAL | SD_BSDF_HAS_TRANSMISSION;
+      sd->runtime_flag |= SR_BSDF | SR_BSDF_HAS_EVAL | SR_BSDF_HAS_TRANSMISSION;
     }
   }
 }

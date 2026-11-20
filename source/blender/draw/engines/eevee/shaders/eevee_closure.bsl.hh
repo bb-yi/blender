@@ -169,7 +169,7 @@ LightProbeRay bxdf_lightprobe_ray(ClosureUndetermined cl,
   return {};
 }
 
-ClosureLight closure_light_new_ex([[resource_table]] const UtilityTexture &util_tx,
+ClosureLight closure_light_new_ex(const UtilityTexture &util_tx,
                                   ClosureUndetermined cl,
                                   float3 V,
                                   Thickness thickness,
@@ -214,7 +214,7 @@ ClosureLight closure_light_new_ex([[resource_table]] const UtilityTexture &util_
       case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID:
       case CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID:
       case CLOSURE_NONE_ID:
-        cl_light = bxdf_diffuse_light(cl);
+        cl_light = bxdf_diffuse_light(cl, V);
         break;
     }
   }
@@ -225,7 +225,7 @@ ClosureLight closure_light_new_ex([[resource_table]] const UtilityTexture &util_
   return cl_light;
 }
 
-ClosureLight closure_light_new([[resource_table]] const UtilityTexture &util_tx,
+ClosureLight closure_light_new(const UtilityTexture &util_tx,
                                ClosureUndetermined cl,
                                float3 V,
                                Thickness thickness)
@@ -233,9 +233,7 @@ ClosureLight closure_light_new([[resource_table]] const UtilityTexture &util_tx,
   return closure_light_new_ex(util_tx, cl, V, thickness, true);
 }
 
-ClosureLight closure_light_new([[resource_table]] const UtilityTexture &util_tx,
-                               ClosureUndetermined cl,
-                               float3 V)
+ClosureLight closure_light_new(const UtilityTexture &util_tx, ClosureUndetermined cl, float3 V)
 {
   return closure_light_new_ex(util_tx, cl, V, Thickness::zero(), false);
 }

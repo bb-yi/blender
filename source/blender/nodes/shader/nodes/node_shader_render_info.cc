@@ -15,7 +15,10 @@ namespace nodes::node_shader_render_info_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_output<decl::Vector>("Frag Coord"_ustr);
+  b.add_output<decl::Vector>("Frag Coord"_ustr)
+      .description(
+          "Normalized fragment coordinates; zero outside fragment shading, including "
+          "vertex displacement");
   b.add_output<decl::Float>("Width"_ustr);
   b.add_output<decl::Float>("Height"_ustr);
   b.add_output<decl::Vector>("Resolution"_ustr);
@@ -29,7 +32,7 @@ static int node_shader_gpu_render_info(GPUMaterial *mat,
                                        GPUNodeStack *in,
                                        GPUNodeStack *out)
 {
-  return GPU_stack_link(mat, node, "node_render_info", in, out);
+  return GPU_stack_link(mat, node, "node_render_info", in, out, GPU_kernel_globals(), GPU_shading_data());
 }
 
 NODE_SHADER_MATERIALX_BEGIN

@@ -19,35 +19,49 @@ namespace blender::gpu::render_graph {
 struct VKDrawIndirectData {
   VKPipelineDataGraphics graphics;
   VKVertexBufferBindings vertex_buffers;
-  VkBuffer indirect_buffer;
+  VKResourceWithHandle<VkBuffer> indirect_buffer;
   VkDeviceSize offset;
   uint32_t draw_count;
   uint32_t stride;
+
+  void reset()
+  {
+    graphics.reset();
+    vertex_buffers = {};
+    indirect_buffer = {};
+    offset = 0;
+    draw_count = 0;
+    stride = 0;
+  }
 };
 
 struct VKDrawIndirectCreateInfo {
-  VKDrawIndirectData node_data = {};
   const VKResourceAccessInfo &resources;
   VKDrawIndirectCreateInfo(const VKResourceAccessInfo &resources) : resources(resources) {}
 };
 
-class VKDrawIndirectNode : public VKNodeInfo<VKNodeType::DRAW_INDIRECT,
-                                             VKDrawIndirectCreateInfo,
-                                             VKDrawIndirectData,
-                                             VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
-                                             VKResourceType::IMAGE | VKResourceType::BUFFER> {
+class VKDrawIndirectNode : public VKDrawNodeInfo<VKNodeType::DRAW_INDIRECT,
+                                                 VKDrawIndirectCreateInfo,
+                                                 VKDrawIndirectData,
+                                                 VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+                                                 VKResourceType::IMAGE | VKResourceType::BUFFER> {
  public:
-  /**
-   * Update the node data with the data inside create_info.
-   *
-   * Has been implemented as a template to ensure all node specific data
-   * (`VK*Data`/`VK*CreateInfo`) types can be included in the same header file as the logic. The
-   * actual node data (`VKRenderGraphNode` includes all header files.)
-   */
-  template<typename Node, typename Storage>
-  static void set_node_data(Node &node, Storage &storage, const CreateInfo &create_info)
+  static void reset_data(Data &data)
   {
-    node.storage_index = storage.draw_indirect.append_and_get_index(create_info.node_data);
+    data.reset();
+  }
+
+  template<typename Storage>
+  static Data &alloc_node_data(Storage &storage, int64_t &r_storage_index)
+  {
+    Data &data = storage.draw_indirect.alloc(r_storage_index);
+    reset_data(data);
+    return data;
+  }
+
+  template<typename Storage> static Data &storage_data(Storage &storage, int64_t storage_index)
+  {
+    return storage.draw_indirect[storage_index];
   }
 
   /**
@@ -55,12 +69,12 @@ class VKDrawIndirectNode : public VKNodeInfo<VKNodeType::DRAW_INDIRECT,
    */
   void build_links(VKResourceStateTracker &resources,
                    VKRenderGraphLinks &links,
-                   const CreateInfo &create_info) override
+                   const CreateInfo &create_info,
+                   Data &data) override
   {
     create_info.resources.build_links(resources, links);
-    vk_vertex_buffer_bindings_build_links(resources, links, create_info.node_data.vertex_buffers);
-    ResourceWithStamp buffer_resource = resources.get_buffer(
-        create_info.node_data.indirect_buffer);
+    vk_vertex_buffer_bindings_build_links(resources, links, data.vertex_buffers);
+    ResourceWithStamp buffer_resource = resources.get_buffer(data.indirect_buffer);
     links.buffers.append({buffer_resource, VK_ACCESS_INDIRECT_COMMAND_READ_BIT});
   }
 
@@ -82,7 +96,16 @@ class VKDrawIndirectNode : public VKNodeInfo<VKNodeType::DRAW_INDIRECT,
     vk_vertex_buffer_bindings_build_commands(
         command_buffer, data.vertex_buffers, r_bound_pipelines.graphics.vertex_buffers);
 
-    command_buffer.draw_indirect(data.indirect_buffer, data.offset, data.draw_count, data.stride);
+    if (command_buffer.use_multi_draw_indirect) {
+      command_buffer.draw_indirect(
+          data.indirect_buffer, data.offset, data.draw_count, data.stride);
+    }
+    else {
+      for (uint32_t i : IndexRange(data.draw_count)) {
+        command_buffer.draw_indirect(
+            data.indirect_buffer, data.offset + i * data.stride, 1, data.stride);
+      }
+    }
   }
 };
 }  // namespace blender::gpu::render_graph

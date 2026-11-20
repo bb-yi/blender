@@ -2,23 +2,30 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup draw_engine
+ *
+ * Surface-stable stochastic transparency implementation. Multiple underlying sampling hashes can
+ * be used.
+ *
+ * References:
+ *
+ *  [wymn2017]  Chris Wyman and Morgan McGuire
+ *              Hashed Alpha Testing
+ *              ACM I3D 2017
+ *              https://research.nvidia.com/labs/rtr/publication/wyman2017hashed/
+ */
+
 #pragma once
 
+#include "eevee_sampling_lib.bsl.hh"
 #include "gpu_shader_compat.hh"
 
-/* From the paper "Hashed Alpha Testing" by Chris Wyman and Morgan McGuire. */
 namespace eevee::hashed_transparency {
 
-float hash(float2 a)
-{
-  return fract(1e4f * sin(17.0f * a.x + 0.1f * a.y) * (0.1f + abs(sin(13.0f * a.y + a.x))));
-}
-
-float hash_3d(float3 a)
-{
-  return hash(float2(hash(a.xy), a.z));
-}
-
+/**
+ * Surface-stable alpha testing [wymn2017], using PCG as the underlying hash.
+ */
 float alpha_threshold(float hash_scale, float hash_offset, float3 P)
 {
   /* Find the discretized derivatives of our coordinates. */
@@ -31,8 +38,8 @@ float alpha_threshold(float hash_scale, float hash_offset, float3 P)
   pix_scales.y = exp2(ceil(pix_scale_log));
   /* Compute alpha thresholds at our two noise scales. */
   float2 alpha;
-  alpha.x = hash_3d(floor(pix_scales.x * P));
-  alpha.y = hash_3d(floor(pix_scales.y * P));
+  alpha.x = random::pcg(floor(pix_scales.x * P));
+  alpha.y = random::pcg(floor(pix_scales.y * P));
   /* Factor to interpolate lerp with. */
   float fac = fract(log2(pix_scale));
   /* Interpolate alpha threshold from noise at two scales. */
@@ -50,6 +57,14 @@ float alpha_threshold(float hash_scale, float hash_offset, float3 P)
   /* Avoids threshold == 0. */
   threshold = clamp(threshold, 1.0e-6f, 1.0f);
   return threshold;
+}
+
+/* Match the shell prepass threshold, while keeping exact endpoints independent of noise. */
+bool should_discard(float transparency, float hash_scale, float hash_offset, float3 P)
+{
+  /* Derivatives must be evaluated before any potentially divergent Alpha condition. */
+  const float threshold = alpha_threshold(hash_scale, hash_offset, P);
+  return transparency >= 1.0f || (transparency > 0.0f && transparency > threshold);
 }
 
 }  // namespace eevee::hashed_transparency

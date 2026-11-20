@@ -279,6 +279,7 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
             draw_material_stencil_settings(panel, mat)
 
         col = layout.column()
+        col.enabled = mat.stencil_mode != 'MARKER_ONLY'
         col.prop(mat, "use_color_write", text="Color Write")
         col.prop(mat, "use_depth_write", text="Depth Write")
 
@@ -288,13 +289,15 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
         col.prop(mat, "displacement_method", text="Displacement")
         col = col.column(align=True)
 
-    col.enabled = mat.displacement_method != 'BUMP'
+    # NOTE: "max_vertex_displacement" also drives the max offset when using Shadow Ray-cast with a custom Position.
+    col.enabled = mat.displacement_method != 'BUMP' or is_eevee
+
     # Clarify that this is for displacement if the displacement method setting is not above.
     max_diplacement_text = "Max Distance" if is_eevee else "Max Displacement"
     col.prop(mat, "max_vertex_displacement", text=max_diplacement_text)
 
     if mat.displacement_method == 'DISPLACEMENT':
-        layout.label(text="Unsupported displacement method", icon='ERROR')
+        layout.label(text="Unsupported displacement method", icon='STATUS_ERROR')
 
     if is_eevee:
         layout.prop(mat, "use_transparent_shadow")
@@ -313,7 +316,17 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
 
 
 def draw_material_stencil_settings(layout, mat):
+    layout.prop(mat, "stencil_mode", text="Mode")
     layout.prop(mat, "use_stencil", text="Enabled")
+    if mat.stencil_mode != 'STANDARD':
+        layout.label(text="Marker writes no color or depth")
+        if any(op in {'INCREMENT_CLAMP', 'DECREMENT_CLAMP'} for op in (
+                mat.stencil_pass_op, mat.stencil_fail_op, mat.stencil_zfail_op)):
+            row = layout.row()
+            row.alert = True
+            row.label(text="Clamp operations are unsupported for early markers", icon='ERROR')
+    if mat.stencil_mode == 'MARKER_ONLY' and not mat.use_stencil:
+        layout.label(text="Marker disabled; surface stays hidden", icon='INFO')
     sub = layout.column(align=True)
     sub.active = mat.use_stencil
     sub.prop(mat, "stencil_order", text="Order")
@@ -483,7 +496,14 @@ class EEVEE_MATERIAL_PT_settings_outline_shell(MaterialButtonsPanel, Panel):
                 icon='INFO')
         layout.active = has_node
 
+        blended = mat.outline_shell_transparency_method == 'BLENDED'
         col = layout.column()
+        col.prop(mat, "outline_shell_transparency_method", text="Transparency")
+        if mat.outline_shell_transparency_method == 'CLIP':
+            col.prop(mat, "outline_shell_alpha_threshold", text="Alpha Threshold")
+
+        col = layout.column()
+        col.enabled = not blended
         col.prop(mat, "outline_shell_render_method", text="Render Method")
 
         col = layout.column(heading="Culling")
@@ -491,8 +511,13 @@ class EEVEE_MATERIAL_PT_settings_outline_shell(MaterialButtonsPanel, Panel):
 
         col = layout.column()
         col.prop(mat, "outline_shell_ztest_mode", text="ZTest")
-        col.prop(mat, "use_outline_shell_depth_write", text="Depth Write")
+        row = col.row()
+        row.enabled = not blended
+        row.prop(mat, "use_outline_shell_depth_write", text="Depth Write")
         col.prop(mat, "use_outline_shell_shadow", text="Cast Shadow")
+        col.prop(mat, "use_outline_shell_self_occlusion", text="Self Occlusion")
+        if blended:
+            layout.label(text="Blended uses Forward without depth or velocity", icon='INFO')
 
         col = layout.column()
         col.prop(mat, "max_vertex_displacement", text="Max Distance")

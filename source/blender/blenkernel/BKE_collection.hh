@@ -10,10 +10,10 @@
 
 #include <string>
 
-#include "BLI_iterator.h"
+#include "BLI_iterator.hh"
 #include "BLI_map.hh"
 #include "BLI_set.hh"
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 #include "DNA_collection_types.h"
 #include "DNA_listBase.h"
@@ -32,6 +32,7 @@ struct ID;
 struct CollectionChild;
 struct CollectionImport;
 struct CollectionExport;
+struct CollectionObject;
 struct Main;
 struct Object;
 struct Scene;
@@ -81,6 +82,12 @@ struct CollectionRuntime {
   CollectionObjectMap *gobject_hash = nullptr;
 
   uint8_t tag = 0;
+};
+
+struct CollectionImportRuntime {
+  /** The archive library this importer is associated with. Will be null when an import has not
+   * occurred yet or has since been cleared. */
+  Library *archive_library = nullptr;
 };
 
 }  // namespace bke
@@ -274,6 +281,27 @@ void BKE_collection_object_move(
     Main *bmain, Scene *scene, Collection *collection_dst, Collection *collection_src, Object *ob);
 
 /**
+ * Find the entry for \a ob inside \a collection.
+ *
+ * \return nullptr if not found.
+ */
+CollectionObject *BKE_collection_object_find_in(const Collection &collection, const Object &ob);
+
+/**
+ *  Unsets the CollectionObject.parented_sort_index for the given \a object.
+ */
+void BKE_collection_object_parented_sort_index_reset(Main &bmain, Object &ob);
+
+/**
+ * Unsets the CollectionObject.parented_sort_index for the given \a object.
+ * Also walks the object's current parent chain to check if the parent is also a member of the same
+ * collection as the given object. If both are in the same collection unset
+ * CollectionObject.sort_index for the given \a object. This should be called when an object is
+ * unparented.
+ */
+void BKE_collection_object_parent_clear_sort_index_reset(Main &bmain, Object &ob);
+
+/**
  * Remove object from all collections of scene
  */
 bool BKE_scene_collections_object_remove(Main *bmain, Scene *scene, Object *ob, bool free_us);
@@ -413,7 +441,8 @@ void BKE_main_collections_parent_relations_rebuild(Main *bmain);
 /**
  * Perform some validation on integrity of the data of this collection.
  *
- * \return `true` if everything is OK, false if some errors are detected. */
+ * \return `true` if everything is OK, false if some errors are detected.
+ */
 bool BKE_collection_validate(Collection *collection);
 
 /* .blend file I/O */
@@ -439,13 +468,13 @@ using BKE_scene_collections_Cb = void (*)(Collection *ob, void *data);
     int _object_visibility_flag = (_mode == DAG_EVAL_VIEWPORT) ? OB_HIDE_VIEWPORT : \
                                                                  OB_HIDE_RENDER; \
     [[maybe_unused]] int _base_id = 0; \
-    for (Base *_base = static_cast<Base *>(BKE_collection_object_cache_get(_collection).first); \
-         _base; \
+    for (Base *_base = BKE_collection_object_cache_get(_collection).first(); _base; \
          _base = _base->next, _base_id++) \
     { \
       Object *_object = _base->object; \
       if ((_base->flag & _base_flag) && \
-          (_object->visibility_flag & _object_visibility_flag) == 0) {
+          (_object->visibility_flag & _object_visibility_flag) == 0) \
+      {
 
 #define FOREACH_COLLECTION_VISIBLE_OBJECT_RECURSIVE_END \
   } \
@@ -454,8 +483,7 @@ using BKE_scene_collections_Cb = void (*)(Collection *ob, void *data);
   ((void)0)
 
 #define FOREACH_COLLECTION_OBJECT_RECURSIVE_BEGIN(_collection, _object) \
-  for (Base *_base = static_cast<Base *>(BKE_collection_object_cache_get(_collection).first); \
-       _base; \
+  for (Base *_base = BKE_collection_object_cache_get(_collection).first(); _base; \
        _base = _base->next) \
   { \
     Object *_object = _base->object; \
@@ -524,12 +552,12 @@ Set<Object *> *BKE_scene_objects_as_set(Scene *scene, Set<Object *> *objects_set
       _instance_next = (_scene)->master_collection; \
     } \
     else { \
-      _instance_next = static_cast<Collection *>((_bmain)->collections.first); \
+      _instance_next = (_bmain)->collections.first(); \
     } \
 \
     while ((_instance = _instance_next)) { \
       if (is_scene_collection) { \
-        _instance_next = static_cast<Collection *>((_bmain)->collections.first); \
+        _instance_next = (_bmain)->collections.first(); \
         is_scene_collection = false; \
       } \
       else { \

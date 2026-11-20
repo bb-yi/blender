@@ -19,6 +19,8 @@
 
 #include "node_geometry_util.hh"
 
+#include <fmt/format.h>
+
 namespace blender::nodes::node_geo_boolean_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
@@ -318,7 +320,7 @@ static void node_rna(StructRNA *srna)
                     "",
                     rna_node_geometry_boolean_method_items,
                     NOD_inline_enum_accessors(custom1),
-                    int(geometry::boolean::Operation::Intersect));
+                    int(geometry::boolean::Operation::Difference));
 
   RNA_def_node_enum(srna,
                     "solver",

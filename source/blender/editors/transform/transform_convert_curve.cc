@@ -10,9 +10,9 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BKE_curve.hh"
 
@@ -410,7 +410,7 @@ static void recalcData_curve(TransInfo *t)
   FOREACH_TRANS_DATA_CONTAINER (t, tc) {
     Curve *cu = id_cast<Curve *>(tc->obedit->data);
     ListBaseT<Nurb> *nurbs = BKE_curve_editNurbs_get(cu);
-    Nurb *nu = static_cast<Nurb *>(nurbs->first);
+    Nurb *nu = nurbs->first();
 
     DEG_id_tag_update(tc->obedit->data, ID_RECALC_GEOMETRY);
 

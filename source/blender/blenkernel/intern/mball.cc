@@ -29,12 +29,12 @@
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_string_utils.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -156,6 +156,7 @@ IDTypeInfo IDType_ID_MB = {
     .foreach_cache = nullptr,
     .foreach_path = nullptr,
     .foreach_working_space_color = nullptr,
+    .foreach_asset_weak_reference = nullptr,
     .owner_pointer_get = nullptr,
 
     .blend_write = metaball_blend_write,
@@ -201,8 +202,8 @@ MetaElem *BKE_mball_element_add(MetaBall *mb, const int type)
       ml->expx = ml->expy = ml->expz = 1.0;
 
       break;
-    case MB_ELIPSOID:
-      ml->type = MB_ELIPSOID;
+    case MB_ELLIPSOID:
+      ml->type = MB_ELLIPSOID;
       ml->expx = 1.2f;
       ml->expy = 0.8f;
       ml->expz = 1.0;
@@ -355,9 +356,7 @@ void BKE_mball_properties_copy(Main *bmain, MetaBall *metaball_src)
    * Solving this case would drastically increase the complexity of this code though, so don't
    * think it would be worth it.
    */
-  for (Object *ob_src = static_cast<Object *>(bmain->objects.first);
-       ob_src != nullptr && ID_IS_EDITABLE(ob_src);)
-  {
+  for (Object *ob_src = bmain->objects.first(); ob_src != nullptr && ID_IS_EDITABLE(ob_src);) {
     if (ob_src->data != id_cast<const ID *>(metaball_src)) {
       ob_src = static_cast<Object *>(ob_src->id.next);
       continue;

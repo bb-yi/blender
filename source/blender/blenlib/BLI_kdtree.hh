@@ -13,7 +13,7 @@
 
 #include "BLI_array.hh"
 #include "BLI_kdtree_types.hh"
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_stack.hh"
 #include "BLI_vector.hh"
@@ -218,7 +218,7 @@ inline int kdtree_find_nearest_cb(const KDTree<CoordT> *tree,
   BLI_assert(tree->is_balanced == true);
 #endif
 
-  if (UNLIKELY(tree->root == detail::kd_node_unset)) {
+  if (tree->root == detail::kd_node_unset) [[unlikely]] {
     return -1;
   }
 
@@ -363,7 +363,7 @@ inline int kdtree_find_nearest_n_with_len_squared_cb(const KDTree<CoordT> *tree,
   BLI_assert(tree->is_balanced == true);
 #endif
 
-  if (UNLIKELY((tree->root == detail::kd_node_unset) || nearest_len_capacity == 0)) {
+  if ((tree->root == detail::kd_node_unset) || nearest_len_capacity == 0) [[unlikely]] {
     return 0;
   }
 
@@ -480,7 +480,7 @@ static void nearest_add_in_range(KDTreeNearest<CoordT> **r_nearest,
 {
   KDTreeNearest<CoordT> *to;
 
-  if (UNLIKELY(nearest_index >= *nearest_len_capacity)) {
+  if (nearest_index >= *nearest_len_capacity) [[unlikely]] {
     *r_nearest = static_cast<KDTreeNearest<CoordT> *>(MEM_realloc_uninitialized_id(
         *r_nearest,
         (*nearest_len_capacity += detail::kd_found_alloc_inc) * sizeof(KDTreeNode<CoordT>),
@@ -518,7 +518,7 @@ inline int kdtree_range_search_with_len_squared_cb(const KDTree<CoordT> *tree,
   BLI_assert(tree->is_balanced == true);
 #endif
 
-  if (UNLIKELY(tree->root == detail::kd_node_unset)) {
+  if (tree->root == detail::kd_node_unset) [[unlikely]] {
     return 0;
   }
 
@@ -598,7 +598,7 @@ inline void kdtree_range_search_cb(const KDTree<CoordT> *tree,
   BLI_assert(tree->is_balanced == true);
 #endif
 
-  if (UNLIKELY(tree->root == detail::kd_node_unset)) {
+  if (tree->root == detail::kd_node_unset) [[unlikely]] {
     return;
   }
 
@@ -806,7 +806,7 @@ inline int kdtree_calc_duplicates_cb(const KDTree<CoordT> *tree,
                                      Func &&duplicates_cb)
 {
   BLI_assert(tree->is_balanced);
-  if (UNLIKELY(tree->root == detail::kd_node_unset)) {
+  if (tree->root == detail::kd_node_unset) [[unlikely]] {
     return 0;
   }
 
@@ -897,78 +897,6 @@ inline int kdtree_calc_duplicates_cb(const KDTree<CoordT> *tree,
   }
 
   return found;
-}
-
-/** \} */
-
-/* -------------------------------------------------------------------- */
-/** \name kdtree_deduplicate
- * \{ */
-
-namespace detail {
-
-template<typename CoordT> static int kdtree_cmp_bool(const bool a, const bool b)
-{
-  if (a == b) {
-    return 0;
-  }
-  return b ? -1 : 1;
-}
-
-template<typename CoordT>
-static int kdtree_node_cmp_deduplicate(const void *n0_p, const void *n1_p)
-{
-  const KDTreeNode<CoordT> *n0 = static_cast<const KDTreeNode<CoordT> *>(n0_p);
-  const KDTreeNode<CoordT> *n1 = static_cast<const KDTreeNode<CoordT> *>(n1_p);
-  for (uint j = 0; j < KDTree<CoordT>::DimsNum; j++) {
-    if (axis_get(n0->co, j) < axis_get(n1->co, j)) {
-      return -1;
-    }
-    if (axis_get(n0->co, j) > axis_get(n1->co, j)) {
-      return 1;
-    }
-  }
-
-  if (n0->d != KDTree<CoordT>::DimsNum && n1->d != KDTree<CoordT>::DimsNum) {
-    /* Two nodes share identical `co`
-     * Both are still valid.
-     * Cast away `const` and tag one of them as invalid. */
-    (static_cast<KDTreeNode<CoordT> *>(const_cast<KDTreeNode<CoordT> *>(n1)))->d =
-        KDTree<CoordT>::DimsNum;
-  }
-
-  /* Keep sorting until each unique value has one and only one valid node. */
-  return kdtree_cmp_bool<CoordT>(n0->d == KDTree<CoordT>::DimsNum,
-                                 n1->d == KDTree<CoordT>::DimsNum);
-}
-
-}  // namespace detail
-
-/**
- * Remove exact duplicates (run before balancing).
- *
- * Keep the first element added when duplicates are found.
- */
-template<typename CoordT> inline int kdtree_deduplicate(KDTree<CoordT> *tree)
-{
-#ifndef NDEBUG
-  tree->is_balanced = false;
-#endif
-  qsort(tree->nodes,
-        size_t(tree->nodes_len),
-        sizeof(*tree->nodes),
-        detail::kdtree_node_cmp_deduplicate<CoordT>);
-  uint j = 0;
-  for (uint i = 0; i < tree->nodes_len; i++) {
-    if (tree->nodes[i].d != KDTree<CoordT>::DimsNum) {
-      if (i != j) {
-        tree->nodes[j] = tree->nodes[i];
-      }
-      j++;
-    }
-  }
-  tree->nodes_len = j;
-  return int(tree->nodes_len);
 }
 
 /** \} */

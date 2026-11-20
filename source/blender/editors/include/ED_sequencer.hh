@@ -12,11 +12,16 @@
 
 namespace blender {
 
+enum eSeqRippleFlag : int;
+
 struct Scene;
 struct Strip;
 struct SpaceSeq;
 struct bContext;
 struct View2D;
+struct rctf;
+struct ARegion;
+struct wmOperatorType;
 
 namespace ed::vse {
 
@@ -79,7 +84,7 @@ VectorSet<Strip *> selected_strips_from_context(bContext *C);
 StripSelection pick_strip_and_handle(const struct Scene *scene,
                                      const View2D *v2d,
                                      float mouse_co[2]);
-bool can_select_handle(const Scene *scene, const Strip *strip, const View2D *v2d);
+bool can_select_handle(const Scene *scene, const Strip *strip);
 bool handle_is_selected(const Strip *strip, eStripHandle handle);
 
 bool is_scene_time_sync_needed(const bContext &C);
@@ -89,6 +94,13 @@ bool is_scene_time_sync_needed(const bContext &C);
  */
 const Strip *get_scene_strip_for_time_sync(const Scene *sequencer_scene);
 void sync_active_scene_and_time_with_scene_strip(bContext &C);
+
+rctf sequencer_clamped_view_bounds_get(const bContext *C, ARegion *region);
+
+/*
+ * Default properties for operators that make use of rippling features.
+ */
+void operator_properties_ripple(wmOperatorType *ot, eSeqRippleFlag options);
 
 }  // namespace ed::vse
 }  // namespace blender

@@ -5,6 +5,9 @@
 /** \file
  * \ingroup bke
  */
+
+#include "BLI_math_vector_c.hh"
+
 #include "MEM_guardedalloc.h"
 
 #include "DNA_action_types.h"
@@ -19,19 +22,19 @@
 
 #include "BLO_read_write.hh"
 
-namespace blender {
+namespace blender::bke {
 
 /* ******************************************************************** */
 /* Animation Visualization */
+namespace animviz {
 
-void animviz_settings_init(bAnimVizSettings *avs)
+void settings_init(bAnimVizSettings *avs)
 {
-  /* sanity check */
   if (avs == nullptr) {
     return;
   }
 
-  /* path settings */
+  /* Path settings. */
   avs->path_bc = avs->path_ac = 10;
 
   avs->path_sf = 1;   /* XXX: Take from scene instead? */
@@ -44,16 +47,37 @@ void animviz_settings_init(bAnimVizSettings *avs)
   avs->path_bakeflag |= MOTIONPATH_BAKE_HEADS;
 }
 
+}  // namespace animviz
+
+/* ******************************************************************** */
+/* Motion Path */
+
+namespace motionpath {
+
+void set_preview_location(bMotionPath &mpath, const float location[3])
+{
+  copy_v3_v3(mpath.runtime->preview_location, location);
+  mpath.runtime->show_preview = true;
+  GPU_VERTBUF_DISCARD_SAFE(mpath.runtime->vbo_preview);
+  GPU_BATCH_DISCARD_SAFE(mpath.runtime->batch_preview);
+}
+
+void clear_preview_location(bMotionPath &mpath)
+{
+  mpath.runtime->show_preview = false;
+  GPU_VERTBUF_DISCARD_SAFE(mpath.runtime->vbo_preview);
+  GPU_BATCH_DISCARD_SAFE(mpath.runtime->batch_preview);
+}
+
 /* ------------------- */
 
-void animviz_free_motionpath_cache(bMotionPath *mpath)
+void free_cache(bMotionPath *mpath)
 {
-  /* sanity check */
   if (mpath == nullptr) {
     return;
   }
 
-  /* free the path if necessary */
+  /* Free the path if necessary. */
   if (mpath->points) {
     MEM_delete(mpath->points);
   }
@@ -61,29 +85,29 @@ void animviz_free_motionpath_cache(bMotionPath *mpath)
   GPU_VERTBUF_DISCARD_SAFE(mpath->points_vbo);
   GPU_BATCH_DISCARD_SAFE(mpath->batch_line);
   GPU_BATCH_DISCARD_SAFE(mpath->batch_points);
+  GPU_VERTBUF_DISCARD_SAFE(mpath->runtime->vbo_preview);
+  GPU_BATCH_DISCARD_SAFE(mpath->runtime->batch_preview);
 
-  /* reset the relevant parameters */
+  /* Reset the relevant parameters. */
   mpath->points = nullptr;
   mpath->length = 0;
 }
 
-void animviz_free_motionpath(bMotionPath *mpath)
+void free(bMotionPath *mpath)
 {
-  /* sanity check */
   if (mpath == nullptr) {
     return;
   }
 
-  /* free the cache first */
-  animviz_free_motionpath_cache(mpath);
+  free_cache(mpath);
 
-  /* now the instance itself */
+  MEM_delete(mpath->runtime);
   MEM_delete(mpath);
 }
 
 /* ------------------- */
 
-bMotionPath *animviz_copy_motionpath(const bMotionPath *mpath_src)
+bMotionPath *copy(const bMotionPath *mpath_src)
 {
   bMotionPath *mpath_dst;
 
@@ -94,37 +118,38 @@ bMotionPath *animviz_copy_motionpath(const bMotionPath *mpath_src)
   mpath_dst = MEM_dupalloc(mpath_src);
   mpath_dst->points = MEM_dupalloc(mpath_src->points);
 
-  /* should get recreated on draw... */
+  /* Should get recreated on draw... */
   mpath_dst->points_vbo = nullptr;
   mpath_dst->batch_line = nullptr;
   mpath_dst->batch_points = nullptr;
+
+  /* Runtime is always created. */
+  BLI_assert(mpath_src->runtime != nullptr);
+  mpath_dst->runtime = MEM_new<bke::motionpath::Runtime>(__func__);
+  mpath_dst->runtime->show_preview = mpath_src->runtime->show_preview;
+  copy_v3_v3(mpath_dst->runtime->preview_location, mpath_src->runtime->preview_location);
 
   return mpath_dst;
 }
 
 /* ------------------- */
 
-bMotionPath *animviz_verify_motionpaths(ReportList *reports,
-                                        Scene *scene,
-                                        Object *ob,
-                                        bPoseChannel *pchan)
+bMotionPath *ensure(ReportList *reports, Scene *scene, Object *ob, bPoseChannel *pchan)
 {
-  bAnimVizSettings *avs;
-  bMotionPath *mpath, **dst;
-
-  /* sanity checks */
   if (ELEM(nullptr, scene, ob)) {
     return nullptr;
   }
 
-  /* get destination data */
+  bAnimVizSettings *avs;
+  bMotionPath *mpath, **dst;
+  /* Get destination data. */
   if (pchan) {
     /* Paths for pose-channel - assume that pose-channel belongs to the object. */
     avs = &ob->pose->avs;
     dst = &pchan->mpath;
   }
   else {
-    /* paths for object */
+    /* Paths for object. */
     avs = &ob->avs;
     dst = &ob->mpath;
   }
@@ -164,11 +189,13 @@ bMotionPath *animviz_verify_motionpaths(ReportList *reports,
       return mpath;
     }
 
-    /* Clear the existing cache, to allocate a new one below. */
-    animviz_free_motionpath_cache(mpath);
+    /* The path exists, but the allocated buffers are the wrong size. Clear the existing cache, to
+     * allocate a new one below. */
+    free_cache(mpath);
   }
   else {
     mpath = MEM_new<bMotionPath>("bMotionPath");
+    mpath->runtime = MEM_new<bke::motionpath::Runtime>(__func__);
     *dst = mpath;
   }
 
@@ -212,33 +239,32 @@ bMotionPath *animviz_verify_motionpaths(ReportList *reports,
   return mpath;
 }
 
-void animviz_motionpath_blend_write(BlendWriter *writer, bMotionPath *mpath)
+void blend_write(BlendWriter *writer, bMotionPath *mpath)
 {
-  /* sanity checks */
   if (mpath == nullptr) {
     return;
   }
 
-  /* firstly, just write the motionpath struct */
-  writer->write_struct(mpath);
-
-  /* now write the array of data */
+  writer->write_struct(mpath, [](BlendStructWriter<bMotionPath> &struct_writer) {
+    struct_writer.shallow_data.runtime = {};
+  });
   writer->write_struct_array(mpath->length, mpath->points);
 }
 
-void animviz_motionpath_blend_read_data(BlendDataReader *reader, bMotionPath *mpath)
+void blend_read_data(BlendDataReader *reader, bMotionPath *mpath)
 {
-  /* sanity check */
   if (mpath == nullptr) {
     return;
   }
 
-  /* relink points cache */
+  /* Relink points cache. */
   BLO_read_array_and_validate_size(reader, &mpath->points, &mpath->length);
 
   mpath->points_vbo = nullptr;
   mpath->batch_line = nullptr;
   mpath->batch_points = nullptr;
+  mpath->runtime = MEM_new<bke::motionpath::Runtime>(__func__);
 }
+}  // namespace motionpath
 
-}  // namespace blender
+}  // namespace blender::bke

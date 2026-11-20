@@ -28,7 +28,7 @@ COMPUTE_SHADER_CREATE_INFO(eevee_ray_trace_hardware_lighting)
 #include "eevee_sampling_lib.glsl"
 #include "eevee_ray_trace_screen_lib.bsl.hh"
 #include "eevee_reverse_z_lib.bsl.hh"
-#include "eevee_spherical_harmonics.bsl.hh"
+#include "gpu_shader_math_spherical_harmonics.bsl.hh"
 #include "gpu_shader_codegen_lib.glsl"
 
 #define RAYTRACE_SPECULAR_MODE_OFF 0
@@ -390,7 +390,7 @@ bool hardware_hit_direction_load(int2 texel, float3 &ray_direction)
     return false;
   }
   ray_direction = hardware_direction_unpack(packed_dir);
-  return isfinite(ray_direction.x) && isfinite(ray_direction.y) && isfinite(ray_direction.z) &&
+  return !any(isnan(ray_direction)) && !any(isinf(ray_direction)) &&
          dot(ray_direction, ray_direction) > 1.0e-10f;
 }
 
@@ -460,14 +460,14 @@ bool hardware_hit_normal_load(int2 texel, float3 &N)
 bool hardware_hit_shadow_payload_valid(int2 texel)
 {
   float3 shadow_N = imageLoadFast(hit_normal_img, texel).rgb;
-  if (!(isfinite(shadow_N.x) && isfinite(shadow_N.y) && isfinite(shadow_N.z)) ||
+  if (!(!any(isnan(shadow_N)) && !any(isinf(shadow_N))) ||
       dot(shadow_N, shadow_N) <= 1.0e-10f)
   {
     return false;
   }
 
   float3 shadow_P = texelFetch(hit_world_position_tx, texel, 0).xyz;
-  return isfinite(shadow_P.x) && isfinite(shadow_P.y) && isfinite(shadow_P.z) &&
+  return !any(isnan(shadow_P)) && !any(isinf(shadow_P)) &&
          dot(shadow_P, shadow_P) > 1.0e-10f;
 }
 
@@ -1017,7 +1017,6 @@ ClosureUndetermined hardware_hit_base_closure_load(int2 texel, float3 N)
   }
 
   ClosureUndetermined cl = closure_new(type);
-  cl.weight = 1.0f;
   cl.color = hit_base.rgb;
   cl.N = N;
   cl.data = float4(0.0f);
@@ -1054,7 +1053,6 @@ ClosureUndetermined hardware_hit_specular_closure_load(int2 texel, float3 N)
 
   ClosureUndetermined cl = closure_new(
       hardware_hit_closure_is_specular_family(type) ? type : CLOSURE_NONE_ID);
-  cl.weight = 1.0f;
   cl.color = proxy_payload ? hit_base.rgb : hit_specular.rgb;
   cl.N = N;
   cl.data = float4(0.0f);
@@ -1109,7 +1107,7 @@ bool layered_receiver_hit_direction_load(int2 texel, float3 &ray_direction)
     return false;
   }
   ray_direction = hardware_direction_unpack(packed_dir);
-  return isfinite(ray_direction.x) && isfinite(ray_direction.y) && isfinite(ray_direction.z) &&
+  return !any(isnan(ray_direction)) && !any(isinf(ray_direction)) &&
          dot(ray_direction, ray_direction) > 1.0e-10f;
 }
 
@@ -1123,7 +1121,7 @@ bool layered_receiver_hit_load(int2 texel, float3 &P_hit, float3 &V)
     return false;
   }
   P_hit = texelFetch(layered_receiver_world_position_tx, texel, 0).xyz;
-  if (!(isfinite(P_hit.x) && isfinite(P_hit.y) && isfinite(P_hit.z)) ||
+  if (!(!any(isnan(P_hit)) && !any(isinf(P_hit))) ||
       dot(P_hit, P_hit) <= 1.0e-10f)
   {
     return false;
@@ -1141,14 +1139,14 @@ bool layered_receiver_hit_normal_load(int2 texel, float3 &N)
 bool layered_receiver_hit_shadow_payload_valid(int2 texel)
 {
   float3 shadow_N = texelFetch(layered_receiver_hit_normal_tx, texel, 0).rgb;
-  if (!(isfinite(shadow_N.x) && isfinite(shadow_N.y) && isfinite(shadow_N.z)) ||
+  if (!(!any(isnan(shadow_N)) && !any(isinf(shadow_N))) ||
       dot(shadow_N, shadow_N) <= 1.0e-10f)
   {
     return false;
   }
 
   float3 shadow_P = texelFetch(layered_receiver_world_position_tx, texel, 0).xyz;
-  return isfinite(shadow_P.x) && isfinite(shadow_P.y) && isfinite(shadow_P.z) &&
+  return !any(isnan(shadow_P)) && !any(isinf(shadow_P)) &&
          dot(shadow_P, shadow_P) > 1.0e-10f;
 }
 
@@ -1186,7 +1184,6 @@ ClosureUndetermined layered_receiver_hit_base_closure_load(int2 texel, float3 N)
   }
 
   ClosureUndetermined cl = closure_new(type);
-  cl.weight = 1.0f;
   cl.color = hit_base.rgb;
   cl.N = N;
   cl.data = float4(0.0f);
@@ -1219,7 +1216,6 @@ ClosureUndetermined layered_receiver_hit_specular_closure_load(int2 texel, float
 
   ClosureUndetermined cl = closure_new(
       hardware_hit_closure_is_specular_family(type) ? type : CLOSURE_NONE_ID);
-  cl.weight = 1.0f;
   cl.color = proxy_payload ? hit_base.rgb : hit_specular.rgb;
   cl.N = N;
   cl.data = float4(0.0f);
@@ -1312,11 +1308,11 @@ void hardware_hit_sampled_local_lights(int2 texel,
   }
 
   for (int pick = 0; pick < HWRT_HIT_SAMPLED_LIGHT_COUNT; pick++) {
-    const float rand_cluster = interleaved_gradient_noise(
+    const float rand_cluster = random::interleaved_gradient(
         float2(texel) + 0.5f,
         float(7 + pick * 2),
         sampling_rng_1D_get(SAMPLING_RAYTRACE_U));
-    const float rand_light = interleaved_gradient_noise(
+    const float rand_light = random::interleaved_gradient(
         float2(texel) + 0.5f,
         float(8 + pick * 2),
         sampling_rng_1D_get(SAMPLING_RAYTRACE_X));
@@ -1443,9 +1439,7 @@ void hardware_hit_light_eval_exact_local(uint local_light_index,
 
   float3 shadow = float3(1.0f);
   bool evaluate_shadow = light.tilemap_index != LIGHT_NO_SHADOW;
-#if defined(SHADOW_DISPATCH_HAS_HARDWARE_RT)
-  evaluate_shadow = evaluate_shadow || (use_hardware_rt_shadows && light.cast_shadow);
-#endif
+  evaluate_shadow = evaluate_shadow || (use_hardware_rt_shadows && light.hwrt_shadow_layer >= 0);
   if (evaluate_shadow) {
     shadow = shadow_eval_dispatch(local_light_index,
                                   light,
@@ -2032,7 +2026,7 @@ bool transmission_receiver_hit_direction_load(int2 texel, float3 &ray_direction)
     return false;
   }
   ray_direction = hardware_direction_unpack(packed_dir);
-  return isfinite(ray_direction.x) && isfinite(ray_direction.y) && isfinite(ray_direction.z) &&
+  return !any(isnan(ray_direction)) && !any(isinf(ray_direction)) &&
          dot(ray_direction, ray_direction) > 1.0e-10f;
 }
 
@@ -2046,7 +2040,7 @@ bool transmission_receiver_hit_load(int2 texel, float3 &P_hit, float3 &V)
     return false;
   }
   P_hit = texelFetch(transmission_receiver_world_position_tx, texel, 0).xyz;
-  if (!(isfinite(P_hit.x) && isfinite(P_hit.y) && isfinite(P_hit.z)) ||
+  if (!(!any(isnan(P_hit)) && !any(isinf(P_hit))) ||
       dot(P_hit, P_hit) <= 1.0e-10f)
   {
     return false;
@@ -2064,14 +2058,14 @@ bool transmission_receiver_hit_normal_load(int2 texel, float3 &N)
 bool transmission_receiver_hit_shadow_payload_valid(int2 texel)
 {
   float3 shadow_N = texelFetch(transmission_receiver_hit_normal_tx, texel, 0).rgb;
-  if (!(isfinite(shadow_N.x) && isfinite(shadow_N.y) && isfinite(shadow_N.z)) ||
+  if (!(!any(isnan(shadow_N)) && !any(isinf(shadow_N))) ||
       dot(shadow_N, shadow_N) <= 1.0e-10f)
   {
     return false;
   }
 
   float3 shadow_P = texelFetch(transmission_receiver_world_position_tx, texel, 0).xyz;
-  return isfinite(shadow_P.x) && isfinite(shadow_P.y) && isfinite(shadow_P.z) &&
+  return !any(isnan(shadow_P)) && !any(isinf(shadow_P)) &&
          dot(shadow_P, shadow_P) > 1.0e-10f;
 }
 
@@ -2101,7 +2095,6 @@ ClosureUndetermined transmission_receiver_hit_base_closure_load(int2 texel, floa
   }
 
   ClosureUndetermined cl = closure_new(type);
-  cl.weight = 1.0f;
   cl.color = hit_base.rgb;
   cl.N = N;
   cl.data = float4(0.0f);
@@ -2133,7 +2126,6 @@ ClosureUndetermined transmission_receiver_hit_specular_closure_load(int2 texel, 
 
   ClosureUndetermined cl = closure_new(
       hardware_hit_closure_is_specular_family(type) ? type : CLOSURE_NONE_ID);
-  cl.weight = 1.0f;
   cl.color = proxy_payload ? hit_base.rgb : hit_specular.rgb;
   cl.N = N;
   cl.data = float4(0.0f);

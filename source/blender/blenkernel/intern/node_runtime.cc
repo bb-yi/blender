@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
@@ -10,7 +14,7 @@
 #include "DNA_node_types.h"
 
 #include "BLI_function_ref.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_stack.hh"
 #include "BLI_task.hh"
 
@@ -19,6 +23,80 @@
 #include "NOD_socket_usage_inference.hh"
 
 namespace blender {
+
+namespace bke {
+
+std::shared_ptr<ShaderNodeCompileContext> shader_node_compile_context_get(bNodeTree &tree)
+{
+  std::lock_guard lock(tree.runtime->shader_node_errors_mutex);
+  if (!tree.runtime->shader_compile_context) {
+    tree.runtime->shader_compile_context = std::make_shared<ShaderNodeCompileContext>();
+  }
+  return tree.runtime->shader_compile_context;
+}
+
+void shader_node_compile_context_invalidate(bNodeTree &tree)
+{
+  std::lock_guard tree_lock(tree.runtime->shader_node_errors_mutex);
+  if (auto context = std::move(tree.runtime->shader_compile_context)) {
+    std::lock_guard context_lock(context->mutex);
+    context->valid = false;
+  }
+  tree.runtime->shader_compile_references.remove_if(
+      [&](const auto &item) { return tree.node_by_id(item.key) == nullptr; });
+}
+
+void shader_node_compile_reference_add(bNodeTree &tree,
+                                       const int32_t node_id,
+                                       const std::shared_ptr<ShaderNodeCompileContext> &context)
+{
+  std::lock_guard lock(tree.runtime->shader_node_errors_mutex);
+  auto &references = tree.runtime->shader_compile_references.lookup_or_add_default(node_id);
+  references.remove_if([](const auto &reference) { return reference.expired(); });
+  for (const auto &reference : references) {
+    if (reference.lock() == context) {
+      return;
+    }
+  }
+  references.append(context);
+}
+
+VectorSet<std::string> shader_node_compile_errors(const bNode &node, const StringRef signature)
+{
+  const bNodeTree &tree = node.owner_tree();
+  Vector<std::weak_ptr<ShaderNodeCompileContext>> references;
+  {
+    std::lock_guard lock(tree.runtime->shader_node_errors_mutex);
+    if (auto *stored = tree.runtime->shader_compile_references.lookup_ptr(node.identifier)) {
+      stored->remove_if([](const auto &reference) { return reference.expired(); });
+      references = *stored;
+    }
+  }
+  VectorSet<std::string> errors;
+  for (const auto &reference : references) {
+    if (auto context = reference.lock()) {
+      std::lock_guard lock(context->mutex);
+      if (!context->valid) {
+        continue;
+      }
+      context->snapshots.remove_if([](const auto &item) { return item.value.owner.expired(); });
+      for (const auto &snapshot : context->snapshots.values()) {
+        for (const auto &messages : snapshot.variants.values()) {
+          for (const auto &message : messages) {
+            if (message.tree_uid == tree.id.session_uid && message.node_id == node.identifier &&
+                message.signature == signature)
+            {
+              errors.add(message.text);
+            }
+          }
+        }
+      }
+    }
+  }
+  return errors;
+}
+
+}  // namespace bke
 
 namespace bke::node_tree_runtime {
 
@@ -165,8 +243,8 @@ static void update_internal_link_inputs(const bNodeTree &ntree)
     for (bNodeSocket *socket : node->runtime->outputs) {
       socket->runtime->internal_link_input = nullptr;
     }
-    for (bNodeLink &link : node->runtime->internal_links) {
-      link.tosock->runtime->internal_link_input = link.fromsock;
+    for (bNodeInternalLink &link : node->runtime->internal_links) {
+      link.out->runtime->internal_link_input = link.in;
     }
   }
 }
@@ -428,6 +506,13 @@ static Vector<const bNode *> get_implicit_origin_nodes(const bNodeTree &ntree, b
       }
     }
   }
+  /* Portal In supplies Portal Out without an explicit bNodeLink. Use the cache built before
+   * topological sorting; the public lookup would re-enter topology cache construction. */
+  if (is_shader_portal_out_node(node)) {
+    if (const bNodeSocket *input = find_shader_portal_source_socket_cached(ntree, node)) {
+      origin_nodes.append(input->runtime->owner_node);
+    }
+  }
   return origin_nodes;
 }
 
@@ -438,6 +523,13 @@ static Vector<const bNode *> get_implicit_target_nodes(const bNodeTree &ntree, b
     const bNodeZoneType &zone_type = *zone_type_by_node_type(node.type_legacy);
     if (const bNode *output_node = zone_type.get_corresponding_output(ntree, node)) {
       target_nodes.append(output_node);
+    }
+  }
+  if (is_shader_portal_in_node(node)) {
+    for (const auto item : ntree.runtime->shader_portal_source_socket_by_out_node_id.items()) {
+      if (item.value->runtime->owner_node == &node) {
+        target_nodes.append(ntree.node_by_id(item.key));
+      }
     }
   }
   return target_nodes;
@@ -795,7 +887,8 @@ void materialize_shader_portals(bNodeTree &tree)
 
 static void add_shader_node_error(bNodeTree &tree, const bNode &node, const StringRef message)
 {
-  tree.runtime->shader_node_errors.lookup_or_add_default(node.identifier).add(message);
+  tree.runtime->shader_node_errors.lookup_or_add_default(node.identifier).add(
+      {nodes::NodeWarningType::Error, std::string(message)});
 }
 
 static void gather_shader_portal_successors(const bNodeTree &tree,

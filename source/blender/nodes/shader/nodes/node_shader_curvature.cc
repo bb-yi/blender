@@ -55,11 +55,13 @@ static int node_shader_gpu_curvature(GPUMaterial *mat,
     GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
     return GPU_stack_link(
         mat, node, use_view_radius ? "node_screenspace_curvature_local_view" :
-                                     "node_screenspace_curvature_local", in, out);
+                                     "node_screenspace_curvature_local", in, out,
+        GPU_kernel_globals(), GPU_shading_data());
   }
   return GPU_stack_link(
       mat, node, use_view_radius ? "node_screenspace_curvature_view" :
-                                   "node_screenspace_curvature", in, out);
+                                   "node_screenspace_curvature", in, out,
+      GPU_kernel_globals(), GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_curvature_cc

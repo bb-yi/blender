@@ -12,8 +12,8 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_string_utf8.hh"
 
 #include "BKE_context.hh"
 #include "BKE_lib_query.hh"
@@ -181,6 +181,7 @@ void ED_spacetype_script()
 
   st->spaceid = SPACE_SCRIPT;
   STRNCPY_UTF8(st->name, "Script");
+  st->struct_size = sizeof(SpaceScript);
 
   st->create = script_create;
   st->free = script_free;

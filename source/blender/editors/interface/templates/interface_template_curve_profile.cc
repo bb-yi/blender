@@ -10,9 +10,9 @@
 #include "BKE_curveprofile.h"
 #include "BKE_library.hh"
 
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_rect.h"
+#include "BLI_rect.hh"
 #include "BLI_string_ref.hh"
 
 #include "BLT_translation.hh"
@@ -29,10 +29,12 @@
 
 namespace blender::ui {
 
+namespace {
 struct CurveRuntimeProperties {
   CurveProfilePoint *last_pt = nullptr;
   float2 last_pos;
 };
+}  // namespace
 
 static Block *curve_profile_presets_fn(bContext *C, ARegion *region, void *cb_v)
 {
@@ -543,7 +545,7 @@ void template_curve_profile(Layout *layout, PointerRNA *ptr, const StringRefNull
   }
 
   PointerRNA cptr = RNA_property_pointer_get(ptr, prop);
-  if (!cptr.data || !RNA_struct_is_a(cptr.type, RNA_CurveProfile)) {
+  if (!cptr || !RNA_struct_is_a(cptr.type, RNA_CurveProfile)) {
     return;
   }
 

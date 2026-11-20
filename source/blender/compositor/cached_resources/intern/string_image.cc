@@ -6,12 +6,12 @@
 #include <limits>
 #include <string>
 
-#include "BLI_assert.h"
+#include "BLI_assert.hh"
 #include "BLI_hash.hh"
 #include "BLI_memory_utils.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_rect.h"
-#include "BLI_string.h"
+#include "BLI_rect.hh"
+#include "BLI_string.hh"
 
 #include "DNA_packedFile_types.h"
 #include "DNA_vfont_types.h"
@@ -206,7 +206,7 @@ StringImage::StringImage(Context &context,
 
   /* Fill the background with alpha since the draws function does not initialize the background. */
   Result result_cpu = context.create_result(ResultType::Float);
-  result_cpu.allocate_texture(int2(total_width, total_height), false, ResultStorageType::CPU);
+  result_cpu.allocate_texture(int2(total_width, total_height), false, ResultStorageType::CPUImage);
   parallel_for(result_cpu.domain().data_size,
                [&](const int2 texel) { result_cpu.store_pixel(texel, 0.0f); });
 

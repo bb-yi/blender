@@ -18,8 +18,8 @@
 
 #  include "DNA_brush_types.h"
 
-#  include "BLI_listbase.h"
-#  include "BLI_math_color.h"
+#  include "BLI_listbase.hh"
+#  include "BLI_math_color_c.hh"
 
 #  include "BKE_library.hh"
 #  include "BKE_paint.hh"
@@ -83,7 +83,7 @@ static PointerRNA rna_Palette_active_color_get(PointerRNA *ptr)
     return RNA_pointer_create_with_parent(*ptr, RNA_PaletteColor, color);
   }
 
-  return PointerRNA_NULL;
+  return {};
 }
 
 static void rna_Palette_active_color_set(PointerRNA *ptr,

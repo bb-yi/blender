@@ -98,7 +98,7 @@ void principled_npr_unpack_modes(float mode0,
   lightgroup_id = max(packed1, 0);
 }
 
-float principled_npr_shadow_visibility(uint light_index,
+float principled_npr_shadow_visibility(KernelGlobals &kg, ShadingData &sd, uint light_index,
                                        bool is_local,
                                        float3 shading_normal,
                                        int shadow_mode)
@@ -107,9 +107,9 @@ float principled_npr_shadow_visibility(uint light_index,
     return 1.0f;
   }
   if (shadow_mode == PRINCIPLED_NPR_SHADOW_CAST_ONLY) {
-    return glsl_light_cast_shadow_raw(light_index, is_local, shading_normal);
+    return glsl_light_cast_shadow_raw(kg, sd, light_index, is_local, shading_normal);
   }
-  return glsl_light_shadow_raw(light_index, is_local, shading_normal);
+  return glsl_light_shadow_raw(kg, sd, light_index, is_local, shading_normal);
 }
 
 float4 principled_npr_simple_map(float coordinate,
@@ -355,7 +355,7 @@ float3 principled_npr_fresnel(float3 F0, float cos_theta)
   return F0 + (float3(1.0f) - F0) * fresnel_power;
 }
 
-void principled_npr_probe(float3 N,
+void principled_npr_probe(KernelGlobals &kg, ShadingData &sd, float3 N,
                           float3 V,
                           float roughness,
                           float ambient_directionality,
@@ -367,19 +367,19 @@ void principled_npr_probe(float3 N,
 #if defined(GPU_FRAGMENT_SHADER) && \
     (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
 #  if defined(CREATE_INFO_eevee_LightprobeRenderData)
-  float3 geometry_normal = principled_npr_safe_normalize(g_data.Ng, float3(0.0f, 0.0f, 1.0f));
+  float3 geometry_normal = principled_npr_safe_normalize(sd.Ng, float3(0.0f, 0.0f, 1.0f));
   float3 reflection_direction = principled_npr_safe_normalize(reflect(-V, N), N);
   float reflection_lod = eevee::lightprobe::sphere::roughness_to_lod(saturate(roughness));
 
   [[resource_table]] const eevee::LightprobeRenderData &lightprobes = resource_table_get(
       eevee::LightprobeRenderData);
   [[resource_table]] const eevee::LightprobeSphereRenderData &lp_spheres = lightprobes.spheres;
-  eevee::LightProbeSample probe_data = lightprobes.load(gl_FragCoord.xy, g_data.P, geometry_normal, -V);
+  eevee::LightProbeSample probe_data = lightprobes.load(gl_FragCoord.xy, sd.P, geometry_normal, -V);
   probe_data.volume_irradiance = spherical_harmonics::clamp_energy(
-      probe_data.volume_irradiance, uniform_buf.clamp.surface_indirect);
+      probe_data.volume_irradiance, eevee_uniform_data_get().clamp.surface_indirect);
 
   reflection = lp_spheres.spherical_sample_normalized_with_parallax(
-      probe_data, g_data.P, reflection_direction, reflection_lod);
+      probe_data, sd.P, reflection_direction, reflection_lod);
   float3 directional = max(probe_data.volume_irradiance.evaluate_lambert(N).rgb, float3(0.0f));
   const float3 axes[6] = {float3(1.0f, 0.0f, 0.0f),
                           float3(-1.0f, 0.0f, 0.0f),
@@ -397,7 +397,7 @@ void principled_npr_probe(float3 N,
 #endif
 }
 
-float principled_npr_rim(float3 N,
+float principled_npr_rim(KernelGlobals &kg, ShadingData &sd, float3 N,
                          float3 V,
                          float angle_degrees,
                          float rim_length,
@@ -408,8 +408,8 @@ float principled_npr_rim(float3 N,
   float3 camera_x = float3(1.0f, 0.0f, 0.0f);
   float3 camera_y = float3(0.0f, 1.0f, 0.0f);
 #if defined(GPU_FRAGMENT_SHADER)
-  camera_x = principled_npr_safe_normalize(drw_view().viewinv[0].xyz, camera_x);
-  camera_y = principled_npr_safe_normalize(drw_view().viewinv[1].xyz, camera_y);
+  camera_x = principled_npr_safe_normalize(kg.view_matrices_get(sd).viewinv[0].xyz, camera_x);
+  camera_y = principled_npr_safe_normalize(kg.view_matrices_get(sd).viewinv[1].xyz, camera_y);
 #endif
   float2 projected_normal = float2(dot(N, camera_x), dot(N, camera_y));
   float projected_length = length(projected_normal);
@@ -474,7 +474,7 @@ void node_principled_npr_v1(float4 base_color,
                             float4 stop_positions_4_7,
                             sampler1DArray diffuse_ramp,
                             sampler1DArray specular_ramp,
-                            float4 mode_controls,
+                            float4 mode_controls,[[resource_table]] KernelGlobals &kg, ShadingData &sd,
                             Closure &shader,
                             float4 &color,
                             float &alpha_out)
@@ -536,8 +536,8 @@ void node_principled_npr_v1(float4 base_color,
   base_color = max(base_color, float4(0.0f));
   metallic = saturate(metallic);
   alpha = saturate(alpha);
-  N = principled_npr_safe_normalize(N, principled_npr_safe_normalize(g_data.N, g_data.Ng));
-  float3 V = principled_npr_safe_normalize(coordinate_incoming(g_data.P), N);
+  N = principled_npr_safe_normalize(N, principled_npr_safe_normalize(sd.N, sd.Ng));
+  float3 V = principled_npr_safe_normalize(coordinate_incoming(kg, sd, sd.P), N);
   float3 F0 = mix(float3(0.04f), base_color.rgb, metallic);
   float NoV = saturate(dot(N, V));
   float3 T;
@@ -570,17 +570,17 @@ void node_principled_npr_v1(float4 base_color,
     if (is_local && light_index >= light_cull_buf.visible_count) {
       continue;
     }
-    if (!glsl_light_loop_accept(light_index, is_local)) {
+    if (!glsl_light_loop_accept(kg, sd, light_index, is_local)) {
       continue;
     }
-    GLSLLight lamp = glsl_light_build(light_index, is_local, light_index);
+    GLSLLight lamp = glsl_light_build(kg, sd, light_index, is_local, light_index);
     if (!lamp.valid || lamp.lightgroup_id != lightgroup_id) {
       continue;
     }
     float3 L = principled_npr_safe_normalize(lamp.vector, N);
     float lambert_raw = dot(N, L);
     float NoL = max(lambert_raw, 0.0f);
-    float visibility = principled_npr_shadow_visibility(light_index, is_local, N, shadow_mode);
+    float visibility = principled_npr_shadow_visibility(kg, sd, light_index, is_local, N, shadow_mode);
     visibility = mix(1.0f, visibility, safe_shadow_strength);
 
     float3 diffuse_radiance = max(lamp.diffuse_color * lamp.attenuation, float3(0.0f));
@@ -733,7 +733,7 @@ void node_principled_npr_v1(float4 base_color,
 
   float3 probe_reflection;
   float3 probe_irradiance;
-  principled_npr_probe(
+  principled_npr_probe(kg, sd,
       N, V, roughness, ambient_directionality, probe_reflection, probe_irradiance);
   float3 fresnel = principled_npr_fresnel(F0, NoV);
   float safe_reflection_strength = max(reflection_strength, 0.0f);
@@ -742,7 +742,7 @@ void node_principled_npr_v1(float4 base_color,
   float3 ambient = max(probe_irradiance, float3(0.0f)) * base_color.rgb *
                    max(ambient_strength, 0.0f) * (1.0f - metallic);
 
-  float rim_shape = principled_npr_rim(N,
+  float rim_shape = principled_npr_rim(kg, sd, N,
                                        V,
                                        rim_angle,
                                        rim_length,
@@ -765,11 +765,9 @@ void node_principled_npr_v1(float4 base_color,
   alpha_out = alpha;
 
   ClosureEmission emission_data;
-  emission_data.weight = weight * alpha;
-  emission_data.emission = result;
+  emission_data.emission = result * weight * alpha;
   ClosureTransparency transparency_data;
-  transparency_data.weight = weight;
-  transparency_data.transmittance = float3(1.0f - alpha);
+  transparency_data.transmittance = float3(1.0f - alpha) * weight;
   transparency_data.holdout = 0.0f;
-  shader = closure_add(closure_eval(emission_data), closure_eval(transparency_data));
+  shader = closure_add(closure_eval(kg, sd, emission_data), closure_eval(kg, sd, transparency_data));
 }

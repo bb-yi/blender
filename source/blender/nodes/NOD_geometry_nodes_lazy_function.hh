@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup nodes
+ */
+
 #pragma once
 
 /**
@@ -256,7 +260,7 @@ struct GeoNodesCallData {
 
   /**
    * Self object has slightly different semantics depending on how geometry nodes is called.
-   * Therefor, it is not stored directly in the global data.
+   * Therefore, it is not stored directly in the global data.
    */
   const Object *self_object() const;
 };
@@ -455,6 +459,8 @@ struct GeometryNodesLazyFunctionGraphInfo {
    * This can be used as a simple heuristic for the complexity of the node group.
    */
   int num_inline_nodes_approximate = 0;
+
+  GeometryNodesLazyFunctionGraphInfo(const char *debug_name);
 };
 
 std::unique_ptr<LazyFunction> get_simulation_output_lazy_function(

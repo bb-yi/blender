@@ -10,14 +10,15 @@
 
 #include "mathutils.hh"
 
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_utildefines.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_offset_indices.hh"
+#include "BLI_utildefines.hh"
 
 #include "../generic/py_capi_utils.hh"
 
 #ifndef MATH_STANDALONE
-#  include "BLI_dynstr.h"
+#  include "BLI_dynstr.hh"
 #endif
 
 namespace blender {
@@ -377,7 +378,8 @@ int mathutils_array_parse_alloc_vi(int **array,
 
 bool mathutils_array_parse_alloc_viseq(PyObject *value,
                                        const char *error_prefix,
-                                       Array<Vector<int>> &r_data)
+                                       Array<int> &r_offsets,
+                                       Array<int> &r_data)
 {
   PyObject *value_fast;
   if (!(value_fast = PySequence_Fast(value, error_prefix))) {
@@ -388,18 +390,28 @@ bool mathutils_array_parse_alloc_viseq(PyObject *value,
   const int size = PySequence_Fast_GET_SIZE(value_fast);
   if (size != 0) {
     PyObject **value_fast_items = PySequence_Fast_ITEMS(value_fast);
-    r_data.reinitialize(size);
-    for (const int64_t i : r_data.index_range()) {
-      PyObject *subseq = value_fast_items[i];
-      const int subseq_len = int(PySequence_Size(subseq));
+    r_offsets.reinitialize(size + 1);
+
+    int count = 0;
+    for (int i = 0; i < size; i++) {
+      r_offsets[i] = count;
+      const int subseq_len = int(PySequence_Size(value_fast_items[i]));
       if (subseq_len == -1) {
         PyErr_Format(
             PyExc_ValueError, "%.200s: sequence expected to have subsequences", error_prefix);
         Py_DECREF(value_fast);
         return false;
       }
-      r_data[i].resize(subseq_len);
-      MutableSpan<int> group = r_data[i];
+      count += int(PySequence_Size(value_fast_items[i]));
+    }
+    r_offsets.last() = count;
+    const OffsetIndices<int> offsets(r_offsets);
+
+    r_data.reinitialize(offsets.total_size());
+
+    for (const int64_t i : offsets.index_range()) {
+      PyObject *subseq = value_fast_items[i];
+      MutableSpan<int> group = r_data.as_mutable_span().slice(offsets[i]);
       if (mathutils_int_array_parse(group.data(), group.size(), subseq, error_prefix) == -1) {
         Py_DECREF(value_fast);
         return false;
@@ -549,7 +561,7 @@ uchar Mathutils_RegisterCallback(Mathutils_Callback *cb)
 int _BaseMathObject_CheckCallback(BaseMathObject *self)
 {
   Mathutils_Callback *cb = mathutils_callbacks[self->cb_type];
-  if (LIKELY(cb->check(self) != -1)) {
+  if (cb->check(self) != -1) [[likely]] {
     return 0;
   }
   return -1;
@@ -560,7 +572,7 @@ int _BaseMathObject_ReadCallback(BaseMathObject *self)
   /* NOTE: use macros to check for nullptr. */
 
   Mathutils_Callback *cb = mathutils_callbacks[self->cb_type];
-  if (LIKELY(cb->get(self, self->cb_subtype) != -1)) {
+  if (cb->get(self, self->cb_subtype) != -1) [[likely]] {
     return 0;
   }
 
@@ -573,7 +585,7 @@ int _BaseMathObject_ReadCallback(BaseMathObject *self)
 int _BaseMathObject_WriteCallback(BaseMathObject *self)
 {
   Mathutils_Callback *cb = mathutils_callbacks[self->cb_type];
-  if (LIKELY(cb->set(self, self->cb_subtype) != -1)) {
+  if (cb->set(self, self->cb_subtype) != -1) [[likely]] {
     return 0;
   }
 
@@ -586,7 +598,7 @@ int _BaseMathObject_WriteCallback(BaseMathObject *self)
 int _BaseMathObject_ReadIndexCallback(BaseMathObject *self, int index)
 {
   Mathutils_Callback *cb = mathutils_callbacks[self->cb_type];
-  if (LIKELY(cb->get_index(self, self->cb_subtype, index) != -1)) {
+  if (cb->get_index(self, self->cb_subtype, index) != -1) [[likely]] {
     return 0;
   }
 
@@ -600,7 +612,7 @@ int _BaseMathObject_ReadIndexCallback(BaseMathObject *self, int index)
 int _BaseMathObject_WriteIndexCallback(BaseMathObject *self, int index)
 {
   Mathutils_Callback *cb = mathutils_callbacks[self->cb_type];
-  if (LIKELY(cb->set_index(self, self->cb_subtype, index) != -1)) {
+  if (cb->set_index(self, self->cb_subtype, index) != -1) [[likely]] {
     return 0;
   }
 
@@ -624,21 +636,21 @@ void _BaseMathObject_RaiseNotFrozenExc(const BaseMathObject *self)
 
 int _BaseMathObject_ResizeOkOrRaiseExc(BaseMathObject *self, const char *error_prefix)
 {
-  if (UNLIKELY(self->flag & BASE_MATH_FLAG_IS_FROZEN)) {
+  if (self->flag & BASE_MATH_FLAG_IS_FROZEN) [[unlikely]] {
     PyErr_Format(PyExc_ValueError, "%s: cannot resize frozen data", error_prefix);
     return -1;
   }
-  if (UNLIKELY(self->flag & BASE_MATH_FLAG_IS_WRAP)) {
+  if (self->flag & BASE_MATH_FLAG_IS_WRAP) [[unlikely]] {
     PyErr_Format(PyExc_ValueError, "%s: cannot resize wrapped data", error_prefix);
     return -1;
   }
-  if (UNLIKELY(self->flag & BASE_MATH_FLAG_HAS_BUFFER_VIEW)) {
+  if (self->flag & BASE_MATH_FLAG_HAS_BUFFER_VIEW) [[unlikely]] {
     PyErr_Format(PyExc_BufferError,
                  "%s: cannot resize data while exported to buffer protocol",
                  error_prefix);
     return -1;
   }
-  if (UNLIKELY(self->cb_user)) {
+  if (self->cb_user) [[unlikely]] {
     PyErr_Format(PyExc_ValueError, "%s: cannot resize owned data", error_prefix);
     return -1;
   }
@@ -647,21 +659,21 @@ int _BaseMathObject_ResizeOkOrRaiseExc(BaseMathObject *self, const char *error_p
 
 int _BaseMathObject_RaiseBufferViewExc(BaseMathObject *self, Py_buffer *view, int flags)
 {
-  if (UNLIKELY(view == nullptr)) {
+  if (view == nullptr) [[unlikely]] {
     PyErr_SetString(PyExc_BufferError, "null view in get-buffer is obsolete");
     return -1;
   }
-  if (UNLIKELY(self->flag & BASE_MATH_FLAG_HAS_BUFFER_VIEW)) {
+  if (self->flag & BASE_MATH_FLAG_HAS_BUFFER_VIEW) [[unlikely]] {
     PyErr_SetString(PyExc_BufferError,
                     "Data is already exported via buffer protocol, "
                     "multiple simultaneous exports are not allowed.");
     return -1;
   }
   if (flags & PyBUF_WRITABLE) {
-    if (UNLIKELY(BaseMath_WriteCallback(self) == -1)) {
+    if (BaseMath_WriteCallback(self) == -1) [[unlikely]] {
       return -1;
     }
-    if (UNLIKELY(self->flag & BASE_MATH_FLAG_IS_FROZEN)) {
+    if (self->flag & BASE_MATH_FLAG_IS_FROZEN) [[unlikely]] {
       PyErr_SetString(PyExc_BufferError, "Data is frozen, cannot get a writable buffer");
       return -1;
     }

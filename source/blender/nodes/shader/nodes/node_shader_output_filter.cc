@@ -12,7 +12,7 @@
 
 #include "DNA_array_utils.hh"
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "BKE_context.hh"
 
@@ -177,8 +177,8 @@ static int node_shader_gpu_output_filter(GPUMaterial *mat,
   NodeShaderFilterOutput *storage = ensure_shader_filter_output_storage(*node);
   if (storage == nullptr) {
     GPUNodeLink *outlink_filter = nullptr;
-    GPUNodeLink *color = in[0].link ? in[0].link : GPU_constant(in[0].vec);
-    GPUNodeLink *alpha = in[1].link ? in[1].link : GPU_constant(&in[1].vec[0]);
+    GPUNodeLink *color = in[0].link ? in[0].link : GPU_constant(in[0]);
+    GPUNodeLink *alpha = in[1].link ? in[1].link : GPU_constant(in[1]);
     if (!GPU_link(mat, "node_output_filter", color, alpha, &outlink_filter)) {
       return false;
     }
@@ -191,9 +191,9 @@ static int node_shader_gpu_output_filter(GPUMaterial *mat,
       break;
     }
     GPUNodeLink *outlink_filter = nullptr;
-    GPUNodeLink *color = in[i * 2].link ? in[i * 2].link : GPU_constant(in[i * 2].vec);
+    GPUNodeLink *color = in[i * 2].link ? in[i * 2].link : GPU_constant(in[i * 2]);
     GPUNodeLink *alpha = in[i * 2 + 1].link ? in[i * 2 + 1].link :
-                                             GPU_constant(&in[i * 2 + 1].vec[0]);
+                                             GPU_constant(in[i * 2 + 1]);
     if (!GPU_link(mat, "node_output_filter", color, alpha, &outlink_filter)) {
       return false;
     }

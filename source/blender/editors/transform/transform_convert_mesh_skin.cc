@@ -11,8 +11,9 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_math_vector_types.hh"
 
 #include "BKE_context.hh"
 #include "BKE_editmesh.hh"
@@ -25,7 +26,7 @@
 namespace blender::ed::transform {
 
 /* -------------------------------------------------------------------- */
-/** \name Edit Mesh #CD_MVERT_SKIN Transform Creation
+/** \name Edit Mesh Skin Modifier Radius Transform Creation
  * \{ */
 
 static float *mesh_skin_transdata_center(const TransIslandData *island_data,
@@ -39,18 +40,17 @@ static float *mesh_skin_transdata_center(const TransIslandData *island_data,
 }
 
 static void mesh_skin_transdata_create(TransDataBasic *td,
-                                       BMEditMesh *em,
                                        BMVert *eve,
                                        const TransIslandData *island_data,
-                                       const int island_index)
+                                       const int island_index,
+                                       const int cd_skin_radius_offset)
 {
   BLI_assert(BM_elem_flag_test(eve, BM_ELEM_HIDDEN) == 0);
-  MVertSkin *vs = static_cast<MVertSkin *>(
-      CustomData_bmesh_get(&em->bm->vdata, eve->head.data, CD_MVERT_SKIN));
   td->flag = 0;
-  if (vs) {
-    copy_v3_v3(td->iloc, vs->radius);
-    td->loc = vs->radius;
+  if (cd_skin_radius_offset != -1) {
+    float2 *radius = static_cast<float2 *>(BM_ELEM_CD_GET_VOID_P(eve, cd_skin_radius_offset));
+    copy_v2_v2(td->iloc, *radius);
+    td->loc = *radius;
   }
   else {
     td->flag |= TD_SKIP;
@@ -70,7 +70,7 @@ static void createTransMeshSkin(bContext * /*C*/, TransInfo *t)
   FOREACH_TRANS_DATA_CONTAINER (t, tc) {
     BMEditMesh *em = BKE_editmesh_from_object(tc->obedit);
     Mesh *mesh = id_cast<Mesh *>(tc->obedit->data);
-    BMesh *bm = em->bm;
+    BMesh *bm = BKE_editmesh_bmesh_get_for_write(mesh);
     BMVert *eve;
     BMIter iter;
     float mtx[3][3], smtx[3][3];
@@ -88,7 +88,9 @@ static void createTransMeshSkin(bContext * /*C*/, TransInfo *t)
      * transform data is created by selected vertices.
      */
 
-    if (!CustomData_has_layer(&bm->vdata, CD_MVERT_SKIN)) {
+    const int cd_skin_radius_offset = CustomData_get_offset_named(
+        &bm->vdata, CD_PROP_FLOAT2, "skin_modifier_radius");
+    if (cd_skin_radius_offset == -1) {
       continue;
     }
 
@@ -126,7 +128,7 @@ static void createTransMeshSkin(bContext * /*C*/, TransInfo *t)
       const bool calc_island_axismtx = false;
 
       transform_convert_mesh_islands_calc(
-          em, calc_single_islands, calc_island_center, calc_island_axismtx, &island_data);
+          em, bm, calc_single_islands, calc_island_center, calc_island_axismtx, &island_data);
     }
 
     copy_m3_m4(mtx, tc->obedit->object_to_world().ptr());
@@ -143,7 +145,7 @@ static void createTransMeshSkin(bContext * /*C*/, TransInfo *t)
       if (is_island_center) {
         dists_index = MEM_new_array_uninitialized<int>(bm->totvert, __func__);
       }
-      transform_convert_mesh_connectivity_distance(em->bm, mtx, dists, dists_index);
+      transform_convert_mesh_connectivity_distance(bm, mtx, dists, dists_index);
     }
 
     /* Create TransDataMirror. */
@@ -153,7 +155,7 @@ static void createTransMeshSkin(bContext * /*C*/, TransInfo *t)
       const bool mirror_axis[3] = {
           bool(tc->use_mirror_axis_x), bool(tc->use_mirror_axis_y), bool(tc->use_mirror_axis_z)};
       transform_convert_mesh_mirrordata_calc(
-          em, use_select, use_topology, mirror_axis, &mirror_data);
+          em, bm, use_select, use_topology, mirror_axis, &mirror_data);
 
       if (mirror_data.vert_map) {
         tc->data_mirror_len = mirror_data.mirror_elem_len;
@@ -171,7 +173,7 @@ static void createTransMeshSkin(bContext * /*C*/, TransInfo *t)
     }
 
     /* Detect CrazySpace [TM]. */
-    transform_convert_mesh_crazyspace_detect(t, tc, em, &crazyspace_data);
+    transform_convert_mesh_crazyspace_detect(t, tc, &crazyspace_data);
 
     /* Create TransData. */
     BLI_assert(data_len >= 1);
@@ -192,21 +194,27 @@ static void createTransMeshSkin(bContext * /*C*/, TransInfo *t)
       }
 
       if (mirror_data.vert_map && mirror_data.vert_map[a].index != -1) {
-        mesh_skin_transdata_create(
-            static_cast<TransDataBasic *>(td_mirror), em, eve, &island_data, island_index);
+        mesh_skin_transdata_create(static_cast<TransDataBasic *>(td_mirror),
+                                   eve,
+                                   &island_data,
+                                   island_index,
+                                   cd_skin_radius_offset);
 
         int elem_index = mirror_data.vert_map[a].index;
         BMVert *v_src = BM_vert_at_index(bm, elem_index);
-        MVertSkin *vs = static_cast<MVertSkin *>(
-            CustomData_bmesh_get(&em->bm->vdata, v_src->head.data, CD_MVERT_SKIN));
+        float2 *radius_src = static_cast<float2 *>(
+            BM_ELEM_CD_GET_VOID_P(v_src, cd_skin_radius_offset));
 
         td_mirror->flag |= mirror_data.vert_map[a].flag;
-        td_mirror->loc_src = vs->radius;
+        td_mirror->loc_src = *radius_src;
         td_mirror++;
       }
       else if (prop_mode || BM_elem_flag_test(eve, BM_ELEM_SELECT)) {
-        mesh_skin_transdata_create(
-            static_cast<TransDataBasic *>(td), em, eve, &island_data, island_index);
+        mesh_skin_transdata_create(static_cast<TransDataBasic *>(td),
+                                   eve,
+                                   &island_data,
+                                   island_index,
+                                   cd_skin_radius_offset);
 
         if (t->around == V3D_AROUND_LOCAL_ORIGINS) {
           createSpaceNormal(td->axismtx, eve->no);
@@ -284,7 +292,7 @@ static void recalcData_mesh_skin(TransInfo *t)
   FOREACH_TRANS_DATA_CONTAINER (t, tc) {
     DEG_id_tag_update(tc->obedit->data, ID_RECALC_GEOMETRY);
     BMEditMesh *em = BKE_editmesh_from_object(tc->obedit);
-    BKE_editmesh_looptris_and_normals_calc(em);
+    BKE_editmesh_looptris_and_normals_calc(em, BKE_editmesh_bmesh_get_for_write(tc->obedit));
   }
 }
 

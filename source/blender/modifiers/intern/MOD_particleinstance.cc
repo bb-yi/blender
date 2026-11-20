@@ -9,12 +9,12 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_color_types.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_rand.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_rand_c.hh"
+#include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
 
@@ -543,7 +543,7 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
   layout.use_property_split_set(true);
 
   layout.prop(ptr, "object", UI_ITEM_NONE, std::nullopt, ICON_NONE);
-  if (!RNA_pointer_is_null(&particle_obj_ptr)) {
+  if (particle_obj_ptr) {
     layout.prop_search(ptr,
                        "particle_system",
                        &particle_obj_ptr,

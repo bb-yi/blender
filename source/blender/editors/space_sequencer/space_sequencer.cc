@@ -14,15 +14,16 @@
 #include "DNA_mask_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_base.h"
-#include "BLI_rect.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_c.hh"
+#include "BLI_rect.hh"
+#include "BLI_string_utf8.hh"
 
 #include "BKE_global.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_lib_remap.hh"
+#include "BKE_main.hh"
 #include "BKE_screen.hh"
 
 #include "ED_screen.hh"
@@ -40,6 +41,7 @@
 #include "SEQ_preview_cache.hh"
 #include "SEQ_retiming.hh"
 #include "SEQ_sequencer.hh"
+#include "SEQ_thumbnail_cache.hh"
 #include "SEQ_time.hh"
 #include "SEQ_transform.hh"
 #include "SEQ_utils.hh"
@@ -57,7 +59,7 @@ namespace blender::ed::vse {
 
 static void sequencer_scopes_tag_refresh(ScrArea *area, const Scene *scene)
 {
-  SpaceSeq *sseq = static_cast<SpaceSeq *>(area->spacedata.first);
+  SpaceSeq *sseq = area->spacedata.first_as<SpaceSeq>();
   sseq->runtime->scopes.cleanup();
   seq::preview_cache_invalidate(const_cast<Scene *>(scene));
 }
@@ -84,10 +86,10 @@ static SpaceLink *sequencer_create(const ScrArea * /*area*/, const Scene *scene)
                                 SEQ_TIMELINE_SHOW_STRIP_DURATION | SEQ_TIMELINE_SHOW_GRID |
                                 SEQ_TIMELINE_SHOW_FCURVES | SEQ_TIMELINE_SHOW_STRIP_COLOR_TAG |
                                 SEQ_TIMELINE_SHOW_STRIP_RETIMING | SEQ_TIMELINE_WAVEFORMS_HALF |
-                                SEQ_TIMELINE_STRIP_END_THUMBNAILS;
+                                SEQ_TIMELINE_SHOW_THUMBNAILS | SEQ_TIMELINE_STRIP_END_THUMBNAILS;
 
   sseq->cache_overlay.flag = SEQ_CACHE_SHOW | SEQ_CACHE_SHOW_FINAL_OUT;
-  sseq->draw_flag |= SEQ_DRAW_TRANSFORM_PREVIEW;
+  sseq->draw_flag |= SEQ_DRAW_EDIT_POINT_PREVIEW;
 
   /* Header. */
   region = BKE_area_region_new();
@@ -204,7 +206,7 @@ static void sequencer_free(SpaceLink *sl)
 
 #if 0
   if (sseq->gpd) {
-    BKE_gpencil_free_data(sseq->gpd);
+    BKE_annotations_free_data(sseq->gpd);
   }
 #endif
 }
@@ -215,7 +217,7 @@ static void sequencer_init(wmWindowManager * /*wm*/, ScrArea * /*area*/) {}
 static void sequencer_refresh(const bContext *C, ScrArea *area)
 {
   const wmWindow *window = CTX_wm_window(C);
-  SpaceSeq *sseq = static_cast<SpaceSeq *>(area->spacedata.first);
+  SpaceSeq *sseq = area->spacedata.first_as<SpaceSeq>();
   ARegion *region_main = BKE_area_find_region_type(area, RGN_TYPE_WINDOW);
   ARegion *region_preview = BKE_area_find_region_type(area, RGN_TYPE_PREVIEW);
   bool view_changed = false;
@@ -268,6 +270,15 @@ static void sequencer_refresh(const bContext *C, ScrArea *area)
     ED_area_init(const_cast<bContext *>(C), window, area);
     ED_area_tag_redraw(area);
   }
+
+  /* Render one pending scene strip thumbnail, if any. This needs to happen
+   * outside of regular drawing due to DRW/GPU locks. */
+  if (Scene *scene = CTX_data_sequencer_scene(C)) {
+    if (seq::thumbnail_cache_update_scene_thumbs(C, scene)) {
+      ED_area_tag_refresh(area);
+      ED_area_tag_redraw(area);
+    }
+  }
 }
 
 static SpaceLink *sequencer_duplicate(SpaceLink *sl)
@@ -279,6 +290,17 @@ static SpaceLink *sequencer_duplicate(SpaceLink *sl)
   // sseq->gpd = gpencil_data_duplicate(sseq->gpd, false);
 
   return reinterpret_cast<SpaceLink *>(sseqn);
+}
+
+static void sequencer_deactivate(ScrArea *area)
+{
+  wmWindowManager *wm = G_MAIN->wm.first();
+  wmWindow *win = wm ? WM_window_find_by_area(wm, area) : nullptr;
+  WorkSpace *workspace = win ? WM_window_get_active_workspace(win) : nullptr;
+  Scene *scene = workspace ? workspace->sequencer_scene : nullptr;
+  if (scene && scene->ed) {
+    scene->ed->edit_point_set(scene, std::nullopt);
+  }
 }
 
 static void sequencer_listener(const wmSpaceTypeListenerParams *params)
@@ -414,6 +436,7 @@ static void sequencer_gizmos()
   WM_gizmogrouptype_append(SEQUENCER_GGT_gizmo2d_translate);
   WM_gizmogrouptype_append(SEQUENCER_GGT_gizmo2d_resize);
   WM_gizmogrouptype_append(SEQUENCER_GGT_gizmo2d_rotate);
+  WM_gizmogrouptype_append(SEQUENCER_GGT_blade);
 
   const wmGizmoMapType_Params params_preview = {SPACE_SEQ, RGN_TYPE_PREVIEW};
   wmGizmoMapType *gzmap_type_preview = WM_gizmomaptype_ensure(&params_preview);
@@ -424,7 +447,7 @@ static void sequencer_gizmos()
 
 static bool sequencer_main_region_poll(const RegionPollParams *params)
 {
-  const SpaceSeq *sseq = static_cast<SpaceSeq *>(params->area->spacedata.first);
+  const SpaceSeq *sseq = params->area->spacedata.first_as<SpaceSeq>();
   return ELEM(sseq->view, SEQ_VIEW_SEQUENCE, SEQ_VIEW_SEQUENCE_PREVIEW);
 }
 
@@ -453,18 +476,68 @@ static void sequencer_main_region_init(wmWindowManager *wm, ARegion *region)
   ListBaseT<wmDropBox> *lb = WM_dropboxmap_find("Sequencer", SPACE_SEQ, RGN_TYPE_WINDOW);
 
   WM_event_add_dropbox_handler(&region->runtime->handlers, lb);
+
+  sequencer_blade_handlers_add(region);
 }
 
 /* Strip editing timeline. */
 static void sequencer_main_region_draw(const bContext *C, ARegion *region)
 {
   draw_timeline_seq(C, region);
+
+  /* If we have any pending scene strip thumbnail requests, tag the area for a refresh
+   * (actual thumbnail rendering needs to happen outside of regular drawing). */
+  if (Scene *scene = CTX_data_sequencer_scene(C)) {
+    if (seq::thumbnail_cache_has_pending_scene_requests(scene)) {
+      ED_area_tag_refresh(CTX_wm_area(C));
+    }
+  }
 }
 
 /* Strip editing timeline. */
 static void sequencer_main_region_draw_overlay(const bContext *C, ARegion *region)
 {
   draw_timeline_seq_display(C, region);
+}
+
+rctf sequencer_clamped_view_bounds_get(const bContext *C, ARegion *region)
+{
+  SpaceSeq *sseq = CTX_wm_space_seq(C);
+  View2D *v2d = &region->v2d;
+  Scene *scene = CTX_data_sequencer_scene(C);
+
+  rctf strip_boundbox;
+
+  if ((sseq->flag & SEQ_CLAMP_VIEW) == 0) {
+    BLI_rctf_init_minmax(&strip_boundbox);
+    return strip_boundbox;
+  }
+
+  /* Initialize default view with 7 channels, that are visible even if empty. */
+  seq::timeline_init_boundbox(scene, &strip_boundbox);
+  Editing *ed = seq::editing_get(scene);
+  if (ed != nullptr) {
+    seq::timeline_expand_boundbox(scene, ed->current_strips(), &strip_boundbox);
+  }
+  /* We need to calculate how much the current view is padded and add this padding to our
+   * strip bounding box. Without this, the scrub-bar or other overlays would occlude the
+   * displayed strips in the timeline.
+   */
+  float pad_top, pad_bottom;
+  SEQ_get_timeline_region_padding(C, &pad_top, &pad_bottom);
+  /* Add padding to be able to scroll the view so that the collapsed redo panel doesn't occlude any
+   * strips. */
+  float bottom_channel_padding = UI_MARKER_MARGIN_Y * ui::view2d_pixel_size_get_y(v2d);
+  bottom_channel_padding = std::max(bottom_channel_padding, 1.0f);
+  /* Add the padding and make sure we have a margin of one channel in each direction. */
+  strip_boundbox.ymax += 1.0f + pad_top * ui::view2d_pixel_size_get_y(v2d);
+  strip_boundbox.ymin -= bottom_channel_padding;
+
+  /* If a strip has been deleted, don't move the view automatically, keep current range until it is
+   * changed. */
+  strip_boundbox.ymax = max_ff(sseq->runtime->timeline_clamp_custom_range, strip_boundbox.ymax);
+
+  return strip_boundbox;
 }
 
 static void sequencer_main_clamp_view(const bContext *C, ARegion *region)
@@ -487,32 +560,7 @@ static void sequencer_main_clamp_view(const bContext *C, ARegion *region)
     return;
   }
 
-  rctf strip_boundbox;
-  /* Initialize default view with 7 channels, that are visible even if empty. */
-  seq::timeline_init_boundbox(scene, &strip_boundbox);
-  Editing *ed = seq::editing_get(scene);
-  if (ed != nullptr) {
-    seq::timeline_expand_boundbox(scene, ed->current_strips(), &strip_boundbox);
-  }
-  /* We need to calculate how much the current view is padded and add this padding to our
-   * strip bounding box. Without this, the scrub-bar or other overlays would occlude the
-   * displayed strips in the timeline.
-   */
-  float pad_top, pad_bottom;
-  SEQ_get_timeline_region_padding(C, &pad_top, &pad_bottom);
-  const float pixel_view_size_y = BLI_rctf_size_y(&v2d->cur) / (BLI_rcti_size_y(&v2d->mask) + 1);
-  /* Add padding to be able to scroll the view so that the collapsed redo panel doesn't occlude any
-   * strips. */
-  float bottom_channel_padding = UI_MARKER_MARGIN_Y * pixel_view_size_y;
-  bottom_channel_padding = std::max(bottom_channel_padding, 1.0f);
-  /* Add the padding and make sure we have a margin of one channel in each direction. */
-  strip_boundbox.ymax += 1.0f + pad_top * pixel_view_size_y;
-  strip_boundbox.ymin -= bottom_channel_padding;
-
-  /* If a strip has been deleted, don't move the view automatically, keep current range until it is
-   * changed. */
-  strip_boundbox.ymax = max_ff(sseq->runtime->timeline_clamp_custom_range, strip_boundbox.ymax);
-
+  rctf strip_boundbox = sequencer_clamped_view_bounds_get(C, region);
   rctf view_clamped = v2d->cur;
   float range_y = BLI_rctf_size_y(&view_clamped);
   if (view_clamped.ymax > strip_boundbox.ymax) {
@@ -650,7 +698,7 @@ static void sequencer_main_cursor(wmWindow *win, ScrArea *area, ARegion *region)
   const WorkSpace *workspace = WM_window_get_active_workspace(win);
   const Scene *scene = workspace->sequencer_scene;
   const Editing *ed = seq::editing_get(scene);
-  const SpaceSeq *sseq = static_cast<SpaceSeq *>(area->spacedata.first);
+  const SpaceSeq *sseq = area->spacedata.first_as<SpaceSeq>();
   const bToolRef *tref = area->runtime.tool;
 
   int wmcursor = WM_CURSOR_DEFAULT;
@@ -721,7 +769,7 @@ static void sequencer_main_cursor(wmWindow *win, ScrArea *area, ARegion *region)
     return;
   }
 
-  if (!can_select_handle(scene, selection.strip1, v2d)) {
+  if (!can_select_handle(scene, selection.strip1)) {
     WM_cursor_set(win, wmcursor);
     return;
   }
@@ -815,7 +863,7 @@ static void sequencer_tools_region_draw(const bContext *C, ARegion *region)
 
 static bool sequencer_preview_region_poll(const RegionPollParams *params)
 {
-  const SpaceSeq *sseq = static_cast<SpaceSeq *>(params->area->spacedata.first);
+  const SpaceSeq *sseq = params->area->spacedata.first_as<SpaceSeq>();
   return ELEM(sseq->view, SEQ_VIEW_PREVIEW, SEQ_VIEW_SEQUENCE_PREVIEW);
 }
 
@@ -868,23 +916,35 @@ static void sequencer_preview_region_view2d_changed(const bContext *C, ARegion *
 }
 
 #ifdef WITH_INPUT_IME
-static std::optional<rcti> sequencer_preview_region_cursor_ime(wmWindow *win,
-                                                               const ScrArea * /*area*/,
-                                                               const ARegion *region)
+static std::optional<ARegionIMECursorState> sequencer_preview_region_cursor_ime(
+    wmWindow *win, const ScrArea * /*area*/, const ARegion *region, ARegionIMECursor *r_cursor)
 {
   const WorkSpace *workspace = WM_window_get_active_workspace(win);
   const Scene *scene = workspace->sequencer_scene;
   if (!scene) {
     return std::nullopt;
   }
-  const std::optional<blender::int2> xy = sequencer_text_editing_cursor_region_xy_get(scene,
-                                                                                      region);
-  if (!xy) {
+  const Strip *strip = sequencer_text_editing_cursor_strip_get(scene);
+  if (strip == nullptr) {
     return std::nullopt;
   }
-  /* Zero-size rectangle: the caret may be rotated by the strip transform,
-   * where an axis-aligned size would not properly represent the caret. */
-  return rcti{xy->x, xy->x, xy->y, xy->y};
+  const std::optional<blender::int2> xy = sequencer_text_editing_cursor_region_xy_get(
+      scene, region, strip);
+  if (!xy) {
+    /* Text editing can be active without a position,
+     * e.g. the current-frame moved outside the strip.
+     * Keep the session pending rather than canceling the composition. */
+    return ARegionIMECursorState::PositionPending;
+  }
+
+  r_cursor->rect = {
+      .xmin = xy->x,
+      .xmax = xy->x,
+      .ymin = xy->y,
+      .ymax = xy->y + int(UI_UNIT_Y),
+  };
+  r_cursor->font_size = UI_UNIT_Y;
+  return ARegionIMECursorState::PositionSet;
 }
 #endif
 
@@ -1102,7 +1162,7 @@ static void sequencer_foreach_id(SpaceLink *space_link, LibraryForeachIDData *da
 
 static bool sequencer_channel_region_poll(const RegionPollParams *params)
 {
-  const SpaceSeq *sseq = static_cast<SpaceSeq *>(params->area->spacedata.first);
+  const SpaceSeq *sseq = params->area->spacedata.first_as<SpaceSeq>();
   return ELEM(sseq->view, SEQ_VIEW_SEQUENCE);
 }
 
@@ -1140,14 +1200,16 @@ static void sequencer_space_blend_read_data(BlendDataReader * /*reader*/, SpaceL
 #if 0
   if (sseq->gpd) {
     sseq->gpd = newdataadr(fd, sseq->gpd);
-    BKE_gpencil_blend_read_data(fd, sseq->gpd);
+    BKE_annotations_blend_read_data(fd, sseq->gpd);
   }
 #endif
 }
 
 static void sequencer_space_blend_write(BlendWriter *writer, SpaceLink *sl)
 {
-  writer->write_struct_cast<SpaceSeq>(sl);
+  writer->write_struct_cast<SpaceSeq>(sl, [](BlendStructWriter<SpaceSeq> &struct_writer) {
+    struct_writer.shallow_data.runtime = nullptr;
+  });
 }
 
 static bool sequencer_scrubbing_region_poll(const RegionPollParams *params)
@@ -1157,7 +1219,7 @@ static bool sequencer_scrubbing_region_poll(const RegionPollParams *params)
     return false;
   }
 
-  const SpaceSeq *sseq = static_cast<SpaceSeq *>(params->area->spacedata.first);
+  const SpaceSeq *sseq = params->area->spacedata.first_as<SpaceSeq>();
   return sseq->flag & SEQ_SHOW_SCRUBBING_REGION;
 }
 
@@ -1209,6 +1271,7 @@ void ED_spacetype_sequencer()
 
   st->spaceid = SPACE_SEQ;
   STRNCPY_UTF8(st->name, "Sequencer");
+  st->struct_size = sizeof(SpaceSeq);
 
   st->create = sequencer_create;
   st->free = sequencer_free;
@@ -1221,6 +1284,7 @@ void ED_spacetype_sequencer()
   st->dropboxes = sequencer_dropboxes;
   st->refresh = sequencer_refresh;
   st->listener = sequencer_listener;
+  st->deactivate = sequencer_deactivate;
   st->id_remap = sequencer_id_remap;
   st->foreach_id = sequencer_foreach_id;
   st->blend_read_data = sequencer_space_blend_read_data;
@@ -1264,6 +1328,7 @@ void ED_spacetype_sequencer()
   /* List-view/buttons. */
   art = MEM_new_zeroed<ARegionType>("spacetype sequencer region");
   art->regionid = RGN_TYPE_UI;
+  art->flag = ARegionTypeFlag::UsePanelCategoriesSearch;
   art->prefsizex = UI_SIDEBAR_PANEL_WIDTH * 1.3f;
   art->keymapflag = ED_KEYMAP_UI | ED_KEYMAP_FRAMES;
   art->message_subscribe = ED_area_do_mgs_subscribe_for_tool_ui;

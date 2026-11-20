@@ -26,9 +26,7 @@ float3 weight_to_rgb(float t)
     /* Error color */
     return float3(1.0f, 0.0f, 1.0f);
   }
-  else {
-    return texture(weight_tx, t).rgb;
-  }
+  return texture(weight_tx, t).rgb;
 }
 
 void main()
@@ -56,7 +54,7 @@ void main()
     float max_offset = vs_depth - (near_plane_distance * 1.01f);
     max_offset = max(0.0f, max_offset);
     /* Compensate for view angle. */
-    float radius = rad * 1.5f;
+    float radius = abs(rad) * 1.5f;
     world_pos += I * min(radius, max_offset);
   }
 #endif

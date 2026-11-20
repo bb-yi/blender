@@ -11,7 +11,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_math_vector_types.hh"
-#include "BLI_rect.h"
+#include "BLI_rect.hh"
 
 #include "BKE_colortools.hh"
 #include "BKE_context.hh"
@@ -423,13 +423,14 @@ void ED_imbuf_sample_draw(const bContext *C, ARegion *region, void *arg_info)
                                      float(event->xy[1] - region->winrct.ymin)},
                               float(info->sample_size / 2.0f) * sima->zoom);
 
-      GPU_logic_op_xor_set(true);
+      /* Use invert blend mode for highly visible border */
+      GPU_blend(GPU_BLEND_INVERT);
 
       GPU_line_width(1.0f);
       imm_draw_box_wire_2d(
           pos, sample_rect_fl.xmin, sample_rect_fl.ymin, sample_rect_fl.xmax, sample_rect_fl.ymax);
 
-      GPU_logic_op_xor_set(false);
+      GPU_blend(GPU_BLEND_NONE);
 
       immUnbindProgram();
     }
@@ -452,7 +453,7 @@ wmOperatorStatus ED_imbuf_sample_invoke(bContext *C, wmOperator *op, const wmEve
   if (area) {
     switch (area->spacetype) {
       case SPACE_IMAGE: {
-        SpaceImage *sima = static_cast<SpaceImage *>(area->spacedata.first);
+        SpaceImage *sima = area->spacedata.first_as<SpaceImage>();
         if (region->regiontype == RGN_TYPE_WINDOW) {
           if (ED_space_image_show_cache_and_mval_over(sima, region, event->mval)) {
             return OPERATOR_PASS_THROUGH;
@@ -482,6 +483,8 @@ wmOperatorStatus ED_imbuf_sample_invoke(bContext *C, wmOperator *op, const wmEve
 
   WM_event_add_modal_handler(C, op);
 
+  ED_area_hud_region_set_padding_flag(area, region, true);
+
   return OPERATOR_RUNNING_MODAL;
 }
 
@@ -491,6 +494,14 @@ wmOperatorStatus ED_imbuf_sample_modal(bContext *C, wmOperator *op, const wmEven
     case LEFTMOUSE:
     case RIGHTMOUSE: /* XXX hardcoded */
       if (event->val == KM_RELEASE) {
+        ScrArea *area = CTX_wm_area(C);
+        ARegion *region = CTX_wm_region(C);
+
+        if (SpaceImage *sima = CTX_wm_space_image(C)) {
+          if (!ED_space_image_show_cache(sima)) {
+            ED_area_hud_region_set_padding_flag(area, region);
+          }
+        }
         ED_imbuf_sample_exit(C, op);
         return OPERATOR_CANCELLED;
       }
@@ -520,7 +531,7 @@ bool ED_imbuf_sample_poll(bContext *C)
 
   switch (area->spacetype) {
     case SPACE_IMAGE: {
-      SpaceImage *sima = static_cast<SpaceImage *>(area->spacedata.first);
+      SpaceImage *sima = area->spacedata.first_as<SpaceImage>();
       Object *obedit = CTX_data_edit_object(C);
       if (obedit) {
         /* Disable when UV editing so it doesn't swallow all click events
@@ -535,7 +546,7 @@ bool ED_imbuf_sample_poll(bContext *C)
       return true;
     }
     case SPACE_SEQ: {
-      SpaceSeq *sseq = static_cast<SpaceSeq *>(area->spacedata.first);
+      SpaceSeq *sseq = area->spacedata.first_as<SpaceSeq>();
 
       if (sseq->mainb != SEQ_DRAW_IMG_IMBUF) {
         return false;

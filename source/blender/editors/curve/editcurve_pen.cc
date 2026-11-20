@@ -11,10 +11,10 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BKE_context.hh"
 #include "BKE_curve.hh"
@@ -1118,9 +1118,9 @@ static void extrude_points_from_selected_vertices(const ViewContext *vc,
     extrude_vertices_from_selected_endpoints(editnurb, nurbs, cu, disp_3d);
   }
   else {
-    Nurb *old_last_nu = static_cast<Nurb *>(editnurb->nurbs.last);
+    Nurb *old_last_nu = editnurb->nurbs.last();
     ed_editcurve_addvert(cu, editnurb, vc->v3d, location);
-    Nurb *new_last_nu = static_cast<Nurb *>(editnurb->nurbs.last);
+    Nurb *new_last_nu = editnurb->nurbs.last();
 
     if (old_last_nu != new_last_nu) {
       BKE_curve_nurb_vert_active_set(cu,

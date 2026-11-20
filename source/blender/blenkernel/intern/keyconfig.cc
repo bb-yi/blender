@@ -12,9 +12,9 @@
 
 #include "RNA_types.hh"
 
-#include "BLI_ghash.h"
-#include "BLI_listbase.h"
-#include "BLI_string.h"
+#include "BLI_ghash.hh"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
 
 #include "DNA_listBase.h"
 #include "DNA_userdef_types.h"
@@ -149,11 +149,7 @@ void BKE_keyconfig_keymap_filter_item(wmKeyMap *keymap,
                                       void *user_data)
 {
   if (params->check_diff_item_add || params->check_diff_item_remove) {
-    for (wmKeyMapDiffItem *kmdi = static_cast<wmKeyMapDiffItem *>(keymap->diff_items.first),
-                          *kmdi_next;
-         kmdi;
-         kmdi = kmdi_next)
-    {
+    for (wmKeyMapDiffItem *kmdi = keymap->diff_items.first(), *kmdi_next; kmdi; kmdi = kmdi_next) {
       kmdi_next = kmdi->next;
       bool remove = false;
 
@@ -181,9 +177,7 @@ void BKE_keyconfig_keymap_filter_item(wmKeyMap *keymap,
   }
 
   if (params->check_item) {
-    for (wmKeyMapItem *kmi = static_cast<wmKeyMapItem *>(keymap->items.first), *kmi_next; kmi;
-         kmi = kmi_next)
-    {
+    for (wmKeyMapItem *kmi = keymap->items.first(), *kmi_next; kmi; kmi = kmi_next) {
       kmi_next = kmi->next;
       if (filter_fn(kmi, user_data)) {
         BLI_remlink(&keymap->items, kmi);

@@ -46,8 +46,8 @@ float hardware_direct_light_local_importance(uint light_index, float3 P, bool P_
      * pick over bright-but-distant ones (the previous importance was position-blind). */
     const float3 to_light = light.position() - P;
     const float dist_sqr = dot(to_light, to_light);
-    const float radius = max(light.local().local.shape_radius, 1.0e-2f);
-    const float power = max(abs(light.power[LIGHT_DIFFUSE]), 1.0e-6f);
+    const float radius = max(light_local_data_get(light).local.shape_radius, 1.0e-2f);
+    const float power = max(abs(eevee::light::power_get(light, LIGHT_DIFFUSE)), 1.0e-6f);
     importance *= power / max(dist_sqr + radius * radius, 1.0e-4f);
   }
   return max(importance, 1.0e-8f);

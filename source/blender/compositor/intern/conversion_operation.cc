@@ -6,7 +6,7 @@
 
 #include "BLI_generic_span.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "GPU_shader.hh"
 
@@ -100,7 +100,6 @@ void ConversionOperation::execute_single(const Result &input, Result &output)
   conversions.convert_to_initialized_n(
       GSpan(input.single_value().type(), input.single_value().get(), 1),
       GMutableSpan(output.single_value().type(), output.single_value().get(), 1));
-  output.update_single_value_data();
 }
 
 void ConversionOperation::execute_cpu(const Result &input, Result &output)

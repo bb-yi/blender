@@ -34,7 +34,7 @@ set(dna_header_string_file "${CMAKE_CURRENT_BINARY_DIR}/dna_includes_as_strings.
 set(DNA_INCLUDE_TEXT "/* Do not edit manually, changes will be overwritten. */\n")
 set(DNA_FILE_LIST "/* Do not edit manually, changes will be overwritten. */\n")
 foreach(header ${SRC_DNA_INC})
-  get_filename_component(dna_header_file ${header} NAME)
+  cmake_path(GET header FILENAME dna_header_file)
   string(APPEND DNA_INCLUDE_TEXT "#include \"${header}\"\n")
   string(APPEND DNA_FILE_LIST "\t\"${dna_header_file}\",\n")
 endforeach()
@@ -174,11 +174,15 @@ set(INC_SYS
 set(SRC
   ${BLENLIB_SRC}
   ${SRC_DNA_OTHER_INC}
+
+  # Needed by `rna_define.cc` for `UString` identifier storage.
+  ../../blenlib/intern/ustring.cc
 )
 
 set(LIB
   PRIVATE bf::intern::atomic
   PRIVATE bf::intern::guardedalloc
+  PRIVATE bf::dependencies::fmt
   PRIVATE bf::dependencies::optional::tbb
 )
 

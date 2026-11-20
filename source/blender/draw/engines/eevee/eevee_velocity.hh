@@ -14,6 +14,7 @@
 #pragma once
 
 #include <variant>
+#include <memory>
 
 #include "BLI_map.hh"
 
@@ -22,6 +23,7 @@
 #include "GPU_batch.hh"
 
 #include "eevee_camera_shared.hh"
+#include "eevee_defines.hh"
 #include "eevee_sync.hh"
 #include "eevee_velocity_shared.hh"
 
@@ -40,6 +42,19 @@ using VelocityObjectBuf = draw::StorageArrayBuffer<float4x4, 16>;
 /** Container for scene velocity data. */
 class VelocityModule {
  public:
+  struct RuntimeStats {
+    uint64_t snapshot_vertices = 0;
+    uint64_t snapshot_copy_bytes = 0;
+    uint64_t geometry_reallocations = 0;
+    uint64_t geometry_shrinks = 0;
+    uint64_t indirection_reallocations = 0;
+    uint64_t indirection_shrinks = 0;
+    uint64_t upload_bytes = 0;
+    uint64_t geometry_capacity_bytes = 0;
+    uint64_t indirection_capacity_bytes = 0;
+    double snapshot_cpu_ms = 0.0;
+  };
+
   struct VelocityObjectData : public VelocityIndex {
     /** ID key to retrieve the corresponding #VelocityGeometryData after copy. */
     uint64_t id;
@@ -80,6 +95,15 @@ class VelocityModule {
       return false;
     }
   };
+
+  /** CPU vertex identity follows the evaluated mesh vertices, rather than the raster mesh's
+   * corner-expanded vertex buffer. Only retained when final geometry lines request motion blur. */
+  struct GeometryLineStep {
+    std::shared_ptr<const Vector<float3>> positions;
+    float4x4 object_to_world;
+    uint64_t topology = 0;
+    uint64_t revision = 0;
+  };
   /**
    * The map contains indirection indices to the obmat and geometry in each step buffer.
    * Note that each object component gets its own resource id so one component correspond to one
@@ -112,6 +136,15 @@ class VelocityModule {
   /** Step referenced as next step. */
   eVelocityStep next_step_ = STEP_NEXT;
 
+  /* These counters follow the physical buffers when the history steps rotate. */
+  std::array<uint32_t, 3> geometry_low_usage_count_ = {};
+  uint32_t indirection_low_usage_count_ = 0;
+  int64_t indirection_initialized_size_ = 0;
+  RuntimeStats runtime_stats_;
+  bool runtime_stats_enabled_ = false;
+  bool geometry_line_steps_enabled_ = false;
+  std::array<Map<ObjectKey, GeometryLineStep>, 3> geometry_line_steps_;
+
  public:
   VelocityModule(Instance &inst) : inst_(inst)
   {
@@ -140,6 +173,11 @@ class VelocityModule {
   }
 
   void init();
+
+  const RuntimeStats &runtime_stats_get() const
+  {
+    return runtime_stats_;
+  }
 
   void step_camera_sync();
   void step_sync(eVelocityStep step, float time);
@@ -174,6 +212,13 @@ class VelocityModule {
 
   bool camera_has_motion() const;
   bool camera_changed_projection() const;
+
+  static uint64_t geometry_line_topology_hash(const Mesh &mesh);
+  const GeometryLineStep *geometry_line_step_get(const ObjectRef &object,
+                                                int instance,
+                                                eVelocityStep step,
+                                                uint64_t topology,
+                                                int vertex_count) const;
 
   /* Returns frame time difference between two steps. */
   float step_time_delta_get(eVelocityStep start, eVelocityStep end) const;

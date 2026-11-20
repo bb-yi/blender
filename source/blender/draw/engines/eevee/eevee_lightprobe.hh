@@ -168,6 +168,7 @@ struct SphereProbe : public LightProbe, SphereProbeData {
 };
 
 struct PlanarProbe : public LightProbe, PlanarProbeData {
+  ObjectKey selection_key;
   /* Copy of object matrices. */
   float4x4 plane_to_world;
   float4x4 world_to_plane;

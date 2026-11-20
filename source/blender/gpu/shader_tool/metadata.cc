@@ -24,6 +24,9 @@ std::string ParsedResource::serialize() const
   if (res_type == "legacy_info") {
     ss << "ADDITIONAL_INFO(" << var_name << ")";
   }
+  else if (res_type == "legacy_iface") {
+    ss << "VERTEX_OUT(" << var_type << "_t)";
+  }
   else if (res_type == "resource_table") {
     if (!res_condition.empty()) {
       ss << ".additional_info_with_condition(\"" << var_type << "\"" << res_condition_lambda
@@ -38,7 +41,6 @@ std::string ParsedResource::serialize() const
     ss << ", ImageType::" << var_type;
     ss << ", \"" << var_name << "\"";
     ss << ", Frequency::" << res_frequency;
-    ss << ", GPUSamplerState::internal_sampler()";
     ss << res_condition_lambda << ")";
   }
   else if (res_type == "image") {
@@ -65,6 +67,12 @@ std::string ParsedResource::serialize() const
     ss << ", Frequency::" << res_frequency;
     ss << res_condition_lambda << ")";
   }
+  else if (res_type == "acceleration_structure") {
+    ss << ".acceleration_structure(" << res_slot;
+    ss << ", \"" << var_name << "\"";
+    ss << ", Frequency::" << res_frequency;
+    ss << res_condition_lambda << ")";
+  }
   else if (res_type == "shared") {
     ss << "GROUP_SHARED(" << var_type << ", " << var_name << var_array << ")";
   }
@@ -74,7 +82,8 @@ std::string ParsedResource::serialize() const
          << var_array.substr(1, var_array.size() - 2) << ")";
     }
     else {
-      ss << "PUSH_CONSTANT(" << var_type << ", " << var_name << ")";
+      ss << ".push_constant(Type::" << var_type << "_t, \"" << var_name << "\", 0"
+         << res_condition_lambda << ")";
     }
   }
   else if (res_type == "compilation_constant") {
@@ -171,8 +180,17 @@ std::string FragmentInputs::serialize() const
 
 std::string ParsedVertInput::serialize() const
 {
+  std::string res_condition_lambda;
+
+  if (!res_condition.empty()) {
+    res_condition_lambda = ", [](blender::Span<CompilationConstant> constants) { ";
+    res_condition_lambda += res_condition;
+    res_condition_lambda += "}";
+  }
+
   std::stringstream ss;
-  ss << "VERTEX_IN(" << slot << ", " << var_type << ", " << var_name << ")";
+  ss << ".vertex_in(" << slot << ", Type::" << var_type << "_t, \"" << var_name << "\""
+     << res_condition_lambda << ")";
   return ss.str();
 }
 
@@ -189,6 +207,64 @@ std::string VertexInputs::serialize() const
   return ss.str();
 }
 
+static std::string enum_to_string(metadata::Qualifier qualifier)
+{
+  switch (qualifier) {
+    case metadata::Qualifier::in:
+      return "in";
+    case metadata::Qualifier::out:
+      return "out";
+    case metadata::Qualifier::inout:
+      return "inout";
+  }
+  return "";
+}
+
+static std::string enum_to_string(metadata::Type type_enum)
+{
+  switch (type_enum) {
+    case metadata::Type::float1:
+      return "float1";
+    case metadata::Type::float2:
+      return "float2";
+    case metadata::Type::float3:
+      return "float3";
+    case metadata::Type::float4:
+      return "float4";
+    case metadata::Type::float3x3:
+      return "float3x3";
+    case metadata::Type::float4x4:
+      return "float4x4";
+    case metadata::Type::int1:
+      return "int1";
+    case metadata::Type::int2:
+      return "int2";
+    case metadata::Type::int3:
+      return "int3";
+    case metadata::Type::int4:
+      return "int4";
+    case metadata::Type::bool1:
+      return "bool1";
+    case metadata::Type::sampler1DArray:
+      return "sampler1DArray";
+    case metadata::Type::sampler2DArray:
+      return "sampler2DArray";
+    case metadata::Type::sampler2D:
+      return "sampler2D";
+    case metadata::Type::sampler3D:
+      return "sampler3D";
+    case metadata::Type::Closure:
+      return "Closure";
+    case metadata::Type::TextureHandle:
+      return "TextureHandle";
+    case metadata::Type::KernelGlobals:
+      return "KernelGlobals";
+    case metadata::Type::ShadingData:
+      return "ShadingData";
+  }
+  return "";
+}
+
 std::string Source::serialize(const std::string &function_name) const
 {
   std::stringstream ss;
@@ -201,8 +277,8 @@ std::string Source::serialize(const std::string &function_name) const
     for (auto arg : function.arguments) {
       ss << "      "
          << "metadata::ArgumentFormat{"
-         << "metadata::Qualifier(" << std::to_string(uint64_t(arg.qualifier)) << "LLU), "
-         << "metadata::Type(" << std::to_string(uint64_t(arg.type)) << "LLU)"
+         << "metadata::Qualifier::" << enum_to_string(arg.qualifier) << ", "
+         << "metadata::Type::" << enum_to_string(arg.type) << ""
          << "},\n";
     }
     ss << "    };\n";
@@ -236,6 +312,14 @@ std::string Source::serialize_infos() const
   for (auto dependency : create_infos_dependencies) {
     ss << "#include \"" << dependency << "\"\n";
   }
+
+  for (auto builtin : builtins) {
+    if (builtin == Builtin::runtime_generated) {
+      /* Do not serialize create infos for runtime generated files. */
+      return ss.str();
+    }
+  }
+
   ss << "\n";
   for (auto define : create_infos_defines) {
     ss << define;

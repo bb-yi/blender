@@ -61,8 +61,10 @@ enum {
   PyObject *cb_user; \
   /** Which user functions do we adhere to, RNA, etc */ \
   unsigned char cb_type; \
-  /** Sub-type: location, rotation... \
-   * to avoid defining many new functions for every attribute of the same type */ \
+  /** \
+   * Sub-type: location, rotation... \
+   * to avoid defining many new functions for every attribute of the same type. \
+   */ \
   unsigned char cb_subtype; \
   /** Wrapped data type. */ \
   unsigned char flag
@@ -230,7 +232,8 @@ void _BaseMathObject_RaiseNotFrozenExc(const BaseMathObject *self);
  */
 [[nodiscard]] bool mathutils_array_parse_alloc_viseq(PyObject *value,
                                                      const char *error_prefix,
-                                                     Array<Vector<int>> &r_data);
+                                                     Array<int> &r_offsets,
+                                                     Array<int> &r_data);
 [[nodiscard]] int mathutils_any_to_rotmat(float rmat[3][3],
                                           PyObject *value,
                                           const char *error_prefix);

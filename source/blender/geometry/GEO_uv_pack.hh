@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include "BLI_heap.h"
-#include "BLI_memarena.h"
+#include "BLI_heap.hh"
+#include "BLI_memarena.hh"
 #include "BLI_span.hh"
 #include "BLI_vector.hh"
 
@@ -146,7 +146,8 @@ class PackIsland {
   float2 pivot_;
   /** Half of the diagonal of the AABB. */
   float2 half_diagonal_;
-  float pre_rotate_;
+  /** The sine & cosine of the pre-rotation angle, to rotate without trigonometric functions. */
+  float2 pre_rotate_sincos_;
 
   void place_(float scale, UVPhi phi);
   void finalize_geometry_(const UVPackIsland_Params &params, MemArena *arena, Heap *heap);

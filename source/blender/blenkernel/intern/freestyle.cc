@@ -11,9 +11,9 @@
 #include "DNA_collection_types.h"
 #include "DNA_freestyle_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_rotation.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
 
 #include "BLT_translation.hh"
@@ -226,9 +226,7 @@ short BKE_freestyle_lineset_get_active_index(FreestyleConfig *config)
   FreestyleLineSet *lineset;
   short i;
 
-  for (lineset = static_cast<FreestyleLineSet *>(config->linesets.first), i = 0; lineset;
-       lineset = lineset->next, i++)
-  {
+  for (lineset = config->linesets.first(), i = 0; lineset; lineset = lineset->next, i++) {
     if (lineset->flags & FREESTYLE_LINESET_CURRENT) {
       return i;
     }
@@ -241,9 +239,7 @@ void BKE_freestyle_lineset_set_active_index(FreestyleConfig *config, short index
   FreestyleLineSet *lineset;
   short i;
 
-  for (lineset = static_cast<FreestyleLineSet *>(config->linesets.first), i = 0; lineset;
-       lineset = lineset->next, i++)
-  {
+  for (lineset = config->linesets.first(), i = 0; lineset; lineset = lineset->next, i++) {
     if (i == index) {
       lineset->flags |= FREESTYLE_LINESET_CURRENT;
     }

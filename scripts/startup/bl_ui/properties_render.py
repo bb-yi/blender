@@ -79,13 +79,13 @@ class RENDER_PT_color_management(RenderButtonsPanel, Panel):
         col.prop(view, "look")
 
         if view.is_hdr and not context.window.support_hdr_color:
-            row = col.split(factor=0.4)
+            row = col.split(factor=col.property_split_factor)
             row.label()
 
             if gpu.platform.backend_type_get() == 'OPENGL':
-                row.label(text="HDR not supported with OpenGL backend", icon='INFO')
+                row.label(text="HDR not supported with OpenGL backend", icon='STATUS_INFO')
             else:
-                row.label(text="HDR display not supported", icon='INFO')
+                row.label(text="HDR display not supported", icon='STATUS_INFO')
 
         col = flow.column()
         col.prop(view, "exposure")
@@ -114,7 +114,7 @@ class RENDER_PT_color_management_working_space(RenderButtonsPanel, Panel):
 
         col = flow.column()
 
-        split = col.split(factor=0.4)
+        split = col.split(factor=col.property_split_factor)
         row = split.row()
         row.label(text="File")
         row.alignment = 'RIGHT'
@@ -122,7 +122,7 @@ class RENDER_PT_color_management_working_space(RenderButtonsPanel, Panel):
             "wm.set_working_color_space",
             "working_space",
             text=blend_colorspace.working_space,
-            text_ctxt=i18n_contexts.default,
+            text_ctxt=i18n_contexts.color_management,
         )
 
         col.prop_with_menu(
@@ -152,6 +152,19 @@ class RENDER_PT_color_management_advanced(RenderButtonsPanel, Panel):
         col = layout.column()
         col.active = scene.view_settings.support_emulation
         col.prop(scene.display_settings, "emulation")
+
+        colorspace = context.blend_data.colorspace
+        source = colorspace.bl_rna.properties["ocio_config_source"].enum_items[colorspace.ocio_config_source]
+
+        split = layout.split(factor=layout.property_split_factor)
+        row = split.row()
+        row.alignment = 'RIGHT'
+        row.label(text="OpenColorIO Config")
+        col = split.column()
+        col.active = False
+        col.label(text=source.name)
+        if colorspace.ocio_config_source != 'BLENDER' and colorspace.ocio_config_path:
+            col.label(text=colorspace.ocio_config_path, translate=False)
 
 
 class RENDER_PT_color_management_curves(RenderButtonsPanel, Panel):
@@ -604,7 +617,7 @@ class RENDER_PT_eevee_light_paths(RenderButtonsPanel, Panel):
         return (context.engine in cls.COMPAT_ENGINES)
 
     def draw(self, context):
-        pass
+        self.layout.prop(context.scene.eevee, "npr_forward_refraction_mode")
 
 
 class RENDER_PT_eevee_clamping(RenderButtonsPanel, Panel):
@@ -855,6 +868,7 @@ class RENDER_PT_eevee_sampling_render(RenderButtonsPanel, Panel):
 
         col = layout.column(align=True)
         col.prop(props, "taa_render_samples", text="Samples")
+        col.prop(props, "time_limit")
 
         # Add SSS sample count here.
 
@@ -881,6 +895,20 @@ class RENDER_PT_eevee_sampling_advanced(RenderButtonsPanel, Panel):
         col.prop(props, "light_threshold")
 
 
+class RENDER_PT_eevee_geometry_lines(RenderButtonsPanel, Panel):
+    bl_label = "Geometry Lines"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.eevee, "use_geometry_lines", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.template_ID(context.scene.eevee, "geometry_line_tree", new="scene.npr_line_tree_new")
+        layout.label(text="Edit the scene in a Geometry Lines node editor.")
+
+
 class RENDER_PT_eevee_outline(RenderButtonsPanel, Panel):
     bl_label = "Outline"
     bl_options = {'DEFAULT_CLOSED'}
@@ -900,6 +928,9 @@ class RENDER_PT_eevee_outline(RenderButtonsPanel, Panel):
         layout.use_property_decorate = False
 
         col = layout.column()
+        col.active = context.scene.eevee.use_outline
+        col.prop(context.scene.eevee, "outline_viewport_resolution")
+        col.prop(context.scene.eevee, "outline_surface_identity")
         col.label(text="Uses Outline Control nodes and the Outline render pass.")
 
 
@@ -1311,6 +1342,16 @@ class RENDER_PT_simplify_greasepencil(RenderButtonsPanel, Panel, GreasePencilSim
     bl_options = {'DEFAULT_CLOSED'}
 
 
+class RENDER_PT_eevee_stencil_surface(RenderButtonsPanel, Panel):
+    bl_label = "Stencil Writer Surface"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    def draw(self, context):
+        self.layout.use_property_split = True
+        self.layout.prop(context.scene.eevee, "stencil_surface_resolution", text="Resolution")
+
+
 class RENDER_PT_hydra_debug(RenderButtonsPanel, Panel):
     bl_label = "Hydra Debug"
     bl_options = {'DEFAULT_CLOSED'}
@@ -1351,6 +1392,7 @@ classes = (
     RENDER_PT_eevee_volumes,
     RENDER_PT_eevee_volumes_range,
     RENDER_PT_eevee_hair,
+    RENDER_PT_eevee_stencil_surface,
     RENDER_PT_simplify,
     RENDER_PT_simplify_viewport,
     RENDER_PT_simplify_render,
@@ -1359,6 +1401,7 @@ classes = (
     RENDER_PT_eevee_motion_blur,
     RENDER_PT_eevee_motion_blur_curve,
     RENDER_PT_eevee_bake,
+    RENDER_PT_eevee_geometry_lines,
     RENDER_PT_eevee_outline,
     RENDER_PT_eevee_film,
     RENDER_PT_eevee_performance,

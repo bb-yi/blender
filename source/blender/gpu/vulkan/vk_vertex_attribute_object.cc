@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup gpu
+ */
+
 #include "vk_vertex_attribute_object.hh"
 
 #include "vk_batch.hh"
@@ -32,6 +36,12 @@ void VKVertexAttributeObject::clear()
   vertex_input.clear();
   vbos.clear();
   buffers.clear();
+  vertex_input_key = VKVertexInputDescriptionPool::invalid_key;
+}
+
+void VKVertexAttributeObject::update_vertex_input_key(VKVertexInputDescriptionPool &pool)
+{
+  vertex_input_key = pool.get_or_insert(vertex_input);
 }
 
 VKVertexAttributeObject &VKVertexAttributeObject::operator=(const VKVertexAttributeObject &other)
@@ -41,6 +51,7 @@ VKVertexAttributeObject &VKVertexAttributeObject::operator=(const VKVertexAttrib
   }
 
   vertex_input = other.vertex_input;
+  vertex_input_key = other.vertex_input_key;
 
   vbos.clear();
   vbos.extend(other.vbos);
@@ -65,20 +76,21 @@ void VKVertexAttributeObject::bind(
     }
     visited_bindings[attribute.binding].set(true);
 
-    VkBuffer buffer = VK_NULL_HANDLE;
+    VKResourceWithHandle<VkBuffer> resource = {};
     VkDeviceSize offset = 0;
 
     if (attribute.binding < buffers.size()) {
-      buffer = buffers[attribute.binding].buffer;
+      resource = buffers[attribute.binding].buffer;
       offset = buffers[attribute.binding].offset;
     }
 
-    if (buffer == VK_NULL_HANDLE) {
-      buffer = dummy.vk_handle();
+    if (resource.vk_handle == VK_NULL_HANDLE) {
+      resource = dummy.resource();
       offset = 0;
     }
 
-    r_vertex_buffer_bindings.buffer[attribute.binding] = buffer;
+    r_vertex_buffer_bindings.buffer[attribute.binding] = resource;
+    r_vertex_buffer_bindings.resource_handles[attribute.binding] = resource;
     r_vertex_buffer_bindings.offset[attribute.binding] = offset;
     r_vertex_buffer_bindings.buffer_count = max_ii(r_vertex_buffer_bindings.buffer_count,
                                                    attribute.binding + 1);
@@ -97,15 +109,14 @@ void VKVertexAttributeObject::update_bindings(const VKContext &context, VKBatch 
   const VKShaderInterface &interface = unwrap(context.shader)->interface_get();
   AttributeMask occupied_attributes = 0;
 
+  fill_unused_bindings(interface, 0);
+  buffers.resize(vertex_input.bindings.size(), VKBufferWithOffset{});
+
   for (int v = 0; v < GPU_BATCH_VBO_MAX_LEN; v++) {
     VKVertexBuffer *vbo = batch.vertex_buffer_get(v);
     if (vbo) {
       update_bindings(vbo->format, vbo, nullptr, vbo->vertex_len, interface, occupied_attributes);
     }
-  }
-
-  if (occupied_attributes != interface.enabled_attr_mask_) {
-    fill_unused_bindings(interface, occupied_attributes);
   }
 }
 
@@ -150,6 +161,9 @@ void VKVertexAttributeObject::update_bindings(VKImmediate &immediate)
   const VKShaderInterface &interface = unwrap(unwrap(immediate.shader))->interface_get();
   AttributeMask occupied_attributes = 0;
 
+  fill_unused_bindings(interface, 0);
+  buffers.resize(vertex_input.bindings.size(), VKBufferWithOffset{});
+
   VKBufferWithOffset immediate_buffer = immediate.active_buffer();
   update_bindings(immediate.vertex_format,
                   nullptr,
@@ -157,9 +171,7 @@ void VKVertexAttributeObject::update_bindings(VKImmediate &immediate)
                   immediate.vertex_len,
                   interface,
                   occupied_attributes);
-  BLI_assert(interface.enabled_attr_mask_ == occupied_attributes);
 }
-
 void VKVertexAttributeObject::update_bindings(const GPUVertFormat &vertex_format,
                                               VKVertexBuffer *vertex_buffer,
                                               VKBufferWithOffset *immediate_vertex_buffer,
@@ -209,30 +221,29 @@ void VKVertexAttributeObject::update_bindings(const GPUVertFormat &vertex_format
       }
 
       r_occupied_attributes |= attribute_mask;
-      const uint32_t binding = vertex_input.bindings.size();
-      VkVertexInputAttributeDescription2EXT attribute_description = {
-          VK_STRUCTURE_TYPE_VERTEX_INPUT_ATTRIBUTE_DESCRIPTION_2_EXT, nullptr};
-      attribute_description.binding = binding;
-      attribute_description.location = shader_input->location;
-      attribute_description.offset = attribute_offset;
-      attribute_description.format = to_vk_format(
-          attribute.type.comp_type(), attribute.type.size(), attribute.type.fetch_mode());
-      vertex_input.attributes.append(attribute_description);
+      uint32_t target_binding = 0;
 
-      VkVertexInputBindingDescription2EXT vk_binding_descriptor = {
-          VK_STRUCTURE_TYPE_VERTEX_INPUT_BINDING_DESCRIPTION_2_EXT, nullptr};
-      vk_binding_descriptor.binding = binding;
-      vk_binding_descriptor.stride = stride;
-      vk_binding_descriptor.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-      vk_binding_descriptor.divisor = 1;
-      vertex_input.bindings.append(vk_binding_descriptor);
+      for (int i = 0; i < vertex_input.attributes.size(); i++) {
+        if (vertex_input.attributes[i].location == shader_input->location) {
+
+          vertex_input.attributes[i].offset = attribute_offset;
+          vertex_input.attributes[i].format = to_vk_format(
+              attribute.type.comp_type(), attribute.type.size(), attribute.type.fetch_mode());
+          vertex_input.bindings[i].stride = stride;
+
+          target_binding = vertex_input.attributes[i].binding;
+
+          break;
+        }
+      }
+
       if (vertex_buffer) {
         add_vbo = true;
         vertex_buffer->upload();
-        buffers.append({vertex_buffer->vk_handle(), buffer_offset});
+        buffers[target_binding] = {vertex_buffer->resource(), buffer_offset};
       }
       if (immediate_vertex_buffer) {
-        buffers.append(*immediate_vertex_buffer);
+        buffers[target_binding] = *immediate_vertex_buffer;
       }
     }
   }
@@ -264,7 +275,7 @@ void VKVertexAttributeObject::debug_print() const
     }
     visited_bindings[attribute.binding].set(true);
 
-    if (attribute.binding < vbos.size()) {
+    if (attribute.binding < buffers.size()) {
       std::cout << " Attach to Buffer\n";
     }
     else {

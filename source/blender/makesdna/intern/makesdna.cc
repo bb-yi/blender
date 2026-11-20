@@ -29,15 +29,16 @@
 
 #include <algorithm>
 #include <cctype>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "BLI_set.hh"
 #include "BLI_string_ref.hh"
-#include "BLI_sys_types.h" /* For `intptr_t` support. */
-#include "BLI_system.h"    /* For #BLI_system_backtrace stub. */
-#include "BLI_utildefines.h"
+#include "BLI_sys_types.hh" /* For `intptr_t` support. */
+#include "BLI_system.hh"    /* For #BLI_system_backtrace stub. */
+#include "BLI_utildefines.hh"
 #include "BLI_vector.hh"
 #include "BLI_vector_set.hh"
 
@@ -763,7 +764,7 @@ static void write_sdna_verify(FILE *file,
                               const StringRefNull base_directory)
 {
   fprintf(file, "/* Verify struct sizes and member offsets are as expected by DNA. */\n");
-  fprintf(file, "#include \"BLI_assert.h\"\n\n");
+  fprintf(file, "#include \"BLI_assert.hh\"\n\n");
   /* Needed so we can find offsets of deprecated structs. */
   fprintf(file, "#define DNA_DEPRECATED_ALLOW\n");
   /* Workaround enum naming collision in static asserts
@@ -829,11 +830,11 @@ static bool apply_renames(Vector<dna::ParsedStruct> &parsed_structs)
       /* Rewrite the member name. */
       std::string &member_name = parsed_member.member_name;
       StringRef stripped = DNA_member_id_string_ref(member_name);
-      const StringRefNull *member_static = rename_maps.members.lookup_ptr(
+      const StringRef *member_static = rename_maps.members.lookup_ptr(
           {parsed_struct.type_name, std::string(stripped)});
       if (member_static != nullptr) {
         const size_t prefix_len = stripped.data() - member_name.data();
-        member_name.replace(prefix_len, stripped.size(), member_static->c_str());
+        member_name.replace(prefix_len, stripped.size(), *member_static);
         stripped = DNA_member_id_string_ref(member_name);
       }
 

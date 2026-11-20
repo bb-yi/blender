@@ -26,7 +26,7 @@
 
 #include "BLI_memory_utils.hh"
 #include "BLI_set.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "CLG_log.h"
 
 #include "intern/gpu_node_graph.hh"
@@ -589,7 +589,7 @@ static void set_fallback_outputs(GPUMaterial *mat, bNode *node, GPUNodeStack *in
     out[0].link = GPU_constant(zero_value);
   }
   if (!out[1].end) {
-    GPU_link(mat, "world_normals_get", &out[1].link);
+    GPU_link(mat, "world_normals_get", GPU_shading_data(), &out[1].link);
   }
   if (!out[2].end) {
     out[2].link = GPU_constant(one_value);
@@ -605,34 +605,34 @@ static std::string build_height_helper_block(const HeightHelper &helper)
   std::stringstream ss;
   switch (helper.return_type) {
     case GPU_FLOAT:
-      ss << "float " << helper.sub_function_name << "();\n";
+      ss << "float " << helper.sub_function_name << "(KernelGlobals kg, ShadingData sd);\n";
       break;
     case GPU_VEC3:
-      ss << "float3 " << helper.sub_function_name << "();\n";
+      ss << "float3 " << helper.sub_function_name << "(KernelGlobals kg, ShadingData sd);\n";
       break;
     case GPU_VEC4:
     default:
-      ss << "float4 " << helper.sub_function_name << "();\n";
+      ss << "float4 " << helper.sub_function_name << "(KernelGlobals kg, ShadingData sd);\n";
       break;
   }
   ss << "\n";
   ss << "float3 " << helper.uv_global_name << " = float3(0.0);\n";
   ss << "float2 " << helper.uv_global_name << "_dx = float2(0.0);\n";
   ss << "float2 " << helper.uv_global_name << "_dy = float2(0.0);\n\n";
-  ss << "float " << helper.helper_name << "(float3 uv, float2 uv_dx, float2 uv_dy)\n{\n";
+  ss << "float " << helper.helper_name << "(KernelGlobals kg, ShadingData sd, float3 uv, float2 uv_dx, float2 uv_dy)\n{\n";
   ss << "  " << helper.uv_global_name << " = uv;\n";
   ss << "  " << helper.uv_global_name << "_dx = uv_dx;\n";
   ss << "  " << helper.uv_global_name << "_dy = uv_dy;\n";
   switch (helper.return_type) {
     case GPU_FLOAT:
-      ss << "  return " << helper.sub_function_name << "();\n";
+      ss << "  return " << helper.sub_function_name << "(kg, sd);\n";
       break;
     case GPU_VEC3:
-      ss << "  return " << helper.sub_function_name << "().x;\n";
+      ss << "  return " << helper.sub_function_name << "(kg, sd).x;\n";
       break;
     case GPU_VEC4:
     default:
-      ss << "  return " << helper.sub_function_name << "().x;\n";
+      ss << "  return " << helper.sub_function_name << "(kg, sd).x;\n";
       break;
   }
   ss << "}\n\n";
@@ -659,7 +659,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     if (has_shadow_input) {
       ss << "float3 sun_direction, ";
     }
-    ss << "float4 tangent, out float3 uv_out, out float3 normal_out, out float shadow_out";
+    ss << "float4 tangent, KernelGlobals kg, _ref(ShadingData, sd), out float3 uv_out, out float3 normal_out, out float shadow_out";
     ss << ");\n\n";
   }
   ss << "void " << wrapper_name << "(";
@@ -674,7 +674,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
   if (has_shadow_input) {
     ss << "float3 sun_direction, ";
   }
-  ss << "float4 tangent, out float3 uv_out";
+  ss << "float4 tangent, KernelGlobals kg, _ref(ShadingData, sd), out float3 uv_out";
   if (use_normal) {
     ss << ", out float3 normal_out";
   }
@@ -689,7 +689,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     if (!compute_shadow) {
       ss << "  float shadow_tmp;\n";
     }
-    ss << "  node_parallax_image_mode(height_image, uv_in, scale, height_offset, ";
+    ss << "  node_parallax_image_mode(kg, sd, height_image, uv_in, scale, height_offset, ";
     ss << "min_steps, max_steps, ";
     ss << (uses_refinement ? "refinement_steps" : "0.0f") << ", " << mode;
     ss << ", " << (use_normal ? "true" : "false") << ", "
@@ -718,7 +718,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     if (has_shadow_input) {
       ss << "sun_direction, ";
     }
-    ss << "tangent, uv_out";
+    ss << "tangent, kg, sd, uv_out";
     ss << ", " << (use_normal ? "normal_out" : "normal_tmp");
     if (compute_shadow) {
       ss << ", shadow_out";
@@ -739,10 +739,10 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     if (has_shadow_input) {
       ss << "float3 sun_direction, ";
     }
-    ss << "float4 tangent, out float3 uv_out, out float3 normal_out, out float shadow_out";
+    ss << "float4 tangent, KernelGlobals kg, _ref(ShadingData, sd), out float3 uv_out, out float3 normal_out, out float shadow_out";
     ss << ")\n{\n";
     ss << "  shadow_out = 1.0f;\n";
-    ss << "  normal_out = parallax_base_normal(tangent);\n";
+    ss << "  normal_out = parallax_base_normal(kg, sd, tangent);\n";
     if (!uses_refinement) {
       ss << "  float refinement_steps = 0.0f;\n";
     }
@@ -751,13 +751,13 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     ss << "    return;\n";
     ss << "  }\n";
     ss << "  if (" << mode << " == PARALLAX_MODE_PLANE_OFFSET) {\n";
-    ss << "    node_parallax_plane_offset(uv_in, scale, tangent, uv_out, normal_out);\n";
+    ss << "    node_parallax_plane_offset(uv_in, scale, tangent, kg, sd, uv_out, normal_out);\n";
     ss << "    return;\n";
     ss << "  }\n";
     ss << "  float2 direction;\n";
     ss << "  float layer_count;\n";
     ss << "  float layer_depth;\n";
-    ss << "  parallax_march_init(tangent, min_steps, max_steps, direction, ";
+    ss << "  parallax_march_init(kg, sd, tangent, min_steps, max_steps, direction, ";
     ss << "layer_count, layer_depth);\n";
     ss << "  float2 uv_dx;\n";
     ss << "  float2 uv_dy;\n";
@@ -767,9 +767,9 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     ss << "  float previous_ray_height = 1.0f;\n";
     ss << "  float2 current_uv = uv_in.xy - delta_uv;\n";
     ss << "  float current_height = " << height_helper.helper_name;
-    ss << "(float3(current_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
+    ss << "(kg, sd, float3(current_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
     ss << "  float previous_height = " << height_helper.helper_name;
-    ss << "(uv_in, uv_dx, uv_dy) + height_offset;\n";
+    ss << "(kg, sd, uv_in, uv_dx, uv_dy) + height_offset;\n";
     ss << "  float ray_height = 1.0f - layer_depth;\n";
     ss << "  for (int i = 0; i < 128; i++) {\n";
     ss << "    if (i >= int(layer_count) || current_height > ray_height) {\n";
@@ -781,7 +781,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     ss << "    ray_height -= layer_depth;\n";
     ss << "    current_uv -= delta_uv;\n";
     ss << "    current_height = " << height_helper.helper_name;
-    ss << "(float3(current_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
+    ss << "(kg, sd, float3(current_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
     ss << "  }\n";
     ss << "  if (" << mode << " == PARALLAX_MODE_OCCLUSION) {\n";
     ss << "    uv_out = float3(parallax_interpolate_uv(current_uv, current_height, ";
@@ -802,7 +802,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     ss << "      float2 middle_uv = (after_uv + before_uv) * 0.5f;\n";
     ss << "      float middle_ray_height = (after_ray_height + before_ray_height) * 0.5f;\n";
     ss << "      float middle_height = " << height_helper.helper_name;
-    ss << "(float3(middle_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
+    ss << "(kg, sd, float3(middle_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
     ss << "      float delta = middle_height - middle_ray_height;\n";
     ss << "      if (delta > 0.0f) {\n";
     ss << "        after_uv = middle_uv;\n";
@@ -840,7 +840,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     ss << "      float2 intersection_uv = uv_in.xy - ";
     ss << "(1.0f - intersection_ray_height) * delta_uv * layer_count;\n";
     ss << "      float intersection_height = " << height_helper.helper_name;
-    ss << "(float3(intersection_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
+    ss << "(kg, sd, float3(intersection_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
     ss << "      float delta = intersection_ray_height - intersection_height;\n";
     ss << "      if (delta < 0.0f) {\n";
     ss << "        after_uv = intersection_uv;\n";
@@ -865,21 +865,21 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     ss << "    uv_out = float3(current_uv, uv_in.z);\n";
     ss << "  }\n";
     ss << "  float hit_height = " << height_helper.helper_name;
-    ss << "(uv_out, uv_dx, uv_dy) + height_offset;\n";
+    ss << "(kg, sd, uv_out, uv_dx, uv_dy) + height_offset;\n";
     if (use_normal) {
       ss << "  float normal_step = max(max(length(uv_dx), length(uv_dy)), 1.0e-4f);\n";
       ss << "  float u_height = " << height_helper.helper_name;
-      ss << "(float3(uv_out.xy + float2(normal_step, 0.0f), uv_out.z), uv_dx, uv_dy) + ";
+      ss << "(kg, sd, float3(uv_out.xy + float2(normal_step, 0.0f), uv_out.z), uv_dx, uv_dy) + ";
       ss << "height_offset;\n";
       ss << "  float v_height = " << height_helper.helper_name;
-      ss << "(float3(uv_out.xy + float2(0.0f, normal_step), uv_out.z), uv_dx, uv_dy) + ";
+      ss << "(kg, sd, float3(uv_out.xy + float2(0.0f, normal_step), uv_out.z), uv_dx, uv_dy) + ";
       ss << "height_offset;\n";
-      ss << "  normal_out = parallax_normal_from_height_samples(tangent, hit_height, ";
+      ss << "  normal_out = parallax_normal_from_height_samples(kg, sd, tangent, hit_height, ";
       ss << "u_height, v_height, normal_step, normal_step, scale);\n";
     }
     if (compute_shadow) {
       ss << "  float3 L = parallax_safe_normalize(";
-      ss << "parallax_world_direction_to_tangent(tangent, sun_direction));\n";
+      ss << "parallax_world_direction_to_tangent(kg, sd, tangent, sun_direction));\n";
       ss << "  if (dot(L, L) <= 1.0e-12f) {\n";
       ss << "    return;\n";
       ss << "  }\n";
@@ -902,7 +902,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
       ss << "  float2 shadow_uv_offset = shadow_delta_uv;\n";
       ss << "  float shadow_ray_height = hit_height + shadow_layer_depth;\n";
       ss << "  float shadow_height = " << height_helper.helper_name;
-      ss << "(float3(uv_out.xy + shadow_uv_offset, uv_out.z), uv_dx, uv_dy) + height_offset;\n";
+      ss << "(kg, sd, float3(uv_out.xy + shadow_uv_offset, uv_out.z), uv_dx, uv_dy) + height_offset;\n";
       ss << "  for (int i = 0; i < 128; i++) {\n";
       ss << "    if (i >= int(shadow_layer_count) || shadow_ray_height >= 1.0f) {\n";
       ss << "      break;\n";
@@ -914,7 +914,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
       ss << "    shadow_ray_height += shadow_layer_depth;\n";
       ss << "    shadow_uv_offset += shadow_delta_uv;\n";
       ss << "    shadow_height = " << height_helper.helper_name;
-      ss << "(float3(uv_out.xy + shadow_uv_offset, uv_out.z), uv_dx, uv_dy) + height_offset;\n";
+      ss << "(kg, sd, float3(uv_out.xy + shadow_uv_offset, uv_out.z), uv_dx, uv_dy) + height_offset;\n";
       ss << "  }\n";
     }
     ss << "}\n";
@@ -926,16 +926,16 @@ static std::string build_plane_offset_wrapper_source()
 {
   std::stringstream ss;
   ss << "void " << parallax_plane_wrapper_name
-     << "(float3 uv_in, float scale, float4 tangent, out float3 uv_out)\n";
+     << "(float3 uv_in, float scale, float4 tangent, KernelGlobals kg, _ref(ShadingData, sd), out float3 uv_out)\n";
   ss << "{\n";
   ss << "  float3 normal_tmp;\n";
-  ss << "  node_parallax_plane_offset(uv_in, scale, tangent, uv_out, normal_tmp);\n";
+  ss << "  node_parallax_plane_offset(uv_in, scale, tangent, kg, sd, uv_out, normal_tmp);\n";
   ss << "}\n\n";
   ss << "void " << parallax_plane_normal_wrapper_name;
-  ss << "(float3 uv_in, float scale, float4 tangent, out float3 uv_out, ";
+  ss << "(float3 uv_in, float scale, float4 tangent, KernelGlobals kg, _ref(ShadingData, sd), out float3 uv_out, ";
   ss << "out float3 normal_out)\n";
   ss << "{\n";
-  ss << "  node_parallax_plane_offset(uv_in, scale, tangent, uv_out, normal_out);\n";
+  ss << "  node_parallax_plane_offset(uv_in, scale, tangent, kg, sd, uv_out, normal_out);\n";
   ss << "}\n";
   return ss.str();
 }
@@ -961,7 +961,7 @@ static Vector<GPUNodeStack> input_stack_with_tangent(GPUMaterial *mat,
 
   GPUNodeStack tangent = {};
   tangent.type = GPU_VEC4;
-  tangent.vec[3] = 1.0f;
+  tangent.value = float4(0.0f, 0.0f, 0.0f, 1.0f);
   tangent.link = GPU_attribute(mat, CD_TANGENT, node_uv_map(node));
   tangent.hasinput = true;
   tangent.sockettype = SOCK_VECTOR;
@@ -1012,7 +1012,7 @@ static bool parallax_stack_link_custom(GPUMaterial *mat,
                                             node,
                                             function_name,
                                             filename,
-                                            GPU_CUSTOM_NODE_DEPENDENCY_NONE,
+                                            GPU_CUSTOM_NODE_DEPENDENCY_SHADING_CONTEXT,
                                             input_stack.data(),
                                             output_stack.data());
   if (linked && out != nullptr) {

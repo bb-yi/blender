@@ -28,9 +28,11 @@ namespace geometry {
  * \returns #std::nullopt if the mesh should not be changed (no vertices are merged), in order to
  * avoid copying the input. Otherwise returns the new mesh with merged geometry.
  */
-std::optional<Mesh *> mesh_merge_by_distance_all(const Mesh &mesh,
-                                                 const IndexMask &selection,
-                                                 float merge_distance);
+std::optional<Mesh *> mesh_merge_by_distance_all(
+    const Mesh &mesh,
+    const IndexMask &selection,
+    float merge_distance,
+    const bke::AttributeFilter &attribute_filter = bke::AttributeFilter::default_filter());
 
 /**
  * Merge selected vertices along edges to other selected vertices. Only vertices connected by edges
@@ -39,37 +41,43 @@ std::optional<Mesh *> mesh_merge_by_distance_all(const Mesh &mesh,
  * \returns #std::nullopt if the mesh should not be changed (no vertices are merged), in order to
  * avoid copying the input. Otherwise returns the new mesh with merged geometry.
  */
-std::optional<Mesh *> mesh_merge_by_distance_connected(const Mesh &mesh,
-                                                       Span<bool> selection,
-                                                       float merge_distance,
-                                                       bool only_loose_edges);
+std::optional<Mesh *> mesh_merge_by_distance_connected(
+    const Mesh &mesh,
+    Span<bool> selection,
+    float merge_distance,
+    bool only_loose_edges,
+    const bke::AttributeFilter &attribute_filter = bke::AttributeFilter::default_filter());
 
 /**
- * Merge Verts indicated in the targets map.
+ * Merge vertices into target vertices targets.
  *
- * This frees the given mesh and returns a new mesh.
+ * \param vert_src_to_target: Maps each vertex to the vertex it merges into. Vertices that don't
+ * merge into another vertex point at themselves. The array is aligned with `mesh.verts_num`.
+ * \warning \a vert_src_to_target must **not** contain any chained mapping (v1 -> v2 -> v3 etc.),
+ * this is not supported and will likely generate corrupted geometry. In other words,
+ * `vert_src_to_target[vert_src_to_target[vert]]` must always equal `vert_src_to_target[vert]`.
  *
- * \param vert_dest_map: The table that maps vertices to target vertices.  a value of -1
- * indicates a vertex is a target, and is to be kept.
- * This array is aligned with 'mesh->verts_num'
- * \warning \a vert_merge_map must **not** contain any chained mapping (v1 -> v2 -> v3 etc.),
- * this is not supported and will likely generate corrupted geometry.
- *
- * \param vert_dest_map_len: The number of non '-1' values in `vert_dest_map`. (not the size)
- * \param do_mix_data: If true, the groups of vertices in the `vert_dest_map_len`, defined by
- * source vertices with the same target plus the target vertex, will have their custom data
- * interpolated into the resulting vertex. If false, only the custom data of the target vertex will
- * remain.
+ * \param removed_verts_num: The number of vertices that merge into a different vertex, in other
+ * words the number of vertices removed by the merge (not the size of the array).
+ * \param do_mix_data: If true, each group of merged vertices (the sources with the same target,
+ * plus the target vertex) will have their custom data interpolated into the resulting vertex. If
+ * false, only the custom data of the target vertex will remain.
  */
 Mesh *mesh_merge_verts(const Mesh &mesh,
-                       MutableSpan<int> vert_dest_map,
-                       int vert_dest_map_len,
-                       const bool do_mix_data);
+                       Span<int> vert_src_to_target,
+                       int removed_verts_num,
+                       bool do_mix_data);
 
-Mesh *mesh_merge_verts(const Mesh &mesh,
-                       const IndexMask &selection,
-                       Span<int> merge_ids,
-                       const bke::AttributeFilter &attribute_filter);
+/**
+ * Merge selected vertices that share the same ID. Each group of vertices merges into the vertex
+ * with the lowest index.
+ * \returns #std::nullopt if the mesh should not be changed (no vertices are merged), in order to
+ * avoid copying the input. Otherwise returns the new mesh with merged geometry.
+ */
+std::optional<Mesh *> mesh_merge_verts(const Mesh &mesh,
+                                       const IndexMask &selection,
+                                       Span<int> merge_ids,
+                                       const bke::AttributeFilter &attribute_filter);
 
 }  // namespace geometry
 }  // namespace blender

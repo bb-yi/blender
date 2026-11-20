@@ -19,8 +19,8 @@
 
 #ifdef RNA_RUNTIME
 
-#  include "BLI_listbase.h"
-#  include "BLI_string.h"
+#  include "BLI_listbase.hh"
+#  include "BLI_string.hh"
 
 #  include "BKE_global.hh"
 #  include "BKE_paint.hh"
@@ -292,6 +292,7 @@ static void rna_def_workspace_owner_ids(BlenderRNA *brna, PropertyRNA *cprop)
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
   /* return type */
   parm = RNA_def_pointer(func, "owner_id", "wmOwnerID", "", "");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 
   /* remove owner_id */

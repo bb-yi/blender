@@ -17,25 +17,29 @@ float3 light_probe_color_safe_direction(float3 value, float3 fallback)
   return float3(0.0f, 0.0f, 1.0f);
 }
 
-float3 light_probe_color_resolve_shading_normal()
+float3 light_probe_color_resolve_shading_normal(ShadingData &sd)
 {
-  return light_probe_color_safe_direction(g_data.N, g_data.Ng);
+  return light_probe_color_safe_direction(sd.N, sd.Ng);
 }
 
 [[node]]
 void node_light_probe_color(float3 direction,
                             float roughness,
+                            [[resource_table]] KernelGlobals &kg,
+                            ShadingData &sd,
                             out float4 reflection,
                             out float4 irradiance,
                             out float4 combined)
 {
 #if defined(GPU_FRAGMENT_SHADER) && \
     (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
-#  if defined(CREATE_INFO_eevee_LightprobeRenderData)
-  float3 geometry_normal = light_probe_color_safe_direction(g_data.Ng, float3(0.0f, 0.0f, 1.0f));
-  float3 shading_normal = light_probe_color_resolve_shading_normal();
-  const ViewMatrices view = view_matrices_get();
-  float3 view_vector = view.world_incident_vector(g_data.P);
+  [[resource_table]] const eevee::PipelineConstants &pipe = resource_table_get(
+      eevee::PipelineConstants);
+  if (pipe.use_lightprobe_data) [[static_branch]] {
+  float3 geometry_normal = light_probe_color_safe_direction(sd.Ng, float3(0.0f, 0.0f, 1.0f));
+  float3 shading_normal = light_probe_color_resolve_shading_normal(sd);
+  const ViewMatrices view = kg.view_matrices_get(sd);
+  float3 view_vector = view.world_incident_vector(sd.P);
   float3 reflected_view_direction = light_probe_color_safe_direction(
       -reflect(view_vector, shading_normal), -view_vector);
   float3 reflection_direction = light_probe_color_safe_direction(direction,
@@ -45,14 +49,14 @@ void node_light_probe_color(float3 direction,
 
   [[resource_table]] const eevee::LightprobeRenderData &lightprobes = resource_table_get(
       eevee::LightprobeRenderData);
-  [[resource_table]] const eevee::LightprobeSphereRenderData &lp_spheres = lightprobes.spheres;
+  [[resource_table]] const eevee::LightprobeSphereRenderData &spheres = lightprobes.spheres;
   eevee::LightProbeSample probe_sample = lightprobes.load(
-      gl_FragCoord.xy, g_data.P, geometry_normal, view_vector);
+      sd.frag_co.xy, sd.P, geometry_normal, view_vector);
   probe_sample.volume_irradiance = spherical_harmonics::clamp_energy(
-      probe_sample.volume_irradiance, uniform_buf.clamp.surface_indirect);
+      probe_sample.volume_irradiance, eevee_uniform_data_get().clamp.surface_indirect);
 
-  float3 reflection_rgb = lp_spheres.spherical_sample_normalized_with_parallax(
-      probe_sample, g_data.P, reflection_direction, reflection_lod);
+  float3 reflection_rgb = spheres.spherical_sample_normalized_with_parallax(
+      probe_sample, sd.P, reflection_direction, reflection_lod);
   float3 irradiance_rgb = max(
       probe_sample.volume_irradiance.evaluate_lambert(irradiance_direction).rgb, float3(0.0f));
   float3 combined_rgb = reflection_rgb + irradiance_rgb;
@@ -60,11 +64,12 @@ void node_light_probe_color(float3 direction,
   reflection = float4(reflection_rgb, 1.0f);
   irradiance = float4(irradiance_rgb, 1.0f);
   combined = float4(combined_rgb, 1.0f);
-#  else
+  }
+  else {
   reflection = float4(0.0f);
   irradiance = float4(0.0f);
   combined = float4(0.0f);
-#  endif
+  }
 #else
   reflection = float4(0.0f);
   irradiance = float4(0.0f);

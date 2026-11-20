@@ -5,7 +5,7 @@
 #include "node_shader_util.hh"
 #include "node_util.hh"
 
-#include "BLI_hash.h"
+#include "BLI_hash_c.hh"
 
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"

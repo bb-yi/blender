@@ -15,8 +15,13 @@
 #include "NOD_sync_sockets.hh"
 
 #include "BKE_idprop.hh"
+#include "BKE_type_conversions.hh"
 
 #include "BLO_read_write.hh"
+
+#include "COM_bundle_item.hh"
+#include "COM_conversion_operation.hh"
+#include "COM_node_operation.hh"
 
 #include "UI_interface_layout.hh"
 #include "shader/node_shader_util.hh"
@@ -45,6 +50,10 @@ static void node_declare(NodeDeclarationBuilder &b)
                        .socket_name_ptr(
                            &tree->id, *SeparateBundleItemsAccessor::item_srna, &item, "name")
                        .propagate_all();
+      if (socket_type == SOCK_VECTOR && tree->type == NTREE_SHADER) {
+        static_cast<decl::VectorBuilder &>(decl).dimensions(
+            item.vector_socket_dimensions == 0 ? 3 : item.vector_socket_dimensions);
+      }
       if (item.structure_type != NodeSocketInterfaceStructureType::Auto) {
         decl.structure_type(StructureType(item.structure_type));
       }
@@ -113,6 +122,13 @@ static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *node_ptr
           panel->use_property_split_set(true);
           panel->use_property_decorate_set(false);
           panel->prop(item_ptr, "socket_type", UI_ITEM_NONE, IFACE_("Type"), ICON_NONE);
+          if (ntree.type == NTREE_SHADER && RNA_enum_get(item_ptr, "socket_type") == SOCK_VECTOR) {
+            panel->prop(item_ptr,
+                        "vector_socket_dimensions",
+                        UI_ITEM_NONE,
+                        IFACE_("Dimensions"),
+                        ICON_NONE);
+          }
           panel->prop(item_ptr, "structure_type", UI_ITEM_NONE, IFACE_("Shape"), ICON_NONE);
         });
   }
@@ -193,6 +209,85 @@ static void node_geo_exec(GeoNodeExecParams params)
   params.set_default_remaining_outputs();
 }
 
+using namespace blender::compositor;
+
+class SeparateBundleOperation : public NodeOperation {
+ public:
+  using NodeOperation::NodeOperation;
+
+  void execute() override
+  {
+    nodes::BundlePtr bundle = this->get_input("Bundle").get_single_value<nodes::BundlePtr>();
+
+    const NodeSeparateBundle &storage = node_storage(this->node());
+    for (const int i : IndexRange(storage.items_num)) {
+      Result &result = this->get_result(this->node().output_socket(i).identifier);
+      if (!result.should_compute()) {
+        continue;
+      }
+
+      const NodeSeparateBundleItem &item = storage.items[i];
+      const StringRef name = item.name;
+      std::optional<BundleKey> key = BundleKey::from_str(name);
+      if (!key) {
+        continue;
+      }
+
+      const BundleItemValue *item_value = bundle->lookup(key.value());
+      if (!item_value) {
+        this->add_warning(
+            NodeWarningType::Error,
+            fmt::format(fmt::runtime(TIP_("Value not found in bundle: \"{}\"")), name));
+        continue;
+      }
+
+      Result bundle_result = BundleItem::get_result(this->context(), *item_value);
+      BLI_SCOPED_DEFER([&]() { bundle_result.release(); });
+      if (result.type() == bundle_result.type()) {
+        result.share_data(bundle_result);
+        continue;
+      }
+
+      const bke::DataTypeConversions &conversions = bke::get_implicit_type_conversions();
+      if (!conversions.is_convertible(bundle_result.get_cpp_type(), result.get_cpp_type())) {
+        this->add_warning(
+            NodeWarningType::Error,
+            fmt::format("{}: \"{}\" ({} " BLI_STR_UTF8_BLACK_RIGHT_POINTING_SMALL_TRIANGLE " {})",
+                        TIP_("Conversion not supported when separating bundle"),
+                        name,
+                        TIP_(Result::type_name(bundle_result.type())),
+                        TIP_(Result::type_name(result.type()))));
+        continue;
+      }
+
+      ConversionOperation conversion_operation(
+          this->context(), bundle_result.type(), result.type());
+      Result conversion_input = this->context().create_result(bundle_result.type(),
+                                                              bundle_result.precision());
+      conversion_input.share_data(bundle_result);
+      conversion_operation.map_input_to_result(&conversion_input);
+      conversion_operation.evaluate();
+      result.share_data(conversion_operation.get_result());
+      conversion_operation.get_result().release();
+
+      this->add_warning(
+          NodeWarningType::Info,
+          fmt::format("{}: \"{}\" ({} " BLI_STR_UTF8_BLACK_RIGHT_POINTING_SMALL_TRIANGLE " {})",
+                      TIP_("Implicit type conversion when separating bundle"),
+                      name,
+                      TIP_(Result::type_name(bundle_result.type())),
+                      TIP_(Result::type_name(result.type()))));
+    }
+
+    this->allocate_default_remaining_outputs();
+  }
+};
+
+static NodeOperation *get_compositor_operation(Context &context, const bNode &node)
+{
+  return new SeparateBundleOperation(context, node);
+}
+
 static void node_gather_link_searches(GatherLinkSearchOpParams &params)
 {
   const bNodeSocket &other_socket = params.other_socket();
@@ -238,7 +333,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  sh_geo_node_type_base(&ntype, "NodeSeparateBundle"_ustr, NODE_SEPARATE_BUNDLE);
+  common_node_type_base(&ntype, "NodeSeparateBundle"_ustr, NODE_SEPARATE_BUNDLE);
   ntype.ui_name = "Separate Bundle";
   ntype.ui_description = "Split a bundle into multiple sockets.";
   ntype.nclass = NODE_CLASS_CONVERTER;
@@ -251,6 +346,7 @@ static void node_register()
   ntype.register_operators = node_operators;
   ntype.blend_write_storage_content = node_blend_write;
   ntype.blend_data_read_storage_content = node_blend_read;
+  ntype.get_compositor_operation = get_compositor_operation;
   bke::node_type_storage(ntype, "NodeSeparateBundle", node_free_storage, node_copy_storage);
   bke::node_register_type(ntype);
 }

@@ -19,6 +19,15 @@
 
 namespace blender {
 
+#ifdef __cplusplus
+namespace bke {
+struct MaskSplineRuntime;
+}
+using MaskSplineRuntime = bke::MaskSplineRuntime;
+#else
+typedef struct MaskSplineRuntime MaskSplineRuntime;
+#endif
+
 enum MaskParentType : int {
   MASK_PARENT_POINT_TRACK = 0, /* parenting happens to point track */
   MASK_PARENT_PLANE_TRACK = 1, /* parenting happens to plane track */
@@ -157,7 +166,7 @@ struct Mask {
 
 struct MaskParent {
   /** Type of parenting. */
-  int id_type = 0;
+  int id_type = ID_MC;
   /** Type of parenting. */
   MaskParentType type = MASK_PARENT_POINT_TRACK;
   /**
@@ -221,8 +230,7 @@ struct MaskSpline {
   /** Parenting information of the whole spline. */
   MaskParent parent;
 
-  /** Deformed copy of 'points' BezTriple data - not saved. */
-  MaskSplinePoint *points_deform = nullptr;
+  MaskSplineRuntime *runtime = nullptr;
 };
 
 /* one per frame */

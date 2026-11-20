@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup geo
+ */
+
 #include "BLI_array_utils.hh"
 #include "BLI_math_color.hh"
 #include "BLI_math_quaternion.hh"
@@ -37,7 +41,7 @@ static int get_count_from_length(const float curve_length,
 {
   /* Find the number of sampled segments by dividing the total length by
    * the sample length. Then there is one more sampled point than segment. */
-  if (UNLIKELY(sample_length == 0.0f)) {
+  if (sample_length == 0.0f) [[unlikely]] {
     return 1;
   }
   const int count = int(curve_length / sample_length) + 1;

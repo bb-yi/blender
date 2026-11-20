@@ -20,9 +20,9 @@
 #include "uri_convert.hh"
 #include "utfconv.hh"
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
-#include "BLI_system.h" /* Own include. */
+#include "BLI_system.hh" /* Own include. */
 
 /* GetVersionEx is deprecated and also tends to lie about much of the information
  * it gives you. We should deal with that one day, but today is not that day. For
@@ -363,14 +363,56 @@ static bool bli_windows_system_backtrace_stack(FILE *fp, const EXCEPTION_POINTER
 {
   fprintf(fp, "Stack trace:\n");
   /* If we are handling an exception use the context record from that. */
-  if (exception_info && exception_info->ExceptionRecord->ExceptionAddress) {
+  if (exception_info && exception_info->ContextRecord) {
     /* The back trace code will write to the context record, to protect the original record from
      * modifications give the backtrace a copy to work on. */
     CONTEXT TempContext = *exception_info->ContextRecord;
+    fprintf(fp, "Exception thread : %08lx\n", GetCurrentThreadId());
+#if defined(_M_AMD64)
+    fprintf(fp,
+            "Exception context: RIP=0x%016llx RSP=0x%016llx RBP=0x%016llx\n",
+            TempContext.Rip,
+            TempContext.Rsp,
+            TempContext.Rbp);
+    /* StackWalk cannot unwind from PC=0. For an indirect CALL to zero the return address is
+     * still on the original stack. Read it safely, and only use an executable candidate. A JMP
+     * to zero need not have pushed a return address, so retain the original registers above. */
+    if (TempContext.Rip == 0 && exception_info->ExceptionRecord &&
+        exception_info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+        exception_info->ExceptionRecord->NumberParameters >= 2 &&
+        exception_info->ExceptionRecord->ExceptionInformation[0] == 8)
+    {
+      DWORD64 return_address = 0;
+      SIZE_T bytes_read = 0;
+      MEMORY_BASIC_INFORMATION memory = {};
+      if (ReadProcessMemory(GetCurrentProcess(),
+                            reinterpret_cast<void *>(TempContext.Rsp),
+                            &return_address,
+                            sizeof(return_address),
+                            &bytes_read) &&
+          bytes_read == sizeof(return_address) &&
+          VirtualQuery(reinterpret_cast<void *>(return_address), &memory, sizeof(memory)) &&
+          memory.State == MEM_COMMIT && !(memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
+          (memory.Protect &
+           (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
+      {
+        fprintf(fp, "Null execution return-address candidate: 0x%016llx\n", return_address);
+        TempContext.Rip = return_address;
+        TempContext.Rsp += sizeof(return_address);
+      }
+    }
+#elif defined(_M_ARM64)
+    fprintf(fp,
+            "Exception context: PC=0x%016llx SP=0x%016llx FP=0x%016llx LR=0x%016llx\n",
+            TempContext.Pc,
+            TempContext.Sp,
+            TempContext.Fp,
+            TempContext.Lr);
+#endif
     return BLI_windows_system_backtrace_run_trace(fp, GetCurrentThread(), &TempContext);
   }
   else {
-    /* If there is no current exception or the address is not set, walk the current stack. */
+    /* Only an absent exception context should fall back to the reporting thread's stack. */
     return bli_windows_system_backtrace_stack_thread(fp, GetCurrentThread());
   }
 }
@@ -617,12 +659,7 @@ void BLI_windows_exception_show_dialog(const char *filepath_crashlog,
 
   TASKDIALOGCONFIG config = {0};
   const TASKDIALOG_BUTTON buttons[] = {{IDRETRY, L"Restart"},
-#if 0
-    /* This lead to a large influx of low quality reports on the tracker,
-     * and has been disabled for that reason, we can re-enable this when
-     * a better workflow has been established. */
-    {IDOK, L"Report a Bug"},
-#endif
+                                       {IDOK, L"Report a Bug"},
                                        {IDHELP, L"View Crash Log"},
                                        {IDCLOSE, L"Close"}};
 
@@ -692,7 +729,8 @@ void BLI_windows_exception_show_dialog(const char *filepath_crashlog,
             L"&project=blender"
             L"&os=" + url_encode_wstring(get_os_info()) +
             L"&gpu=" + url_encode_wstring(data_ptr->gpu_name) +
-            L"&broken_version=" + url_encode_wstring(data_ptr->build_version);
+            L"&broken_version=" + url_encode_wstring(data_ptr->build_version) +
+            L"&utm_content=crash_dialog";
         /* clang-format on */
         ShellExecuteW(nullptr, L"open", link.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         return S_FALSE;

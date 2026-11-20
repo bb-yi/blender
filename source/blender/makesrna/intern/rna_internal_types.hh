@@ -12,6 +12,7 @@
 #include <string>
 
 #include "BLI_map.hh"
+#include "BLI_ustring.hh"
 #include "BLI_vector_set.hh"
 
 #include "DNA_listBase.h"
@@ -36,6 +37,35 @@ struct ReportList;
 struct Scene;
 struct StructRNA;
 struct bContext;
+
+/** Internal Property flags WARNING! 16bits only! */
+enum PropertyFlagIntern : int16_t {
+  PROP_INTERN_BUILTIN = (1 << 0),
+  PROP_INTERN_RUNTIME = (1 << 1),
+  PROP_INTERN_RAW_ACCESS = (1 << 2),
+  PROP_INTERN_RAW_ARRAY = (1 << 3),
+  PROP_INTERN_FREE_POINTERS = (1 << 4),
+  /**
+   * Negative mirror of #PROP_PTR_NO_OWNERSHIP,
+   * used to prevent automatically setting that one in `makesrna` when pointer is an ID.
+   */
+  PROP_INTERN_PTR_OWNERSHIP_FORCED = (1 << 5),
+  /**
+   * Indicates that #PROP_ID_REFCOUNT has been explicitly set (using `RNA_def_property_flag`) or
+   * cleared (using `RNA_def_property_clear_flag`) by property definition code, and should
+   * therefore not be automatically defined based on #STRUCT_ID_REFCOUNT of the property type (in
+   * #rna_auto_types or #RNA_def_property_struct_runtime).
+   */
+  PROP_INTERN_PTR_ID_REFCOUNT_FORCED = (1 << 6),
+  /**
+   * Set on the RNA definition meta-types own properties (properties of `Struct`, `Property` and
+   * their sub-types).
+   *
+   * See also #StructFlag::STRUCT_RNA_DEFINITION for details.
+   */
+  PROP_INTERN_RNA_DEFINITION = (1 << 7),
+};
+ENUM_OPERATORS(PropertyFlagIntern)
 
 /* Function Callbacks */
 
@@ -185,7 +215,7 @@ struct PropertyRNAOrID {
    */
   IDProperty *idprop;
   /** The name of the property. */
-  const char *identifier;
+  UString identifier;
 
   /**
    * Whether this property is a 'pure' IDProperty or not.
@@ -333,7 +363,7 @@ struct RNAPropertyOverrideApplyContext {
 using RNAPropOverrideApply = bool (*)(Main *bmain, RNAPropertyOverrideApplyContext &rnaapply_ctx);
 
 struct PropertyRNAIdentifierGetter {
-  StringRef operator()(const PropertyRNA *prop) const;
+  UString operator()(const PropertyRNA *prop) const;
 };
 
 /** Container - generic abstracted container of RNA properties */
@@ -346,10 +376,10 @@ struct FunctionRNA {
   /** Structs are containers of properties. */
   ContainerRNA cont = {};
   /** Unique identifier, keep after `cont`. */
-  const char *identifier = nullptr;
+  UString identifier;
 
   /** Various options */
-  int flag = 0;
+  FunctionFlag flag = {};
 
   /** Single line description, displayed in the tool-tip for example. */
   const char *description = nullptr;
@@ -372,15 +402,15 @@ struct PropertyRNA {
   int magic;
 
   /** Unique identifier. */
-  const char *identifier;
+  UString identifier;
   /** Various options. */
-  int flag;
+  PropertyFlag flag;
   /** Various override options. */
-  int flag_override;
+  PropertyOverrideFlag flag_override;
   /** Function parameters flags. */
-  short flag_parameter;
+  ParameterFlag flag_parameter;
   /** Internal ("private") flags. */
-  short flag_internal;
+  PropertyFlagIntern flag_internal;
   /** The subset of #StructRNA::prop_tag_defines values that applies to this property. */
   short tags;
 
@@ -462,31 +492,10 @@ struct PropertyRNA {
   void *py_data;
 };
 
-inline StringRef PropertyRNAIdentifierGetter::operator()(const PropertyRNA *prop) const
+inline UString PropertyRNAIdentifierGetter::operator()(const PropertyRNA *prop) const
 {
   return prop->identifier;
 }
-
-/** Internal flags WARNING! 16bits only! */
-enum PropertyFlagIntern {
-  PROP_INTERN_BUILTIN = (1 << 0),
-  PROP_INTERN_RUNTIME = (1 << 1),
-  PROP_INTERN_RAW_ACCESS = (1 << 2),
-  PROP_INTERN_RAW_ARRAY = (1 << 3),
-  PROP_INTERN_FREE_POINTERS = (1 << 4),
-  /**
-   * Negative mirror of #PROP_PTR_NO_OWNERSHIP,
-   * used to prevent automatically setting that one in `makesrna` when pointer is an ID.
-   */
-  PROP_INTERN_PTR_OWNERSHIP_FORCED = (1 << 5),
-  /**
-   * Indicates that #PROP_ID_REFCOUNT has been explicitly set (using `RNA_def_property_flag`) or
-   * cleared (using `RNA_def_property_clear_flag`) by property definition code, and should
-   * therefore not be automatically defined based on #STRUCT_ID_REFCOUNT of the property type (in
-   * #rna_auto_types or #RNA_def_property_struct_runtime).
-   */
-  PROP_INTERN_PTR_ID_REFCOUNT_FORCED = (1 << 6),
-};
 
 /* Property Types. */
 
@@ -663,7 +672,7 @@ struct StructRNA {
   /** Structs are containers of properties. */
   ContainerRNA cont = {};
   /** Unique identifier, keep after `cont`. */
-  const char *identifier = nullptr;
+  UString identifier;
 
   /**
    * Python type, this is a sub-type of #pyrna_struct_Type
@@ -675,7 +684,7 @@ struct StructRNA {
   void *blender_type = nullptr;
 
   /** Various options. */
-  int flag = 0;
+  StructFlag flag = {};
   /**
    * Each StructRNA type can define its own tags which properties can set
    * (PropertyRNA.tags) for changed behavior based on struct-type.
@@ -752,7 +761,7 @@ struct BlenderRNA {
    * A map of structs: `{StructRNA.identifier -> StructRNA}`
    * These are ensured to have unique names (with #STRUCT_PUBLIC_NAMESPACE enabled).
    */
-  Map<StringRef, StructRNA *> structs_map;
+  Map<UString, StructRNA *> structs_map;
 
   /**
    * This RNA container is created at runtime and is not the main static RNA. This is currently

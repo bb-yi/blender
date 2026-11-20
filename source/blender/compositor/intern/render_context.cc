@@ -5,14 +5,14 @@
 #include <memory>
 #include <string>
 
-#include "BLI_assert.h"
-#include "BLI_listbase.h"
+#include "BLI_assert.hh"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_c.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 
 #include "MEM_guardedalloc.h"
 
@@ -121,7 +121,7 @@ void FileOutput::add_pass(const char *pass_name,
   /* Passes can only be added for EXR images. */
   BLI_assert(ELEM(format_.imtype, R_IMF_IMTYPE_OPENEXR, R_IMF_IMTYPE_MULTILAYER));
 
-  RenderLayer *render_layer = static_cast<RenderLayer *>(render_result_->layers.first);
+  RenderLayer *render_layer = render_result_->layers.first();
   RenderPass *render_pass = MEM_new<RenderPass>("Render Pass For File Output.");
   if (!output_colorspace.is_empty()) {
     pass_colorspaces_.add(render_pass, output_colorspace);

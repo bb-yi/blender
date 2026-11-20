@@ -6,7 +6,7 @@ import numpy as np
 from .....io.com.gltf2_io_extensions import Extension
 from ....com.conversion import get_anisotropy_rotation_blender_to_gltf
 from ...material import texture_info as gltf2_blender_gather_texture_info
-from ..search_node_tree import detect_anisotropy_nodes, get_socket, has_image_node_from_socket, get_factor_from_socket
+from ..search_node_tree import detect_anisotropy_nodes, has_image_node_from_socket, get_factor_from_socket
 from ..encode_image import TmpImageGuard, make_temp_image_copy, StoreImage, StoreData
 
 
@@ -16,11 +16,9 @@ def export_anisotropy(bmat, export_settings):
     uvmap_infos = {}
     udim_infos = {}
 
-    anisotropy_socket = get_socket(bmat.get_used_material().node_tree, 'Anisotropic')
-    anisotropic_rotation_socket = get_socket(
-        bmat.get_used_material().node_tree,
-        'Anisotropic Rotation')
-    anisotropy_tangent_socket = get_socket(bmat.get_used_material().node_tree, 'Tangent')
+    anisotropy_socket = bmat.get_socket('Anisotropic')
+    anisotropic_rotation_socket = bmat.get_socket('Anisotropic Rotation')
+    anisotropy_tangent_socket = bmat.get_socket('Tangent')
 
     if anisotropy_socket.socket is None or anisotropic_rotation_socket.socket is None or anisotropy_tangent_socket.socket is None:
         return None, {}, {}
@@ -128,6 +126,7 @@ def export_anisotropy(bmat, export_settings):
         anisotropy_data['tex_socket'],
         (anisotropy_data['tex_socket'],),
         export_settings,
+        kind='DATA'
     )
     anisotropy_extension['anisotropyTexture'] = anisotropy_texture
     uvmap_infos.update({'anisotropyTexture': uvmap_info})
@@ -156,11 +155,9 @@ def export_anisotropy(bmat, export_settings):
 def export_anisotropy_from_grayscale_textures(bmat, export_settings):
     # There will be a texture, with a complex calculation (no direct channel mapping)
 
-    anisotropy_socket = get_socket(bmat.get_used_material().node_tree, 'Anisotropic')
-    anisotropic_rotation_socket = get_socket(
-        bmat.get_used_material().node_tree,
-        'Anisotropic Rotation')
-    anisotropy_tangent_socket = get_socket(bmat.get_used_material().node_tree, 'Tangent')
+    anisotropy_socket = bmat.get_socket('Anisotropic')
+    anisotropic_rotation_socket = bmat.get_socket('Anisotropic Rotation')
+    anisotropy_tangent_socket = bmat.get_socket('Tangent')
 
     sockets = (anisotropy_socket, anisotropic_rotation_socket, anisotropy_tangent_socket)
 
@@ -173,7 +170,9 @@ def export_anisotropy_from_grayscale_textures(bmat, export_settings):
         primary_socket,
         sockets,
         export_settings,
-        filter_type='ANY')
+        filter_type='ANY',
+        kind='DATA'
+    )
 
     if anisotropyTexture is None:
         return None, {}
@@ -208,9 +207,9 @@ def grayscale_anisotropy_calculation(stored, export_settings):
                 images.append(fill.image)
 
     if not images:
-        # No ImageFills; use a 1x1 white pixel
-        pixels = np.array([1.0, 1.0, 1.0, 1.0], np.float32)
-        return pixels, 1, 1
+        # No ImageFills; use a 4x4 white pixel
+        pixels = np.array([1.0, 1.0, 1.0, 1.0] * 16, np.float32)
+        return pixels, 4, 4
 
     width = max(image.size[0] for image in images)
     height = max(image.size[1] for image in images)

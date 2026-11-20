@@ -11,8 +11,8 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_math_vector.h"
-#include "BLI_string_utf8.h"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string_utf8.hh"
 
 #include "BKE_nla.hh"
 #include "BKE_scene.hh"
@@ -69,7 +69,7 @@ static void applyTimeSlideValue(TransInfo *t, float sval, float cval)
 
   /* Set value for drawing black line. */
   if (t->spacetype == SPACE_ACTION) {
-    SpaceAction *saction = static_cast<SpaceAction *>(t->area->spacedata.first);
+    SpaceAction *saction = t->area->spacedata.first_as<SpaceAction>();
     saction->timeslide = cval;
   }
 
@@ -164,7 +164,7 @@ static void initTimeSlide(TransInfo *t, wmOperator * /*op*/)
 {
   /* This tool is only really available in the Action Editor. */
   if (t->spacetype == SPACE_ACTION) {
-    SpaceAction *saction = static_cast<SpaceAction *>(t->area->spacedata.first);
+    SpaceAction *saction = t->area->spacedata.first_as<SpaceAction>();
 
     /* Set flag for drawing stuff. */
     saction->flag |= SACTION_MOVING;
@@ -237,6 +237,7 @@ TransModeInfo TransMode_timeslide = {
     /*snap_distance_fn*/ nullptr,
     /*snap_apply_fn*/ nullptr,
     /*draw_fn*/ nullptr,
+    /*status_fn*/ nullptr,
 };
 
 }  // namespace blender::ed::transform

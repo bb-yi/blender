@@ -2,7 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/**
+/** \file
+ * \ingroup fn
+ *
  * This file implements the evaluation of a lazy-function graph. It's main objectives are:
  * - Only compute values that are actually used.
  * - Stay single threaded when nodes are executed quickly.
@@ -49,8 +51,8 @@
 #include "BLI_function_ref.hh"
 #include "BLI_mutex.hh"
 #include "BLI_stack.hh"
-#include "BLI_task.h"
 #include "BLI_task.hh"
+#include "BLI_task_c.hh"
 
 #include "FN_lazy_function_graph_executor.hh"
 #include "FN_lazy_function_graph_executor_generic.hh"

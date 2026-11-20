@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup eevee
+ */
+
 #include "eevee_lightprobe_sphere.hh"
 #include "eevee_instance.hh"
 
@@ -170,13 +174,13 @@ void SphereProbeModule::end_sync()
 void SphereProbeModule::ensure_cubemap_render_target(int resolution)
 {
   eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ;
-  if (cubemap_tx_.ensure_cube(gpu::TextureFormat::SFLOAT_16_16_16_16, resolution, usage)) {
+  if (cubemap_tx_.ensure_cube(gpu::TextureFormat::SFLOAT_32_32_32_32, resolution, usage)) {
     for (int i : IndexRange(6)) {
       GPU_TEXTURE_FREE_SAFE(cubemap_face_views_[i]);
       /* Each cubemap face view addresses exactly one array layer. */
       cubemap_face_views_[i] = GPU_texture_create_view("Probe.Cubemap.View",
                                                        cubemap_tx_,
-                                                       gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                                       gpu::TextureFormat::SFLOAT_32_32_32_32,
                                                        0,
                                                        1,
                                                        i,
@@ -185,7 +189,14 @@ void SphereProbeModule::ensure_cubemap_render_target(int resolution)
                                                        false);
     }
   }
-  /* TODO(fclem): deallocate it. */
+}
+
+void SphereProbeModule::release_render_target()
+{
+  for (int i : IndexRange(6)) {
+    GPU_TEXTURE_FREE_SAFE(cubemap_face_views_[i]);
+  }
+  cubemap_tx_.free();
 }
 
 SphereProbeModule::UpdateInfo SphereProbeModule::update_info_from_probe(SphereProbe &probe)
@@ -199,8 +210,6 @@ SphereProbeModule::UpdateInfo SphereProbeModule::update_info_from_probe(SpherePr
 
   probe.do_render = false;
   probe.use_for_render = true;
-
-  ensure_cubemap_render_target(info.cube_target_extent);
   return info;
 }
 

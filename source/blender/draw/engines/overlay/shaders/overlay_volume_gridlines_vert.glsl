@@ -8,7 +8,7 @@ VERTEX_SHADER_CREATE_INFO(overlay_volume_gridlines_range)
 
 #include "draw_model_lib.glsl"
 #include "draw_view_lib.glsl"
-#include "gpu_shader_math_vector_compare_lib.glsl"
+#include "gpu_shader_math_vector_compare.bsl.hh"
 #include "select_lib.glsl"
 
 float4 flag_to_color(uint flag)
@@ -93,14 +93,14 @@ void main()
 #endif
   /* NOTE(Metal): Declaring constant arrays in function scope to avoid increasing local shader
    * memory pressure. */
-  constexpr int indices[8] = int_array(0, 1, 1, 2, 2, 3, 3, 0);
+  constexpr int indices[8] = {0, 1, 1, 2, 2, 3, 3, 0};
 
   /* Corners for cell outlines. 0.45 is arbitrary. Any value below 0.5f can be used to avoid
    * overlapping of the outlines. */
-  constexpr float3 corners[4] = float3_array(float3(-0.45f, 0.45f, 0.0f),
-                                             float3(0.45f, 0.45f, 0.0f),
-                                             float3(0.45f, -0.45f, 0.0f),
-                                             float3(-0.45f, -0.45f, 0.0f));
+  constexpr float3 corners[4] = {float3(-0.45f, 0.45f, 0.0f),
+                                 float3(0.45f, 0.45f, 0.0f),
+                                 float3(0.45f, -0.45f, 0.0f),
+                                 float3(-0.45f, -0.45f, 0.0f)};
 
   float3 pos = domain_origin_offset +
                cell_size * (float3(cell_co + adaptive_cell_offset) + cell_offset);

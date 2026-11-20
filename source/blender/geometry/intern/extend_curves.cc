@@ -33,7 +33,7 @@ static void extend_curve_straight(const float used_percent_length,
 {
   float overshoot_point_param = used_percent_length * (new_size - 1);
   if (start_points[curve]) {
-    /** Here we use the vector between two adjacent points around #overshoot_point_param as
+    /* Here we use the vector between two adjacent points around #overshoot_point_param as
      * our reference for the direction of extension, however to have better tolerance for jitter,
      * using the vector (a_few_points_back - end_point) might be a better solution in the future.
      */
@@ -48,7 +48,7 @@ static void extend_curve_straight(const float used_percent_length,
                                       positions[new_curve[index2]],
                                       fmodf(overshoot_point_param, 1.0f));
     result -= positions[new_curve.first()];
-    if (UNLIKELY(math::is_zero(result))) {
+    if (math::is_zero(result)) [[unlikely]] {
       result = positions[new_curve[1]] - positions[new_curve[0]];
     }
     positions[new_curve[0]] += result * (-use_start_lengths[curve] / math::length(result));
@@ -61,7 +61,7 @@ static void extend_curve_straight(const float used_percent_length,
                                       positions[new_curve[index2]],
                                       fmodf(overshoot_point_param, 1.0f));
     result -= positions[new_curve.last()];
-    if (UNLIKELY(math::is_zero(result))) {
+    if (math::is_zero(result)) [[unlikely]] {
       result = positions[new_curve[new_size - 2]] - positions[new_curve[new_size - 1]];
     }
     positions[new_curve[new_size - 1]] += result *
@@ -145,7 +145,7 @@ static void extend_curve_curved(const float used_percent_length,
       total_angle += no;
     }
 
-    if (UNLIKELY(overshoot_length == 0.0f)) {
+    if (overshoot_length == 0.0f) [[unlikely]] {
       /* Don't do a proper extension if the used points are all in the same position. */
       continue;
     }

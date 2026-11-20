@@ -14,9 +14,9 @@
 #include <string>
 #include <type_traits>
 
-#include "BLI_compiler_attrs.h"
+#include "BLI_compiler_attrs.hh"
 #include "BLI_span.hh"
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 #include "DNA_vec_types.h"
 
@@ -63,7 +63,6 @@ void PyC_StackSpit();
  */
 bool PyC_Err_CaptureSystemExitCode();
 
-[[nodiscard]] PyObject *PyC_Object_GetAttrStringArgs(PyObject *o, Py_ssize_t n, ...);
 [[nodiscard]] PyObject *PyC_FrozenSetFromStrings(const char **strings);
 
 /**

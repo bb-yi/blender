@@ -30,9 +30,9 @@
 
 #  include <fmt/format.h>
 
-#  include "BLI_math_vector.h"
-#  include "BLI_string.h"
-#  include "BLI_threads.h"
+#  include "BLI_math_vector_c.hh"
+#  include "BLI_string.hh"
+#  include "BLI_threads.hh"
 
 #  include "BKE_colorband.hh"
 #  include "BKE_context.hh"
@@ -241,7 +241,7 @@ static bool rna_Fluid_parts_exists(PointerRNA *ptr, int ptype)
   Object *ob = id_cast<Object *>(ptr->owner_id);
   ParticleSystem *psys;
 
-  for (psys = static_cast<ParticleSystem *>(ob->particlesystem.first); psys; psys = psys->next) {
+  for (psys = ob->particlesystem.first(); psys; psys = psys->next) {
     if (psys->part->type == ptype) {
       return true;
     }

@@ -174,7 +174,7 @@ static void node_geo_exec(GeoNodeExecParams params)
     for (const int64_t list_i : range) {
       /* Create input value. */
       BLI_assert(list_i < std::numeric_limits<int>::max());
-      closure_params.inputs[0].value = bke::SocketValueVariant::From(int(list_i));
+      closure_params.inputs[0].value = bke::SocketValueVariant::from(int(list_i));
 
       /* Set output locations. */
       for (const int required_i : required_items.index_range()) {
@@ -197,9 +197,9 @@ static void node_geo_exec(GeoNodeExecParams params)
     const UString identifier{ItemsAccessor::output_socket_identifier_for_item(items[item_i])};
     Array<bke::SocketValueVariant> &values = closure_results[required_i];
 
-    if (std::all_of(values.begin(), values.end(), [](const bke::SocketValueVariant &value) {
-          return value.is_single();
-        }))
+    if (std::all_of(values.begin(),
+                    values.end(),
+                    [](const bke::SocketValueVariant &value) { return value.is_single(); }))
     {
       const eNodeSocketDatatype socket_type = items[item_i].socket_type;
       const CPPType &type = *bke::socket_type_to_geo_nodes_base_cpp_type(socket_type);
@@ -207,7 +207,7 @@ static void node_geo_exec(GeoNodeExecParams params)
       GArray<> array(type, count, NoInitialization());
       threading::parallel_for(IndexRange(count), 128, [&](const IndexRange range) {
         for (const int list_i : range) {
-          void *closure_result = const_cast<void *>(values[list_i].get_single_ptr_raw());
+          void *closure_result = values[list_i].get_if(type);
           type.move_construct(closure_result, array[list_i]);
         }
       });

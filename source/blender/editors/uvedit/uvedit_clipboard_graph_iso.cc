@@ -7,9 +7,13 @@
  * graphISO: Tools to compute the Maximum Common Subgraph between two graphs.
  */
 
+/** \file
+ * \ingroup eduv
+ */
+
 #include "uvedit_clipboard_graph_iso.hh"
 
-#include "BLI_assert.h"
+#include "BLI_assert.hh"
 
 #include "MEM_guardedalloc.h"
 

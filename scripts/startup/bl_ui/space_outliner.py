@@ -72,7 +72,7 @@ class OUTLINER_HT_header(Header):
             sub.prop(space, "filter_id_type", text="", icon_only=True)
 
         if display_mode == 'VIEW_LAYER':
-            layout.operator("outliner.collection_new", text="", icon='COLLECTION_NEW').nested = True
+            layout.operator("outliner.collection_new", text="", icon='COLLECTION_NEW')
 
         elif display_mode == 'ORPHAN_DATA':
             layout.operator("outliner.orphans_purge", text="Purge")
@@ -191,7 +191,7 @@ class OUTLINER_MT_view_pie(Menu):
 
 
 class OUTLINER_MT_id_data(Menu):
-    bl_label = "ID Data"
+    bl_label = "Data-block"
 
     @classmethod
     def poll(cls, context):
@@ -274,8 +274,8 @@ class OUTLINER_MT_collection(Menu):
 
         space = context.space_data
 
-        layout.operator("outliner.collection_new", text="New", text_ctxt=i18n_contexts.id_collection).nested = True
-        layout.operator("outliner.collection_duplicate", text="Duplicate Collection")
+        layout.operator("outliner.collection_new", text="New", text_ctxt=i18n_contexts.id_collection)
+        layout.operator("outliner.collection_duplicate", text="Duplicate Collection", icon='DUPLICATE')
         layout.operator("outliner.collection_duplicate_linked", text="Duplicate Linked")
         layout.operator("outliner.id_copy", text="Copy", icon='COPYDOWN')
         layout.operator("outliner.id_paste", text="Paste", icon='PASTEDOWN')
@@ -324,7 +324,7 @@ class OUTLINER_MT_collection_new(Menu):
 
     @staticmethod
     def draw_without_context_menu(_context, layout):
-        layout.operator("outliner.collection_new", text="New Collection").nested = True
+        layout.operator("outliner.collection_new", text="New Collection")
         layout.operator("outliner.id_paste", text="Paste Data-Blocks", icon='PASTEDOWN')
 
     def draw(self, context):
@@ -365,7 +365,7 @@ class OUTLINER_MT_object(Menu):
             layout.operator("outliner.id_operation", text="Unlink").type = 'UNLINK'
             layout.separator()
 
-        layout.operator("outliner.collection_new", text="New Collection").nested = True
+        layout.operator("outliner.collection_new", text="New Collection")
 
         layout.separator()
 
@@ -455,8 +455,12 @@ class OUTLINER_PT_filter(Panel):
             layout.separator()
 
         if display_mode != 'DATA_API':
-            col = layout.column(align=True)
-            col.prop(space, "use_sort_alpha")
+            col = layout.column()
+            col.use_property_split = True
+            col.use_property_decorate = False
+            sub = col.column()
+            sub.prop(space, "sort_method", text="Sort")
+            layout.separator()
 
         if display_mode != 'LIBRARY_OVERRIDES':
             col = layout.column(align=True)
@@ -465,9 +469,17 @@ class OUTLINER_PT_filter(Panel):
             row = col.row(align=True)
             row.active = space.use_sync_select
             row.prop(space, "scroll_to_active", text="Scroll to Active")
+            row = col.row(align=True)
+            row.active = space.scroll_to_active and space.use_sync_select
+            row.prop(space, "expand_on_focus")
 
             row = layout.row(align=True)
             row.prop(space, "show_mode_column", text="Show Mode Column")
+
+            if display_mode in {'VIEW_LAYER', 'SCENES'}:
+                row = layout.row(align=True)
+                row.prop(space, "show_users_column", text="Show Users Column")
+
             layout.separator()
 
         if display_mode == 'LIBRARY_OVERRIDES' and space.lib_override_view_mode == 'PROPERTIES' and bpy.data.libraries:
@@ -484,7 +496,6 @@ class OUTLINER_PT_options_search(Panel):
 
     @classmethod
     def poll(cls, context):
-        st = context.space_data
         space = context.space_data
         display_mode = space.display_mode
 
@@ -498,7 +509,6 @@ class OUTLINER_PT_options_search(Panel):
     def draw(self, context):
         layout = self.layout
         space = context.space_data
-        display_mode = space.display_mode
 
         col = layout.column(align=True)
         col.prop(space, "use_filter_complete", text="Exact Match")
@@ -520,7 +530,6 @@ class OUTLINER_PT_options_filter(Panel):
     def draw(self, context):
         layout = self.layout
         space = context.space_data
-        display_mode = space.display_mode
         col = layout.column(align=True)
 
         row = col.row()
@@ -543,13 +552,6 @@ class OUTLINER_PT_options_filter(Panel):
 
         sub = col.column(align=True)
         sub.active = space.use_filter_object
-
-        row = sub.row()
-        row.label(icon='BLANK1')
-        row.prop(space, "use_filter_object_content", text="Object Contents")
-        row = sub.row()
-        row.label(icon='BLANK1')
-        row.prop(space, "use_filter_children", text="Object Children")
 
         if bpy.data.meshes:
             row = sub.row()
@@ -593,6 +595,73 @@ class OUTLINER_PT_options_filter(Panel):
             row = sub.row()
             row.label(icon='BLANK1')
             row.prop(space, "use_filter_object_others", text="Others")
+
+        row = sub.row()
+        row.label(icon='BLANK1')
+        row.prop(space, "use_filter_children", text="Object Children")
+
+
+class OUTLINER_PT_options_object_data(Panel):
+    bl_space_type = 'OUTLINER'
+    bl_region_type = 'HEADER'
+    bl_label = ""
+    bl_parent_id = "OUTLINER_PT_options_filter"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw_header(self, context):
+        layout = self.layout
+        space = context.space_data
+        layout.prop(space, "use_filter_object_content", text="Object Contents")
+
+    def draw(self, context):
+        space = context.space_data
+        layout = self.layout
+
+        layout.active = space.use_filter_object and space.use_filter_object_content
+        panel_column = layout.column(align=True)
+        panel_column.use_property_split = False
+        panel_column.use_property_decorate = False
+
+        row = panel_column.row(align=True)
+        row.label(icon='OBJECT_DATA')
+        row.separator()
+        row.prop(space, "use_filter_object_data", text="Object Data")
+        row = panel_column.row(align=True)
+        row.label(icon='GROUP_VERTEX')
+        row.separator()
+        row.prop(space, "use_filter_object_vertex_groups", text="Vertex Groups")
+        row = panel_column.row(align=True)
+        row.label(icon='SHAPEKEY_DATA')
+        row.separator()
+        row.prop(space, "use_filter_object_shape_keys", text="Shape Keys")
+        row = panel_column.row(align=True)
+        row.label(icon='ANIM_DATA')
+        row.separator()
+        row.prop(space, "use_filter_object_animation", text="Animation Data")
+        row = panel_column.row(align=True)
+        row.label(icon='CONSTRAINT')
+        row.separator()
+        row.prop(space, "use_filter_object_constraints", text="Constraints")
+        row = panel_column.row(align=True)
+        row.label(icon='MODIFIER_ON')
+        row.separator()
+        row.prop(space, "use_filter_object_modifiers", text="Modifiers")
+        row = panel_column.row(align=True)
+        row.label(icon='GROUP_BONE')
+        row.separator()
+        row.prop(space, "use_filter_bone_collections", text="Bone Collections")
+        row = panel_column.row(align=True)
+        row.label(icon='SHADERFX')
+        row.separator()
+        row.prop(space, "use_filter_grease_pencil_effects", text="Grease Pencil Effects")
+        row = panel_column.row(align=True)
+        row.label(icon='BONE_DATA')
+        row.separator()
+        row.prop(space, "use_filter_pose_bones", text="Pose Bones")
+        row = panel_column.row(align=True)
+        row.label(icon='MATERIAL')
+        row.separator()
+        row.prop(space, "use_filter_object_materials", text="Materials")
 
 
 class OUTLINER_PT_eevee_performance(Panel):
@@ -639,6 +708,7 @@ classes = (
     OUTLINER_PT_eevee_performance,
     OUTLINER_PT_options_search,
     OUTLINER_PT_options_filter,
+    OUTLINER_PT_options_object_data,
 )
 
 if __name__ == "__main__":  # only for live edit.

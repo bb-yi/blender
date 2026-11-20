@@ -4,16 +4,17 @@
 
 #pragma once
 
-#include "BLI_bounds_types.hh"
-#include "BLI_math_vector_types.hh"
+#include <cstdint>
+
+#include "BLI_enum_flags.hh"
 #include "BLI_string_ref.hh"
 
 #include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
 
-#include "GPU_shader.hh"
+#include "BKE_compute_context_cache_fwd.hh"
 
-#include "BKE_compute_context_cache.hh"
+#include "GPU_shader.hh"
 
 #include "COM_domain.hh"
 #include "COM_meta_data.hh"
@@ -23,6 +24,7 @@
 
 namespace blender {
 struct Main;
+class ComputeContext;
 }  // namespace blender
 
 namespace blender::nodes::eval_log {
@@ -31,22 +33,34 @@ class NodesEvalLog;
 
 namespace blender::compositor {
 
+/* A bit flag of compositor side effect outputs than can be computed. */
+enum class SideEffectOutputTypes : uint8_t {
+  None = 0,
+  ViewerNode = 1 << 0,
+  FileOutputNode = 1 << 1,
+  NodePreviews = 1 << 2,
+};
+ENUM_OPERATORS(SideEffectOutputTypes)
+
 /* ------------------------------------------------------------------------------------------------
  * Context
  *
  * A Context is an abstract class that is implemented by the caller of the evaluator to provide the
  * necessary data and functionalities for the correct operation of the evaluator. This includes
  * providing input data like render passes and the active scene, as well as callbacks to write the
- * outputs of the compositor. Finally, the class have a reference to a static resource manager for
- * acquiring cached resources efficiently. */
+ * outputs of the compositor. Finally, the class have a reference to a static cache manager and a
+ * compute context cache. */
 class Context {
  private:
   /* A static cache manager that can be used to acquire cached resources for the compositor
    * efficiently. */
   StaticCacheManager &cache_manager_;
+  /* A compute context cache that can be used to acquire compute contexts throughout the compositor
+   * evaluation. */
+  bke::ComputeContextCache &compute_context_cache_;
 
  public:
-  Context(StaticCacheManager &cache_manager);
+  Context(StaticCacheManager &cache_manager, bke::ComputeContextCache &compute_context_cache);
 
   virtual const Main &get_main() const = 0;
 
@@ -61,6 +75,12 @@ class Context {
 
   /* True if the compositor should use GPU acceleration. */
   virtual bool use_gpu() const = 0;
+
+  /* Returns the side effect output types that needs to be computed. */
+  virtual SideEffectOutputTypes needed_side_effect_output_types() const = 0;
+
+  /* Returns the compute context of the active viewer if one exists. */
+  virtual const ComputeContext *viewer_compute_context() const = 0;
 
   /* Get the strip that the compositing modifier is applied to. */
   virtual const Strip *get_strip() const;
@@ -80,15 +100,6 @@ class Context {
   /* Get the precision of the intermediate results of the compositor. */
   virtual ResultPrecision get_precision() const;
 
-  /* Set an info message. This is called by the compositor evaluator to inform or warn the user
-   * about something, typically an error. The implementation should display the message in an
-   * appropriate place, which can be directly in the UI or just logged to the output stream. */
-  virtual void set_info_message(StringRef message) const;
-
-  /* True if the compositor should treat viewer nodes as group output nodes because it has no
-   * concept of or support for viewers. */
-  virtual bool treat_viewer_as_group_output() const;
-
   /* Populates the given meta data from the render stamp information of the given render pass. */
   virtual void populate_meta_data_for_pass(const Scene *scene,
                                            int view_layer_id,
@@ -99,6 +110,10 @@ class Context {
    * the current render. It might be null if the compositor is not being evaluated as part of a
    * render pipeline. */
   virtual RenderContext *render_context() const;
+
+  /* Returns true if this context is the viewport compositor, as opposed to the interactive
+   * compositor or a final render. */
+  virtual bool is_viewport() const;
 
   /* Returns a pointer to a nodes evaluation log of the context, this can be nullptr for context
    * that does not support logging. */
@@ -139,6 +154,9 @@ class Context {
 
   /* Get a reference to the static cache manager of this context. */
   StaticCacheManager &cache_manager();
+
+  /* Get a reference to the compute context cache of this context. */
+  bke::ComputeContextCache &compute_context_cache() const;
 };
 
 }  // namespace blender::compositor

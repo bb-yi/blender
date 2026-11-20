@@ -9,8 +9,8 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_array.hh"
-#include "BLI_fileops.h"
-#include "BLI_threads.h"
+#include "BLI_fileops.hh"
+#include "BLI_threads.hh"
 
 #include "IMB_colormanagement.hh"
 #include "IMB_filetype.hh"

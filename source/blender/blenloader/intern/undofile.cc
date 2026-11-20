@@ -23,7 +23,7 @@
 #include "DNA_listBase.h"
 
 #include "BLI_implicit_sharing.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 
 #include "BLO_readfile.hh"
 #include "BLO_undofile.hh"
@@ -32,7 +32,7 @@
 #include "BKE_main.hh"
 #include "BKE_undo_system.hh"
 
-#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
+#include "BLI_strict_flags.hh" /* IWYU pragma: keep. Keep last. */
 
 #include "writefile.hh"
 
@@ -108,7 +108,7 @@ void BLO_memfile_write_init(WriteData *wd,
   mem_data->written_memfile = written_memfile;
   mem_data->reference_memfile = reference_memfile;
   mem_data->reference_current_chunk = reference_memfile ? static_cast<MemFileChunk *>(
-                                                              reference_memfile->chunks.first) :
+                                                              reference_memfile->chunks.first_) :
                                                           nullptr;
 
   /* If we have a reference memfile, we generate a mapping between the session_uid's of the
@@ -205,7 +205,7 @@ static int64_t undo_read(FileReader *reader, void *buffer, size_t size)
   }
 
   if (seek != size_t(undo->reader.offset)) {
-    chunk = static_cast<MemFileChunk *>(undo->memfile->chunks.first);
+    chunk = undo->memfile->chunks.first();
     seek = 0;
 
     while (chunk) {

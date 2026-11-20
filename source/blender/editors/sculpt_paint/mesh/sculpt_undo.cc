@@ -33,12 +33,12 @@
 #include "BLI_bit_group_vector.hh"
 #include "BLI_compression.hh"
 #include "BLI_enumerable_thread_specific.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
 #include "BLI_memory_counter.hh"
-#include "BLI_string_utf8.h"
-#include "BLI_task.h"
-#include "BLI_utildefines.h"
+#include "BLI_string_utf8.hh"
+#include "BLI_task_c.hh"
+#include "BLI_utildefines.hh"
 #include "BLI_vector.hh"
 
 #include "DNA_key_types.h"
@@ -130,8 +130,6 @@ namespace ed::sculpt_paint::undo {
  *
  * End of dynamic topology and symmetrize in this mode are handled in a special manner as well. */
 
-#define NO_ACTIVE_LAYER bke::AttrDomain::Auto
-
 struct Node {
   Array<float3, 0> position;
   Array<float3, 0> orig_position;
@@ -167,9 +165,9 @@ struct Node {
 };
 
 struct SculptAttrRef {
-  bke::AttrDomain domain;
-  eCustomDataType type;
-  char name[MAX_CUSTOMDATA_LAYER_NAME];
+  std::optional<bke::AttrDomain> domain;
+  bke::AttrType type;
+  std::string name;
   bool was_set;
 };
 
@@ -535,7 +533,7 @@ static bool restore_active_shape_key(bContext &C,
     if (kb) {
       object.shapenr = BLI_findindex(&key->block, kb) + 1;
 
-      BKE_sculpt_update_object_for_edit(&depsgraph, &object, false);
+      BKE_sculptsession_update_for_edit(&depsgraph, &object, false);
       WM_event_add_notifier(&C, NC_OBJECT | ND_DATA, &object);
     }
     else {
@@ -1014,17 +1012,17 @@ static int bmesh_restore(bContext *C, Depsgraph &depsgraph, StepData &step_data,
   SculptSession &ss = *object.runtime->sculpt_session;
   switch (step_data.type) {
     case Type::DyntopoBegin:
-      BKE_sculpt_update_object_for_edit(&depsgraph, &object, false);
+      BKE_sculptsession_update_for_edit(&depsgraph, &object, false);
       bmesh_handle_dyntopo_begin(C, step_data, object);
       return true;
 
     case Type::DyntopoEnd:
-      BKE_sculpt_update_object_for_edit(&depsgraph, &object, false);
+      BKE_sculptsession_update_for_edit(&depsgraph, &object, false);
       bmesh_handle_dyntopo_end(C, step_data, object);
       return true;
     default:
       if (ss.bm_log) {
-        BKE_sculpt_update_object_for_edit(&depsgraph, &object, false);
+        BKE_sculptsession_update_for_edit(&depsgraph, &object, false);
         bmesh_restore_generic(step_data, object);
         return true;
       }
@@ -1123,7 +1121,7 @@ static void restore_list(bContext *C, Depsgraph *depsgraph, StepData &step_data)
       IndexMaskMemory memory;
       const IndexMask node_mask = bke::pbvh::all_leaf_nodes(pbvh, memory);
 
-      BKE_sculpt_update_object_for_edit(depsgraph, &object, false);
+      BKE_sculptsession_update_for_edit(depsgraph, &object, false);
       if (!topology_matches(step_data, object)) {
         return;
       }
@@ -1184,7 +1182,7 @@ static void restore_list(bContext *C, Depsgraph *depsgraph, StepData &step_data)
       IndexMaskMemory memory;
       const IndexMask node_mask = bke::pbvh::all_leaf_nodes(pbvh, memory);
 
-      BKE_sculpt_update_object_for_edit(depsgraph, &object, false);
+      BKE_sculptsession_update_for_edit(depsgraph, &object, false);
       if (!topology_matches(step_data, object)) {
         return;
       }
@@ -1231,7 +1229,7 @@ static void restore_list(bContext *C, Depsgraph *depsgraph, StepData &step_data)
       IndexMaskMemory memory;
       const IndexMask node_mask = bke::pbvh::all_leaf_nodes(pbvh, memory);
 
-      BKE_sculpt_update_object_for_edit(depsgraph, &object, false);
+      BKE_sculptsession_update_for_edit(depsgraph, &object, false);
       if (!topology_matches(step_data, object)) {
         return;
       }
@@ -1275,7 +1273,7 @@ static void restore_list(bContext *C, Depsgraph *depsgraph, StepData &step_data)
       IndexMaskMemory memory;
       const IndexMask node_mask = bke::pbvh::all_leaf_nodes(pbvh, memory);
 
-      BKE_sculpt_update_object_for_edit(depsgraph, &object, false);
+      BKE_sculptsession_update_for_edit(depsgraph, &object, false);
       if (!topology_matches(step_data, object)) {
         return;
       }
@@ -1317,7 +1315,7 @@ static void restore_list(bContext *C, Depsgraph *depsgraph, StepData &step_data)
       IndexMaskMemory memory;
       const IndexMask node_mask = bke::pbvh::all_leaf_nodes(pbvh, memory);
 
-      BKE_sculpt_update_object_for_edit(depsgraph, &object, false);
+      BKE_sculptsession_update_for_edit(depsgraph, &object, false);
       if (!topology_matches(step_data, object)) {
         return;
       }
@@ -1357,7 +1355,7 @@ static void restore_list(bContext *C, Depsgraph *depsgraph, StepData &step_data)
       IndexMaskMemory memory;
       const IndexMask node_mask = bke::pbvh::all_leaf_nodes(pbvh, memory);
 
-      BKE_sculpt_update_object_for_edit(depsgraph, &object, false);
+      BKE_sculptsession_update_for_edit(depsgraph, &object, false);
       if (!topology_matches(step_data, object)) {
         return;
       }
@@ -1945,20 +1943,23 @@ static void save_active_attribute(Object &object, SculptAttrRef *attr)
 {
   Mesh *mesh = BKE_object_get_original_mesh(&object);
   attr->was_set = true;
-  attr->domain = NO_ACTIVE_LAYER;
-  attr->name[0] = 0;
+  attr->domain = std::nullopt;
+  attr->name = "";
   if (!mesh) {
     return;
   }
   const char *name = mesh->active_color_attribute;
+  if (!name) {
+    return;
+  }
   const bke::AttributeAccessor attributes = mesh->attributes();
   const std::optional<bke::AttributeMetaData> meta_data = attributes.lookup_meta_data(name);
   if (!bke::mesh::is_color_attribute(meta_data)) {
     return;
   }
   attr->domain = meta_data->domain;
-  STRNCPY_UTF8(attr->name, name);
-  attr->type = *bke::attr_type_to_custom_data_type(meta_data->data_type);
+  attr->name = name;
+  attr->type = meta_data->data_type;
 }
 
 /**
@@ -2109,10 +2110,10 @@ void push_end_ex(Object &ob, const bool use_nested_undo)
   }
 
   /* We could remove this and enforce all callers run in an operator using 'OPTYPE_UNDO'. */
-  wmWindowManager *wm = static_cast<wmWindowManager *>(G_MAIN->wm.first);
+  wmWindowManager *wm = G_MAIN->wm.first();
   if (wm->op_undo_depth == 0 || use_nested_undo) {
     UndoStack *ustack = ED_undo_stack_get();
-    BKE_undosys_step_push(ustack, nullptr, nullptr);
+    BKE_undosys_step_push(ustack, nullptr, nullptr, UndoEncodeHints::None);
     if (wm->op_undo_depth == 0) {
       BKE_undosys_stack_limit_steps_and_memory_defaults(ustack);
     }
@@ -2137,7 +2138,7 @@ void push_end(Object &ob)
 
 static void set_active_layer(bContext *C, const SculptAttrRef *attr_ref)
 {
-  if (attr_ref->domain == bke::AttrDomain::Auto) {
+  if (!attr_ref->domain) {
     return;
   }
 
@@ -2159,14 +2160,14 @@ static void set_active_layer(bContext *C, const SculptAttrRef *attr_ref)
    */
   if (const bke::GAttributeReader attr = attributes.lookup(attr_ref->name)) {
     if (attr.domain != attr_ref->domain ||
-        bke::cpp_type_to_custom_data_type(attr.varray.type()) != attr_ref->type)
+        bke::cpp_type_to_attribute_type(attr.varray.type()) != attr_ref->type)
     {
       AttributeOwner owner = AttributeOwner::from_id(&mesh->id);
       if (ed::geometry::convert_attribute(owner,
                                           mesh->attributes_for_write(),
                                           attr_ref->name,
-                                          attr_ref->domain,
-                                          *bke::custom_data_type_to_attr_type(attr_ref->type),
+                                          *attr_ref->domain,
+                                          attr_ref->type,
                                           nullptr))
       {
       }
@@ -2175,10 +2176,8 @@ static void set_active_layer(bContext *C, const SculptAttrRef *attr_ref)
 
   if (!attributes.contains(attr_ref->name)) {
     /* Memfile undo killed the layer; re-create it. */
-    mesh->attributes_for_write().add(attr_ref->name,
-                                     attr_ref->domain,
-                                     *bke::custom_data_type_to_attr_type(attr_ref->type),
-                                     bke::AttributeInitDefaultValue());
+    mesh->attributes_for_write().add(
+        attr_ref->name, *attr_ref->domain, attr_ref->type, bke::AttributeInitDefaultValue());
     DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
   }
 
@@ -2191,6 +2190,8 @@ static void step_encode_init(bContext * /*C*/, UndoStep *us_p)
 {
   SculptUndoStep *us = reinterpret_cast<SculptUndoStep *>(us_p);
   new (&us->data) StepData();
+  new (&us->active_color_start) SculptAttrRef();
+  new (&us->active_color_end) SculptAttrRef();
 }
 
 static bool step_encode(bContext * /*C*/, Main *bmain, UndoStep *us_p)
@@ -2340,6 +2341,8 @@ static void step_free(UndoStep *us_p)
 {
   SculptUndoStep *us = reinterpret_cast<SculptUndoStep *>(us_p);
   free_step_data(us->data);
+  us->active_color_start.~SculptAttrRef();
+  us->active_color_end.~SculptAttrRef();
 }
 
 void geometry_begin(const Scene &scene, Object &ob, const wmOperator *op)
@@ -2405,10 +2408,10 @@ void geometry_end(Object &ob)
   step_data->undo_size = estimate_geometry_step_size(*step_data);
 
   /* We could remove this and enforce all callers run in an operator using 'OPTYPE_UNDO'. */
-  wmWindowManager *wm = static_cast<wmWindowManager *>(G_MAIN->wm.first);
+  wmWindowManager *wm = G_MAIN->wm.first();
   if (wm->op_undo_depth == 0) {
     UndoStack *ustack = ED_undo_stack_get();
-    BKE_undosys_step_push(ustack, nullptr, nullptr);
+    BKE_undosys_step_push(ustack, nullptr, nullptr, UndoEncodeHints::None);
     if (wm->op_undo_depth == 0) {
       BKE_undosys_stack_limit_steps_and_memory_defaults(ustack);
     }
@@ -2418,7 +2421,7 @@ void geometry_end(Object &ob)
 
 void register_type(UndoType *ut)
 {
-  ut->name = "Sculpt";
+  ut->identifier = "SCULPT";
   ut->poll = nullptr; /* No poll from context for now. */
   ut->step_encode_init = step_encode_init;
   ut->step_encode = step_encode;

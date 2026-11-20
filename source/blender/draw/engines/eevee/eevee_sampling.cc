@@ -13,10 +13,12 @@
 #include "BKE_colortools.hh"
 #include "BKE_scene.hh"
 
-#include "BLI_rand.h"
+#include "BLI_rand.hh"
+#include "BLI_rand_c.hh"
+#include "BLI_time.hh"
 
 #include "BLI_math_base.hh"
-#include "BLI_math_base_safe.h"
+#include "BLI_math_base_safe.hh"
 
 #include "eevee_instance.hh"
 #include "eevee_sampling.hh"
@@ -40,6 +42,7 @@ void Sampling::init(const Scene *scene, const int viewport_pixel_size)
 
   sample_count_ = (inst_.is_viewport() && scene_ref != nullptr) ? scene_ref->eevee.taa_samples :
                                                                   render_sample_count;
+  time_limit_ = scene->eevee.time_limit;
 
   if (inst_.is_image_render) {
     sample_count_ = math::max(uint64_t(1), sample_count_);
@@ -88,7 +91,7 @@ void Sampling::init(const Scene *scene, const int viewport_pixel_size)
   /* Only multiply after to have full the full DoF web pattern for each time steps. */
   sample_count_ *= motion_blur_steps_;
 
-  auto clamp_value_load = [](float value) { return (value > 0.0) ? value : 1e20; };
+  auto clamp_value_load = [](float value) { return (value > 0.0) ? value : unclamped_max; };
 
   clamp_data_.sun_threshold = clamp_value_load(inst_.world.sun_threshold());
   clamp_data_.surface_direct = clamp_value_load(
@@ -123,6 +126,10 @@ void Sampling::init(const Scene *scene, const int viewport_pixel_size)
       }
     }
   }
+
+  if (!inst_.is_viewport()) {
+    start_render_time_ = BLI_time_now_seconds();
+  }
 }
 
 void Sampling::init(const Object &probe_object)
@@ -133,12 +140,14 @@ void Sampling::init(const Object &probe_object)
 
   sample_count_ = max_ii(1, lightprobe.grid_bake_samples);
   sample_ = 0;
+  start_render_time_ = BLI_time_now_seconds();
 }
 
 void Sampling::end_sync()
 {
   if (reset_) {
     viewport_sample_ = 0;
+    start_render_time_ = BLI_time_now_seconds();
   }
 
   if (inst_.is_viewport()) {
@@ -163,6 +172,23 @@ void Sampling::end_sync()
       }
     }
   }
+}
+
+void Sampling::update_time()
+{
+  if (time_limit_ > 0.0f) {
+    current_time_ = BLI_time_now_seconds();
+  }
+}
+
+bool Sampling::check_time_limit_reached() const
+{
+  if (time_limit_ > 0.0f && sample_ > 0 && viewport_sample_ > 0) {
+    if (current_time_ - start_render_time_ >= time_limit_) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void Sampling::step()
@@ -274,6 +300,21 @@ void Sampling::step()
     data_.dimensions[SAMPLING_GBUFFER_U] = r[0];
     data_.dimensions[SAMPLING_GBUFFER_V] = r[1];
     data_.dimensions[SAMPLING_GBUFFER_W] = r[2];
+  }
+  {
+    /* Separate sequence for film accumulation buffer quantization dithering (see #129533). */
+    double x, offset = 0;
+    BLI_halton_1d(19, offset, sample_ + 1, &x);
+    data_.dimensions[SAMPLING_FILM_U] = float(x);
+  }
+  {
+    /* Separate sequence for panoramic film sample jittering. */
+    double2 r, offset = {0, 0};
+    uint64_t leap = 4;
+    uint2 primes = {5, 7};
+    BLI_halton_2d(primes, offset, sample_ * leap + 1, r);
+    data_.dimensions[SAMPLING_PANORAMIC_U] = r[0];
+    data_.dimensions[SAMPLING_PANORAMIC_V] = r[1];
   }
 
   for (int i : IndexRange(SAMPLING_DIMENSION_COUNT)) {

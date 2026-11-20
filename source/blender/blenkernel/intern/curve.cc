@@ -14,19 +14,19 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_ghash.h"
+#include "BLI_ghash.hh"
 #include "BLI_index_range.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_base_safe.h"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_solvers.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_base_safe.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_solvers.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 #include "BLT_translation.hh"
 
 /* Allow using deprecated functionality for .blend file I/O. */
@@ -233,13 +233,13 @@ static void curve_blend_read_data(BlendDataReader *reader, ID *id)
     BLO_read_struct_list(reader, Nurb, &(cu->nurb));
   }
   else {
-    cu->nurb.first = cu->nurb.last = nullptr;
+    cu->nurb.first_ = cu->nurb.last_ = nullptr;
 
-    if (UNLIKELY(cu->str == nullptr)) {
+    if (cu->str == nullptr) [[unlikely]] {
       cu->len_char32 = 0;
       cu->str = MEM_new_array_zeroed<char>(cu->len_char32 + 1, "str new");
     }
-    if (UNLIKELY(cu->strinfo == nullptr)) {
+    if (cu->strinfo == nullptr) [[unlikely]] {
       cu->strinfo = MEM_new_array<CharInfo>(cu->len_char32 + 1, "strinfo new");
     }
 
@@ -317,6 +317,7 @@ IDTypeInfo IDType_ID_CU_LEGACY = {
     .foreach_cache = nullptr,
     .foreach_path = nullptr,
     .foreach_working_space_color = nullptr,
+    .foreach_asset_weak_reference = nullptr,
     .owner_pointer_get = nullptr,
 
     .blend_write = curve_blend_write,
@@ -2083,7 +2084,7 @@ static void bevel_list_calc_bisect(BevList *bl)
   if (is_cyclic == false) {
     bevp0 = &bl->bevpoints[0];
     bevp1 = &bl->bevpoints[1];
-    if (UNLIKELY(is_zero_v3(bevp0->dir))) {
+    if (is_zero_v3(bevp0->dir)) [[unlikely]] {
       sub_v3_v3v3(bevp0->dir, bevp1->vec, bevp0->vec);
       if (normalize_v3(bevp0->dir) == 0.0f) {
         copy_v3_v3(bevp0->dir, bevp1->dir);
@@ -2092,7 +2093,7 @@ static void bevel_list_calc_bisect(BevList *bl)
 
     bevp0 = &bl->bevpoints[bl->nr - 2];
     bevp1 = &bl->bevpoints[bl->nr - 1];
-    if (UNLIKELY(is_zero_v3(bevp1->dir))) {
+    if (is_zero_v3(bevp1->dir)) [[unlikely]] {
       sub_v3_v3v3(bevp1->dir, bevp1->vec, bevp0->vec);
       if (normalize_v3(bevp1->dir) == 0.0f) {
         copy_v3_v3(bevp1->dir, bevp0->dir);
@@ -3110,6 +3111,11 @@ static void calchandleNurb_intern(BezTriple *bezt,
   bezt->auto_handle_type = HD_AUTOTYPE_NORMAL;
 
   if (bezt->h1 == 0 && bezt->h2 == 0) {
+    return;
+  }
+
+  if (prev == nullptr && next == nullptr) {
+    /* Single point, no need to calculate handles. */
     return;
   }
 

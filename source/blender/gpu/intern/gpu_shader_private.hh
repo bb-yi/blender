@@ -51,6 +51,7 @@ struct PatchedShaderCreateInfo {
  */
 class Shader {
  public:
+  std::shared_ptr<ShaderCompileDiagnostics> compilation_diagnostics;
   /** Uniform & attribute locations for shader. */
   ShaderInterface *interface = nullptr;
   /** Bit-set indicating the frame-buffer color attachments that this shader writes to. */
@@ -156,7 +157,8 @@ class Shader {
                  const char *log,
                  const char *stage,
                  bool error,
-                 GPULogParser *parser);
+                 GPULogParser *parser,
+                 StringRefNull compiled_source = {});
 };
 
 class ShaderCompiler {
@@ -228,7 +230,7 @@ class ShaderCompiler {
 
   AsyncCompilationHandle async_compilation(const shader::ShaderCreateInfo *info,
                                            CompilationPriority priority);
-  void asyc_compilation_cancel(AsyncCompilationHandle &handle);
+  void async_compilation_cancel(AsyncCompilationHandle &handle);
   bool async_compilation_is_ready(AsyncCompilationHandle handle);
   Shader *async_compilation_finalize(AsyncCompilationHandle &handle);
 

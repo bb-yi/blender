@@ -9,7 +9,7 @@
 
 #include "BKE_context.hh"
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "RE_engine.h"
 

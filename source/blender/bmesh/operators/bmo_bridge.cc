@@ -8,9 +8,9 @@
  * Connect verts across faces (splits faces) and bridge tool.
  */
 
-#include "BLI_listbase.h"
-#include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines.hh"
 
 #include "bmesh.hh"
 
@@ -99,8 +99,8 @@ static void bm_bridge_best_rotation(BMEdgeLoopStore *el_store_a, BMEdgeLoopStore
 {
   ListBaseT<LinkData> *lb_a = BM_edgeloop_verts_get(el_store_a);
   ListBaseT<LinkData> *lb_b = BM_edgeloop_verts_get(el_store_b);
-  LinkData *el_a = static_cast<LinkData *>(lb_a->first);
-  LinkData *el_b = static_cast<LinkData *>(lb_b->first);
+  LinkData *el_a = lb_a->first();
+  LinkData *el_b = lb_b->first();
   LinkData *el_b_first = el_b;
   LinkData *el_b_best = nullptr;
 
@@ -126,11 +126,6 @@ static void bm_face_edges_tag_out(BMesh *bm, BMFace *f)
   do {
     BMO_edge_flag_enable(bm, l_iter->e, EDGE_OUT);
   } while ((l_iter = l_iter->next) != l_first);
-}
-
-static bool bm_edge_test_cb(BMEdge *e, void *bm_v)
-{
-  return BMO_edge_flag_test((BMesh *)bm_v, e, EDGE_MARK);
 }
 
 static void bridge_loop_pair(BMesh *bm,
@@ -183,11 +178,11 @@ static void bridge_loop_pair(BMesh *bm,
     const float *test_a, *test_b;
 
     sub_v3_v3v3(dir_a_orig,
-                (static_cast<BMVert *>((static_cast<LinkData *>(lb_a->first))->data))->co,
-                (static_cast<BMVert *>((static_cast<LinkData *>(lb_a->last))->data))->co);
+                (static_cast<BMVert *>(lb_a->first()->data))->co,
+                (static_cast<BMVert *>(lb_a->last()->data))->co);
     sub_v3_v3v3(dir_b_orig,
-                (static_cast<BMVert *>((static_cast<LinkData *>(lb_b->first))->data))->co,
-                (static_cast<BMVert *>((static_cast<LinkData *>(lb_b->last))->data))->co);
+                (static_cast<BMVert *>(lb_b->first()->data))->co,
+                (static_cast<BMVert *>(lb_b->last()->data))->co);
 
     /* make the directions point out from the normals, 'no' is used as a temp var */
     cross_v3_v3v3(no, dir_a_orig, el_dir);
@@ -195,7 +190,7 @@ static void bridge_loop_pair(BMesh *bm,
     cross_v3_v3v3(no, dir_b_orig, el_dir);
     cross_v3_v3v3(dir_b, no, el_dir);
 
-    if (LIKELY(!is_zero_v3(dir_a) && !is_zero_v3(dir_b))) {
+    if (!is_zero_v3(dir_a) && !is_zero_v3(dir_b)) [[likely]] {
       test_a = dir_a;
       test_b = dir_b;
     }
@@ -230,7 +225,9 @@ static void bridge_loop_pair(BMesh *bm,
   dot_a = dot_v3v3(BM_edgeloop_normal_get(el_store_a), el_dir);
   dot_b = dot_v3v3(BM_edgeloop_normal_get(el_store_b), el_dir);
 
-  if (UNLIKELY((len_squared_v3(el_dir) < eps) || ((fabsf(dot_a) < eps) && (fabsf(dot_b) < eps)))) {
+  if ((len_squared_v3(el_dir) < eps) || ((fabsf(dot_a) < eps) && (fabsf(dot_b) < eps)))
+      [[unlikely]]
+  {
     /* in this case there is no depth between the two loops,
      * eg: 2x 2d circles, one scaled smaller,
      * in this case 'el_dir' can't be used, just ensure we have matching flipping. */
@@ -331,8 +328,8 @@ static void bridge_loop_pair(BMesh *bm,
   }
 
   /* Assign after flipping is finalized */
-  el_a_first = static_cast<LinkData *>(BM_edgeloop_verts_get(el_store_a)->first);
-  el_b_first = static_cast<LinkData *>(BM_edgeloop_verts_get(el_store_b)->first);
+  el_a_first = BM_edgeloop_verts_get(el_store_a)->first();
+  el_b_first = BM_edgeloop_verts_get(el_store_b)->first();
 
   if (use_merge) {
     bm_bridge_splice_loops(bm, el_a_first, el_b_first, merge_factor);
@@ -399,7 +396,7 @@ static void bridge_loop_pair(BMesh *bm,
       if (v_b != v_b_next) {
 #ifdef USE_DUPLICATE_FACE_VERT_CHECK /* Only check for duplicates between loops. */
         BLI_assert((v_b != v_b_next) && (v_a_next != v_a));
-        if (UNLIKELY(ELEM(v_b, v_a_next, v_a) || ELEM(v_b_next, v_a_next, v_a))) {
+        if (ELEM(v_b, v_a_next, v_a) || ELEM(v_b_next, v_a_next, v_a)) [[unlikely]] {
           f = nullptr;
         }
         else
@@ -433,7 +430,7 @@ static void bridge_loop_pair(BMesh *bm,
       else {
 #ifdef USE_DUPLICATE_FACE_VERT_CHECK /* Only check for duplicates between loops. */
         BLI_assert(v_a_next != v_a);
-        if (UNLIKELY(ELEM(v_b, v_a_next, v_a))) {
+        if (ELEM(v_b, v_a_next, v_a)) [[unlikely]] {
           f = nullptr;
         }
         else
@@ -589,7 +586,8 @@ void bmo_bridge_loops_exec(BMesh *bm, BMOperator *op)
 
   BMO_slot_buffer_flag_enable(bm, op->slots_in, "edges", BM_EDGE, EDGE_MARK);
 
-  count = BM_mesh_edgeloops_find(bm, &eloops, bm_edge_test_cb, bm);
+  count = BM_mesh_edgeloops_find(
+      bm, &eloops, [&](BMEdge *e) { return BMO_edge_flag_test(bm, e, EDGE_MARK); });
 
   BM_mesh_edgeloops_calc_center(bm, &eloops);
 
@@ -605,7 +603,7 @@ void bmo_bridge_loops_exec(BMesh *bm, BMOperator *op)
 
   if (use_merge) {
     bool match = true;
-    const int eloop_len = BM_edgeloop_length_get(static_cast<BMEdgeLoopStore *>(eloops.first));
+    const int eloop_len = BM_edgeloop_length_get(eloops.first());
     for (BMEdgeLoopStore &el_store : eloops) {
       if (eloop_len != BM_edgeloop_length_get(&el_store)) {
         match = false;
@@ -626,14 +624,12 @@ void bmo_bridge_loops_exec(BMesh *bm, BMOperator *op)
   }
 
   /* No ListBaseT iterator because of incomplete type. */
-  for (const Link *el_store = static_cast<const Link *>(eloops.first); el_store;
-       el_store = el_store->next)
-  {
+  for (const Link *el_store = eloops.first_as<Link>(); el_store; el_store = el_store->next) {
     Link *el_store_next = el_store->next;
 
     if (el_store_next == nullptr) {
       if (use_cyclic && (count > 2)) {
-        el_store_next = static_cast<Link *>(eloops.first);
+        el_store_next = eloops.first_as<Link>();
       }
       else {
         break;

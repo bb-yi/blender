@@ -12,13 +12,13 @@
 #include "DNA_pointcloud_types.h"
 
 #include "BLI_bounds.hh"
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_matrix.hh"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
 #include "BLI_math_vector.hh"
-#include "BLI_utildefines.h"
+#include "BLI_math_vector_c.hh"
+#include "BLI_utildefines.hh"
 #include "BLI_vector.hh"
 
 #include "BKE_action.hh"
@@ -94,9 +94,8 @@ static wmOperatorStatus snap_sel_to_grid_exec(bContext *C, wmOperator *op)
         *bmain, scene, view_layer, CTX_wm_view3d(C));
     for (Object *obedit : objects) {
       if (obedit->type == OB_MESH) {
-        BMEditMesh *em = BKE_editmesh_from_object(obedit);
-
-        if (em->bm->totvertsel == 0) {
+        const BMesh *bm = BKE_editmesh_bmesh_get(obedit);
+        if (bm->totvertsel == 0) {
           continue;
         }
       }
@@ -362,9 +361,8 @@ static bool snap_selected_to_location_rotation(bContext *C,
       obedit = objects[ob_index];
 
       if (obedit->type == OB_MESH) {
-        BMEditMesh *em = BKE_editmesh_from_object(obedit);
-
-        if (em->bm->totvertsel == 0) {
+        const BMesh *bm = BKE_editmesh_bmesh_get(obedit);
+        if (bm->totvertsel == 0) {
           continue;
         }
       }
@@ -531,9 +529,7 @@ static bool snap_selected_to_location_rotation(bContext *C,
     BKE_scene_graph_evaluated_ensure(depsgraph, bmain);
 
     /* Reset flags. */
-    for (Object *ob = static_cast<Object *>(bmain->objects.first); ob;
-         ob = static_cast<Object *>(ob->id.next))
-    {
+    for (Object *ob = bmain->objects.first(); ob; ob = static_cast<Object *>(ob->id.next)) {
       ob->flag &= ~OB_DONE;
     }
 
@@ -933,9 +929,8 @@ static bool snap_curs_to_sel_ex(bContext *C, const int pivot_point, float r_curs
 
       /* We can do that quick check for meshes only... */
       if (obedit->type == OB_MESH) {
-        BMEditMesh *em = BKE_editmesh_from_object(obedit);
-
-        if (em->bm->totvertsel == 0) {
+        const BMesh *bm = BKE_editmesh_bmesh_get(obedit);
+        if (bm->totvertsel == 0) {
           continue;
         }
       }

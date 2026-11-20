@@ -19,15 +19,17 @@ struct wmOperatorType;
 
 struct KeyingSet;
 
-/* KeyingSets/Keyframing Interface ------------- */
+/* -------------------------------------------------------------------- */
+/** \name KeyingSets/Keyframing Interface
+ * \{ */
 
 /** List of builtin KeyingSets (defined in `blender/animrig/keyingsets.cc`). */
 extern ListBaseT<KeyingSet> builtin_keyingsets;
 
-/* Operator Define Prototypes ------------------- */
+/** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name Main Keyframe Management operators
+/** \name Main Keyframe Management Operators
  *
  * These handle keyframes management from various spaces.
  * They only make use of Keying Sets.
@@ -41,7 +43,7 @@ void ANIM_OT_keyframe_delete_by_name(wmOperatorType *ot);
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name Main Keyframe Management operators
+/** \name Keyframe Management Operators (Per-Space Menus)
  *
  * These handle keyframes management from various spaces.
  * They will handle the menus required for each space.
@@ -57,7 +59,7 @@ void ANIM_OT_keyframe_clear_vse(wmOperatorType *ot);
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name Keyframe management operators for UI buttons (RMB menu)
+/** \name Keyframe Management Operators for UI Buttons (RMB Menu)
  * \{ */
 
 void ANIM_OT_keyframe_insert_button(wmOperatorType *ot);
@@ -67,7 +69,7 @@ void ANIM_OT_keyframe_clear_button(wmOperatorType *ot);
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name KeyingSet management operators for UI buttons (RMB menu)
+/** \name KeyingSet Management Operators for UI Buttons (RMB Menu)
  * \{ */
 
 void ANIM_OT_keyingset_button_add(wmOperatorType *ot);
@@ -76,7 +78,7 @@ void ANIM_OT_keyingset_button_remove(wmOperatorType *ot);
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name KeyingSet management operators for RNA collections/UI buttons
+/** \name KeyingSet Management Operators for RNA Collections/UI Buttons
  * \{ */
 
 void ANIM_OT_keying_set_add(wmOperatorType *ot);
@@ -87,7 +89,7 @@ void ANIM_OT_keying_set_path_remove(wmOperatorType *ot);
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name KeyingSet general operators
+/** \name KeyingSet General Operators
  * \{ */
 
 void ANIM_OT_keying_set_active_set(wmOperatorType *ot);
@@ -95,7 +97,7 @@ void ANIM_OT_keying_set_active_set(wmOperatorType *ot);
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name Driver management operators for UI buttons (RMB menu)
+/** \name Driver Management Operators for UI Buttons (RMB Menu)
  * \{ */
 
 void ANIM_OT_driver_button_add(wmOperatorType *ot);
@@ -106,18 +108,28 @@ void ANIM_OT_paste_driver_button(wmOperatorType *ot);
 
 /** \} */
 
-/* -------------------------------------------------------------------- */
-/** \name Pose Asset operators
- * \{ */
-
 namespace ed::animrig {
+
+/* -------------------------------------------------------------------- */
+/** \name Pose Asset Operators
+ * \{ */
 
 void POSELIB_OT_create_pose_asset(wmOperatorType *ot);
 void POSELIB_OT_asset_modify(wmOperatorType *ot);
 void POSELIB_OT_asset_delete(wmOperatorType *ot);
 void POSELIB_OT_screenshot_preview(wmOperatorType *ot);
-}  // namespace ed::animrig
 
 /** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name World Space Copy Paste
+ * \{ */
+
+void ANIM_OT_world_space_copy(wmOperatorType *ot);
+void ANIM_OT_world_space_paste(wmOperatorType *ot);
+
+/** \} */
+
+}  // namespace ed::animrig
 
 }  // namespace blender

@@ -11,8 +11,8 @@
 #include "BKE_object.hh"
 #include "BKE_object_types.hh"
 
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
 
 #include "BLT_translation.hh"
 
@@ -162,7 +162,7 @@ static wmOperatorStatus vr_location_scouting_capture_review_invoke(bContext *C,
 {
   /* Operator invoked while already running, toggle off. */
   if (vr_location_scouting_capture_review_get_running_state(C)) {
-    /* Set the running state (stored on the WM) to false, catched by the running operator modal. */
+    /* Set the running state (stored on the WM) to false, cached by the running operator modal. */
     vr_location_scouting_capture_review_set_running_state(C, false);
     return OPERATOR_CANCELLED;
   }

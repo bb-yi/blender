@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup gpu
+ */
+
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
 #include "BLI_task.hh"
@@ -20,7 +24,7 @@ static void convert_normals_impl(const Span<float3> src, MutableSpan<GPUType> ds
   });
 }
 
-template<> void convert_normals(const Span<float3> src, MutableSpan<PackedNormal> dst)
+template<> void convert_normals(const Span<float3> src, MutableSpan<int1010102_norm> dst)
 {
   convert_normals_impl(src, dst);
 }

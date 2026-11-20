@@ -56,6 +56,10 @@ class NativePostFXOutputModule {
   TextureFromPool default_outline_effect_tx_ = {"outline_camera_fx_effect"};
   TextureFromPool default_outline_velocity_tx_ = {"outline_camera_fx_velocity"};
 
+  TextureFromPool geometry_line_tx_ = {"geometry_line_camera_fx"};
+  TextureFromPool geometry_line_effect_tx_ = {"geometry_line_camera_fx_effect"};
+  TextureFromPool geometry_line_velocity_tx_ = {"geometry_line_camera_fx_velocity"};
+
   PassSimple extract_ps_ = {"NativePostFXOutput.Extract"};
   PassSimple pack_color_ps_ = {"NativePostFXOutput.PackColor"};
   PassSimple pack_value_ps_ = {"NativePostFXOutput.PackValue"};
@@ -63,6 +67,8 @@ class NativePostFXOutputModule {
   std::array<DepthOfFieldBuffer, output_max> dof_buffers_;
   std::array<uint64_t, output_max> dof_signatures_ = {};
   DepthOfFieldBuffer default_outline_dof_buffer_;
+  DepthOfFieldBuffer geometry_line_dof_buffer_;
+  uint64_t geometry_line_history_signature_ = 0;
 
  public:
   NativePostFXOutputModule(Instance &inst) : inst_(inst) {}
@@ -97,7 +103,17 @@ class NativePostFXOutputModule {
 
   void render(View &view);
   gpu::Texture *render_outline_for_combined(View &view, gpu::Texture *outline_tx);
+  /** Process an independent premultiplied line image without changing its raw pass or guides.
+   * The returned texture is transient: consume or copy it before #release. */
+  gpu::Texture *render_geometry_lines_for_combined(View &view,
+                                                 gpu::Texture *color_tx,
+                                                 gpu::Texture *depth_tx,
+                                                 gpu::Texture *velocity_tx,
+                                                 bool use_dof,
+                                                 bool use_motion_blur,
+                                                 uint64_t history_signature);
   void release_default_outline_history();
+  void release_geometry_lines_history();
   void release();
 
   static ePassStorageType output_storage_type(const ViewLayerNativePostFXOutput &output,

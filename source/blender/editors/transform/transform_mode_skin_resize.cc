@@ -8,8 +8,8 @@
 
 #include <cstdlib>
 
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_task.hh"
 
 #include "BKE_unit.hh"
@@ -140,6 +140,7 @@ TransModeInfo TransMode_skinresize = {
     /*snap_distance_fn*/ nullptr,
     /*snap_apply_fn*/ nullptr,
     /*draw_fn*/ nullptr,
+    /*status_fn*/ nullptr,
 };
 
 }  // namespace blender::ed::transform

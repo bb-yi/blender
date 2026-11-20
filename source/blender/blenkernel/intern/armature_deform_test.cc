@@ -2,10 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_listbase.h"
-#include "BLI_math_rotation.h"
-#include "BLI_math_vector.h"
-#include "BLI_string.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string.hh"
 
 #include "BKE_action.hh"
 #include "BKE_armature.hh"
@@ -274,7 +274,7 @@ class ArmatureDeformTestBase {
 
     bke::greasepencil::Layer &layer = grease_pencil->add_layer("Test");
     greasepencil::Drawing &drawing = grease_pencil->insert_frame(layer, 1)->wrap();
-    bke::CurvesGeometry &curves = drawing.geometry.wrap();
+    bke::CurvesGeometry &curves = drawing.strokes_for_write();
 
     curves.resize(vertex_positions().size(), 3);
     curves.offsets_for_write().copy_from(curve_offsets());
@@ -503,8 +503,9 @@ class ArmatureDeformTestBase {
     BMeshCreateParams create_params{};
     create_params.use_toolflags = true;
     BMesh *bm = BKE_mesh_to_bmesh(mesh, 0, false, &create_params);
-    BMEditMesh *edit_mesh = BKE_editmesh_create(bm);
-    Array<float3> bm_verts_wrapper = BM_mesh_vert_coords_alloc(edit_mesh->bm);
+    mesh->runtime->edit_mesh = std::make_shared<BMEditMesh>();
+    mesh->runtime->edit_mesh->bm = bm;
+    Array<float3> bm_verts_wrapper = BM_mesh_vert_coords_alloc(bm);
 
     Array<float3x3> deform_mats;
     std::optional<MutableSpan<float3x3>> deform_mats_opt;
@@ -522,7 +523,7 @@ class ArmatureDeformTestBase {
                                              deform_mats_opt,
                                              deform_flag,
                                              defgrp_name,
-                                             *edit_mesh);
+                                             *bm);
 
     EXPECT_EQ_SPAN(expected_positions(TargetDataType::EditMesh, weighting, masking),
                    bm_verts_wrapper.as_span());
@@ -530,8 +531,8 @@ class ArmatureDeformTestBase {
       EXPECT_EQ_SPAN(expected_deform_mats(weighting), deform_mats.as_span());
     }
 
-    BKE_editmesh_free_data(edit_mesh);
-    MEM_delete(edit_mesh);
+    BKE_editmesh_free_data(mesh->runtime->edit_mesh.get());
+    mesh->runtime->edit_mesh.reset();
     BKE_id_delete(bmain, ob_arm);
     BKE_id_delete(bmain, ob_target);
   }
@@ -589,7 +590,7 @@ class ArmatureDeformTestBase {
     GreasePencilDrawingBase *drawing_base = grease_pencil->drawings()[0];
     BLI_assert(drawing_base->type == GP_DRAWING);
     greasepencil::Drawing &drawing = reinterpret_cast<GreasePencilDrawing *>(drawing_base)->wrap();
-    bke::CurvesGeometry &curves = drawing.geometry.wrap();
+    bke::CurvesGeometry &curves = drawing.strokes_for_write();
 
     Array<float3x3> deform_mats;
     std::optional<MutableSpan<float3x3>> deform_mats_opt;

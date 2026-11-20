@@ -10,40 +10,34 @@
 gbuffer::InputClosures gbuffer_new()
 {
   gbuffer::InputClosures data;
-  data.closure[0].type = CLOSURE_NONE_ID;
-  data.closure[0].weight = 0.0f;
-  data.closure[1].type = CLOSURE_NONE_ID;
-  data.closure[1].weight = 0.0f;
-  data.closure[2].type = CLOSURE_NONE_ID;
-  data.closure[2].weight = 0.0f;
+  data.closure[0] = ClosureUndetermined{};
+  data.closure[1] = ClosureUndetermined{};
+  data.closure[2] = ClosureUndetermined{};
   return data;
 }
 
 [[compute, local_size(1)]]
-void eevee_test_gbuffer_normal_main([[resource_table]] const ShaderTestOutput & /*srt*/,
-                                    [[resource_table]] const gbuffer::PackParameters &param)
+void eevee_test_gbuffer_normal_main(
+    [[resource_table]] [[maybe_unused]] const ShaderTestOutput &srt,
+    [[resource_table]] const gbuffer::PackParameters &param)
 {
   float3 Ng = float3(1.0f, 0.0f, 0.0f);
   float3 N = Ng;
   Thickness thickness = Thickness::from(0.2f, ThicknessMode::Slab);
 
   ClosureUndetermined cl1 = closure_new(CLOSURE_BSDF_DIFFUSE_ID);
-  cl1.weight = 1.0f;
   cl1.color = float3(1);
   cl1.N = normalize(float3(0.2f, 0.1f, 0.3f));
 
   ClosureUndetermined cl2 = closure_new(CLOSURE_BSDF_DIFFUSE_ID);
-  cl2.weight = 1.0f;
   cl2.color = float3(1);
   cl2.N = normalize(float3(0.1f, 0.2f, 0.3f));
 
   ClosureUndetermined cl3 = closure_new(CLOSURE_BSDF_DIFFUSE_ID);
-  cl3.weight = 1.0f;
   cl3.color = float3(1);
   cl3.N = normalize(float3(0.3f, 0.2f, 0.1f));
 
   ClosureUndetermined cl_none = closure_new(CLOSURE_NONE_ID);
-  cl_none.weight = 1.0f;
   cl_none.color = float3(1);
   cl_none.N = normalize(float3(0.0f, 0.0f, 1.0f));
 
@@ -58,9 +52,9 @@ void eevee_test_gbuffer_normal_main([[resource_table]] const ShaderTestOutput & 
 
     EXPECT_EQ(uint(data_out.used_layers), 0u);
     EXPECT_TRUE(all(equal(uint3(header.empty_bins()), uint3(0, 0, 1))));
-    EXPECT_EQ(header.closure_len(), 2);
-    EXPECT_EQ(header.tangent_space_id(0), 0u);
-    EXPECT_EQ(header.tangent_space_id(1), 0u);
+    EXPECT_EQ(header.closure_len(), uchar(2));
+    EXPECT_EQ(header.tangent_space_id(0), uchar(0u));
+    EXPECT_EQ(header.tangent_space_id(1), uchar(0u));
     EXPECT_NEAR(cl1.N, gbuffer::normal_unpack(data_out.normal[0]), 1e-5f);
     EXPECT_NEAR(cl1.N, gbuffer::normal_unpack(data_out.normal[1]), 1e-5f);
   }
@@ -76,9 +70,9 @@ void eevee_test_gbuffer_normal_main([[resource_table]] const ShaderTestOutput & 
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_1));
     EXPECT_TRUE(all(equal(uint3(header.empty_bins()), uint3(0, 0, 1))));
-    EXPECT_EQ(header.closure_len(), 2);
-    EXPECT_EQ(header.tangent_space_id(0), 0u);
-    EXPECT_EQ(header.tangent_space_id(1), 1u);
+    EXPECT_EQ(header.closure_len(), uchar(2));
+    EXPECT_EQ(header.tangent_space_id(0), uchar(0u));
+    EXPECT_EQ(header.tangent_space_id(1), uchar(1u));
     EXPECT_NEAR(cl1.N, gbuffer::normal_unpack(data_out.normal[0]), 1e-5f);
     EXPECT_NEAR(cl2.N, gbuffer::normal_unpack(data_out.normal[1]), 1e-5f);
   }
@@ -95,10 +89,10 @@ void eevee_test_gbuffer_normal_main([[resource_table]] const ShaderTestOutput & 
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_1 | CLOSURE_DATA_2));
     EXPECT_TRUE(all(equal(uint3(header.empty_bins()), uint3(0, 0, 0))));
-    EXPECT_EQ(header.closure_len(), 3);
-    EXPECT_EQ(header.tangent_space_id(0), 0u);
-    EXPECT_EQ(header.tangent_space_id(1), 1u);
-    EXPECT_EQ(header.tangent_space_id(2), 1u);
+    EXPECT_EQ(header.closure_len(), uchar(3));
+    EXPECT_EQ(header.tangent_space_id(0), uchar(0u));
+    EXPECT_EQ(header.tangent_space_id(1), uchar(1u));
+    EXPECT_EQ(header.tangent_space_id(2), uchar(1u));
     EXPECT_NEAR(cl1.N, gbuffer::normal_unpack(data_out.normal[0]), 1e-5f);
     EXPECT_NEAR(cl2.N, gbuffer::normal_unpack(data_out.normal[1]), 1e-5f);
   }
@@ -115,10 +109,10 @@ void eevee_test_gbuffer_normal_main([[resource_table]] const ShaderTestOutput & 
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_1 | CLOSURE_DATA_2));
     EXPECT_TRUE(all(equal(uint3(header.empty_bins()), uint3(0, 0, 0))));
-    EXPECT_EQ(header.closure_len(), 3);
-    EXPECT_EQ(header.tangent_space_id(0), 0u);
-    EXPECT_EQ(header.tangent_space_id(1), 1u);
-    EXPECT_EQ(header.tangent_space_id(2), 0u);
+    EXPECT_EQ(header.closure_len(), uchar(3));
+    EXPECT_EQ(header.tangent_space_id(0), uchar(0u));
+    EXPECT_EQ(header.tangent_space_id(1), uchar(1u));
+    EXPECT_EQ(header.tangent_space_id(2), uchar(0u));
     EXPECT_NEAR(cl2.N, gbuffer::normal_unpack(data_out.normal[0]), 1e-5f);
     EXPECT_NEAR(cl1.N, gbuffer::normal_unpack(data_out.normal[1]), 1e-5f);
   }
@@ -135,10 +129,10 @@ void eevee_test_gbuffer_normal_main([[resource_table]] const ShaderTestOutput & 
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_2 | CLOSURE_DATA_2));
     EXPECT_TRUE(all(equal(uint3(header.empty_bins()), uint3(0, 0, 0))));
-    EXPECT_EQ(header.closure_len(), 3);
-    EXPECT_EQ(header.tangent_space_id(0), 0u);
-    EXPECT_EQ(header.tangent_space_id(1), 0u);
-    EXPECT_EQ(header.tangent_space_id(2), 2u);
+    EXPECT_EQ(header.closure_len(), uchar(3));
+    EXPECT_EQ(header.tangent_space_id(0), uchar(0u));
+    EXPECT_EQ(header.tangent_space_id(1), uchar(0u));
+    EXPECT_EQ(header.tangent_space_id(2), uchar(2u));
     EXPECT_NEAR(cl2.N, gbuffer::normal_unpack(data_out.normal[0]), 1e-5f);
     EXPECT_NEAR(cl1.N, gbuffer::normal_unpack(data_out.normal[2]), 1e-5f);
   }
@@ -155,10 +149,10 @@ void eevee_test_gbuffer_normal_main([[resource_table]] const ShaderTestOutput & 
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_1 | NORMAL_DATA_2 | CLOSURE_DATA_2));
     EXPECT_TRUE(all(equal(uint3(header.empty_bins()), uint3(0, 0, 0))));
-    EXPECT_EQ(header.closure_len(), 3);
-    EXPECT_EQ(header.tangent_space_id(0), 0u);
-    EXPECT_EQ(header.tangent_space_id(1), 1u);
-    EXPECT_EQ(header.tangent_space_id(2), 2u);
+    EXPECT_EQ(header.closure_len(), uchar(3));
+    EXPECT_EQ(header.tangent_space_id(0), uchar(0u));
+    EXPECT_EQ(header.tangent_space_id(1), uchar(1u));
+    EXPECT_EQ(header.tangent_space_id(2), uchar(2u));
     EXPECT_NEAR(cl1.N, gbuffer::normal_unpack(data_out.normal[0]), 1e-5f);
     EXPECT_NEAR(cl2.N, gbuffer::normal_unpack(data_out.normal[1]), 1e-5f);
     EXPECT_NEAR(cl3.N, gbuffer::normal_unpack(data_out.normal[2]), 1e-5f);
@@ -176,9 +170,9 @@ void eevee_test_gbuffer_normal_main([[resource_table]] const ShaderTestOutput & 
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_1));
     EXPECT_TRUE(all(equal(uint3(header.empty_bins()), uint3(0, 1, 0))));
-    EXPECT_EQ(header.closure_len(), 2);
-    EXPECT_EQ(header.tangent_space_id(0), 0u);
-    EXPECT_EQ(header.tangent_space_id(1), 1u);
+    EXPECT_EQ(header.closure_len(), uchar(2));
+    EXPECT_EQ(header.tangent_space_id(0), uchar(0u));
+    EXPECT_EQ(header.tangent_space_id(1), uchar(1u));
     EXPECT_NEAR(cl1.N, gbuffer::normal_unpack(data_out.normal[0]), 1e-5f);
     EXPECT_NEAR(cl3.N, gbuffer::normal_unpack(data_out.normal[1]), 1e-5f);
   }
@@ -195,8 +189,8 @@ void eevee_test_gbuffer_normal_main([[resource_table]] const ShaderTestOutput & 
 
     EXPECT_EQ(uint(data_out.used_layers), uint(0));
     EXPECT_TRUE(all(equal(uint3(header.empty_bins()), uint3(1, 1, 0))));
-    EXPECT_EQ(header.closure_len(), 1);
-    EXPECT_EQ(header.tangent_space_id(0), 0u);
+    EXPECT_EQ(header.closure_len(), uchar(1));
+    EXPECT_EQ(header.tangent_space_id(0), uchar(0u));
     EXPECT_NEAR(cl3.N, gbuffer::normal_unpack(data_out.normal[1]), 1e-5f);
   }
 }

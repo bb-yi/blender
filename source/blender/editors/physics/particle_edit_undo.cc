@@ -16,8 +16,8 @@
 #include "DNA_scene_types.h"
 #include "DNA_windowmanager_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_utildefines.hh"
 
 #include "BKE_context.hh"
 #include "BKE_layer.hh"
@@ -66,7 +66,7 @@ static void undoptcache_from_editcache(PTCacheUndo *undo, PTCacheEdit *edit)
     PTCacheMem *pm;
 
     BLI_duplicatelist(&undo->mem_cache, &edit->pid.cache->mem_cache);
-    pm = static_cast<PTCacheMem *>(undo->mem_cache.first);
+    pm = undo->mem_cache.first();
 
     for (; pm; pm = pm->next) {
       for (int i = 0; i < BPHYS_TOT_DATA; i++) {
@@ -147,7 +147,7 @@ static void undoptcache_to_editcache(PTCacheUndo *undo, PTCacheEdit *edit)
 
     BLI_duplicatelist(&edit->pid.cache->mem_cache, &undo->mem_cache);
 
-    pm = static_cast<PTCacheMem *>(edit->pid.cache->mem_cache.first);
+    pm = edit->pid.cache->mem_cache.first();
 
     for (; pm; pm = pm->next) {
       for (i = 0; i < BPHYS_TOT_DATA; i++) {
@@ -259,7 +259,7 @@ static void particle_undosys_step_decode(
 
   /* While this shouldn't happen, entering particle edit-mode uses a more complex
    * setup compared to most other modes which we can't ensure succeeds. */
-  if (UNLIKELY(edit == nullptr)) {
+  if (edit == nullptr) [[unlikely]] {
     BLI_assert(0);
     return;
   }
@@ -295,7 +295,7 @@ static void particle_undosys_foreach_ID_ref(UndoStep *us_p,
 
 void ED_particle_undosys_type(UndoType *ut)
 {
-  ut->name = "Edit Particle";
+  ut->identifier = "EDIT_PARTICLE";
   ut->poll = particle_undosys_poll;
   ut->step_encode = particle_undosys_step_encode;
   ut->step_decode = particle_undosys_step_decode;
@@ -303,7 +303,7 @@ void ED_particle_undosys_type(UndoType *ut)
 
   ut->step_foreach_ID_ref = particle_undosys_foreach_ID_ref;
 
-  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE;
+  ut->flags = UNDOTYPE_FLAG_NEED_CONTEXT_FOR_ENCODE | UNDOTYPE_FLAG_ENCODE_PRE_MEMFILE_SUPPORTED;
 
   ut->step_size = sizeof(ParticleUndoStep);
 }

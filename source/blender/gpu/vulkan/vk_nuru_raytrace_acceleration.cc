@@ -40,7 +40,7 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_time.h"
+#include "BLI_time.hh"
 
 #include "shaderc/shaderc.hpp"
 
@@ -215,7 +215,7 @@ static bool rt_buffer_create(RTBuffer &r_buffer,
     VkBufferDeviceAddressInfo address_info = {};
     address_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     address_info.buffer = r_buffer.buffer;
-    r_buffer.device_address = vkGetBufferDeviceAddress(device.vk_handle(), &address_info);
+    r_buffer.device_address = device.functions.vkGetBufferDeviceAddress(device.vk_handle(), &address_info);
   }
   return true;
 }
@@ -232,8 +232,8 @@ static void rt_buffer_free(RTBuffer &buffer)
       CloseHandle(buffer.external_handle);
     }
 #endif
-    vkDestroyBuffer(device.vk_handle(), buffer.buffer, nullptr);
-    vkFreeMemory(device.vk_handle(), buffer.external_memory, nullptr);
+    device.functions.vkDestroyBuffer(device.vk_handle(), buffer.buffer, nullptr);
+    device.functions.vkFreeMemory(device.vk_handle(), buffer.external_memory, nullptr);
   }
   else {
     vmaDestroyBuffer(device.mem_allocator_get(), buffer.buffer, buffer.allocation);
@@ -272,15 +272,15 @@ static bool rt_external_buffer_create(RTBuffer &r_buffer,
   create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
   VkBuffer vk_buffer = VK_NULL_HANDLE;
-  if (vkCreateBuffer(device.vk_handle(), &create_info, nullptr, &vk_buffer) != VK_SUCCESS) {
+  if (device.functions.vkCreateBuffer(device.vk_handle(), &create_info, nullptr, &vk_buffer) != VK_SUCCESS) {
     return false;
   }
 
   VkMemoryRequirements requirements = {};
-  vkGetBufferMemoryRequirements(device.vk_handle(), vk_buffer, &requirements);
+  device.functions.vkGetBufferMemoryRequirements(device.vk_handle(), vk_buffer, &requirements);
 
   VkPhysicalDeviceMemoryProperties memory_properties = {};
-  vkGetPhysicalDeviceMemoryProperties(device.physical_device_get(), &memory_properties);
+  volk::vkGetPhysicalDeviceMemoryProperties(device.physical_device_get(), &memory_properties);
   uint32_t memory_type_index = UINT32_MAX;
   for (uint32_t i : IndexRange(memory_properties.memoryTypeCount)) {
     if ((requirements.memoryTypeBits & (1u << i)) &&
@@ -291,7 +291,7 @@ static bool rt_external_buffer_create(RTBuffer &r_buffer,
     }
   }
   if (memory_type_index == UINT32_MAX) {
-    vkDestroyBuffer(device.vk_handle(), vk_buffer, nullptr);
+    device.functions.vkDestroyBuffer(device.vk_handle(), vk_buffer, nullptr);
     return false;
   }
 
@@ -311,13 +311,13 @@ static bool rt_external_buffer_create(RTBuffer &r_buffer,
   allocate_info.memoryTypeIndex = memory_type_index;
 
   VkDeviceMemory vk_memory = VK_NULL_HANDLE;
-  if (vkAllocateMemory(device.vk_handle(), &allocate_info, nullptr, &vk_memory) != VK_SUCCESS) {
-    vkDestroyBuffer(device.vk_handle(), vk_buffer, nullptr);
+  if (device.functions.vkAllocateMemory(device.vk_handle(), &allocate_info, nullptr, &vk_memory) != VK_SUCCESS) {
+    device.functions.vkDestroyBuffer(device.vk_handle(), vk_buffer, nullptr);
     return false;
   }
-  if (vkBindBufferMemory(device.vk_handle(), vk_buffer, vk_memory, 0) != VK_SUCCESS) {
-    vkDestroyBuffer(device.vk_handle(), vk_buffer, nullptr);
-    vkFreeMemory(device.vk_handle(), vk_memory, nullptr);
+  if (device.functions.vkBindBufferMemory(device.vk_handle(), vk_buffer, vk_memory, 0) != VK_SUCCESS) {
+    device.functions.vkDestroyBuffer(device.vk_handle(), vk_buffer, nullptr);
+    device.functions.vkFreeMemory(device.vk_handle(), vk_memory, nullptr);
     return false;
   }
 
@@ -335,7 +335,7 @@ static void *rt_external_buffer_export_win32(const RTBuffer &buffer)
 {
   VKDevice &device = VKBackend::get().device;
   if (buffer.external_memory == VK_NULL_HANDLE ||
-      device.functions.vkGetMemoryWin32Handle == nullptr)
+      device.functions.vkGetMemoryWin32HandleKHR == nullptr)
   {
     return nullptr;
   }
@@ -344,7 +344,7 @@ static void *rt_external_buffer_export_win32(const RTBuffer &buffer)
   get_handle_info.memory = buffer.external_memory;
   get_handle_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
   HANDLE handle = nullptr;
-  if (device.functions.vkGetMemoryWin32Handle(device.vk_handle(), &get_handle_info, &handle) !=
+  if (device.functions.vkGetMemoryWin32HandleKHR(device.vk_handle(), &get_handle_info, &handle) !=
       VK_SUCCESS)
   {
     return nullptr;
@@ -357,7 +357,7 @@ static void *rt_external_buffer_export_win32(const RTBuffer &buffer)
 static int rt_external_buffer_export_fd(const RTBuffer &buffer)
 {
   VKDevice &device = VKBackend::get().device;
-  if (buffer.external_memory == VK_NULL_HANDLE || device.functions.vkGetMemoryFd == nullptr) {
+  if (buffer.external_memory == VK_NULL_HANDLE || device.functions.vkGetMemoryFdKHR == nullptr) {
     return -1;
   }
   VkMemoryGetFdInfoKHR get_fd_info = {};
@@ -365,7 +365,7 @@ static int rt_external_buffer_export_fd(const RTBuffer &buffer)
   get_fd_info.memory = buffer.external_memory;
   get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
   int fd = -1;
-  if (device.functions.vkGetMemoryFd(device.vk_handle(), &get_fd_info, &fd) != VK_SUCCESS) {
+  if (device.functions.vkGetMemoryFdKHR(device.vk_handle(), &get_fd_info, &fd) != VK_SUCCESS) {
     return -1;
   }
   return fd;
@@ -408,7 +408,7 @@ static VkCommandPool raytrace_command_pool_get()
   create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
   create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
   create_info.queueFamilyIndex = device.queue_family_get();
-  if (vkCreateCommandPool(device.vk_handle(), &create_info, nullptr, &pool) != VK_SUCCESS) {
+  if (device.functions.vkCreateCommandPool(device.vk_handle(), &create_info, nullptr, &pool) != VK_SUCCESS) {
     pool = VK_NULL_HANDLE;
   }
   return pool;
@@ -433,27 +433,33 @@ static VkCommandBuffer raytrace_command_buffer_alloc()
   allocate_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   allocate_info.commandBufferCount = 1;
   VkCommandBuffer command_buffer = VK_NULL_HANDLE;
-  if (vkAllocateCommandBuffers(device.vk_handle(), &allocate_info, &command_buffer) != VK_SUCCESS)
+  if (device.functions.vkAllocateCommandBuffers(device.vk_handle(), &allocate_info, &command_buffer) != VK_SUCCESS)
   {
     return VK_NULL_HANDLE;
   }
   VkCommandBufferBeginInfo begin_info = {};
   begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(command_buffer, &begin_info);
+  if (device.functions.vkBeginCommandBuffer(command_buffer, &begin_info) != VK_SUCCESS) {
+    device.functions.vkFreeCommandBuffers(device.vk_handle(), pool, 1, &command_buffer);
+    return VK_NULL_HANDLE;
+  }
   return command_buffer;
 }
 
 static bool raytrace_command_buffer_submit_and_wait(VkCommandBuffer command_buffer)
 {
   VKDevice &device = VKBackend::get().device;
-  vkEndCommandBuffer(command_buffer);
+  if (device.functions.vkEndCommandBuffer(command_buffer) != VK_SUCCESS) {
+    device.functions.vkFreeCommandBuffers(device.vk_handle(), raytrace_command_pool_get(), 1, &command_buffer);
+    return false;
+  }
 
   VkFenceCreateInfo fence_info = {};
   fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
   VkFence fence = VK_NULL_HANDLE;
-  if (vkCreateFence(device.vk_handle(), &fence_info, nullptr, &fence) != VK_SUCCESS) {
-    vkFreeCommandBuffers(device.vk_handle(), raytrace_command_pool_get(), 1, &command_buffer);
+  if (device.functions.vkCreateFence(device.vk_handle(), &fence_info, nullptr, &fence) != VK_SUCCESS) {
+    device.functions.vkFreeCommandBuffers(device.vk_handle(), raytrace_command_pool_get(), 1, &command_buffer);
     return false;
   }
 
@@ -470,7 +476,11 @@ static bool raytrace_command_buffer_submit_and_wait(VkCommandBuffer command_buff
    * the queue front-end on a wait whose signal arrives in a LATER submission on the same
    * queue - the queue never reaches it (observed: TLAS build batch wedge on object move,
    * GPU idle, no TDR). Block until everything up to the wait value reached `vkQueueSubmit`. */
-  device.wait_for_submission_timeline(chain_wait_value);
+  if (!device.wait_for_submission_timeline(chain_wait_value)) {
+    device.functions.vkDestroyFence(device.vk_handle(), fence, nullptr);
+    device.functions.vkFreeCommandBuffers(device.vk_handle(), raytrace_command_pool_get(), 1, &command_buffer);
+    return false;
+  }
   VkSemaphore timeline_semaphore = device.timeline_semaphore_get();
   VkPipelineStageFlags chain_wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
   VkTimelineSemaphoreSubmitInfo timeline_info = {};
@@ -492,22 +502,20 @@ static bool raytrace_command_buffer_submit_and_wait(VkCommandBuffer command_buff
   submit_info.pSignalSemaphores = &timeline_semaphore;
   {
     std::scoped_lock lock(device.queue_mutex_get());
-    if (vkQueueSubmit(device.queue_get(), 1, &submit_info, fence) != VK_SUCCESS) {
-      VkSemaphoreSignalInfo signal_info = {};
-      signal_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
-      signal_info.semaphore = timeline_semaphore;
-      signal_info.value = chain_signal_value;
-      vkSignalSemaphore(device.vk_handle(), &signal_info);
-      device.external_timeline_chain_submitted(chain_signal_value);
-      vkDestroyFence(device.vk_handle(), fence, nullptr);
-      vkFreeCommandBuffers(device.vk_handle(), raytrace_command_pool_get(), 1, &command_buffer);
+    const VkResult result = device.submission_failed() ?
+                                device.submission_error_get() :
+                                device.functions.vkQueueSubmit(device.queue_get(), 1, &submit_info, fence);
+    if (result != VK_SUCCESS) {
+      device.submission_error_set(result, "vkQueueSubmit (HWRT acceleration)", chain_signal_value);
+      device.functions.vkDestroyFence(device.vk_handle(), fence, nullptr);
+      device.functions.vkFreeCommandBuffers(device.vk_handle(), raytrace_command_pool_get(), 1, &command_buffer);
       return false;
     }
   }
   device.external_timeline_chain_submitted(chain_signal_value);
   /* First slice short: a healthy build batch completes in milliseconds, so a 5 s stall is
    * already a wedge; dump diagnostics before the app gets killed as "Not Responding". */
-  VkResult wait_result = vkWaitForFences(
+  VkResult wait_result = device.functions.vkWaitForFences(
       device.vk_handle(), 1, &fence, VK_TRUE, uint64_t(5) * 1000 * 1000 * 1000);
   if (wait_result == VK_TIMEOUT) {
     fprintf(stderr,
@@ -515,15 +523,20 @@ static bool raytrace_command_buffer_submit_and_wait(VkCommandBuffer command_buff
             (unsigned long long)chain_wait_value,
             (unsigned long long)chain_signal_value);
     device.diagnostic_checkpoints_dump();
-    wait_result = vkWaitForFences(
+    wait_result = device.functions.vkWaitForFences(
         device.vk_handle(), 1, &fence, VK_TRUE, uint64_t(55) * 1000 * 1000 * 1000);
   }
   if (wait_result != VK_SUCCESS) {
     fprintf(stderr, "Vulkan RT build-batch wait failed with status=%d\n", int(wait_result));
     device.diagnostic_checkpoints_dump();
+    device.submission_error_set(wait_result, "vkWaitForFences (HWRT acceleration)", chain_signal_value);
+    if (wait_result != VK_ERROR_DEVICE_LOST) {
+      /* The command buffer and scratch allocations can still be in use after a timeout. */
+      device.wait_queue_idle();
+    }
   }
-  vkDestroyFence(device.vk_handle(), fence, nullptr);
-  vkFreeCommandBuffers(device.vk_handle(), raytrace_command_pool_get(), 1, &command_buffer);
+  device.functions.vkDestroyFence(device.vk_handle(), fence, nullptr);
+  device.functions.vkFreeCommandBuffers(device.vk_handle(), raytrace_command_pool_get(), 1, &command_buffer);
   return wait_result == VK_SUCCESS;
 }
 
@@ -547,7 +560,8 @@ static bool commit_acceleration_structure_build_batch(AccelerationStructureBuild
   barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
                           VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
                           VK_ACCESS_SHADER_READ_BIT;
-  vkCmdPipelineBarrier(batch.command_buffer,
+  const VKDevice &device = VKBackend::get().device;
+  device.functions.vkCmdPipelineBarrier(batch.command_buffer,
                        VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                        VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -582,7 +596,7 @@ static uint32_t acceleration_structure_scratch_alignment()
   VkPhysicalDeviceProperties2 properties = {};
   properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
   properties.pNext = &as_properties;
-  vkGetPhysicalDeviceProperties2(device.physical_device_get(), &properties);
+  volk::vkGetPhysicalDeviceProperties2(device.physical_device_get(), &properties);
   alignment = std::max(as_properties.minAccelerationStructureScratchOffsetAlignment, 1u);
   return alignment;
 }
@@ -619,7 +633,7 @@ static bool rt_scratch_buffer_create(RTBuffer &r_buffer, const size_t size)
   VkBufferDeviceAddressInfo address_info = {};
   address_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   address_info.buffer = r_buffer.buffer;
-  r_buffer.device_address = vkGetBufferDeviceAddress(device.vk_handle(), &address_info);
+  r_buffer.device_address = device.functions.vkGetBufferDeviceAddress(device.vk_handle(), &address_info);
   return true;
 }
 
@@ -634,9 +648,9 @@ static bool build_acceleration_structure(
     RTBuffer &r_buffer)
 {
   VKDevice &device = VKBackend::get().device;
-  if (device.functions.vkGetAccelerationStructureBuildSizes == nullptr ||
-      device.functions.vkCreateAccelerationStructure == nullptr ||
-      device.functions.vkCmdBuildAccelerationStructures == nullptr)
+  if (device.functions.vkGetAccelerationStructureBuildSizesKHR == nullptr ||
+      device.functions.vkCreateAccelerationStructureKHR == nullptr ||
+      device.functions.vkCmdBuildAccelerationStructuresKHR == nullptr)
   {
     return false;
   }
@@ -644,7 +658,7 @@ static bool build_acceleration_structure(
   const uint32_t primitive_count = range_info.primitiveCount;
   VkAccelerationStructureBuildSizesInfoKHR size_info = {};
   size_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-  device.functions.vkGetAccelerationStructureBuildSizes(
+  device.functions.vkGetAccelerationStructureBuildSizesKHR(
       device.vk_handle(),
       VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
       &build_info,
@@ -669,7 +683,7 @@ static bool build_acceleration_structure(
   create_info.offset = 0;
   create_info.size = size_info.accelerationStructureSize;
   create_info.type = type;
-  if (device.functions.vkCreateAccelerationStructure(
+  if (device.functions.vkCreateAccelerationStructureKHR(
           device.vk_handle(), &create_info, nullptr, &r_acceleration_structure) != VK_SUCCESS)
   {
     rt_buffer_free(r_buffer);
@@ -678,7 +692,7 @@ static bool build_acceleration_structure(
 
   RTBuffer scratch;
   if (!rt_scratch_buffer_create(scratch, std::max<size_t>(size_info.buildScratchSize, 16))) {
-    device.functions.vkDestroyAccelerationStructure(
+    device.functions.vkDestroyAccelerationStructureKHR(
         device.vk_handle(), r_acceleration_structure, nullptr);
     r_acceleration_structure = VK_NULL_HANDLE;
     rt_buffer_free(r_buffer);
@@ -689,7 +703,7 @@ static bool build_acceleration_structure(
   build_info.scratchData.deviceAddress = scratch.device_address;
 
   const VkAccelerationStructureBuildRangeInfoKHR *range_ptr = &range_info;
-  device.functions.vkCmdBuildAccelerationStructures(
+  device.functions.vkCmdBuildAccelerationStructuresKHR(
       batch.command_buffer, 1, &build_info, &range_ptr);
 
   batch.scratch_buffers.push_back(scratch);
@@ -701,8 +715,8 @@ static void destroy_acceleration_structure(VkAccelerationStructureKHR &accelerat
 {
   if (acceleration_structure != VK_NULL_HANDLE) {
     VKDevice &device = VKBackend::get().device;
-    if (device.functions.vkDestroyAccelerationStructure != nullptr) {
-      device.functions.vkDestroyAccelerationStructure(
+    if (device.functions.vkDestroyAccelerationStructureKHR != nullptr) {
+      device.functions.vkDestroyAccelerationStructureKHR(
           device.vk_handle(), acceleration_structure, nullptr);
     }
     acceleration_structure = VK_NULL_HANDLE;
@@ -1204,7 +1218,7 @@ static bool build_top_level_acceleration_structure(
   }
 
   VKDevice &device = VKBackend::get().device;
-  if (device.functions.vkGetAccelerationStructureDeviceAddress == nullptr) {
+  if (device.functions.vkGetAccelerationStructureDeviceAddressKHR == nullptr) {
     return false;
   }
 
@@ -1227,7 +1241,7 @@ static bool build_top_level_acceleration_structure(
     VkAccelerationStructureDeviceAddressInfoKHR address_info = {};
     address_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     address_info.accelerationStructure = entry.acceleration_structure;
-    const VkDeviceAddress blas_address = device.functions.vkGetAccelerationStructureDeviceAddress(
+    const VkDeviceAddress blas_address = device.functions.vkGetAccelerationStructureDeviceAddressKHR(
         device.vk_handle(), &address_info);
 
     for (uint32_t instance_index = 0; instance_index < entry.instance_count; instance_index++) {
@@ -2047,7 +2061,7 @@ static KernelPipeline &kernel_pipeline_get(const NuruKernel kernel)
   module_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
   module_info.codeSize = spirv.size() * sizeof(uint32_t);
   module_info.pCode = spirv.data();
-  if (vkCreateShaderModule(device.vk_handle(), &module_info, nullptr, &entry.shader_module) !=
+  if (device.functions.vkCreateShaderModule(device.vk_handle(), &module_info, nullptr, &entry.shader_module) !=
       VK_SUCCESS)
   {
     entry.failed = true;
@@ -2070,7 +2084,7 @@ static KernelPipeline &kernel_pipeline_get(const NuruKernel kernel)
   layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
   layout_info.bindingCount = uint32_t(layout_bindings.size());
   layout_info.pBindings = layout_bindings.data();
-  if (vkCreateDescriptorSetLayout(
+  if (device.functions.vkCreateDescriptorSetLayout(
           device.vk_handle(), &layout_info, nullptr, &entry.descriptor_set_layout) != VK_SUCCESS)
   {
     entry.failed = true;
@@ -2081,7 +2095,7 @@ static KernelPipeline &kernel_pipeline_get(const NuruKernel kernel)
   pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
   pipeline_layout_info.setLayoutCount = 1;
   pipeline_layout_info.pSetLayouts = &entry.descriptor_set_layout;
-  if (vkCreatePipelineLayout(
+  if (device.functions.vkCreatePipelineLayout(
           device.vk_handle(), &pipeline_layout_info, nullptr, &entry.pipeline_layout) !=
       VK_SUCCESS)
   {
@@ -2096,7 +2110,7 @@ static KernelPipeline &kernel_pipeline_get(const NuruKernel kernel)
   pipeline_info.stage.module = entry.shader_module;
   pipeline_info.stage.pName = "main";
   pipeline_info.layout = entry.pipeline_layout;
-  if (vkCreateComputePipelines(device.vk_handle(),
+  if (device.functions.vkCreateComputePipelines(device.vk_handle(),
                                VK_NULL_HANDLE,
                                1,
                                &pipeline_info,
@@ -2135,7 +2149,7 @@ static VkSampler raytrace_sampler_get(const bool linear)
   create_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   create_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   create_info.maxLod = VK_LOD_CLAMP_NONE;
-  vkCreateSampler(device.vk_handle(), &create_info, nullptr, &sampler);
+  device.functions.vkCreateSampler(device.vk_handle(), &create_info, nullptr, &sampler);
   return sampler;
 }
 
@@ -2190,7 +2204,7 @@ static VkImageView raytrace_dummy_array_view_get()
   view_info.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
   view_info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
   view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-  if (vkCreateImageView(device.vk_handle(), &view_info, nullptr, &view) != VK_SUCCESS) {
+  if (device.functions.vkCreateImageView(device.vk_handle(), &view_info, nullptr, &view) != VK_SUCCESS) {
     failed = true;
     view = VK_NULL_HANDLE;
     return VK_NULL_HANDLE;
@@ -2199,6 +2213,7 @@ static VkImageView raytrace_dummy_array_view_get()
   /* One-time transition to GENERAL so descriptor layout expectations always hold. */
   VkCommandBuffer command_buffer = raytrace_command_buffer_alloc();
   if (command_buffer == VK_NULL_HANDLE) {
+    device.functions.vkDestroyImageView(device.vk_handle(), view, nullptr);
     failed = true;
     view = VK_NULL_HANDLE;
     return VK_NULL_HANDLE;
@@ -2213,7 +2228,7 @@ static VkImageView raytrace_dummy_array_view_get()
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.image = image;
   barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-  vkCmdPipelineBarrier(command_buffer,
+  device.functions.vkCmdPipelineBarrier(command_buffer,
                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                        0,
@@ -2223,7 +2238,11 @@ static VkImageView raytrace_dummy_array_view_get()
                        nullptr,
                        1,
                        &barrier);
-  raytrace_command_buffer_submit_and_wait(command_buffer);
+  if (!raytrace_command_buffer_submit_and_wait(command_buffer)) {
+    device.functions.vkDestroyImageView(device.vk_handle(), view, nullptr);
+    view = VK_NULL_HANDLE;
+    failed = true;
+  }
   return view;
 }
 
@@ -2297,7 +2316,7 @@ static void submission_destroy(NuruVKSubmission *submission)
    * Remove before completion. */
   if (!submission->args_snapshots.empty()) {
     const bool fence_ok = (submission->fence != VK_NULL_HANDLE) &&
-                          (vkGetFenceStatus(device.vk_handle(), submission->fence) == VK_SUCCESS);
+                          (device.functions.vkGetFenceStatus(device.vk_handle(), submission->fence) == VK_SUCCESS);
     for (size_t i = 0; i < submission->args_snapshots.size(); i++) {
       RTBuffer &snapshot = submission->args_snapshots[i];
       if (snapshot.mapped == nullptr) {
@@ -2317,16 +2336,16 @@ static void submission_destroy(NuruVKSubmission *submission)
   }
   /* END DIAGNOSTIC */
   for (VkDescriptorPool pool : submission->descriptor_pools) {
-    vkDestroyDescriptorPool(device.vk_handle(), pool, nullptr);
+    device.functions.vkDestroyDescriptorPool(device.vk_handle(), pool, nullptr);
   }
   for (RTBuffer &buffer : submission->uniform_buffers) {
     rt_buffer_free(buffer);
   }
   if (submission->fence != VK_NULL_HANDLE) {
-    vkDestroyFence(device.vk_handle(), submission->fence, nullptr);
+    device.functions.vkDestroyFence(device.vk_handle(), submission->fence, nullptr);
   }
   if (submission->command_buffer != VK_NULL_HANDLE) {
-    vkFreeCommandBuffers(
+    device.functions.vkFreeCommandBuffers(
         device.vk_handle(), raytrace_command_pool_get(), 1, &submission->command_buffer);
   }
   delete submission;
@@ -2338,16 +2357,24 @@ static void collect_finished_submissions(const bool wait_all)
   std::vector<NuruVKSubmission *> &submissions = in_flight_submissions();
   for (auto it = submissions.begin(); it != submissions.end();) {
     NuruVKSubmission *submission = *it;
-    VkResult status = vkGetFenceStatus(device.vk_handle(), submission->fence);
-    if (status != VK_SUCCESS && wait_all) {
-      vkWaitForFences(device.vk_handle(),
-                      1,
-                      &submission->fence,
-                      VK_TRUE,
-                      uint64_t(60) * 1000 * 1000 * 1000);
-      status = vkGetFenceStatus(device.vk_handle(), submission->fence);
+    VkResult status = device.functions.vkGetFenceStatus(device.vk_handle(), submission->fence);
+    if (status == VK_NOT_READY && wait_all) {
+      status = device.functions.vkWaitForFences(device.vk_handle(),
+                              1,
+                              &submission->fence,
+                              VK_TRUE,
+                              uint64_t(60) * 1000 * 1000 * 1000);
+      if (status != VK_SUCCESS && status != VK_ERROR_DEVICE_LOST) {
+        device.submission_error_set(status, "vkWaitForFences (HWRT cleanup)");
+        if (device.wait_queue_idle()) {
+          status = VK_SUCCESS;
+        }
+      }
     }
-    if (status == VK_SUCCESS) {
+    if (status == VK_ERROR_DEVICE_LOST) {
+      device.submission_error_set(status, "vkGetFenceStatus (HWRT)");
+    }
+    if (status == VK_SUCCESS || status == VK_ERROR_DEVICE_LOST) {
       submission_destroy(submission);
       it = submissions.erase(it);
     }
@@ -2359,12 +2386,16 @@ static void collect_finished_submissions(const bool wait_all)
 
 static NuruVKSubmission *submission_begin()
 {
+  const VKDevice &device = VKBackend::get().device;
   /* Keep the in-flight list shallow; HWRT dispatches are heavyweight. */
   if (in_flight_submissions().size() > 8) {
     collect_finished_submissions(true);
   }
   else {
     collect_finished_submissions(false);
+  }
+  if (device.submission_failed()) {
+    return nullptr;
   }
 
   VkCommandBuffer command_buffer = raytrace_command_buffer_alloc();
@@ -2379,7 +2410,7 @@ static NuruVKSubmission *submission_begin()
   barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
   barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
   barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-  vkCmdPipelineBarrier(command_buffer,
+  device.functions.vkCmdPipelineBarrier(command_buffer,
                        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                        0,
@@ -2392,11 +2423,8 @@ static NuruVKSubmission *submission_begin()
   /* Nuru: wedge diagnostic (BLENDER_VULKAN_CHECKPOINTS=1). If this marker shows as
    * LAST_STARTED in a device-lost dump, the external RT batch passed its begin barrier;
    * if it never appears, the wedge sits in an earlier render-graph pass. */
-  {
-    const VKDevice &device = VKBackend::get().device;
-    if (device.functions.vkCmdSetCheckpoint) {
-      device.functions.vkCmdSetCheckpoint(command_buffer, "NURU_RT external begin");
-    }
+  if (device.extensions_get().diagnostic_checkpoints && device.functions.vkCmdSetCheckpointNV) {
+    device.functions.vkCmdSetCheckpointNV(command_buffer, "NURU_RT external begin");
   }
   return submission;
 }
@@ -2407,8 +2435,8 @@ static bool submission_end(NuruVKSubmission *submission, const bool wait)
 
   /* Nuru: wedge diagnostic (BLENDER_VULKAN_CHECKPOINTS=1). LAST_COMPLETED on this marker means
    * every kernel of the external batch finished on the GPU. */
-  if (device.functions.vkCmdSetCheckpoint) {
-    device.functions.vkCmdSetCheckpoint(submission->command_buffer, "NURU_RT external end");
+  if (device.extensions_get().diagnostic_checkpoints && device.functions.vkCmdSetCheckpointNV) {
+    device.functions.vkCmdSetCheckpointNV(submission->command_buffer, "NURU_RT external end");
   }
 
   /* Make compute writes visible to all later GPU work on this queue. */
@@ -2416,7 +2444,7 @@ static bool submission_end(NuruVKSubmission *submission, const bool wait)
   barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
   barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
   barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-  vkCmdPipelineBarrier(submission->command_buffer,
+  device.functions.vkCmdPipelineBarrier(submission->command_buffer,
                        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                        0,
@@ -2426,11 +2454,14 @@ static bool submission_end(NuruVKSubmission *submission, const bool wait)
                        nullptr,
                        0,
                        nullptr);
-  vkEndCommandBuffer(submission->command_buffer);
+  if (device.functions.vkEndCommandBuffer(submission->command_buffer) != VK_SUCCESS) {
+    submission_destroy(submission);
+    return false;
+  }
 
   VkFenceCreateInfo fence_info = {};
   fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  if (vkCreateFence(device.vk_handle(), &fence_info, nullptr, &submission->fence) != VK_SUCCESS) {
+  if (device.functions.vkCreateFence(device.vk_handle(), &fence_info, nullptr, &submission->fence) != VK_SUCCESS) {
     submission_destroy(submission);
     return false;
   }
@@ -2445,7 +2476,10 @@ static bool submission_end(NuruVKSubmission *submission, const bool wait)
   const TimelineValue chain_signal_value = device.external_timeline_chain_acquire(
       &chain_wait_value);
   /* Submission-order discipline; see `raytrace_command_buffer_submit_and_wait`. */
-  device.wait_for_submission_timeline(chain_wait_value);
+  if (!device.wait_for_submission_timeline(chain_wait_value)) {
+    submission_destroy(submission);
+    return false;
+  }
   VkSemaphore timeline_semaphore = device.timeline_semaphore_get();
   VkPipelineStageFlags chain_wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
   VkTimelineSemaphoreSubmitInfo timeline_info = {};
@@ -2469,14 +2503,11 @@ static bool submission_end(NuruVKSubmission *submission, const bool wait)
   const double submit_start = submit_perf_logging ? BLI_time_now_seconds() : 0.0;
   {
     std::scoped_lock lock(device.queue_mutex_get());
-    if (vkQueueSubmit(device.queue_get(), 1, &submit_info, submission->fence) != VK_SUCCESS) {
-      /* Unblock the chain: later graph submissions already wait on `chain_signal_value`. */
-      VkSemaphoreSignalInfo signal_info = {};
-      signal_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
-      signal_info.semaphore = timeline_semaphore;
-      signal_info.value = chain_signal_value;
-      vkSignalSemaphore(device.vk_handle(), &signal_info);
-      device.external_timeline_chain_submitted(chain_signal_value);
+    const VkResult result = device.submission_failed() ?
+                                device.submission_error_get() :
+                                device.functions.vkQueueSubmit(device.queue_get(), 1, &submit_info, submission->fence);
+    if (result != VK_SUCCESS) {
+      device.submission_error_set(result, "vkQueueSubmit (HWRT dispatch)", chain_signal_value);
       submission_destroy(submission);
       return false;
     }
@@ -2486,7 +2517,7 @@ static bool submission_end(NuruVKSubmission *submission, const bool wait)
   bool success = true;
   if (wait || vulkan_raytrace_force_sync()) {
     const double fence_wait_start = submit_perf_logging ? BLI_time_now_seconds() : 0.0;
-    const VkResult wait_result = vkWaitForFences(
+    const VkResult wait_result = device.functions.vkWaitForFences(
         device.vk_handle(), 1, &submission->fence, VK_TRUE, uint64_t(60) * 1000 * 1000 * 1000);
     if (submit_perf_logging) {
       /* With force-sync this attributes wall GPU time to each external batch. */
@@ -2502,6 +2533,11 @@ static bool submission_end(NuruVKSubmission *submission, const bool wait)
       /* Nuru: wedge diagnostic. Covers both DEVICE_LOST and the 60s fence timeout; on timeout
        * the checkpoint state still names the graph node the GPU is spinning in. */
       device.diagnostic_checkpoints_dump();
+      device.submission_error_set(wait_result, "vkWaitForFences (HWRT dispatch)", chain_signal_value);
+      if (wait_result != VK_ERROR_DEVICE_LOST && !device.wait_queue_idle()) {
+        in_flight_submissions().push_back(submission);
+        return false;
+      }
     }
     submission_destroy(submission);
     if (success) {
@@ -2521,24 +2557,10 @@ static void transition_image_to_general(VkCommandBuffer command_buffer, VKTextur
   if (image == VK_NULL_HANDLE) {
     return;
   }
-  const VkImageLayout current_layout = device.resources.image_layout_get(image);
+  const ResourceHandle image_handle = texture->resource_handle();
+  const VkImageLayout current_layout = device.resources.image_layout_get(image_handle);
   if (current_layout == VK_IMAGE_LAYOUT_GENERAL) {
     return;
-  }
-
-  VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-  const TextureFormat format = texture->device_format_get();
-  if (ELEM(format,
-           TextureFormat::SFLOAT_32_DEPTH,
-           TextureFormat::SFLOAT_32_DEPTH_UINT_8,
-           TextureFormat::UNORM_16_DEPTH))
-  {
-    aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-    /* Blender tracks one layout for the whole image and does not enable separate depth/stencil
-     * layouts. Transition both aspects even when the sampled view exposes depth only. */
-    if (format == TextureFormat::SFLOAT_32_DEPTH_UINT_8) {
-      aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
-    }
   }
 
   VkImageMemoryBarrier barrier = {};
@@ -2550,12 +2572,12 @@ static void transition_image_to_general(VkCommandBuffer command_buffer, VKTextur
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.image = image;
-  barrier.subresourceRange.aspectMask = aspect;
+  barrier.subresourceRange.aspectMask = to_vk_image_aspect_flag_bits(texture->device_format_get());
   barrier.subresourceRange.baseMipLevel = 0;
   barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
   barrier.subresourceRange.baseArrayLayer = 0;
   barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
-  vkCmdPipelineBarrier(command_buffer,
+  device.functions.vkCmdPipelineBarrier(command_buffer,
                        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                        0,
@@ -2565,7 +2587,7 @@ static void transition_image_to_general(VkCommandBuffer command_buffer, VKTextur
                        nullptr,
                        1,
                        &barrier);
-  device.resources.update_image_layout(image, VK_IMAGE_LAYOUT_GENERAL);
+  device.resources.update_image_layout(image_handle, VK_IMAGE_LAYOUT_GENERAL);
 }
 
 /* Record one kernel dispatch into the submission's command buffer. */
@@ -2639,7 +2661,7 @@ static bool record_kernel_dispatch(NuruVKSubmission *submission,
   pool_info.poolSizeCount = uint32_t(pool_sizes.size());
   pool_info.pPoolSizes = pool_sizes.data();
   VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
-  if (vkCreateDescriptorPool(device.vk_handle(), &pool_info, nullptr, &descriptor_pool) !=
+  if (device.functions.vkCreateDescriptorPool(device.vk_handle(), &pool_info, nullptr, &descriptor_pool) !=
       VK_SUCCESS)
   {
     return false;
@@ -2652,7 +2674,7 @@ static bool record_kernel_dispatch(NuruVKSubmission *submission,
   set_alloc_info.descriptorSetCount = 1;
   set_alloc_info.pSetLayouts = &pipeline.descriptor_set_layout;
   VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
-  if (vkAllocateDescriptorSets(device.vk_handle(), &set_alloc_info, &descriptor_set) !=
+  if (device.functions.vkAllocateDescriptorSets(device.vk_handle(), &set_alloc_info, &descriptor_set) !=
       VK_SUCCESS)
   {
     return false;
@@ -2732,12 +2754,12 @@ static bool record_kernel_dispatch(NuruVKSubmission *submission,
     writes.push_back(write);
   }
 
-  vkUpdateDescriptorSets(
+  device.functions.vkUpdateDescriptorSets(
       device.vk_handle(), uint32_t(writes.size()), writes.data(), 0, nullptr);
 
-  vkCmdBindPipeline(
+  device.functions.vkCmdBindPipeline(
       submission->command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline);
-  vkCmdBindDescriptorSets(submission->command_buffer,
+  device.functions.vkCmdBindDescriptorSets(submission->command_buffer,
                           VK_PIPELINE_BIND_POINT_COMPUTE,
                           pipeline.pipeline_layout,
                           0,
@@ -2765,7 +2787,7 @@ static bool record_kernel_dispatch(NuruVKSubmission *submission,
         copy_region.srcOffset = 0;
         copy_region.dstOffset = 0;
         copy_region.size = sizeof(uint32_t) * 3;
-        vkCmdCopyBuffer(submission->command_buffer,
+        device.functions.vkCmdCopyBuffer(submission->command_buffer,
                         args.indirect_buffer,
                         snapshot.buffer,
                         1,
@@ -2777,16 +2799,16 @@ static bool record_kernel_dispatch(NuruVKSubmission *submission,
     /* END DIAGNOSTIC */
     /* Nuru: per-kernel wedge-diagnostic checkpoint (BLENDER_VULKAN_CHECKPOINTS=1). Kernel names
      * are static literals, so they stay valid for a device-lost dump. */
-    if (device.functions.vkCmdSetCheckpoint) {
-      device.functions.vkCmdSetCheckpoint(submission->command_buffer, kernel_name(kernel));
+    if (device.extensions_get().diagnostic_checkpoints && device.functions.vkCmdSetCheckpointNV) {
+      device.functions.vkCmdSetCheckpointNV(submission->command_buffer, kernel_name(kernel));
     }
-    vkCmdDispatchIndirect(submission->command_buffer, args.indirect_buffer, 0);
+    device.functions.vkCmdDispatchIndirect(submission->command_buffer, args.indirect_buffer, 0);
   }
   else {
-    if (device.functions.vkCmdSetCheckpoint) {
-      device.functions.vkCmdSetCheckpoint(submission->command_buffer, kernel_name(kernel));
+    if (device.extensions_get().diagnostic_checkpoints && device.functions.vkCmdSetCheckpointNV) {
+      device.functions.vkCmdSetCheckpointNV(submission->command_buffer, kernel_name(kernel));
     }
-    vkCmdDispatch(submission->command_buffer,
+    device.functions.vkCmdDispatch(submission->command_buffer,
                   uint32_t(std::max(args.group_count.x, 1)),
                   uint32_t(std::max(args.group_count.y, 1)),
                   uint32_t(std::max(args.group_count.z, 1)));
@@ -2797,7 +2819,7 @@ static bool record_kernel_dispatch(NuruVKSubmission *submission,
   barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
   barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
   barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-  vkCmdPipelineBarrier(submission->command_buffer,
+  device.functions.vkCmdPipelineBarrier(submission->command_buffer,
                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                        0,
@@ -2842,7 +2864,9 @@ static bool dispatch_kernel(GPUHardwareRaytraceScene *scene,
   if (!uses_batch) {
     const TimelineValue pending_timeline = context->flush_render_graph(
         RenderGraphFlushFlags::SUBMIT | RenderGraphFlushFlags::RENEW_RENDER_GRAPH);
-    VKBackend::get().device.wait_for_submission_timeline(pending_timeline);
+    if (!VKBackend::get().device.wait_for_submission_timeline(pending_timeline)) {
+      return false;
+    }
   }
 
   NuruVKSubmission *submission = uses_batch ? scene->shadow_batch_submission :
@@ -2854,7 +2878,6 @@ static bool dispatch_kernel(GPUHardwareRaytraceScene *scene,
   if (!record_kernel_dispatch(submission, kernel, args)) {
     if (!uses_batch) {
       /* Abandon the partially recorded one-shot submission. */
-      vkEndCommandBuffer(submission->command_buffer);
       submission_destroy(submission);
     }
     return false;
@@ -3613,7 +3636,9 @@ bool raytrace_scene_shadow_batch_begin(GPUHardwareRaytraceScene *scene)
    * compacts) must be on the queue before the batch submission; see dispatch_kernel(). */
   const TimelineValue pending_timeline = context->flush_render_graph(
       RenderGraphFlushFlags::SUBMIT | RenderGraphFlushFlags::RENEW_RENDER_GRAPH);
-  VKBackend::get().device.wait_for_submission_timeline(pending_timeline);
+  if (!VKBackend::get().device.wait_for_submission_timeline(pending_timeline)) {
+    return false;
+  }
   scene->shadow_batch_submission = submission_begin();
   scene->shadow_batch_has_work = false;
   return scene->shadow_batch_submission != nullptr;
@@ -4413,7 +4438,9 @@ bool raytrace_denoise_oidn(const GPUHardwareRaytraceOIDNDenoiseParams &params)
       pack_flush_ms = (now - t_phase) * 1000.0;
       t_phase = now;
     }
-    VKBackend::get().device.wait_for_submission_timeline(pending_timeline);
+    if (!VKBackend::get().device.wait_for_submission_timeline(pending_timeline)) {
+      return false;
+    }
     if (perf_logging_enabled) {
       const double now = BLI_time_now_seconds();
       pack_publish_ms = (now - t_phase) * 1000.0;
@@ -4424,7 +4451,6 @@ bool raytrace_denoise_oidn(const GPUHardwareRaytraceOIDNDenoiseParams &params)
       return false;
     }
     if (!record_kernel_dispatch(submission, NuruKernel::OIDN_PACK, args)) {
-      vkEndCommandBuffer(submission->command_buffer);
       submission_destroy(submission);
       return false;
     }
@@ -4583,14 +4609,15 @@ bool raytrace_denoise_oidn(const GPUHardwareRaytraceOIDNDenoiseParams &params)
     std::scoped_lock lock(raytrace_mutex_get());
     const TimelineValue pending_timeline = context->flush_render_graph(
         RenderGraphFlushFlags::SUBMIT | RenderGraphFlushFlags::RENEW_RENDER_GRAPH);
-    VKBackend::get().device.wait_for_submission_timeline(pending_timeline);
+    if (!VKBackend::get().device.wait_for_submission_timeline(pending_timeline)) {
+      return false;
+    }
     NuruVKSubmission *submission = submission_begin();
     if (submission != nullptr) {
       if (record_kernel_dispatch(submission, NuruKernel::OIDN_UNPACK, args)) {
         unpack_submitted = submission_end(submission, /*wait=*/true);
       }
       else {
-        vkEndCommandBuffer(submission->command_buffer);
         submission_destroy(submission);
       }
     }
@@ -4670,22 +4697,22 @@ void raytrace_device_free()
 
   for (KernelPipeline &pipeline : g_kernel_pipelines) {
     if (pipeline.pipeline != VK_NULL_HANDLE) {
-      vkDestroyPipeline(device.vk_handle(), pipeline.pipeline, nullptr);
+      device.functions.vkDestroyPipeline(device.vk_handle(), pipeline.pipeline, nullptr);
     }
     if (pipeline.pipeline_layout != VK_NULL_HANDLE) {
-      vkDestroyPipelineLayout(device.vk_handle(), pipeline.pipeline_layout, nullptr);
+      device.functions.vkDestroyPipelineLayout(device.vk_handle(), pipeline.pipeline_layout, nullptr);
     }
     if (pipeline.descriptor_set_layout != VK_NULL_HANDLE) {
-      vkDestroyDescriptorSetLayout(device.vk_handle(), pipeline.descriptor_set_layout, nullptr);
+      device.functions.vkDestroyDescriptorSetLayout(device.vk_handle(), pipeline.descriptor_set_layout, nullptr);
     }
     if (pipeline.shader_module != VK_NULL_HANDLE) {
-      vkDestroyShaderModule(device.vk_handle(), pipeline.shader_module, nullptr);
+      device.functions.vkDestroyShaderModule(device.vk_handle(), pipeline.shader_module, nullptr);
     }
     pipeline = {};
   }
 
   if (g_dummy_array_view != VK_NULL_HANDLE) {
-    vkDestroyImageView(device.vk_handle(), g_dummy_array_view, nullptr);
+    device.functions.vkDestroyImageView(device.vk_handle(), g_dummy_array_view, nullptr);
     g_dummy_array_view = VK_NULL_HANDLE;
   }
   if (g_dummy_array_image != VK_NULL_HANDLE) {
@@ -4697,13 +4724,13 @@ void raytrace_device_free()
 
   for (VkSampler &sampler : g_raytrace_samplers) {
     if (sampler != VK_NULL_HANDLE) {
-      vkDestroySampler(device.vk_handle(), sampler, nullptr);
+      device.functions.vkDestroySampler(device.vk_handle(), sampler, nullptr);
       sampler = VK_NULL_HANDLE;
     }
   }
 
   if (g_raytrace_command_pool != VK_NULL_HANDLE) {
-    vkDestroyCommandPool(device.vk_handle(), g_raytrace_command_pool, nullptr);
+    device.functions.vkDestroyCommandPool(device.vk_handle(), g_raytrace_command_pool, nullptr);
     g_raytrace_command_pool = VK_NULL_HANDLE;
   }
 }
@@ -4719,8 +4746,7 @@ GPUHardwareRaytraceScene::~GPUHardwareRaytraceScene()
   using namespace gpu::vulkan;
   /* Submissions may still reference the acceleration structures and buffers. */
   if (shadow_batch_submission != nullptr) {
-    /* Never submitted: finish recording and destroy directly. */
-    vkEndCommandBuffer(shadow_batch_submission->command_buffer);
+    /* Never submitted: discard the recording. */
     gpu::vulkan::submission_destroy(shadow_batch_submission);
     shadow_batch_submission = nullptr;
   }

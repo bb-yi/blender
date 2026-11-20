@@ -8,20 +8,20 @@
 
 #include "BLI_array.hh"
 #include "BLI_array_utils.hh"
-#include "BLI_assert.h"
+#include "BLI_assert.hh"
 #include "BLI_enumerable_thread_specific.hh"
 #include "BLI_index_mask.hh"
 #include "BLI_index_range.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_base.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_offset_indices.hh"
 #include "BLI_span.hh"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 #include "BLI_vector.hh"
 
 #include "BLT_translation.hh"
@@ -36,7 +36,7 @@
 #include "DNA_windowmanager_types.h"
 
 #include "BKE_anim_data.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_attribute.hh"
 #include "BKE_attribute_legacy_convert.hh"
 #include "BKE_context.hh"
@@ -938,8 +938,8 @@ static const EnumPropertyItem prop_cyclical_types[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static bke::CurvesGeometry subdivide_last_segement(const bke::CurvesGeometry &curves,
-                                                   const IndexMask &strokes)
+static bke::CurvesGeometry subdivide_last_segment(const bke::CurvesGeometry &curves,
+                                                  const IndexMask &strokes)
 {
   const VArray<bool> cyclic = curves.cyclic();
   const Span<float3> positions = curves.positions();
@@ -1020,7 +1020,7 @@ static wmOperatorStatus grease_pencil_cyclical_set_exec(bContext *C, wmOperator 
       /* Update to properly calculate the lengths. */
       curves.tag_topology_changed();
 
-      curves = subdivide_last_segement(curves, strokes);
+      curves = subdivide_last_segment(curves, strokes);
     }
 
     info.drawing.tag_topology_changed();
@@ -5087,7 +5087,9 @@ static void GREASE_PENCIL_OT_set_corner_type(wmOperatorType *ot)
 /** \name Set Stroke Mode Operator
  * \{ */
 
+namespace {
 enum class StrokeType : int8_t { Stroke = 0, Fill = 1, Both = 2 };
+}
 
 static wmOperatorStatus grease_pencil_set_stroke_type_exec(bContext *C, wmOperator *op)
 {
@@ -5135,15 +5137,21 @@ static wmOperatorStatus grease_pencil_set_stroke_type_exec(bContext *C, wmOperat
           strokes, memory, [&](const int64_t index) { return fill_ids.span[index] == 0; });
       bke::greasepencil::gather_next_available_fill_ids(
           fill_ids.span.varray(), selected_non_fill_strokes, fill_ids.span);
+      bke::SpanAttributeWriter<float> fill_opacities =
+          attributes.lookup_or_add_for_write_span<float>("fill_opacity", bke::AttrDomain::Curve);
+
+      /* Each non fill selected stroke becomes a new fill. */
+      index_mask::masked_fill(fill_opacities.span, 1.0f, selected_non_fill_strokes);
+      fill_opacities.finish();
     }
 
     hide_stroke.finish();
     fill_ids.finish();
 
     if (type == StrokeType::Stroke) {
-      if (std::all_of(fill_ids.span.begin(), fill_ids.span.end(), [&](const int64_t fill_id) {
-            return fill_id == 0;
-          }))
+      if (std::all_of(fill_ids.span.begin(),
+                      fill_ids.span.end(),
+                      [&](const int64_t fill_id) { return fill_id == 0; }))
       {
         /* Remove #fill_id attribute if there are no fills left. */
         attributes.remove("fill_id");
@@ -5550,6 +5558,7 @@ void ED_operatortypes_grease_pencil_edit()
   WM_operatortype_append(GREASE_PENCIL_OT_set_stroke_type);
   WM_operatortype_append(GREASE_PENCIL_OT_join_fills);
   WM_operatortype_append(GREASE_PENCIL_OT_separate_fills);
+  WM_operatortype_append(GREASE_PENCIL_OT_stroke_carver);
 }
 
 /* -------------------------------------------------------------------- */
@@ -5821,14 +5830,15 @@ static void join_object_with_active(Main &bmain,
 
   /* Rename animation paths to layers. */
   BKE_fcurves_main_cb(&bmain, [&](ID *id, FCurve *fcu) {
-    if (id == &grease_pencil_src.id && fcu->rna_path && strstr(fcu->rna_path, "layers[")) {
+    const StringRefNull rna_path = fcu->rna_path();
+    if (id == &grease_pencil_src.id && strstr(rna_path.c_str(), "layers[")) {
       /* Have to use linear search, the layer name map only contains sub-strings of RNA paths. */
       for (auto [name_src, name_dst] : layer_name_map.items()) {
         if (name_dst != name_src) {
-          const char *old_path = fcu->rna_path;
-          fcu->rna_path = BKE_animsys_fix_rna_path_rename(
-              id, fcu->rna_path, "layers", name_src.c_str(), name_dst.c_str(), 0, 0, false);
-          if (old_path != fcu->rna_path) {
+          if (char *new_path = BKE_animsys_fix_rna_path_rename(
+                  id, rna_path.c_str(), "layers", name_src, name_dst))
+          {
+            fcu->rna_path_set_move(new_path);
             /* Stop after first match. */
             break;
           }
@@ -5848,10 +5858,11 @@ static void join_object_with_active(Main &bmain,
           if (dtar->rna_path && strstr(dtar->rna_path, "layers[")) {
             for (auto [name_src, name_dst] : layer_name_map.items()) {
               if (name_dst != name_src) {
-                const char *old_path = fcu->rna_path;
-                dtar->rna_path = BKE_animsys_fix_rna_path_rename(
-                    id, dtar->rna_path, "layers", name_src.c_str(), name_dst.c_str(), 0, 0, false);
-                if (old_path != dtar->rna_path) {
+                if (char *new_path = BKE_animsys_fix_rna_path_rename(
+                        id, dtar->rna_path, "layers", name_src, name_dst))
+                {
+                  MEM_delete(dtar->rna_path);
+                  dtar->rna_path = new_path;
                   break;
                 }
               }

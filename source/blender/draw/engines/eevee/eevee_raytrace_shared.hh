@@ -2,7 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/**
+/** \file
+ * \ingroup eevee
+ *
  * Shared code between host and client code-bases.
  */
 
@@ -223,7 +225,9 @@ struct [[host_shared]] HardwareHitEvalRecord {
   packed_float3 view_origin;
   float _pad1;
 };
+#ifndef GPU_SHADER
 BLI_STATIC_ASSERT_ALIGN(HardwareHitEvalRecord, 16)
+#endif
 
 struct [[host_shared]] AOData {
   float2 pixel_size;

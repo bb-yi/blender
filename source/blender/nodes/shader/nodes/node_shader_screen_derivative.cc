@@ -77,7 +77,7 @@ static int gpu_shader_screen_derivative(GPUMaterial *mat,
     default:
       break;
   }
-  return GPU_stack_link(mat, node, function_name, in, out);
+  return GPU_stack_link(mat, node, function_name, in, out, GPU_kernel_globals());
 }
 
 }  // namespace nodes::node_shader_screen_derivative_cc

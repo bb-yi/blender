@@ -2,13 +2,17 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup spnode
+ */
+
 #include "AS_asset_catalog.hh"
 #include "AS_asset_catalog_tree.hh"
 #include "AS_asset_library.hh"
 #include "AS_asset_representation.hh"
 
 #include "BLI_multi_value_map.hh"
-#include "BLI_string_utf8.h"
+#include "BLI_string_utf8.hh"
 
 #include "DNA_space_types.h"
 
@@ -265,7 +269,7 @@ static void root_catalogs_draw(const bContext *C, Menu *menu, const StringRefNul
   layout->separator();
 
   if (!loading_finished) {
-    layout->label(IFACE_("Loading Asset Libraries"), ICON_INFO);
+    layout->label(IFACE_("Loading Asset Libraries"), ICON_STATUS_INFO);
   }
 
   const Set<StringRef> all_builtin_menus = get_builtin_menus(edit_tree->type);

@@ -28,8 +28,8 @@ struct RegionView3D;
 struct Scene;
 struct View3D;
 
-namespace bke {
-struct BVHTreeFromMesh;
+namespace bke::bvh {
+class Tree;
 }
 
 struct ReportList;
@@ -87,6 +87,7 @@ std::unique_ptr<CurvesSculptStrokeOperation> new_density_operation(
     const Object &object,
     const StrokeExtension &stroke_start);
 std::unique_ptr<CurvesSculptStrokeOperation> new_slide_operation();
+std::unique_ptr<CurvesSculptStrokeOperation> new_cut_operation();
 
 struct CurvesBrush3D {
   float3 position_cu;
@@ -149,7 +150,7 @@ std::optional<CurvesBrush3D> sample_curves_surface_3d_brush(
     const ARegion &region,
     const View3D &v3d,
     const CurvesSurfaceTransforms &transforms,
-    const bke::BVHTreeFromMesh &surface_bvh,
+    const bke::bvh::Tree &surface_bvh,
     const float2 &brush_pos_re,
     const float brush_radius_re);
 
@@ -163,6 +164,7 @@ void report_missing_surface(ReportList *reports);
 void report_missing_uv_map_on_original_surface(ReportList *reports);
 void report_missing_uv_map_on_evaluated_surface(ReportList *reports);
 void report_invalid_uv_map(ReportList *reports);
+void report_cyclic_not_supported(ReportList *reports);
 
 /**
  * Utility class to make it easy for brushes to implement length preservation and surface

@@ -310,8 +310,16 @@ class TestPropByteString(unittest.TestCase):
             set=set_,
         )
 
+        # Doubles the value, so the stored value is longer than the one assigned.
+        id_type.test_byte_string_transform = StringProperty(
+            default=self.default_value.decode(),
+            subtype="BYTE_STRING",
+            set_transform=lambda s, n_v, c_v, isset: n_v * 2,
+        )
+
     def tearDown(self):
         del id_type.test_byte_string
+        del id_type.test_byte_string_transform
 
     def do_test_access(self, prop_name, py_type, expected_value):
         v = getattr(id_inst, prop_name)
@@ -325,6 +333,13 @@ class TestPropByteString(unittest.TestCase):
 
     def test_access_byte_string(self):
         self.do_test_access("test_byte_string", bytes, self.default_value)
+
+    def test_access_byte_string_transform(self):
+        # The first assignment creates the property, the second updates the existing one.
+        id_inst.test_byte_string_transform = b"ab"
+        self.assertEqual(id_inst.test_byte_string_transform, b"abab")
+        id_inst.test_byte_string_transform = b"cdef"
+        self.assertEqual(id_inst.test_byte_string_transform, b"cdefcdef")
 
     # TODO: get/set is known essentially broken (aka unsupported) with byte strings properties currently.
     # See #150755, and comments in `bpy_props.cc`:
@@ -501,12 +516,14 @@ class TestPropCollectionAndPointer(unittest.TestCase):
         id_type.test_pointer_ID = PointerProperty(type=bpy.types.ID)
         id_type.test_pointer_ID_poll = PointerProperty(type=bpy.types.ID, poll=lambda s, v: v.id_type == 'OBJECT')
         id_type.test_collection = CollectionProperty(type=TestPropertyGroup)
+        id_type.test_collection_move = CollectionProperty(type=TestPropertyGroup)
 
     def tearDown(self):
         del id_type.test_pointer
         del id_type.test_pointer_ID
         del id_type.test_pointer_ID_poll
         del id_type.test_collection
+        del id_type.test_collection_move
 
         bpy.utils.unregister_class(TestPropertyGroup)
 
@@ -577,6 +594,45 @@ class TestPropCollectionAndPointer(unittest.TestCase):
         # Removing the second item re-allocates the third one, so no equality anymore.
         self.assertNotEqual(id_inst.test_collection[1], test_item_3)
         self.assertEqual(id_inst.test_collection[1].test_prop, 24)
+
+    def test_access_collection_move(self):
+        self.assertEqual(len(id_inst.test_collection_move), 0)
+
+        # Out of range in no-init empty collection.
+        with self.assertRaises(IndexError) as context:
+            id_inst.test_collection_move.move(0, 0)
+        self.assertEqual(str(context.exception), "bpy_prop_collection.move: index out of range")
+
+        # Out of range in init empty collection.
+        id_inst.test_collection_move.add()
+        id_inst.test_collection_move.clear()
+        with self.assertRaises(IndexError) as context:
+            id_inst.test_collection_move.move(0, 0)
+        self.assertEqual(str(context.exception), "bpy_prop_collection.move: index out of range")
+
+        # Fill.
+        for i in range(4):
+            id_inst.test_collection_move.add().test_prop = i
+
+        # Out of range.
+        with self.assertRaises(IndexError) as context:
+            id_inst.test_collection_move.move(0, 4)
+        self.assertEqual(str(context.exception), "bpy_prop_collection.move: index out of range")
+
+        # Negative index.
+        with self.assertRaises(IndexError) as context:
+            id_inst.test_collection_move.move(-1, 0)
+        self.assertEqual(str(context.exception), "bpy_prop_collection.move: index out of range")
+
+        # Regular move case.
+        id_inst.test_collection_move.move(0, 3)
+        self.assertEqual([i.test_prop for i in id_inst.test_collection_move], [1, 2, 3, 0])
+
+        # Single element move.
+        id_inst.test_collection_move.clear()
+        test_item = id_inst.test_collection_move.add()
+        id_inst.test_collection_move.move(0, 0)
+        self.assertEqual(id_inst.test_collection_move[0], test_item)
 
     # TODO: Add expected failure cases (e.g. assigning propertygroup to a Pointer property, etc.).
 

@@ -22,6 +22,8 @@ struct CombineBundleItemsAccessor : public socket_items::SocketItemsAccessorDefa
   static int node_type;
   static constexpr StringRefNull node_idname = "NodeCombineBundle";
   static constexpr bool has_type = true;
+  static constexpr bool has_vector_dimensions = true;
+  static constexpr bool shader_vector_dimensions_only = true;
   static constexpr bool has_name = true;
   static constexpr bool has_name_validation = true;
   static constexpr char unique_name_separator = '_';
@@ -76,10 +78,12 @@ struct CombineBundleItemsAccessor : public socket_items::SocketItemsAccessorDefa
   static void init_with_socket_type_and_name(bNode &node,
                                              ItemT &item,
                                              const eNodeSocketDatatype socket_type,
-                                             const char *name)
+                                             const char *name,
+                                             std::optional<int> dimensions = std::nullopt)
   {
     auto *storage = static_cast<NodeCombineBundle *>(node.storage);
     item.socket_type = socket_type;
+    item.vector_socket_dimensions = dimensions.value_or(3);
     item.identifier = storage->next_identifier++;
     socket_items::set_item_name_and_make_unique<CombineBundleItemsAccessor>(node, item, name);
   }
@@ -98,6 +102,8 @@ struct SeparateBundleItemsAccessor : public socket_items::SocketItemsAccessorDef
   static int node_type;
   static constexpr StringRefNull node_idname = "NodeSeparateBundle";
   static constexpr bool has_type = true;
+  static constexpr bool has_vector_dimensions = true;
+  static constexpr bool shader_vector_dimensions_only = true;
   static constexpr bool has_name = true;
   static constexpr bool has_name_validation = true;
   static constexpr char unique_name_separator = '_';
@@ -152,10 +158,12 @@ struct SeparateBundleItemsAccessor : public socket_items::SocketItemsAccessorDef
   static void init_with_socket_type_and_name(bNode &node,
                                              ItemT &item,
                                              const eNodeSocketDatatype socket_type,
-                                             const char *name)
+                                             const char *name,
+                                             std::optional<int> dimensions = std::nullopt)
   {
     auto *storage = static_cast<NodeSeparateBundle *>(node.storage);
     item.socket_type = socket_type;
+    item.vector_socket_dimensions = dimensions.value_or(3);
     item.identifier = storage->next_identifier++;
     socket_items::set_item_name_and_make_unique<SeparateBundleItemsAccessor>(node, item, name);
   }

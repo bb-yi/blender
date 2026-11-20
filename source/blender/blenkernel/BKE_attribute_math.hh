@@ -15,8 +15,8 @@
 #include "BLI_math_axis_angle.hh"
 #include "BLI_math_color.hh"
 #include "BLI_math_quaternion.hh"
-#include "BLI_math_vector.h"
 #include "BLI_math_vector.hh"
+#include "BLI_math_vector_c.hh"
 #include "BLI_offset_indices.hh"
 
 #include "PRF_profile.hh"
@@ -891,6 +891,16 @@ void mix_groups(GSpan src,
                 OffsetIndices<int> groups,
                 Span<int> all_indices,
                 std::optional<Span<float>> all_weights,
+                GMutableSpan dst);
+/**
+ * Mix the source values of each group into the corresponding index in the destination mask.
+ * \param groups: Groups of source indices and weights for every index in #dst_mask.
+ */
+void mix_groups(GSpan src,
+                OffsetIndices<int> groups,
+                Span<int> all_indices,
+                std::optional<Span<float>> all_weights,
+                const IndexMask &dst_mask,
                 GMutableSpan dst);
 inline void mix_groups(GSpan src,
                        OffsetIndices<int> groups,

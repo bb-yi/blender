@@ -8,9 +8,11 @@
 
 #include <cfloat>
 
-#include "BLI_listbase.h"
+#include "BLI_generic_array.hh"
+#include "BLI_implicit_sharing_ptr.hh"
+#include "BLI_listbase.hh"
 #include "BLI_math_euler.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "PRF_profile.hh"
 
@@ -82,7 +84,7 @@ template<typename T>
   if (!bke::allow_procedural_attribute_access(attribute_name)) {
     return std::nullopt;
   }
-  return bke::SocketValueVariant::From(bke::AttributeFieldInput::from<T>(attribute_name));
+  return bke::SocketValueVariant::from(bke::AttributeFieldInput::from<T>(attribute_name));
 }
 
 template<typename T>
@@ -92,27 +94,31 @@ static bke::SocketValueVariant load_data_block_input(const GeoNodesCallData *cal
   PropertyRNA &prop = *RNA_struct_find_property(&input_props_ptr, "value");
   if (RNA_property_type(&prop) == PROP_STRING) {
     if (!call_data) {
-      return bke::SocketValueVariant::From(static_cast<T *>(nullptr));
+      return bke::SocketValueVariant::from(static_cast<T *>(nullptr));
     }
     BLI_assert(call_data->operator_data);
     const std::string name = RNA_string_get(&input_props_ptr, "value");
     const ID *id_orig = call_data->operator_data->input_ids->lookup_default(name, nullptr);
     if (!id_orig) {
-      return bke::SocketValueVariant::From(static_cast<T *>(nullptr));
+      return bke::SocketValueVariant::from(static_cast<T *>(nullptr));
     }
     const ID *id_eval = call_data->operator_data->depsgraphs->get_evaluated_id(*id_orig);
-    return bke::SocketValueVariant::From(id_cast<T *>(const_cast<ID *>(id_eval)));
+    return bke::SocketValueVariant::from(id_cast<T *>(const_cast<ID *>(id_eval)));
   }
 
   BLI_assert(RNA_property_type(&prop) == PROP_POINTER);
   T *data_block = id_cast<T *>(RNA_pointer_get(&input_props_ptr, "value").owner_id);
-  return bke::SocketValueVariant::From(data_block);
+  return bke::SocketValueVariant::from(data_block);
 }
 
 static GeometryNodesInputType get_effective_input_type(PointerRNA *input_props_ptr,
                                                        const bNodeTree &ntree,
                                                        const bNodeTreeInterfaceSocket &io_socket)
 {
+  if (ntree.type == NTREE_COMPOSIT) {
+    return GeometryNodesInputType::Value;
+  }
+
   const int input_index = ntree.interface_input_index(io_socket);
   if (PropertyRNA *prop = RNA_struct_find_property(input_props_ptr, "type")) {
     if (nodes::input_has_attribute_toggle(ntree, input_index)) {
@@ -120,6 +126,7 @@ static GeometryNodesInputType get_effective_input_type(PointerRNA *input_props_p
     }
     return GeometryNodesInputType::Value;
   }
+
   return GeometryNodesInputType::Fallback;
 }
 
@@ -199,7 +206,7 @@ static bke::SocketValueVariant init_socket_cpp_value(const GeoNodesCallData *cal
       }
       if (type == GeometryNodesInputType::Layer) {
         const std::string layer_name = RNA_string_get(input_props_ptr, "layer_name");
-        return bke::SocketValueVariant::From(
+        return bke::SocketValueVariant::from(
             fn::GField::from_input<bke::NamedLayerSelectionFieldInput>(layer_name));
       }
       break;
@@ -243,7 +250,7 @@ static bke::SocketValueVariant init_socket_cpp_value(const GeoNodesCallData *cal
           input_props_ptr, ntree, io_socket);
       if (type == GeometryNodesInputType::Value) {
         const int value = RNA_enum_get(input_props_ptr, "value");
-        return bke::SocketValueVariant::From(MenuValue(value));
+        return bke::SocketValueVariant::from(MenuValue(value));
       }
       break;
     }
@@ -358,7 +365,7 @@ struct OutputAttributeToStore {
   bke::GeometryComponent::Type component_type;
   bke::AttrDomain domain;
   std::string name;
-  GMutableSpan data;
+  GArray<> data;
 };
 
 /**
@@ -393,7 +400,7 @@ static MultiValueMap<bke::AttrDomain, OutputAttributeInfo> find_output_attribute
 
     const int index = socket->index();
     bke::SocketValueVariant &value_variant = *output_values[index].get<bke::SocketValueVariant>();
-    const fn::GField field = value_variant.get<fn::GField>();
+    const fn::GField &field = value_variant.ensure_type<fn::GField>();
 
     const bNodeTreeInterfaceSocket *interface_socket = tree.interface_outputs()[index];
     const bke::AttrDomain domain = bke::AttrDomain(interface_socket->attribute_domain);
@@ -432,17 +439,13 @@ static Vector<OutputAttributeToStore> compute_attributes_to_store(
         const CPPType &type = output_info.field.cpp_type();
         const bke::AttributeValidator validator = attributes.lookup_validator(output_info.name);
 
-        OutputAttributeToStore store{
-            component_type,
-            domain,
-            output_info.name,
-            GMutableSpan{
-                type,
-                MEM_new_uninitialized_aligned(type.size * domain_size, type.alignment, __func__),
-                domain_size}};
+        OutputAttributeToStore store{component_type,
+                                     domain,
+                                     output_info.name,
+                                     GArray<>(type, domain_size, NoInitialization())};
         fn::GField field = validator.validate_field_if_necessary(output_info.field);
-        field_evaluator.add_with_destination(std::move(field), store.data);
-        attributes_to_store.append(store);
+        field_evaluator.add_with_destination(std::move(field), store.data.as_mutable_span());
+        attributes_to_store.append(std::move(store));
       }
       field_evaluator.evaluate();
     }
@@ -467,9 +470,9 @@ static void remove_anonymous_attributes(bke::GeometrySet &geometry)
 }
 
 static void store_computed_output_attributes(
-    bke::GeometrySet &geometry, const Span<OutputAttributeToStore> attributes_to_store)
+    bke::GeometrySet &geometry, const MutableSpan<OutputAttributeToStore> attributes_to_store)
 {
-  for (const OutputAttributeToStore &store : attributes_to_store) {
+  for (OutputAttributeToStore &store : attributes_to_store) {
     bke::GeometryComponent &component = geometry.get_component_for_write(store.component_type);
     bke::MutableAttributeAccessor attributes = *component.attributes_for_write();
 
@@ -487,10 +490,13 @@ static void store_computed_output_attributes(
 
     /* Try to create the attribute reusing the stored buffer. This will only succeed if the
      * attribute didn't exist before, or if it existed but was removed above. */
+    const ImplicitSharingPtr sharing_info(
+        new ImplicitSharedValue<GArray<>>(std::move(store.data)));
+    const GArray<> &data = sharing_info->data;
     if (attributes.add(store.name,
                        store.domain,
-                       bke::cpp_type_to_attribute_type(store.data.type()),
-                       bke::AttributeInitMoveArray(store.data.data())))
+                       bke::cpp_type_to_attribute_type(data.type()),
+                       bke::AttributeInitShared(data.data(), *sharing_info)))
     {
       continue;
     }
@@ -498,13 +504,9 @@ static void store_computed_output_attributes(
     bke::GAttributeWriter attribute = attributes.lookup_or_add_for_write(
         store.name, store.domain, data_type);
     if (attribute) {
-      attribute.varray.set_all(store.data.data());
+      attribute.varray.set_all(data.data());
       attribute.finish();
     }
-
-    /* We were unable to reuse the data, so it must be destructed and freed. */
-    store.data.type().destruct_n(store.data.data(), store.data.size());
-    MEM_delete_void(store.data.data());
   }
 }
 
@@ -576,7 +578,7 @@ bke::GeometrySet execute_geometry_nodes_on_geometry(const bNodeTree &btree,
       .slice(function.outputs.input_usages)
       .fill(lf::ValueUsage::Unused);
 
-  call_data.call_depth_limit = U.geometry_nodes_stack_limit;
+  call_data.call_depth_limit = U.nodes_stack_limit;
 
   GeoNodesUserData user_data;
   user_data.call_data = &call_data;
@@ -597,8 +599,8 @@ bke::GeometrySet execute_geometry_nodes_on_geometry(const bNodeTree &btree,
     const bke::bNodeSocketType *typeinfo = interface_socket.socket_typeinfo();
     const eNodeSocketDatatype socket_type = typeinfo ? typeinfo->type : SOCK_CUSTOM;
     if (socket_type == SOCK_GEOMETRY && i == 0) {
-      bke::SocketValueVariant &value = scope.construct<bke::SocketValueVariant>();
-      value.set(std::move(input_geometry));
+      bke::SocketValueVariant &value = scope.construct<bke::SocketValueVariant>(
+          bke::SocketValueVariant::from(std::move(input_geometry)));
       param_inputs[function.inputs.main[0]] = &value;
       continue;
     }
@@ -702,7 +704,7 @@ Vector<InferenceValue> get_geometry_nodes_input_inference_values(const bNodeTree
     if (!value.is_single()) {
       continue;
     }
-    const GPointer single_value = value.get_single_ptr();
+    const GPointer single_value = value.get();
     BLI_assert(single_value.type() == stype->base_cpp_type);
     inference_values[input_i] = InferenceValue::from_primitive(single_value.get());
   }

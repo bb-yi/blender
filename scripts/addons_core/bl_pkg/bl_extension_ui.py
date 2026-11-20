@@ -53,10 +53,10 @@ USE_ADDON_IGNORE_EXTENSION_MANIFEST_HACK = True
 def size_as_fmt_string(num: float, *, precision: int = 1) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB"):
         if abs(num) < 1024.0:
-            return "{:3.{:d}f}{:s}".format(num, precision, unit)
+            return "{:3.{:d}f} {:s}".format(num, precision, unit)
         num /= 1024.0
     unit = "YB"
-    return "{:.{:d}f}{:s}".format(num, precision, unit)
+    return "{:.{:d}f} {:s}".format(num, precision, unit)
 
 
 def sizes_as_percentage_string(size_partial: int, size_final: int) -> str:
@@ -178,6 +178,12 @@ addon_type_icon = (
     'PACKAGE',  # `ADDON_TYPE_LEGACY_OTHER`.
 )
 
+extension_type_labels = {
+    "add-on": n_("Add-on", i18n_contexts.editor_preferences),
+    "asset-library": n_("Asset Library", i18n_contexts.editor_preferences),
+    "theme": n_("Theme", i18n_contexts.editor_preferences),
+}
+
 if USE_ADDON_IGNORE_EXTENSION_MANIFEST_HACK:
     # WARNING: poor performance, acceptable as it's only called for expanded add-ons (but not ideal).
     def addon_ignore_manifest_website_hack_remote_or_default(module_name, item_doc_url):
@@ -232,8 +238,10 @@ def addon_draw_item_expanded(
     col_b = split.column()
 
     if item_description:
-        col_a.label(
-            text=" {:s}.".format(item_description),
+        col_a_row = col_a.row()
+        col_a_row.separator(factor=0.1)
+        col_a_row.label_multiline(
+            text="{:s}.".format(item_description),
             translate=False,
         )
 
@@ -256,21 +264,16 @@ def addon_draw_item_expanded(
     col_b = split.column()
 
     col_a.alignment = 'RIGHT'
+    col_b.alignment = 'LEFT'
 
     if item_doc_url:
         col_a.label(text="Website")
-        col_b.split(factor=0.5).operator(
-            "wm.url_open",
-            text=domain_extract_from_url(item_doc_url),
-            icon='HELP' if addon_type in {ADDON_TYPE_LEGACY_CORE, ADDON_TYPE_LEGACY_USER} else 'URL',
-        ).url = item_doc_url
-    # Only add "Report a Bug" button if tracker_url is set.
+        col_b.link(url=item_doc_url, text=domain_extract_from_url(item_doc_url))
+    # Only add "Feedback" link if tracker_url is set.
     # None of the core add-ons are expected to have tracker info (glTF is the exception).
     if item_tracker_url:
         col_a.label(text="Feedback", text_ctxt=i18n_contexts.editor_preferences)
-        col_b.split(factor=0.5).operator(
-            "wm.url_open", text="Report a Bug", icon='URL',
-        ).url = item_tracker_url
+        col_b.link(url=item_tracker_url, text=domain_extract_from_url(item_tracker_url))
 
     if USE_SHOW_ADDON_TYPE_AS_TEXT:
         col_a.label(text="Type")
@@ -284,11 +287,11 @@ def addon_draw_item_expanded(
     if item_warnings:
         # Only for legacy add-ons.
         col_a.label(text="Warning")
-        col_b.label(text=item_warnings[0], icon='ERROR')
+        col_b.label_multiline(text=item_warnings[0], icon='STATUS_WARNING')
         if len(item_warnings) > 1:
             for value in item_warnings[1:]:
                 col_a.label(text="")
-                col_b.label(text=value, icon='BLANK1')
+                col_b.label_multiline(text=value, icon='BLANK1')
             # pylint: disable-next=undefined-loop-variable
             del value
 
@@ -316,7 +319,7 @@ def addons_panel_draw_missing_with_extension_impl(
         missing_modules  # `set[str]`
 ):
     layout_header, layout_panel = layout.panel("builtin_addons", default_closed=True)
-    layout_header.label(text="Missing Built-in Add-ons", icon='ERROR')
+    layout_header.label(text="Missing Built-in Add-ons", icon='STATUS_WARNING')
 
     if layout_panel is None:
         return
@@ -342,9 +345,9 @@ def addons_panel_draw_missing_with_extension_impl(
 
     if repo is None:
         # Most likely the user manually removed this.
-        box.label(text="Blender's extension repository not found!", icon='ERROR')
+        box.label(text="Blender's extension repository not found!", icon='STATUS_ERROR')
     elif not repo.enabled:
-        box.label(text="Blender's extension repository must be enabled to install extensions!", icon='ERROR')
+        box.label(text="Blender's extension repository must be enabled to install extensions!", icon='STATUS_ERROR')
         repo_index = -1
     else:
         # Ensure the remote data is available from which to install the extensions.
@@ -354,7 +357,7 @@ def addons_panel_draw_missing_with_extension_impl(
         pkg_manifest_remote = repo_cache_store.refresh_remote_from_directory(directory=repo.directory, error_fn=print)
         if pkg_manifest_remote is None:
             row = box.row()
-            row.label(text="Blender's extension repository must be refreshed!", icon='ERROR')
+            row.label(text="Blender's extension repository must be refreshed!", icon='STATUS_WARNING_FILLED')
             # Ideally this would only sync one repository, but there is no operator to do this
             # and this one corner-case doesn't justify adding a new operator.
             rowsub = row.row()
@@ -411,7 +414,7 @@ def addons_panel_draw_missing_impl(
         missing_modules,  # `set[str]`
 ):
     layout_header, layout_panel = layout.panel("missing_script_files", default_closed=True)
-    layout_header.label(text="Missing Add-ons", icon='ERROR')
+    layout_header.label(text="Missing Add-ons", icon='STATUS_WARNING')
 
     if layout_panel is None:
         return
@@ -582,7 +585,7 @@ def addons_panel_draw_items(
         sub.label(text=" " + item_name, translate=False)
 
         if item_warnings:
-            sub.label(icon='ERROR')
+            sub.label(icon='STATUS_WARNING')
         elif USE_SHOW_ADDON_TYPE_AS_ICON:
             sub.label(icon=addon_type_icon[addon_type])
 
@@ -620,7 +623,7 @@ def addons_panel_draw_error_duplicates(layout):
     box = layout.box()
     row = box.row()
     row.label(text="Multiple add-ons with the same name found!")
-    row.label(icon='ERROR')
+    row.label(icon='STATUS_ERROR')
     box.label(text="Delete one of each pair to resolve:")
     for (addon_name, addon_file, addon_path) in addon_utils.error_duplicates:
         box.separator()
@@ -640,7 +643,7 @@ def addons_panel_draw_error_generic(layout, lines):
     box = layout.box()
     sub = box.row()
     sub.label(text=lines[0])
-    sub.label(icon='ERROR')
+    sub.label(icon='STATUS_ERROR')
     for l in lines[1:]:
         box.label(text=l)
 
@@ -852,6 +855,7 @@ class ExtensionUI_FilterParams:
         "tags_exclude",
         "filter_by_type",
         "addons_enabled",
+        "asset_libraries_enabled_ids",
         "active_theme_info",
         "repos_all",
 
@@ -874,6 +878,7 @@ class ExtensionUI_FilterParams:
             tags_exclude,
             filter_by_type,
             addons_enabled,
+            asset_libraries_enabled_ids,
             active_theme_info,
             repos_all,
             repo_filter,
@@ -885,6 +890,7 @@ class ExtensionUI_FilterParams:
         self.tags_exclude = tags_exclude
         self.filter_by_type = filter_by_type
         self.addons_enabled = addons_enabled
+        self.asset_libraries_enabled_ids = asset_libraries_enabled_ids
         self.active_theme_info = active_theme_info
         self.repos_all = repos_all
         self.repo_filter = None if repo_filter == '_ALL_' else repo_filter
@@ -900,6 +906,7 @@ class ExtensionUI_FilterParams:
     def default_from_context(context):
         from .bl_extension_ops import (
             blender_filter_by_type_map,
+            extension_asset_library_enabled_id_set,
             extension_repos_read,
         )
 
@@ -910,12 +917,20 @@ class ExtensionUI_FilterParams:
 
         filter_by_type = blender_filter_by_type_map[wm.extension_type]
         show_addons = filter_by_type in {"", "add-on"}
+        show_assets = filter_by_type in {"", "asset-library"}
         show_themes = filter_by_type in {"", "theme"}
 
         if show_addons:
             addons_enabled = {addon.module for addon in prefs.addons} if show_addons else None
         else:
             addons_enabled = None  # Unused.
+
+        if show_assets:
+            asset_libraries_enabled_ids = extension_asset_library_enabled_id_set(
+                prefs.filepaths.asset_libraries,
+            )
+        else:
+            asset_libraries_enabled_ids = None  # Unused.
 
         if show_themes:
             active_theme_info = pkg_repo_and_id_from_theme_path(repos_all, prefs.themes[0].filepath)
@@ -935,6 +950,7 @@ class ExtensionUI_FilterParams:
             tags_exclude=extension_tags_exclude,
             filter_by_type=filter_by_type,
             addons_enabled=addons_enabled,
+            asset_libraries_enabled_ids=asset_libraries_enabled_ids,
             active_theme_info=active_theme_info,
             repos_all=repos_all,
             repo_filter=repo_filter,
@@ -952,6 +968,7 @@ class ExtensionUI_FilterParams:
             pkg_manifest_remote,  # `dict[str, PkgManifest_Normalized]`
     ):
         from .bl_extension_ops import (
+            extension_asset_library_id,
             pkg_info_check_exclude_filter,
         )
 
@@ -982,10 +999,13 @@ class ExtensionUI_FilterParams:
                     continue
 
             is_addon = False
+            is_asset_library = False
             is_theme = False
             match item.type:
                 case "add-on":
                     is_addon = True
+                case "asset-library":
+                    is_asset_library = True
                 case "theme":
                     is_theme = True
 
@@ -999,6 +1019,10 @@ class ExtensionUI_FilterParams:
                 else:
                     is_enabled = False
                     addon_module_name = None
+            elif is_asset_library:
+                extension_id = extension_asset_library_id(self.repos_all[repo_index].module, pkg_id)
+                is_enabled = is_installed and (extension_id in self.asset_libraries_enabled_ids)
+                addon_module_name = None
             elif is_theme:
                 is_enabled = (repo_index, pkg_id) == self.active_theme_info
                 addon_module_name = None
@@ -1096,7 +1120,7 @@ class display_errors:
         box_header = layout.box()
         # Don't clip longer names.
         row = box_header.split(factor=0.9)
-        row.label(text="Repository Alert:", icon='ERROR')
+        row.label(text="Repository Alert:", icon='STATUS_WARNING_FILLED')
         rowsub = row.row(align=True)
         rowsub.alignment = 'RIGHT'
         rowsub.operator("extensions.status_clear_errors", text="", icon='X', emboss=False)
@@ -1296,6 +1320,7 @@ def extension_draw_item(
         is_enabled,  # `bool`
         is_outdated,  # `bool`
         show,  # `bool`.
+        show_type,  # `bool`.
         mark,  # `bool | None`.
 
         # General vars.
@@ -1346,7 +1371,7 @@ def extension_draw_item(
     # is enabled or not, which is useful to show - when they may be considering removing/updating
     # extensions based on them being used or not.
     if pkg_block or item_warnings:
-        sub.label(text=item.name, icon='ERROR', translate=False)
+        sub.label(text=item.name, icon='STATUS_WARNING', translate=False)
     else:
         sub.label(text=item.name, translate=False)
 
@@ -1360,6 +1385,15 @@ def extension_draw_item(
     row_right_toplevel.alignment = 'RIGHT'
     row_right = row_right_toplevel.row()
     row_right.alignment = 'RIGHT'
+
+    # When not filtering by type, show the extension type to avoid confusion
+    # as there could be two extensions with similar names but different types.
+    if show_type:
+        sub = row_right.row()
+        sub.alignment = 'RIGHT'
+        sub.active = False
+        sub.label(text=extension_type_labels.get(item.type, item.type), text_ctxt=i18n_contexts.editor_preferences)
+        del sub
 
     if has_remote and (item_remote is not None):
         if pkg_block is not None:
@@ -1406,8 +1440,8 @@ def extension_draw_item(
         row = col.row()
         row.active = is_enabled
 
-        # The full tagline may be multiple lines (not yet supported by Blender's UI).
-        row.label(text=" {:s}.".format(item.tagline), translate=False)
+        row.separator(factor=0.1)
+        row.label_multiline(text="{:s}.".format(item.tagline), translate=False)
 
         col.separator(type='LINE')
         del col
@@ -1418,6 +1452,7 @@ def extension_draw_item(
         col_a = split.column()
         col_b = split.column()
         col_a.alignment = "RIGHT"
+        col_b.alignment = "LEFT"
 
         if pkg_block is not None:
             col_a.label(text="Blocked")
@@ -1425,22 +1460,20 @@ def extension_draw_item(
 
         if item_warnings:
             col_a.label(text="Warning")
-            col_b.label(text=item_warnings[0])
+            col_b.label_multiline(text=item_warnings[0])
             if len(item_warnings) > 1:
                 for value in item_warnings[1:]:
                     col_a.label(text="")
-                    col_b.label(text=value)
+                    col_b.label_multiline(text=value)
                 # pylint: disable-next=undefined-loop-variable
                 del value
 
         if value := (item_remote or item_local).website:
             col_a.label(text="Website")
-            col_b.split(factor=0.5).operator(
-                "wm.url_open", text=domain_extract_from_url(value), icon='URL',
-            ).url = value
+            col_b.link(url=value, text=domain_extract_from_url(value))
         del value
 
-        if item.type == "add-on":
+        if item.type in {"add-on", "asset-library"}:
             col_a.label(text="Permissions")
             # WARNING: while this is documented to be a dict, old packages may contain a list of strings.
             # As it happens dictionary keys & list values both iterate over string,
@@ -1463,7 +1496,7 @@ def extension_draw_item(
         else:
             col_b.label(text=item.version, translate=False)
 
-        if has_remote and (item_remote is not None):
+        if item.type == "add-on" and has_remote and (item_remote is not None):
             col_a.label(text="Size")
             col_b.label(text=size_as_fmt_string(item_remote.archive_size), translate=False)
 
@@ -1770,6 +1803,7 @@ def extensions_panel_draw_impl(
                 is_enabled=ext_ui.is_enabled,
                 is_outdated=ext_ui.is_outdated,
                 show=(ext_ui.pkg_id, ext_ui.repo_index) in blender_extension_show,
+                show_type=(params.filter_by_type == ""),
                 mark=((ext_ui.pkg_id, ext_ui.repo_index) in blender_extension_mark) if show_development else None,
 
                 # General vars.
@@ -1897,7 +1931,9 @@ class USERPREF_MT_extensions_item(Menu):
         # to be a convenient way to do so.
 
         from . import repo_cache_store_ensure
-        from .bl_extension_ops import extension_repos_read
+        from .bl_extension_ops import (
+            extension_repos_read,
+        )
 
         repo_module, pkg_id = extension_path.partition(".")[0::2]
 
@@ -1979,6 +2015,12 @@ class USERPREF_MT_extensions_item(Menu):
                             text="Add-on Enabled",
                             emboss=False,
                         ).module = addon_module_name
+            case "asset-library":
+                if is_installed:
+                    props = layout.operator("extensions.package_asset_library_show", text="View Details")
+                    props.repo_index = repo_index
+                    props.pkg_id = pkg_id
+                    del props
             case "theme":
                 if is_installed:
                     props = layout.operator(
@@ -2083,9 +2125,9 @@ def extensions_panel_draw(panel, context):
         # Don't clip longer names.
         row = box.split(factor=0.9, align=True)
         if repo_status_text.running:
-            row.label(text=iface_(repo_status_text.title) + "...", icon='INFO', translate=False)
+            row.label(text=iface_(repo_status_text.title) + "...", icon='STATUS_INFO', translate=False)
         else:
-            row.label(text=repo_status_text.title, icon='INFO')
+            row.label(text=repo_status_text.title, icon='STATUS_INFO')
         if show_development_reports:
             rowsub = row.row(align=True)
             rowsub.alignment = 'RIGHT'
@@ -2216,6 +2258,7 @@ def tags_exclude_match(
 def tags_current(wm, tags_attr):
     from .bl_extension_ops import (
         blender_filter_by_type_map,
+        extension_asset_library_enabled_id_set,
         extension_repos_read,
         repo_cache_store_refresh_from_prefs,
     )
@@ -2246,10 +2289,15 @@ def tags_current(wm, tags_attr):
 
     addons_enabled = None
     active_theme_info = None
+    asset_libraries_enabled_ids = None
 
     # Currently only add-ons can make use of enabled by type (usefully) for tags.
     if filter_by_type in {"", "add-on"}:
         addons_enabled = {addon.module for addon in prefs.addons}
+    if filter_by_type in {"", "asset-library"}:
+        asset_libraries_enabled_ids = extension_asset_library_enabled_id_set(
+            prefs.filepaths.asset_libraries,
+        )
     if filter_by_type in {"", "theme"}:
         active_theme_info = pkg_repo_and_id_from_theme_path(repos_all, prefs.themes[0].filepath)
 
@@ -2260,6 +2308,7 @@ def tags_current(wm, tags_attr):
         tags_exclude=set(),  # Tags are being generated, ignore them.
         filter_by_type=filter_by_type,
         addons_enabled=addons_enabled,
+        asset_libraries_enabled_ids=asset_libraries_enabled_ids,
         active_theme_info=active_theme_info,
         repos_all=repos_all,
         repo_filter=repo_filter,

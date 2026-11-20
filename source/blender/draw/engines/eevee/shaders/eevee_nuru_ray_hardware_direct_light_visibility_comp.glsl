@@ -17,8 +17,8 @@ COMPUTE_SHADER_CREATE_INFO(eevee_ray_hardware_direct_light_visibility)
 #include "eevee_reverse_z_lib.glsl"
 #include "eevee_sampling_lib.glsl"
 #include "gpu_shader_codegen_lib.glsl"
-#include "gpu_shader_math_vector_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_math_vector.bsl.hh"
+#include "gpu_shader_utildefines.bsl.hh"
 
 bool select_local_light(HardwareDirectLightWorkTile work_tile,
                         float selector,
@@ -155,7 +155,7 @@ void main()
   const uint2 tile_coord = unpackUvec2x16(work_tile.packed_tile_coord);
   const uint tile_size_px = max(raytrace_buf.hardware_direct_light.tile_size_px, 1u);
 
-  const float2 noise = interleaved_gradient_noise(
+  const float2 noise = random::interleaved_gradient_2d(
       float2(tile_coord * tile_size_px) + 0.5f,
       float2(0.0f, 1.0f),
       float2(sampling_rng_1D_get(SAMPLING_SHADOW_U), sampling_rng_1D_get(SAMPLING_SHADOW_X)));
@@ -187,9 +187,9 @@ void main()
     sample_P = drw_point_screen_to_world(float3(sample_uv, sample_depth));
   }
 
-  const float local_selector = interleaved_gradient_noise(
+  const float local_selector = random::interleaved_gradient(
       float2(sample_texel) + 0.5f, 2.0f, sampling_rng_1D_get(SAMPLING_RAYTRACE_U));
-  const float cluster_selector = interleaved_gradient_noise(
+  const float cluster_selector = random::interleaved_gradient(
       float2(sample_texel) + 0.5f, 4.0f, sampling_rng_1D_get(SAMPLING_SHADOW_I));
   if (select_local_light(
           work_tile,
@@ -208,7 +208,7 @@ void main()
         hardware_direct_visibility(int2(sample_texel), light.hwrt_shadow_layer);
   }
 
-  const float sun_selector = interleaved_gradient_noise(
+  const float sun_selector = random::interleaved_gradient(
       float2(sample_texel) + 0.5f, 3.0f, sampling_rng_1D_get(SAMPLING_RAYTRACE_X));
   if (select_sun_light(
           sun_selector, visibility_record.sun_light_index, visibility_record.sun_importance))

@@ -21,17 +21,17 @@
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_base.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_matrix_types.hh"
-#include "BLI_utildefines.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_utildefines.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
 
 #include "BKE_icons.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
@@ -176,9 +176,9 @@ static void light_blend_write(BlendWriter *writer, ID *id, const void *id_addres
   /* Node-tree is integral part of lights, no libdata. */
   if (la->nodetree) {
     BLO_Write_IDBuffer temp_embedded_id_buffer{la->nodetree->id, writer};
-    writer->write_struct_at_address_cast<bNodeTree>(la->nodetree, temp_embedded_id_buffer.get());
-    bke::node_tree_blend_write(writer,
-                               reinterpret_cast<bNodeTree *>(temp_embedded_id_buffer.get()));
+    bNodeTree *temp_ntree = reinterpret_cast<bNodeTree *>(temp_embedded_id_buffer.get());
+    writer->write_embedded_id_struct(la->nodetree, temp_ntree);
+    bke::node_tree_blend_write(writer, temp_ntree);
   }
 
   BKE_previewimg_blend_write(writer, la->preview);
@@ -214,6 +214,7 @@ IDTypeInfo IDType_ID_LA = {
     .foreach_cache = nullptr,
     .foreach_path = nullptr,
     .foreach_working_space_color = light_foreach_working_space_color,
+    .foreach_asset_weak_reference = nullptr,
     .owner_pointer_get = nullptr,
 
     .blend_write = light_blend_write,

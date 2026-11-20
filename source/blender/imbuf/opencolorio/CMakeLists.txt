@@ -27,20 +27,6 @@ set(SRC
   intern/white_point.cc
   intern/white_point.hh
 
-  intern/fallback/fallback_colorspace.hh
-  intern/fallback/fallback_config.cc
-  intern/fallback/fallback_config.hh
-  intern/fallback/fallback_cpu_processor.hh
-  intern/fallback/fallback_default_display.hh
-  intern/fallback/fallback_default_look.hh
-  intern/fallback/fallback_default_view.hh
-  intern/fallback/fallback_display_cpu_processor.cc
-  intern/fallback/fallback_display_cpu_processor.hh
-  intern/fallback/fallback_gpu_shader_binder.cc
-  intern/fallback/fallback_gpu_shader_binder.hh
-  intern/fallback/fallback_processor_cache.cc
-  intern/fallback/fallback_processor_cache.hh
-
   intern/libocio/error_handling.cc
   intern/libocio/error_handling.hh
   intern/libocio/libocio_colorspace.cc
@@ -53,6 +39,7 @@ set(SRC
   intern/libocio/libocio_display.hh
   intern/libocio/libocio_display_processor.cc
   intern/libocio/libocio_display_processor.hh
+  intern/libocio/libocio_fallback_config.cc
   intern/libocio/libocio_gpu_shader_binder.cc
   intern/libocio/libocio_gpu_shader_binder.hh
   intern/libocio/libocio_look.cc
@@ -106,6 +93,7 @@ set(GLSL_INC
   ../../gpu
   ../../gpu/shaders
   ../../gpu/shaders/common
+  ../../gpu/shaders/compat
 
   intern
   shaders
@@ -124,7 +112,7 @@ set(GLSL_SOURCE_CONTENT "")
 set(GLSL_METADATA_CONTENT "")
 set(GLSL_INFOS_CONTENT "")
 foreach(GLSL_FILE ${GLSL_SRC})
-  get_filename_component(GLSL_FILE_NAME ${GLSL_FILE} NAME)
+  cmake_path(GET GLSL_FILE FILENAME GLSL_FILE_NAME)
   string(REPLACE "." "_" GLSL_FILE_NAME_UNDERSCORES ${GLSL_FILE_NAME})
   string(APPEND GLSL_FILE_NAME_UNDERSCORES "_tmp")
   string(APPEND GLSL_SOURCE_CONTENT "SHADER_SOURCE\(${GLSL_FILE_NAME_UNDERSCORES}, \"${GLSL_FILE_NAME}\", \"${GLSL_FILE}\"\)\n")
@@ -148,6 +136,7 @@ target_include_directories(bf_imbuf_opencolorio_shaders PUBLIC ${CMAKE_CURRENT_B
 if(WITH_GTESTS)
   set(TEST_SRC
     intern/description_test.cc
+    intern/libocio/libocio_fallback_config_test.cc
     intern/source_processor_test.cc
     intern/view_specific_look_test.cc
   )

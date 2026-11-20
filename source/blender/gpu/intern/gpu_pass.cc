@@ -12,12 +12,13 @@
 
 #include "BLI_map.hh"
 #include "BLI_span.hh"
-#include "BLI_time.h"
+#include "BLI_time.hh"
 #include "BLI_vector.hh"
 
 #include "GPU_capabilities.hh"
 #include "GPU_context.hh"
 #include "GPU_pass.hh"
+#include "GPU_material_profile.hh"
 #include "GPU_vertex_format.hh"
 #include "gpu_codegen.hh"
 
@@ -35,6 +36,8 @@ static bool gpu_pass_validate(GPUCodegenCreateInfo *create_info);
  * \{ */
 
 struct GPUPass {
+  std::shared_ptr<gpu::ShaderCompileDiagnostics> diagnostics =
+      std::make_shared<gpu::ShaderCompileDiagnostics>();
   static inline std::atomic<uint64_t> compilation_counts = 0;
 
   GPUCodegenCreateInfo *create_info = nullptr;
@@ -51,8 +54,10 @@ struct GPUPass {
   double compilation_start_timestamp = 0.0;
   double compilation_time = 0.0;
 
-  /** Hint that an optimized variant of this pass should be created.
-   *  Based on a complexity heuristic from pass code generation. */
+  /**
+   * Hint that an optimized variant of this pass should be created.
+   * Based on a complexity heuristic from pass code generation.
+   */
   bool should_optimize = false;
   bool is_optimization_pass = false;
 
@@ -69,6 +74,8 @@ struct GPUPass {
         is_optimization_pass(is_optimization_pass)
   {
     BLI_assert(!is_optimization_pass || !should_optimize);
+    create_info->compilation_diagnostics = diagnostics;
+    diagnostics->sources = create_info->expression_sources;
     if (is_optimization_pass && deferred_compilation) {
       // Defer until all non optimization passes are compiled.
       return;
@@ -176,13 +183,25 @@ GPUPassStatus GPU_pass_status(GPUPass *pass)
   return pass->status;
 }
 
+std::string GPU_pass_error_message(GPUPass *pass)
+{
+  std::lock_guard lock(pass->diagnostics->mutex);
+  return pass->diagnostics->message;
+}
+
+std::vector<gpu::ShaderDiagnostic> GPU_pass_expression_errors(GPUPass *pass)
+{
+  std::lock_guard lock(pass->diagnostics->mutex);
+  return pass->diagnostics->errors;
+}
+
 bool GPU_pass_should_optimize(GPUPass *pass)
 {
   /* Returns optimization heuristic prepared during
    * initial codegen.
    * NOTE: Only enabled on Metal, since it doesn't seem to yield any performance improvements for
    * other backends. */
-  return (GPU_backend_get_type() == GPU_BACKEND_METAL) && pass->should_optimize;
+  return pass && (GPU_backend_get_type() == GPU_BACKEND_METAL) && pass->should_optimize;
 }
 
 gpu::Shader *GPU_pass_shader_get(GPUPass *pass)
@@ -262,7 +281,7 @@ class GPUPassCache {
         std::make_unique<GPUPass>(codegen.create_info,
                                   deferred_compilation,
                                   is_optimization_pass,
-                                  codegen.should_optimize_heuristic()));
+                                  !is_optimization_pass && codegen.should_optimize_heuristic()));
   };
 
   GPUPass *get(eGPUMaterialEngine engine,
@@ -355,7 +374,8 @@ static bool gpu_pass_validate(GPUCodegenCreateInfo *create_info)
 {
   int samplers_len = 0;
   for (const ShaderCreateInfo::Resource &res : create_info->resources_get_all_()) {
-    if (res.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
+    if (res.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER &&
+        res.conditions.evaluate(create_info->compilation_constants_)) {
       samplers_len++;
     }
   }
@@ -373,7 +393,22 @@ GPUPass *GPU_generate_pass(GPUMaterial *material,
                            void *thunk,
                            bool optimize_graph)
 {
+  GPUMaterialProfileTimer profile_codegen(GPUMaterialProfileStage::Codegen);
   gpu_node_graph_prune_unused(graph);
+
+  GPUCodegen codegen(material, graph, debug_name);
+  codegen.generate_material_props();
+  codegen.extract_uniform_list();
+
+  if (optimize_graph) {
+    /* The optimized version of the shader should not re-generate a UBO.
+     * For the builtin uniforms (i.e. cryptomatte), the non-optimized-pass UBO will be reused.
+     * Ensure that inputs are sorted the same way so that the UBO declaration still match.  */
+    codegen.sort_uniform_inputs();
+  }
+  else {
+    codegen.generate_uniform_buffer();
+  }
 
   /* If Optimize flag is passed in, we are generating an optimized
    * variant of the GPUMaterial's GPUPass. */
@@ -385,27 +420,27 @@ GPUPass *GPU_generate_pass(GPUMaterial *material,
    * shader. */
   gpu_node_graph_finalize_uniform_attrs(graph);
 
-  GPUCodegen codegen(material, graph, debug_name);
   codegen.generate_graphs();
-  codegen.generate_cryptomatte();
+  codegen.create_info->expression_sources = GPU_material_expression_diagnostic_sources(material);
 
   GPUPass *pass = nullptr;
 
-  if (!optimize_graph) {
-    /* The optimized version of the shader should not re-generate a UBO.
-     * The UBO will not be used for this variant. */
-    codegen.generate_uniform_buffer();
+  /* Cache lookup: Reuse shaders already compiled. */
+  profile_codegen.stop();
+  {
+    GPUMaterialProfileTimer profile(GPUMaterialProfileStage::CompileWait);
+    pass = g_cache->get(engine, codegen.hash_get(), deferred_compilation, optimize_graph);
   }
 
-  /* Cache lookup: Reuse shaders already compiled. */
-  pass = g_cache->get(engine, codegen.hash_get(), deferred_compilation, optimize_graph);
-
   if (pass) {
+    GPU_material_profile_count(GPUMaterialProfileCounter::PassHits);
     pass->refcount++;
     return pass;
   }
 
   /* The shader is not compiled, continue generating the shader strings. */
+  GPU_material_profile_count(GPUMaterialProfileCounter::PassMisses);
+  GPUMaterialProfileTimer profile_source(GPUMaterialProfileStage::Codegen);
   codegen.generate_attribs();
   codegen.generate_resources();
 
@@ -413,6 +448,8 @@ GPUPass *GPU_generate_pass(GPUMaterial *material,
   finalize_source_cb(thunk, material, &codegen.output);
 
   codegen.create_info->finalize();
+  profile_source.stop();
+  GPUMaterialProfileTimer profile_compile(GPUMaterialProfileStage::CompileWait);
   g_cache->add(engine, codegen, deferred_compilation, optimize_graph);
   codegen.create_info = nullptr;
 

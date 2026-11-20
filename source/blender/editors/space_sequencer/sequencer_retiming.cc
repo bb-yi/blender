@@ -6,9 +6,9 @@
  * \ingroup spseq
  */
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 #include "BLI_set.hh"
 
 #include "DNA_scene_types.h"
@@ -487,7 +487,7 @@ void SEQUENCER_OT_retiming_transition_add(wmOperatorType *ot)
               0,
               INT_MAX,
               "Duration",
-              "Duration of freeze frame segment",
+              "Duration of speed transition segment",
               0,
               INT_MAX);
 }
@@ -617,11 +617,6 @@ static void strip_speed_set(Scene *scene, Strip *strip, const float speed)
 
   /* TODO: it would be nice to multiply speed with complex retiming by a factor. */
   seq::retiming_key_speed_set(scene, strip, right_key, speed / 100.0f);
-
-  ListBaseT<Strip> *seqbase = seq::active_seqbase_get(seq::editing_get(scene));
-  if (seq::transform_test_overlap(scene, seqbase, strip)) {
-    seq::transform_seqbase_shuffle(seqbase, strip, scene);
-  }
 }
 
 static void segment_speed_set(Scene *scene,
@@ -630,15 +625,16 @@ static void segment_speed_set(Scene *scene,
 {
   ListBaseT<Strip> *seqbase = seq::active_seqbase_get(seq::editing_get(scene));
 
+  VectorSet<Strip *> retimed_strips;
   for (auto item : selection.items()) {
     seq::relations_invalidate_cache_raw(scene, item.value);
 
     seq::retiming_key_speed_set(scene, item.value, item.key, speed / 100.0f);
 
-    if (seq::transform_test_overlap(scene, seqbase, item.value)) {
-      seq::transform_seqbase_shuffle(seqbase, item.value, scene);
-    }
+    retimed_strips.add(item.value);
   }
+
+  seq::transform_handle_overlap(scene, seqbase, retimed_strips, false);
 }
 
 static wmOperatorStatus sequencer_retiming_segment_speed_set_exec(bContext *C, wmOperator *op)
@@ -653,6 +649,8 @@ static wmOperatorStatus sequencer_retiming_segment_speed_set_exec(bContext *C, w
     for (Strip *strip : strips) {
       strip_speed_set(scene, strip, speed);
     }
+    ListBaseT<Strip> *seqbase = seq::active_seqbase_get(seq::editing_get(scene));
+    seq::transform_handle_overlap(scene, seqbase, strips, false);
     WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
     return OPERATOR_FINISHED;
   }

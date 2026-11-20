@@ -102,8 +102,12 @@ static BPy_GeometrySet *BPy_GeometrySet_static_from_evaluated_object(PyObject * 
 {
   static const char *kwlist[] = {"evaluated_object", nullptr};
   PyObject *py_evaluated_object;
-  if (!PyArg_ParseTupleAndKeywords(
-          args, kwds, "O", const_cast<char **>(kwlist), &py_evaluated_object))
+  if (!PyArg_ParseTupleAndKeywords(args,
+                                   kwds,
+                                   "O" /* `evaluated_object` */
+                                   ":from_evaluated_object",
+                                   const_cast<char **>(kwlist),
+                                   &py_evaluated_object))
   {
     return nullptr;
   }
@@ -194,7 +198,8 @@ static PyObject *BPy_GeometrySet_get_instances_pointcloud(BPy_GeometrySet *self)
   }
   if (self->instances_pointcloud == nullptr) {
     const int instances_num = instances->instances_num();
-    PointCloud *pointcloud = BKE_pointcloud_new_nomain(instances_num);
+    PointCloud *pointcloud = BKE_pointcloud_new_nomain(PointCloudType::Points, instances_num);
+    bke::instance_position_varray(*instances).materialize(pointcloud->positions_for_write());
     bke::gather_attributes(instances->attributes(),
                            bke::AttrDomain::Instance,
                            bke::AttrDomain::Point,

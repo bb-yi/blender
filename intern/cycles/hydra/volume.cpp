@@ -34,6 +34,9 @@ void HdCyclesVolume::Populate(HdSceneDelegate *sceneDelegate, HdDirtyBits dirtyB
 {
   Scene *const scene = (Scene *)_geom->get_owner();
 
+  /* USD/Hydra convention is that volume density is in object space. */
+  _geom->set_object_space(true);
+
   if (dirtyBits & HdChangeTracker::DirtyVolumeField) {
     const HdSceneIndexPrim prim = GetPrim(sceneDelegate, GetId());
     HdVolumeFieldBindingSchema bindings = HdVolumeFieldBindingSchema::GetFromParent(
@@ -51,25 +54,7 @@ void HdCyclesVolume::Populate(HdSceneDelegate *sceneDelegate, HdDirtyBits dirtyB
       {
         const ustring name(fieldName.GetString());
 
-        AttributeStandard std = ATTR_STD_NONE;
-        if (name == Attribute::standard_name(ATTR_STD_VOLUME_DENSITY)) {
-          std = ATTR_STD_VOLUME_DENSITY;
-        }
-        else if (name == Attribute::standard_name(ATTR_STD_VOLUME_COLOR)) {
-          std = ATTR_STD_VOLUME_COLOR;
-        }
-        else if (name == Attribute::standard_name(ATTR_STD_VOLUME_FLAME)) {
-          std = ATTR_STD_VOLUME_FLAME;
-        }
-        else if (name == Attribute::standard_name(ATTR_STD_VOLUME_HEAT)) {
-          std = ATTR_STD_VOLUME_HEAT;
-        }
-        else if (name == Attribute::standard_name(ATTR_STD_VOLUME_TEMPERATURE)) {
-          std = ATTR_STD_VOLUME_TEMPERATURE;
-        }
-        else if (name == Attribute::standard_name(ATTR_STD_VOLUME_VELOCITY)) {
-          std = ATTR_STD_VOLUME_VELOCITY;
-        }
+        const AttributeStandard std = Attribute::name_volume_standard(name);
 
         // Skip attributes that are not needed
         if ((std != ATTR_STD_NONE && _geom->need_attribute(scene, std)) ||

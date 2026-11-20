@@ -1,4 +1,4 @@
-#include "gpu_shader_common_math_utils.glsl"
+#include "gpu_shader_common_math_utils.bsl.hh"
 
 /**
  * SDF Functions based on these sources, inc comments:

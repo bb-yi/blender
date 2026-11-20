@@ -1,7 +1,9 @@
 ## 当前默认线
 
 - 当前默认分支：`main`
-- 当前默认版本线：Blender 5.2 NPR Port
+- 当前默认版本线：Blender 5.3.0 NPR Port
+- 官方 5.3 基线已同步至 `02f0899d78e3` 正式版，包含标题栏菜单搜索崩溃、远程节点工具与翻译更新。
+- 已合入既有 5.3 升级分支，并保留最新几何描边、笔刷闭包、Pre-FX、灯光信息和阴影分类修复。
 - 下面保留的 5.1.x 条目是历史发布记录，不代表当前默认分支仍是 5.1。
 
 ## 2026-03-19  c4b7253e825b
@@ -615,14 +617,75 @@
 - 修复 `NodeTree.type` 缺少 `FILTER_GRAPH` 枚举项导致的控制台持续报错 `current value '4' matches no enum in 'EeveeFilterGraphNodeTree', 'Eevee Filter Graph', 'type'`，`tree.type` 现在正确返回 `FILTER_GRAPH`。
 - Windows 发布包已完成带 Cycles 的全量清理构建，完整 Release 测试 `116/116` 通过；该结果不代表 Linux 或 macOS 测试覆盖。
 
-## 暂存
+## 2026-11-01  NPR 功能整合
+
+#### 新增功能
+- 新增原生合成器 `LUT Color Grade`，支持 `.cube` 与 PNG/TIFF/EXR 切片图片、强度和遮罩、色彩预设、插值、重载及打包。
+- 新增 `Draw Info` 材质输入节点，统一查询描边、阴影、探针及 Render Texture 捕获、着色阶段、烘焙、视口、播放和导航等 22 项上下文。
+- 新增 `Planar Probe` 材质采样节点，以 Position、Normal、UV 三个输入读取探针颜色、线性深度、UV 和有效性，支持自动或对象选择及 Cycles 零值回退。
+- Outline Shell 新增默认关闭的材质级自身遮挡，按物体实例保存辅助深度，保留本体与壳体的独立 Alpha 和现有透明模式。
+- `Stencil Value` 新增 Writer Surface 来源及 Depth、Valid 输出，读取最近合格写入表面的参考值和深度；支持全、半、四分之一分辨率，默认仍使用模板快照。
+- 新增可选 NPR Forward 折射背景分层，按对象参与开关及 Refraction Layer 将较低层 Forward 不透明、半透明和描边壳纳入较高层 NPR 折射背景；传统模式仍为默认。
+
+#### 修复与改进
+- 保留分层折射中的成对颜色/深度、体积雾、滤镜和 Render Texture 捕获隔离，并按对象参与状态区分共享材质的绘制缓存。
+- 修复 Stencil 写入表面捕获与 Shell 自身遮挡整合后的着色器变体识别，保留 Draw Info、Planar Probe 和 Stencil 的独立设置及资源生命周期。
+- 本轮发布同时包含下方图像闭包旧坐标兼容和 Deferred 描边折射分层修复。
+
+## 2026-10-31  图像闭包与 Deferred 描边修复
+
+#### 新增功能
+- 无
+
+#### 修复与改进
+- 修复 `Evaluate Closure` 评估图像闭包时，旧坐标键 `Vector` 被忽略而导致整片采到默认位置的问题。兼容旧 `Vector`，存在 `UV` 时优先使用 `UV`。
+- 图像闭包显式同步接口时，可将旧 `Vector` 迁移为 `UV`，并保留坐标默认值、插口标识和连线。坐标缺失或类型错误时给出明确诊断；普通自定义 Closure 继续严格按参数键匹配。
+- 修复使用 `Outline Shell Output` 且开启 Raytrace Transmission 时，Deferred 描边挡住 NPR Refraction 背景的问题。描边预通道与着色通道跟随对象的 `Refraction Layer`，高层可读取低层完成后的主体和描边，不再读入自身描边壳内部。
+- 修复多个折射层开启 `Clamp Surface Direct` 后，背景反馈被当前层颜色覆盖的问题。仅在反馈纹理读写重叠时保存临时背景，保留 HDR 颜色和 Alpha。
+- 修复没有不透明物体、仅有世界背景时，双层及更多层 NPR Refraction 变黑的问题，正确区分首个有效层和后续层。
+- 补齐旧闭包文件重载、节点组与 Bundle、折射层级跳号、共享材质、动态层级切换、多材质槽、Alpha 动画及 OpenGL/Vulkan 回归，并更新相关使用文档。
+
+## 2026-11-10 · 自 47732b164c81 正式版以来
 
 #### 新增功能
 
+- 新增场景级 `Geometry Lines` 描边节点树，支持八类几何线、可见／隐藏线、物体和材质筛选，以及多条规则的组合、覆盖和独立输出。
+- 新增有色笔刷闭包：左侧直接提供距离、系数、长度、ID、闭合数据；右侧仅保留位置偏移、宽度、颜色、透明度及自动预览，继续使用原 Brush 插口。
+- 闭包支持数学、矢量、渐变、Float Curve、图像及可编辑效果节点组；可读取源模型 UV、顶点／面角颜色和当前可见 Deferred 材质 AOV。
+- 新增 Simple、Normal、Multiple 快捷笔刷及笔尖、贴图、起收笔、虚线、随机与形变控制，支持视口和最终渲染，并提供描边通道及可选相机效果。
+- `Light Info` 新增求值后的 Origin、X Axis、Y Axis、Z Axis，保留原 Position／Direction；`Draw Info` 补充上下文查询，Outline Shell 支持 AOV。
+- Node Wrangler 新增 Filter Graph 和灯光节点预览、循环输出及正确连接；嵌套预览保留正式组输出。
+
 #### 修复与改进
+
+- 优化屏幕描边检测与 GPU 缓冲，增加视口描边分辨率倍率和边缘控制，改善大场景交互开销。
+- 修复 `Shader Info` 自阴影／投射阴影分类：完整深度与投影来源成对处理，避免无关后方物体及实例变化导致分类错误。
+- Pre-FX 改为复用同一遍场景绘制与采样，在相机后处理前分流和累积，移除重复场景渲染；保留镜头／快门采样的模糊，不另跑 DLSS。几何描边以原始采样进入该阶段。
+- 修复几何描边部分视角下的末端扇形、细小断缝、闭环曲线失效和多笔刷 Float Curve 读取串用。
+- 对照 Pencil+4 改进像素线宽、Simple 虚线圆帽和新建起收笔组。Color Map 使用 RGB 与强度混合，图像 Alpha 不再额外影响颜色混合；笔画透明度仍独立控制。
+- 修复图像纹理 Repeat／Mirror 边界过滤；改善来源跟随、AOV 缺失回退及合法黑色／零值处理。
+- 笔刷预览共用着色器与缓存，连续调参停止后合并刷新，减少界面阻塞；Shift+A 改为分类子菜单，补齐新增界面的简中标签与提示。
+- Node Wrangler 清理保留阶段、AOV 和灯光输出，并禁用不支持的图像混合操作。
+- Pencil+4 对齐已做实际渲染对照，但仍有随机、纹理笔刷聚合及连接等差异；闭包虚线是透明度遮罩，与独立圆帽虚线不同，不承诺全功能或逐像素完全一致。局部预览没有模型来源；材质 AOV 首期仅支持当前已完成的可见 Deferred 表面。
+
+## 2026-11-13 Blender 5.3.0 NPR Port
+
+#### 修复与改进
+
+- 修复 EEVEE 的 GLSL Function 灯光回调在描边壳自遮挡、深度和阴影通道报 `light_cull_buf` / `light_buf` 未声明的问题。保留 NPR Surface Diffusion 的表面着色。
+- 修复灯光驱动的 `Depth Offset` 在深度预通道缺少灯光缓冲、可能导致 Vulkan 崩溃的问题。DLSSNR 引导按需准备同视图的灯光数据，使引导深度与实际材质偏移一致。
+- 修复最终渲染同时启用 DLSSNR 和描边壳 `Self Occlusion` 时绑定空 Hi-Z 纹理导致的崩溃。两个开关可以同时使用。
+
+## 2026-11-15 Blender 5.3.0 NPR Port
+
+#### 修复与改进
+
+- 修复 5.3 升级后，EEVEE 日光照明正常但透视视图可能没有投影的问题。阴影采样现在按接收面像素尺寸选择阴影贴图层级，独立保留软阴影倍率。
+- 新增实际渲染回归，覆盖裁剪距离较大的透视视图和正交投影，分别检查地面的遮挡区与无遮挡区。
 
 # TODO
 
+- [×] 修复 `DLSSNR` 与描边壳 `Self Occlusion` 同时开启时的最终渲染崩溃（5.3.0 NPR，`2cdc3a319259`，Vulkan）。引导通道现在会在提交自遮挡深度前初始化 Hi-Z 纹理引用，避免 `GPU_texture_bind_ex` 读取空指针。回归确认两个开关同时开启时能出图且 DLSSNR 完成。使用旧版时可在「渲染属性 → DLSS5」将模式设为 `Off`，保留描边壳自遮挡。
 - [ ] 提高阴影分辨率
 - [ ] 材质debug器,显示信息
 - [×] 曲面细分着色器

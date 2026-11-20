@@ -19,11 +19,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_c.hh"
 #include "BLI_pool.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BKE_customdata.hh"
 
@@ -32,7 +32,7 @@
 
 #include "range_tree.h"
 
-#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
+#include "BLI_strict_flags.hh" /* IWYU pragma: keep. Keep last. */
 
 namespace blender {
 
@@ -457,21 +457,21 @@ BMLog *BM_log_from_existing_entries_create(BMesh *bm, BMLogEntry *entry)
   }
 
   /* Let BMLog manage the entry list again */
-  log->entries.first = log->entries.last = entry;
+  log->entries.first_ = log->entries.last_ = entry;
 
   {
     while (entry->prev) {
       entry = entry->prev;
-      log->entries.first = entry;
+      log->entries.first_ = entry;
     }
-    entry = static_cast<BMLogEntry *>(log->entries.last);
+    entry = log->entries.last();
     while (entry->next) {
       entry = entry->next;
-      log->entries.last = entry;
+      log->entries.last_ = entry;
     }
   }
 
-  for (entry = static_cast<BMLogEntry *>(log->entries.first); entry; entry = entry->next) {
+  for (entry = log->entries.first(); entry; entry = entry->next) {
     entry->log = log;
 
     /* Take all used IDs */
@@ -625,7 +625,7 @@ void BM_log_redo(BMesh *bm, BMLog *log)
 
   if (!entry) {
     /* Currently at the beginning of the undo stack, move to first entry */
-    entry = static_cast<BMLogEntry *>(log->entries.first);
+    entry = log->entries.first();
   }
   else if (entry->next) {
     /* Move to next undo entry */
@@ -849,9 +849,7 @@ void BM_log_print(const BMLog *log, const char *description)
 
   printf("%s:\n", description);
   printf("    % 2d: [ initial ]%s\n", 0, (!log->current_entry) ? current : "");
-  for (entry = static_cast<const BMLogEntry *>(log->entries.first), i = 1; entry;
-       entry = entry->next, i++)
-  {
+  for (entry = log->entries.first(), i = 1; entry; entry = entry->next, i++) {
     printf("    % 2d: [%p]%s\n", i, entry, (entry == log->current_entry) ? current : "");
   }
 }

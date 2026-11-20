@@ -6,14 +6,15 @@
 
 #include "eevee_light_shared.hh"
 #include "eevee_lightprobe_sphere.bsl.hh"
-#include "eevee_spherical_harmonics.bsl.hh"
+#include "gpu_shader_math_spherical_harmonics.bsl.hh"
 
 namespace eevee::lookdev {
 
 struct CopyWorld {
   [[storage(0, read)]] const SphereProbeHarmonic &in_sh;
   [[storage(1, write)]] SphereProbeHarmonic &out_sh;
-  /* WORKAROUND: The no_restrict flag is here to workaround an NVidia linker quirk (see #134239).*/
+  /* WORKAROUND: The no_restrict flag is here to workaround an NVidia linker quirk
+   * (see #134239). */
   [[storage(2, read_no_restrict)]] const LightData &in_sun;
   [[storage(3, write)]] LightData &out_sun;
   [[push_constant]] const int4 read_coord_packed;
@@ -123,7 +124,8 @@ void copy_world_main([[resource_table]] CopyWorld &srt,
   imageStore(srt.out_sphere_mip4,
              int3(local_texel, write_coord.layer),
              srt.get_mip_data(4, local_texel, read_coord, write_coord, rotation_mat));
-#ifdef __cplusplus
+
+#ifdef GLSL_CPP_STUBS
   /* If this mismatches, manual unroll needs to be updated. */
   static_assert(SPHERE_PROBE_MIPMAP_LEVELS == 5);
 #endif

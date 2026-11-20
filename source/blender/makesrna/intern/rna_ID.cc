@@ -217,9 +217,9 @@ const IDFilterEnumPropertyItem rna_enum_id_type_filter_items[] = {
 
 #  include "DNA_anim_types.h"
 
-#  include "BLI_listbase.h"
-#  include "BLI_math_base.h"
-#  include "BLI_string.h"
+#  include "BLI_listbase.hh"
+#  include "BLI_math_base_c.hh"
+#  include "BLI_string.hh"
 
 #  include "BLT_translation.hh"
 
@@ -411,7 +411,7 @@ static PointerRNA rna_ID_original_get(PointerRNA *ptr)
 short RNA_type_to_ID_code(const StructRNA *type)
 {
   const StructRNA *base_type = RNA_struct_base_child_of(type, RNA_ID);
-  if (UNLIKELY(base_type == nullptr)) {
+  if (base_type == nullptr) [[unlikely]] {
     return 0;
   }
   if (base_type == RNA_Action) {
@@ -646,9 +646,7 @@ int rna_ID_is_runtime_editable(const PointerRNA *ptr, const char **r_info)
 {
   ID *id = static_cast<ID *>(ptr->data);
   /* TODO: This should be abstracted in a BKE function or define, somewhat related to #88555. */
-  if (id->tag & (ID_TAG_NO_MAIN | ID_TAG_TEMP_MAIN | ID_TAG_LOCALIZED |
-                 ID_TAG_COPIED_ON_EVAL_FINAL_RESULT | ID_TAG_COPIED_ON_EVAL))
-  {
+  if (id->tag & (ID_TAG_NO_MAIN | ID_TAG_TEMP_MAIN | ID_TAG_LOCALIZED | ID_TAG_COPIED_ON_EVAL)) {
     *r_info = N_(
         "Cannot edit 'runtime' status of non-blendfile data-blocks, as they are by definition "
         "always runtime");
@@ -662,9 +660,7 @@ bool rna_ID_is_runtime_get(PointerRNA *ptr)
 {
   ID *id = static_cast<ID *>(ptr->data);
   /* TODO: This should be abstracted in a BKE function or define, somewhat related to #88555. */
-  if (id->tag & (ID_TAG_NO_MAIN | ID_TAG_TEMP_MAIN | ID_TAG_LOCALIZED |
-                 ID_TAG_COPIED_ON_EVAL_FINAL_RESULT | ID_TAG_COPIED_ON_EVAL))
-  {
+  if (id->tag & (ID_TAG_NO_MAIN | ID_TAG_TEMP_MAIN | ID_TAG_LOCALIZED | ID_TAG_COPIED_ON_EVAL)) {
     return true;
   }
 
@@ -1079,6 +1075,19 @@ static void rna_ID_override_library_property_operations_remove(
   BKE_lib_override_library_property_operation_delete(override_property, override_operation);
 
   WM_main_add_notifier(NC_WM | ND_LIB_OVERRIDE_CHANGED, nullptr);
+}
+
+static void rna_ID_deephash_get(PointerRNA *ptr, char *value)
+{
+  ID *id = ptr->data_as<ID>();
+  memcpy(value, id->deep_hash.data, sizeof(id->deep_hash.data));
+  value[sizeof(id->deep_hash.data)] = '\0';
+}
+
+static int rna_ID_deephash_len(PointerRNA *ptr)
+{
+  ID *id = ptr->data_as<ID>();
+  return sizeof(id->deep_hash.data);
 }
 
 static void rna_ID_update_tag(ID *id, Main *bmain, ReportList *reports, int flag)
@@ -1784,7 +1793,7 @@ static void rna_def_ID_properties(BlenderRNA *brna)
    */
   prop = RNA_def_property(srna, "name", PROP_STRING, PROP_NONE);
   RNA_def_property_flag(prop, PROP_IDPROPERTY);
-  // RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
   RNA_def_property_ui_text(prop,
                            "Name",
                            "Unique name used in the code and scripting, can be re-defined in "
@@ -2123,6 +2132,7 @@ static void rna_def_ID_override_library_property_operations(BlenderRNA *brna, Pr
                          "IDOverrideLibraryPropertyOperation",
                          "New Operation",
                          "Created operation");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 
   func = RNA_def_function(srna, "remove", "rna_ID_override_library_property_operations_remove");
@@ -2187,6 +2197,7 @@ static void rna_def_ID_override_library_properties(BlenderRNA *brna, PropertyRNA
                          "IDOverrideLibraryProperty",
                          "New Property",
                          "Newly created override property or existing one");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
   parm = RNA_def_string(
       func, "rna_path", nullptr, 256, "RNA Path", "RNA-Path of the property to add");
@@ -2441,6 +2452,16 @@ static void rna_def_ID(BlenderRNA *brna)
       "same across renames and internal reallocations, unchanged when reloading the file");
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);
 
+  prop = RNA_def_property(srna, "deep_hash", PROP_STRING, PROP_BYTESTRING);
+  RNA_def_property_string_sdna(prop, nullptr, "deep_hash.data");
+  RNA_def_property_ui_text(
+      prop,
+      "Linked Packed Deep Hash",
+      "Hash representing a unique version of a packed linked data and all of its dependencies");
+  RNA_def_property_string_maxlength(prop, int(sizeof(ID::deep_hash.data)) + 1);
+  RNA_def_property_string_funcs(prop, "rna_ID_deephash_get", "rna_ID_deephash_len", nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+
   prop = RNA_def_property(srna, "is_evaluated", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_ui_text(
       prop,
@@ -2540,12 +2561,13 @@ static void rna_def_ID(BlenderRNA *brna)
   RNA_def_property_override_flag(prop, PROPOVERRIDE_NO_COMPARISON);
   RNA_def_property_ui_text(prop, "Library", "Library file the data-block is linked from");
 
-  prop = RNA_def_pointer(srna,
-                         "library_weak_reference",
-                         "LibraryWeakReference",
-                         "Library Weak Reference",
-                         "Weak reference to a data-block in another library .blend file (used to "
-                         "re-use already appended data instead of appending new copies)");
+  prop = RNA_def_pointer(
+      srna,
+      "library_weak_reference",
+      "LibraryWeakReference",
+      "Library Weak Reference",
+      "Weak reference to the data-block in a library .blend file this "
+      "originated from. For re-use of already appended data and linked editable assets");
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);
   RNA_def_property_override_flag(prop, PROPOVERRIDE_NO_COMPARISON);
 
@@ -2608,6 +2630,7 @@ static void rna_def_ID(BlenderRNA *brna)
       func, "depsgraph", "Depsgraph", "", "Dependency graph to perform lookup in");
   RNA_def_parameter_flags(parm, PROP_NEVER_NULL, PARM_REQUIRED);
   parm = RNA_def_pointer(func, "id", "ID", "", "New copy of the ID");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 
   func = RNA_def_function(srna, "copy", "rna_ID_copy");
@@ -2712,6 +2735,7 @@ static void rna_def_ID(BlenderRNA *brna)
       "Remove potential asset metadata so the newly local data-block is not treated as asset "
       "data-block and won't show up in asset libraries");
   parm = RNA_def_pointer(func, "id", "ID", "", "This ID, or the new ID if it was copied");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 
   func = RNA_def_function(srna, "user_of_id", "BKE_library_ID_use_ID");
@@ -2745,7 +2769,7 @@ static void rna_def_ID(BlenderRNA *brna)
   RNA_def_function_flag(func, FUNC_USE_MAIN | FUNC_USE_REPORTS);
   RNA_def_function_ui_description(func,
                                   "Tag the ID to update its display data, "
-                                  "e.g. when calling :class:`bpy.types.Scene.update`");
+                                  "e.g. when calling :class:`bpy.types.ViewLayer.update`");
   RNA_def_enum_flag(func, "refresh", update_flag_items, 0, "", "Type of updates to perform");
 
   func = RNA_def_function(srna, "preview_ensure", "BKE_previewimg_id_ensure");
@@ -2773,7 +2797,11 @@ static void rna_def_library(BlenderRNA *brna)
   prop = RNA_def_property(srna, "filepath", PROP_STRING, PROP_FILEPATH);
   RNA_def_property_string_sdna(prop, nullptr, "filepath");
   RNA_def_property_flag(prop, PROP_PATH_SUPPORTS_BLEND_RELATIVE);
-  RNA_def_property_ui_text(prop, "File Path", "Path to the library .blend file");
+  RNA_def_property_ui_text(prop,
+                           "File Path",
+                           "Path to the library .blend file. WARNING: Typically, this value "
+                           "should be considered read-only, changing this path without proper "
+                           "processing afterwards can leave Blender data in an invalid state");
   RNA_def_property_string_funcs(prop, nullptr, nullptr, "rna_Library_filepath_set");
 
   prop = RNA_def_property(srna, "parent", PROP_POINTER, PROP_NONE);
@@ -2805,8 +2833,8 @@ static void rna_def_library(BlenderRNA *brna)
   RNA_def_property_ui_text(prop,
                            "Library Overrides Need resync",
                            "True if this library contains library overrides that are linked in "
-                           "current blendfile, and that had to be recursively resynced on load "
-                           "(it is recommended to open and re-save that library blendfile then)");
+                           "current blend-file, and that had to be recursively resynced on load "
+                           "(it is recommended to open and re-save that library blend-file then)");
 
   prop = RNA_def_property(srna, "is_editable", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "runtime->tag", LIBRARY_ASSET_EDITABLE);

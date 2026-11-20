@@ -31,44 +31,44 @@ bool parallax_view_from_tangent_direction(float3 tangent_view_direction,
   return dot(view_dir, view_dir) > 1.0e-12f;
 }
 
-bool parallax_tangent_basis(float4 tangent, out float3 T, out float3 B, out float3 N)
+bool parallax_tangent_basis(KernelGlobals &kg, ShadingData &sd, float4 tangent, out float3 T, out float3 B, out float3 N)
 {
 #ifdef GPU_FRAGMENT_SHADER
   if (all(equal(tangent, float4(0.0f, 0.0f, 0.0f, 1.0f)))) {
     T = float3(1.0f, 0.0f, 0.0f);
     B = float3(0.0f, 1.0f, 0.0f);
-    N = g_data.Ni;
+    N = sd.Ni;
     return false;
   }
 
   tangent *= (FrontFacing ? 1.0f : -1.0f);
-  N = parallax_safe_normalize(g_data.Ni);
+  N = parallax_safe_normalize(sd.Ni);
   T = parallax_safe_normalize(tangent.xyz);
   T = cross(N, parallax_safe_normalize(cross(T, N)));
   B = tangent.w * parallax_safe_normalize(cross(N, T));
-  B *= (object_infos_get().flag & OBJECT_NEGATIVE_SCALE) != 0 ? -1.0f : 1.0f;
+  B *= (kg.object_infos_get(sd).flag & OBJECT_NEGATIVE_SCALE) != 0 ? -1.0f : 1.0f;
   return true;
 #else
   T = float3(1.0f, 0.0f, 0.0f);
   B = float3(0.0f, 1.0f, 0.0f);
-  N = g_data.N;
+  N = sd.N;
   return false;
 #endif
 }
 
-bool parallax_view_data(float4 tangent, out float2 view_dir, out float view_z)
+bool parallax_view_data(KernelGlobals &kg, ShadingData &sd, float4 tangent, out float2 view_dir, out float view_z)
 {
   float3 T;
   float3 B;
   float3 N;
-  if (!parallax_tangent_basis(tangent, T, B, N)) {
+  if (!parallax_tangent_basis(kg, sd, tangent, T, B, N)) {
     view_dir = float2(0.0f);
     view_z = 1.0f;
     return false;
   }
 
 #ifdef GPU_FRAGMENT_SHADER
-  float3 V = parallax_safe_normalize(drw_world_incident_vector(g_data.P));
+  float3 V = parallax_safe_normalize(kg.view_matrices_get(sd).world_incident_vector(sd.P));
   float3 Vt = float3(dot(V, T), dot(V, B), dot(V, N));
   return parallax_view_from_tangent_direction(Vt, view_dir, view_z);
 #else
@@ -78,34 +78,34 @@ bool parallax_view_data(float4 tangent, out float2 view_dir, out float view_z)
 #endif
 }
 
-float3 parallax_base_normal(float4 tangent)
+float3 parallax_base_normal(KernelGlobals &kg, ShadingData &sd, float4 tangent)
 {
   float3 T;
   float3 B;
   float3 N;
-  if (!parallax_tangent_basis(tangent, T, B, N)) {
-    return g_data.N;
+  if (!parallax_tangent_basis(kg, sd, tangent, T, B, N)) {
+    return sd.N;
   }
   return N;
 }
 
-float3 parallax_tangent_normal_to_world(float4 tangent, float3 tangent_normal)
+float3 parallax_tangent_normal_to_world(KernelGlobals &kg, ShadingData &sd, float4 tangent, float3 tangent_normal)
 {
   float3 T;
   float3 B;
   float3 N;
-  if (!parallax_tangent_basis(tangent, T, B, N)) {
-    return g_data.N;
+  if (!parallax_tangent_basis(kg, sd, tangent, T, B, N)) {
+    return sd.N;
   }
   return parallax_safe_normalize(tangent_normal.x * T + tangent_normal.y * B + tangent_normal.z * N);
 }
 
-float3 parallax_world_direction_to_tangent(float4 tangent, float3 world_direction)
+float3 parallax_world_direction_to_tangent(KernelGlobals &kg, ShadingData &sd, float4 tangent, float3 world_direction)
 {
   float3 T;
   float3 B;
   float3 N;
-  if (!parallax_tangent_basis(tangent, T, B, N)) {
+  if (!parallax_tangent_basis(kg, sd, tangent, T, B, N)) {
     return float3(0.0f, 0.0f, 1.0f);
   }
   float3 direction = parallax_safe_normalize(world_direction);
@@ -115,7 +115,7 @@ float3 parallax_world_direction_to_tangent(float4 tangent, float3 world_directio
   return float3(dot(direction, T), dot(direction, B), dot(direction, N));
 }
 
-float3 parallax_normal_from_height_samples(float4 tangent,
+float3 parallax_normal_from_height_samples(KernelGlobals &kg, ShadingData &sd, float4 tangent,
                                            float center_height,
                                            float u_height,
                                            float v_height,
@@ -127,14 +127,14 @@ float3 parallax_normal_from_height_samples(float4 tangent,
   float dheight_dv = (v_height - center_height) / max(v_step, 1.0e-5f);
   float3 tangent_normal = parallax_safe_normalize(
       float3(-dheight_du * scale, -dheight_dv * scale, 1.0f));
-  return parallax_tangent_normal_to_world(tangent, tangent_normal);
+  return parallax_tangent_normal_to_world(kg, sd, tangent, tangent_normal);
 }
 
-float2 parallax_offset_direction(float4 tangent)
+float2 parallax_offset_direction(KernelGlobals &kg, ShadingData &sd, float4 tangent)
 {
   float2 view_dir;
   float view_z;
-  if (!parallax_view_data(tangent, view_dir, view_z)) {
+  if (!parallax_view_data(kg, sd, tangent, view_dir, view_z)) {
     return float2(0.0f);
   }
   return view_dir;
@@ -143,20 +143,21 @@ float2 parallax_offset_direction(float4 tangent)
 [[node]]
 void node_parallax_plane_offset(float3 uv_in,
                                 float scale,
-                                float4 tangent,
+                                float4 tangent,[[resource_table]] KernelGlobals &kg, ShadingData &sd,
                                 out float3 uv_out,
                                 out float3 normal_out)
 {
-  float2 direction = parallax_offset_direction(tangent);
+  float2 direction = parallax_offset_direction(kg, sd, tangent);
   uv_out = float3(uv_in.xy - direction * scale, uv_in.z);
-  normal_out = parallax_base_normal(tangent);
+  normal_out = parallax_base_normal(kg, sd, tangent);
 }
 
 void parallax_uv_gradients(float3 uv_in, out float2 uv_dx, out float2 uv_dy)
 {
 #ifdef GPU_FRAGMENT_SHADER
-  uv_dx = gpu_dfdx(uv_in.xy) * texture_lod_bias_get();
-  uv_dy = gpu_dfdy(uv_in.xy) * texture_lod_bias_get();
+  float lod_bias = eevee_uniform_data_get().film.texture_lod_bias;
+  uv_dx = gpu_dfdx(uv_in.xy) * lod_bias;
+  uv_dy = gpu_dfdy(uv_in.xy) * lod_bias;
 #else
   uv_dx = float2(0.0f);
   uv_dy = float2(0.0f);
@@ -194,7 +195,7 @@ float2 parallax_interpolate_uv(float2 after_uv,
   return abs(after_delta) <= abs(before_delta) ? after_uv : before_uv;
 }
 
-float3 parallax_normal_image(sampler2D height_image,
+float3 parallax_normal_image(KernelGlobals &kg, ShadingData &sd, sampler2D height_image,
                              float2 uv,
                              float scale,
                              float height_offset,
@@ -212,11 +213,11 @@ float3 parallax_normal_image(sampler2D height_image,
   float v_height = parallax_height_offset(
       parallax_height_image(height_image, uv + float2(0.0f, texel_size.y), uv_dx, uv_dy),
       height_offset);
-  return parallax_normal_from_height_samples(
+  return parallax_normal_from_height_samples(kg, sd,
       tangent, center_height, u_height, v_height, texel_size.x, texel_size.y, scale);
 }
 
-void parallax_march_init(float4 tangent,
+void parallax_march_init(KernelGlobals &kg, ShadingData &sd, float4 tangent,
                          float min_steps,
                          float max_steps,
                          out float2 direction,
@@ -224,7 +225,7 @@ void parallax_march_init(float4 tangent,
                          out float layer_depth)
 {
   float view_z;
-  if (!parallax_view_data(tangent, direction, view_z)) {
+  if (!parallax_view_data(kg, sd, tangent, direction, view_z)) {
     layer_count = 1.0f;
     layer_depth = 1.0f;
     return;
@@ -237,7 +238,7 @@ void parallax_march_init(float4 tangent,
   layer_depth = 1.0f / max(layer_count, 1.0f);
 }
 
-void parallax_trace_image(sampler2D height_image,
+void parallax_trace_image(KernelGlobals &kg, ShadingData &sd, sampler2D height_image,
                           float3 uv_in,
                           float scale,
                           float height_offset,
@@ -252,7 +253,7 @@ void parallax_trace_image(sampler2D height_image,
   float2 direction;
   float layer_count;
   float layer_depth;
-  parallax_march_init(tangent, min_steps, max_steps, direction, layer_count, layer_depth);
+  parallax_march_init(kg, sd, tangent, min_steps, max_steps, direction, layer_count, layer_depth);
 
   float2 uv_dx;
   float2 uv_dy;
@@ -449,7 +450,7 @@ float parallax_shadow_image(sampler2D height_image,
   return 1.0f;
 }
 
-void node_parallax_image_mode(sampler2D height_image,
+void node_parallax_image_mode(KernelGlobals &kg, ShadingData &sd, sampler2D height_image,
                               float3 uv_in,
                               float scale,
                               float height_offset,
@@ -466,17 +467,17 @@ void node_parallax_image_mode(sampler2D height_image,
                               out float shadow_out)
 {
   shadow_out = 1.0f;
-  normal_out = parallax_base_normal(tangent);
+  normal_out = parallax_base_normal(kg, sd, tangent);
   if (scale == 0.0f) {
     uv_out = uv_in;
     return;
   }
   if (mode == PARALLAX_MODE_PLANE_OFFSET) {
-    node_parallax_plane_offset(uv_in, scale, tangent, uv_out, normal_out);
+    node_parallax_plane_offset(uv_in, scale, tangent,kg, sd,  uv_out, normal_out);
     return;
   }
   float hit_height;
-  parallax_trace_image(height_image,
+  parallax_trace_image(kg, sd, height_image,
                        uv_in,
                        scale,
                        height_offset,
@@ -491,11 +492,11 @@ void node_parallax_image_mode(sampler2D height_image,
   float2 uv_dy;
   parallax_uv_gradients(uv_in, uv_dx, uv_dy);
   if (use_normal) {
-    normal_out = parallax_normal_image(
+    normal_out = parallax_normal_image(kg, sd,
         height_image, uv_out.xy, scale, height_offset, tangent, uv_dx, uv_dy);
   }
   if (use_shadow) {
-    float3 sun_direction_ts = parallax_world_direction_to_tangent(tangent, sun_direction);
+    float3 sun_direction_ts = parallax_world_direction_to_tangent(kg, sd, tangent, sun_direction);
     shadow_out = parallax_shadow_image(height_image,
                                        uv_out.xy,
                                        hit_height,

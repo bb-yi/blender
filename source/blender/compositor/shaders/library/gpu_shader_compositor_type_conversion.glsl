@@ -2,8 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "gpu_shader_math_matrix_construct_lib.glsl"
-#include "gpu_shader_math_rotation_conversion_lib.glsl"
+#include "gpu_shader_math_matrix_construct.bsl.hh"
+#include "gpu_shader_math_rotation_conversion.bsl.hh"
 
 /* --------------------------------------------------------------------
  * Float to other.
@@ -300,7 +300,7 @@ float int2_to_float(int2 value)
 
 int int2_to_int(int2 value)
 {
-  return int(int2_to_float(value));
+  return midpoint(value.x, value.y);
 }
 
 int3 int2_to_int3(int2 value)
@@ -403,7 +403,7 @@ float3 bool_to_float3(bool value)
 
 float4 bool_to_color(bool value)
 {
-  return float4(value);
+  return value ? float4(1.0f) : float4(0.0f, 0.0f, 0.0f, 1.0f);
 }
 
 float4 bool_to_float4(bool value)
@@ -427,7 +427,8 @@ int3 bool_to_int3(bool value)
 
 float4 float4x4_to_quaternion(float4x4 mat)
 {
-  float3x3 mat_3x3 = normalize(to_float3x3(mat));
+  float3 unused_size;
+  float3x3 mat_3x3 = normalize_and_get_size(to_float3x3(mat), unused_size);
   return to_quaternion(to_euler(mat_3x3)).as_float4();
 }
 
@@ -437,13 +438,13 @@ float4 float4x4_to_quaternion(float4x4 mat)
 
 float2 quaternion_to_float2(float4 value)
 {
-  Quaternion quat = Quaternion{UNPACK4(value)};
+  Quaternion quat = Quaternion::from_float4(value);
   return to_euler(from_rotation(quat)).as_float3().xy();
 }
 
 float3 quaternion_to_float3(float4 value)
 {
-  Quaternion quat = Quaternion{UNPACK4(value)};
+  Quaternion quat = Quaternion::from_float4(value);
   return to_euler(from_rotation(quat)).as_float3();
 }
 
@@ -454,7 +455,7 @@ float4 quaternion_to_float4(float4 value)
 
 float4x4 quaternion_to_float4x4(float4 value)
 {
-  Quaternion quat = Quaternion{UNPACK4(value)};
+  Quaternion quat = Quaternion::from_float4(value);
   float3x3 mat_3x3 = from_rotation(quat);
   return float4x4(float4(mat_3x3[0], 0.0f),
                   float4(mat_3x3[1], 0.0f),

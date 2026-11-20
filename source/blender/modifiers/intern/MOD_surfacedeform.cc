@@ -6,9 +6,10 @@
  * \ingroup modifiers
  */
 
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.h"
-#include "BLI_task.h"
+#include "BKE_bvh.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_task_c.hh"
 
 #include "BLT_translation.hh"
 
@@ -59,7 +60,7 @@ struct SDefEdgePolys {
 };
 
 struct SDefBindCalcData {
-  bke::BVHTreeFromMesh *treeData;
+  const bke::bvh::Tree *treeData;
   const SDefAdjacencyArray *vert_edges;
   const SDefEdgePolys *edge_polys;
   SDefVert *bind_verts;
@@ -364,10 +365,6 @@ BLI_INLINE void sortPolyVertsTri(uint *indices,
 
 BLI_INLINE uint nearestVert(SDefBindCalcData *const data, const float point_co[3])
 {
-  BVHTreeNearest nearest{};
-  nearest.dist_sq = FLT_MAX;
-  nearest.index = -1;
-
   float t_point[3];
   float max_dist = FLT_MAX;
   float dist;
@@ -375,10 +372,11 @@ BLI_INLINE uint nearestVert(SDefBindCalcData *const data, const float point_co[3
 
   mul_v3_m4v3(t_point, data->imat, point_co);
 
-  BLI_bvhtree_find_nearest(
-      data->treeData->tree, t_point, &nearest, data->treeData->nearest_callback, data->treeData);
+  const std::optional<bke::bvh::ClosestPointResult> nearest = data->treeData->closest_point(
+      t_point);
+  BLI_assert(nearest.has_value());
 
-  const IndexRange face = data->polys[data->tri_faces[nearest.index]];
+  const IndexRange face = data->polys[data->tri_faces[nearest->index]];
 
   for (int i = 0; i < face.size(); i++) {
     const int edge_i = data->corner_edges[face.start() + i];
@@ -1220,13 +1218,7 @@ static bool surfacedeformBind(Object *ob,
   smd_orig->verts_sharing_info = MEM_new<BindVertsImplicitSharing>(
       __func__, smd_orig->verts, verts_num);
 
-  bke::BVHTreeFromMesh treeData = target->bvh_corner_tris();
-  if (treeData.tree == nullptr) {
-    BKE_modifier_set_error(ob, reinterpret_cast<ModifierData *>(smd_eval), "Out of memory");
-    freeAdjacencyMap(vert_edges, adj_array, edge_polys);
-    implicit_sharing::free_shared_data(&smd_orig->verts, &smd_orig->verts_sharing_info);
-    return false;
-  }
+  const bke::bvh::Tree &treeData = target->bvh_tris();
 
   adj_result = buildAdjacencyMap(polys, edges, corner_edges, vert_edges, adj_array, edge_polys);
 
@@ -1630,7 +1622,7 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
     col->op("OBJECT_OT_surfacedeform_bind", IFACE_("Unbind"), ICON_NONE);
   }
   else {
-    col->active_set(!RNA_pointer_is_null(&target_ptr));
+    col->active_set(target_ptr);
     col->op("OBJECT_OT_surfacedeform_bind", IFACE_("Bind"), ICON_NONE);
   }
   modifier_error_message_draw(layout, ptr);
@@ -1643,28 +1635,29 @@ static void panel_register(ARegionType *region_type)
 
 static void blend_write(BlendWriter *writer, const ID *id_owner, const ModifierData *md)
 {
-  SurfaceDeformModifierData smd = *reinterpret_cast<const SurfaceDeformModifierData *>(md);
-  const bool is_undo = BLO_write_is_undo(writer);
-
-  if (ID_IS_OVERRIDE_LIBRARY(id_owner) && !is_undo) {
+  const SurfaceDeformModifierData *smd = reinterpret_cast<const SurfaceDeformModifierData *>(md);
+  const bool is_undo = writer->is_undo();
+  const bool without_bind_data = ID_IS_OVERRIDE_LIBRARY(id_owner) && !is_undo &&
+                                 (md->flag & eModifierFlag_OverrideLibrary_Local) == 0;
+  if (without_bind_data) {
+    /* Modifier coming from linked data cannot be bound from an override, so we can remove all
+     * binding data, can save a significant amount of memory. */
     BLI_assert(!ID_IS_LINKED(id_owner));
-    const bool is_local = (md->flag & eModifierFlag_OverrideLibrary_Local) != 0;
-    if (!is_local) {
-      /* Modifier coming from linked data cannot be bound from an override, so we can remove all
-       * binding data, can save a significant amount of memory. */
-      smd.bind_verts_num = 0;
-      smd.verts = nullptr;
-      smd.verts_sharing_info = nullptr;
-    }
+    writer->write_struct(smd, [](BlendStructWriter<SurfaceDeformModifierData> &struct_writer) {
+      struct_writer.shallow_data.bind_verts_num = 0;
+      struct_writer.shallow_data.verts = nullptr;
+      struct_writer.shallow_data.verts_sharing_info = nullptr;
+    });
+    return;
   }
 
-  if (smd.verts != nullptr) {
-    BLO_write_shared(
-        writer, smd.verts, sizeof(SDefVert) * smd.bind_verts_num, smd.verts_sharing_info, [&]() {
-          SDefVert *bind_verts = smd.verts;
-          writer->write_struct_array(smd.bind_verts_num, bind_verts);
+  if (smd->verts != nullptr) {
+    writer->write_shared(
+        smd->verts, sizeof(SDefVert) * smd->bind_verts_num, smd->verts_sharing_info, [&]() {
+          const SDefVert *bind_verts = smd->verts;
+          writer->write_struct_array(smd->bind_verts_num, bind_verts);
 
-          for (int i = 0; i < smd.bind_verts_num; i++) {
+          for (int i = 0; i < smd->bind_verts_num; i++) {
             writer->write_struct_array(bind_verts[i].binds_num, bind_verts[i].binds);
 
             if (bind_verts[i].binds) {
@@ -1688,7 +1681,7 @@ static void blend_write(BlendWriter *writer, const ID *id_owner, const ModifierD
         });
   }
 
-  writer->write_struct_at_address(md, &smd);
+  writer->write_struct(smd);
 }
 
 static void blend_read(BlendDataReader *reader, ModifierData *md)

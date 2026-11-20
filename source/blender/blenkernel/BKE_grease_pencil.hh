@@ -89,6 +89,10 @@ struct TriangleCache {
    */
   Vector<int3> triangles;
   Vector<int> triangle_offsets;
+
+  /** The extra points used when fill geometry intersect. Grouped by each fill. */
+  Vector<float3> intersection_points;
+  Vector<int> intersection_point_offsets;
 };
 
 class DrawingRuntime {
@@ -150,6 +154,11 @@ class Drawing : public blender::GreasePencilDrawing {
    * in this drawing. See #fills().
    */
   std::optional<GroupedSpan<int3>> triangles() const;
+  /**
+   * The extra points used when fill geometry intersect. Grouped by each fill. Can be empty when
+   * there are no fills in this drawing. See #fills().
+   */
+  GroupedSpan<float3> intersection_points() const;
   /**
    * Normal vectors for a plane that fits the stroke.
    */
@@ -576,7 +585,8 @@ class Layer : public blender::GreasePencilLayer {
   /**
    * \returns the index of the active drawing at frame \a frame_number or -1 if there is no
    * drawing.
-   * TODO: This should be a private API! */
+   * TODO: This should be a private API!
+   */
   int drawing_index_at(const int frame_number) const;
 
   /**
@@ -1173,7 +1183,8 @@ void BKE_grease_pencil_copy_layer_group_parameters(const bke::greasepencil::Laye
 
 /**
  * Move data from a grease pencil outside of the main data-base into a grease pencil in the
- * data-base. Takes ownership of the source grease pencil. */
+ * data-base. Takes ownership of the source grease pencil.
+ */
 void BKE_grease_pencil_nomain_to_grease_pencil(GreasePencil *grease_pencil_src,
                                                GreasePencil *grease_pencil_dst);
 
@@ -1231,6 +1242,10 @@ Material *BKE_grease_pencil_object_material_alt_ensure_from_brush(Main *bmain,
 void BKE_grease_pencil_material_remap(GreasePencil *grease_pencil, const uint *remap, int totcol);
 void BKE_grease_pencil_material_index_remove(GreasePencil *grease_pencil, int index);
 bool BKE_grease_pencil_material_index_used(GreasePencil *grease_pencil, int index);
+
+void BKE_grease_pencil_brush_material_set(struct Brush *brush, struct Material *material);
+
+void BKE_grease_pencil_palette_ensure(Main *bmain, Scene *scene);
 
 bool BKE_grease_pencil_references_cyclic_check(const GreasePencil *id_reference,
                                                const GreasePencil *grease_pencil);

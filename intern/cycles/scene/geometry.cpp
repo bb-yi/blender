@@ -331,6 +331,14 @@ static void update_device_flags_attribute(uint32_t &device_update_flags,
         device_update_flags |= ATTR_NORMAL_MODIFIED;
         break;
       }
+      case AttrKernelDataType::QUATERNION: {
+        device_update_flags |= ATTR_QUATERNION_MODIFIED;
+        break;
+      }
+      case AttrKernelDataType::SPHERICAL_HARMONICS_REST: {
+        device_update_flags |= ATTR_SPHERICAL_HARMONICS_REST_MODIFIED;
+        break;
+      }
       case AttrKernelDataType::NUM: {
         break;
       }
@@ -358,6 +366,12 @@ static void update_attribute_realloc_flags(uint32_t &device_update_flags,
   }
   if (attributes.modified(AttrKernelDataType::NORMAL)) {
     device_update_flags |= ATTR_NORMAL_NEEDS_REALLOC;
+  }
+  if (attributes.modified(AttrKernelDataType::QUATERNION)) {
+    device_update_flags |= ATTR_QUATERNION_NEEDS_REALLOC;
+  }
+  if (attributes.modified(AttrKernelDataType::SPHERICAL_HARMONICS_REST)) {
+    device_update_flags |= ATTR_SPHERICAL_HARMONICS_REST_NEEDS_REALLOC;
   }
 }
 
@@ -405,6 +419,13 @@ void GeometryManager::geom_calc_offset(Scene *scene, BVHLayout bvh_layout)
       PointCloud *pointcloud = static_cast<PointCloud *>(geom);
 
       prim_offset_changed = (pointcloud->prim_offset != point_size);
+
+      /* Changing Render As on point cloud is likely to change its underlying BVH type (i.e. Render
+       * As Points uses hardware-accelerated point primitives, and Render As GSplats uses custom
+       * primitives). */
+      if (pointcloud->render_as_is_modified()) {
+        geom->need_update_rebuild = true;
+      }
 
       pointcloud->prim_offset = point_size;
       point_size += pointcloud->num_points();
@@ -472,7 +493,7 @@ void GeometryManager::device_update_preprocess(Device *device, Scene *scene, Pro
         /* Attributes might need to be tessellated if added. */
         if (geom->is_mesh()) {
           Mesh *mesh = static_cast<Mesh *>(geom);
-          if (mesh->need_tesselation()) {
+          if (mesh->need_tessellation()) {
             mesh->tag_modified();
           }
         }
@@ -484,7 +505,7 @@ void GeometryManager::device_update_preprocess(Device *device, Scene *scene, Pro
         /* Attributes might need to be tessellated if added. */
         if (geom->is_mesh()) {
           Mesh *mesh = static_cast<Mesh *>(geom);
-          if (mesh->need_tesselation()) {
+          if (mesh->need_tessellation()) {
             mesh->tag_modified();
           }
         }
@@ -686,6 +707,22 @@ void GeometryManager::device_update_preprocess(Device *device, Scene *scene, Pro
     dscene->attributes_normal.tag_modified();
   }
 
+  if (device_update_flags & ATTR_QUATERNION_NEEDS_REALLOC) {
+    dscene->attributes_map.tag_realloc();
+    dscene->attributes_quaternion.tag_realloc();
+  }
+  else if (device_update_flags & ATTR_QUATERNION_MODIFIED) {
+    dscene->attributes_quaternion.tag_modified();
+  }
+
+  if (device_update_flags & ATTR_SPHERICAL_HARMONICS_REST_NEEDS_REALLOC) {
+    dscene->attributes_map.tag_realloc();
+    dscene->attributes_spherical_harmonics_rest.tag_realloc();
+  }
+  else if (device_update_flags & ATTR_SPHERICAL_HARMONICS_REST_MODIFIED) {
+    dscene->attributes_spherical_harmonics_rest.tag_modified();
+  }
+
   if (device_update_flags & DEVICE_MESH_DATA_MODIFIED) {
     /* if anything else than vertices or shaders are modified, we would need to reallocate, so
      * these are the only arrays that can be updated */
@@ -817,7 +854,7 @@ void GeometryManager::device_update(Device *device,
           Mesh *mesh = static_cast<Mesh *>(geom);
 
           /* Test if we need tessellation and setup normals if required. */
-          if (mesh->need_tesselation()) {
+          if (mesh->need_tessellation()) {
             num_tessellation++;
             /* OPENSUBDIV Catmull-Clark does not make use of input normals and will overwrite them.
              */
@@ -836,6 +873,11 @@ void GeometryManager::device_update(Device *device,
           if (mesh->has_true_displacement()) {
             true_displacement_used = true;
           }
+        }
+        else if (geom->is_pointcloud()) {
+          /* Precompute gsplat bounding sphere for faster access to its bounds. */
+          PointCloud *pointcloud = static_cast<PointCloud *>(geom);
+          pointcloud->update_gsplat_radii();
         }
       }
 
@@ -897,7 +939,7 @@ void GeometryManager::device_update(Device *device,
     /* Apply generated attribute if needed or remove if not needed */
     mesh->update_generated(scene);
 
-    if (num_tessellation && mesh->need_tesselation()) {
+    if (num_tessellation && mesh->need_tessellation()) {
       {
         const thread_scoped_lock status_lock(status_mutex);
         string msg = "Tessellating ";
@@ -1218,6 +1260,8 @@ void GeometryManager::device_update(Device *device,
   dscene->attributes_float4.clear_modified();
   dscene->attributes_uchar4.clear_modified();
   dscene->attributes_normal.clear_modified();
+  dscene->attributes_quaternion.clear_modified();
+  dscene->attributes_spherical_harmonics_rest.clear_modified();
 }
 
 void GeometryManager::device_free(Device *device, DeviceScene *dscene, bool force_free)
@@ -1245,6 +1289,8 @@ void GeometryManager::device_free(Device *device, DeviceScene *dscene, bool forc
   dscene->attributes_float4.free_if_need_realloc(force_free);
   dscene->attributes_uchar4.free_if_need_realloc(force_free);
   dscene->attributes_normal.free_if_need_realloc(force_free);
+  dscene->attributes_quaternion.free_if_need_realloc(force_free);
+  dscene->attributes_spherical_harmonics_rest.free_if_need_realloc(force_free);
 
   /* Signal for shaders like displacement not to do ray tracing. */
   dscene->data.bvh.bvh_layout = BVH_LAYOUT_NONE;

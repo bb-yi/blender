@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "BLI_bounds.hh"
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_string_ref.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "DNA_layer_types.h"
 #include "DNA_node_types.h"
@@ -14,8 +14,10 @@
 #include "DNA_vec_types.h"
 #include "DNA_view3d_types.h"
 
+#include "BKE_camera.h"
+#include "BKE_compositor.hh"
+#include "BKE_compute_context_cache.hh"
 #include "BKE_node.hh"
-#include "BKE_node_runtime.hh"
 
 #include "DEG_depsgraph_query.hh"
 
@@ -29,6 +31,7 @@
 #include "COM_node_group_operation.hh"
 #include "COM_realize_on_domain_operation.hh"
 #include "COM_result.hh"
+#include "COM_scene_compositor_effects_operation.hh"
 #include "COM_utilities.hh"
 
 #include "GPU_context.hh"
@@ -45,20 +48,20 @@ class Context : public compositor::Context {
  private:
   const Main *main_;
   const Scene *scene_;
-  /* A pointer to the info message of the compositor engine. This is a char array of size
-   * GPU_INFO_SIZE. The message is cleared prior to updating or evaluating the compositor. */
-  char *info_message_;
-  /* Identified if the output of the viewer was written. */
-  bool viewer_was_written_ = false;
+  /* The compute context of the active viewer if one exists. */
+  const ComputeContext *active_compute_context_;
 
  public:
   Context(compositor::StaticCacheManager &cache_manager,
+          bke::ComputeContextCache &compute_context_cache,
           const Main *main,
-          const Scene *scene,
-          char *info_message)
-      : compositor::Context(cache_manager), main_(main), scene_(scene), info_message_(info_message)
+          const Scene *scene)
+      : compositor::Context(cache_manager, compute_context_cache),
+        main_(main),
+        scene_(scene),
+        active_compute_context_(
+            bke::compositor::compute_viewer_compute_context(*scene, compute_context_cache))
   {
-    this->set_info_message("");
   }
 
   const Main &get_main() const override
@@ -76,11 +79,19 @@ class Context : public compositor::Context {
     return true;
   }
 
-  /* The viewport compositor does not support viewer outputs, so treat viewers as composite
-   * outputs. */
-  bool treat_viewer_as_group_output() const override
+  bool is_viewport() const override
   {
     return true;
+  }
+
+  compositor::SideEffectOutputTypes needed_side_effect_output_types() const override
+  {
+    return compositor::SideEffectOutputTypes::ViewerNode;
+  }
+
+  const ComputeContext *viewer_compute_context() const override
+  {
+    return active_compute_context_;
   }
 
   /* In case the viewport has no camera region or is an image render, the domain covers the entire
@@ -96,15 +107,15 @@ class Context : public compositor::Context {
       return compositor::Domain(int2(draw_ctx->viewport_size_get()));
     }
 
-    rctf camera_border;
-    ED_view3d_calc_camera_border(draw_ctx->scene,
-                                 draw_ctx->depsgraph,
-                                 draw_ctx->region,
-                                 draw_ctx->v3d,
-                                 draw_ctx->rv3d,
-                                 false,
-                                 &camera_border);
-
+    const rctf camera_border = BKE_camera_view_border(draw_ctx->scene,
+                                                      draw_ctx->depsgraph,
+                                                      draw_ctx->v3d,
+                                                      draw_ctx->rv3d,
+                                                      draw_ctx->region->winx,
+                                                      draw_ctx->region->winy,
+                                                      false,
+                                                      false,
+                                                      true);
     const Bounds<int2> camera_region = Bounds<int2>(
         int2(int(camera_border.xmin), int(camera_border.ymin)),
         int2(int(camera_border.xmax), int(camera_border.ymax)));
@@ -131,15 +142,15 @@ class Context : public compositor::Context {
       return render_region;
     }
 
-    rctf camera_border;
-    ED_view3d_calc_camera_border(draw_ctx->scene,
-                                 draw_ctx->depsgraph,
-                                 draw_ctx->region,
-                                 draw_ctx->v3d,
-                                 draw_ctx->rv3d,
-                                 false,
-                                 &camera_border);
-
+    const rctf camera_border = BKE_camera_view_border(draw_ctx->scene,
+                                                      draw_ctx->depsgraph,
+                                                      draw_ctx->v3d,
+                                                      draw_ctx->rv3d,
+                                                      draw_ctx->region->winx,
+                                                      draw_ctx->region->winy,
+                                                      false,
+                                                      false,
+                                                      true);
     const Bounds<int2> camera_region = Bounds<int2>(
         int2(int(camera_border.xmin), int(camera_border.ymin)),
         int2(int(camera_border.xmax), int(camera_border.ymax)));
@@ -149,11 +160,6 @@ class Context : public compositor::Context {
 
   void write_output(const compositor::Result &result)
   {
-    /* Do not write the output if the viewer output was already written. */
-    if (viewer_was_written_) {
-      return;
-    }
-
     gpu::Texture *output = DRW_context_get()->viewport_texture_list_get()->color;
     if (result.is_single_value()) {
       GPU_texture_clear(output, GPU_DATA_FLOAT, result.get_single_value<compositor::Color>());
@@ -180,33 +186,31 @@ class Context : public compositor::Context {
     GPU_shader_unbind();
   }
 
-  void write_viewer(compositor::Result &viewer_result) override
+  void write_viewer(compositor::Result &result) override
   {
     using namespace compositor;
 
-    /* Realize the on the compositing domain if needed. */
+    /* Realize the result on the compositing domain if needed. */
     const Domain compositing_domain = this->get_compositing_domain();
     const InputDescriptor input_descriptor = {ResultType::Color,
                                               InputRealizationMode::OperationDomain};
     SimpleOperation *realization_operation = RealizeOnDomainOperation::construct_if_needed(
-        *this, viewer_result, input_descriptor, compositing_domain);
+        *this, result, input_descriptor, compositing_domain);
 
-    if (realization_operation) {
-      Result realize_input = this->create_result(ResultType::Color, viewer_result.precision());
-      realize_input.share_data(viewer_result);
-      realization_operation->map_input_to_result(&realize_input);
-      realization_operation->evaluate();
-
-      Result &realized_viewer_result = realization_operation->get_result();
-      this->write_output(realized_viewer_result);
-      realized_viewer_result.release();
-      viewer_was_written_ = true;
-      delete realization_operation;
+    if (!realization_operation) {
+      this->write_output(result);
       return;
     }
 
-    this->write_output(viewer_result);
-    viewer_was_written_ = true;
+    Result realize_input = this->create_result(result.type(), result.precision());
+    realize_input.share_data(result);
+    realization_operation->map_input_to_result(&realize_input);
+    realization_operation->evaluate();
+
+    Result &realized_result = realization_operation->get_result();
+    this->write_output(realized_result);
+    realized_result.release();
+    delete realization_operation;
   }
 
   compositor::Result get_invalid_pass()
@@ -323,90 +327,30 @@ class Context : public compositor::Context {
     return compositor::ResultPrecision::Half;
   }
 
-  void set_info_message(StringRef message) const override
-  {
-    message.copy_utf8_truncated(info_message_, GPU_INFO_SIZE);
-  }
-
-  compositor::NodeGroupOutputTypes needed_outputs() const
-  {
-    return compositor::NodeGroupOutputTypes::GroupOutputNode |
-           compositor::NodeGroupOutputTypes::ViewerNode;
-  }
-
   void evaluate()
   {
-    using namespace compositor;
-    const bNodeTree &node_group = *DRW_context_get()->scene->compositing_node_group;
-    const bke::DataBlockComputeContext compute_context(nullptr, this->get_scene().id);
-    NodeGroupOperation node_group_operation(*this,
-                                            node_group,
-                                            this->needed_outputs(),
-                                            node_group.active_viewer_key,
-                                            bke::NODE_INSTANCE_KEY_BASE,
-                                            compute_context);
+    compositor::SceneCompositorEffectsOperation operation =
+        compositor::SceneCompositorEffectsOperation(*this);
 
-    /* Set the reference count for the outputs, only the first color output is actually needed,
-     * while the rest are ignored. */
-    node_group.ensure_interface_cache();
-    for (const bNodeTreeInterfaceSocket *output_socket : node_group.interface_outputs()) {
-      const bool is_first_output = output_socket == node_group.interface_outputs().first();
-      Result &output_result = node_group_operation.get_result(output_socket->identifier);
-      const bool is_color = output_result.type() == ResultType::Color;
-      output_result.set_reference_count(is_first_output && is_color ? 1 : 0);
+    const int active_view_layer_index = BLI_findstringindex(
+        &scene_->view_layers, DRW_context_get()->view_layer->name, offsetof(ViewLayer, name));
+    compositor::Result combined_pass = this->get_pass(
+        scene_, active_view_layer_index, RE_PASSNAME_COMBINED);
+    operation.map_input_to_result(&combined_pass);
+    operation.evaluate();
+
+    if (!operation.has_output()) {
+      operation.free_results();
+      return;
     }
 
-    /* Map the inputs to the operation. */
-    Vector<std::unique_ptr<Result>> inputs;
-    for (const bNodeTreeInterfaceSocket *input_socket : node_group.interface_inputs()) {
-      Result *input_result = new Result(
-          this->create_result(ResultType::Color, ResultPrecision::Half));
-      if (input_socket == node_group.interface_inputs()[0]) {
-        /* First socket is the viewport combined pass. */
-        const int active_view_layer_index = BLI_findstringindex(
-            &scene_->view_layers, DRW_context_get()->view_layer->name, offsetof(ViewLayer, name));
-        Result combined_pass = this->get_pass(
-            scene_, active_view_layer_index, RE_PASSNAME_COMBINED);
-        input_result->share_data(combined_pass);
-        combined_pass.release();
-      }
-      else {
-        /* The rest of the sockets are not supported. */
-        input_result->allocate_invalid();
-      }
-
-      node_group_operation.map_input_to_result(input_socket->identifier, input_result);
-      inputs.append(std::unique_ptr<Result>(input_result));
+    /* If the no viewer output exist, write the output as a viewer. */
+    compositor::Result &output_result = operation.get_result();
+    if (!this->viewer_compute_context()) {
+      this->write_viewer(output_result);
     }
 
-    node_group_operation.evaluate();
-
-    /* Write the outputs of the operation. */
-    for (const bNodeTreeInterfaceSocket *output_socket : node_group.interface_outputs()) {
-      Result &output_result = node_group_operation.get_result(output_socket->identifier);
-      if (!output_result.should_compute()) {
-        continue;
-      }
-
-      /* Realize the output on the compositing domain if needed. */
-      const Domain compositing_domain = this->get_compositing_domain();
-      const InputDescriptor input_descriptor = {ResultType::Color,
-                                                InputRealizationMode::OperationDomain};
-      SimpleOperation *realization_operation = RealizeOnDomainOperation::construct_if_needed(
-          *this, output_result, input_descriptor, compositing_domain);
-      if (realization_operation) {
-        realization_operation->map_input_to_result(&output_result);
-        realization_operation->evaluate();
-        Result &realized_output_result = realization_operation->get_result();
-        this->write_output(realized_output_result);
-        realized_output_result.release();
-        delete realization_operation;
-        continue;
-      }
-
-      this->write_output(output_result);
-      output_result.release();
-    }
+    output_result.release();
   }
 };
 
@@ -427,10 +371,11 @@ class Instance : public DrawEngine {
 
   void draw(Manager & /*manager*/) final
   {
+    bke::ComputeContextCache compute_context_cache;
     Context context(cache_manager_,
+                    compute_context_cache,
                     DEG_get_bmain(DRW_context_get()->depsgraph),
-                    DRW_context_get()->scene,
-                    this->info);
+                    DRW_context_get()->scene);
     if (context.get_camera_region().is_empty()) {
       return;
     }

@@ -9,9 +9,11 @@
 #pragma once
 
 #include "BLI_mutex.hh"
+#include "BLI_span.hh"
 
 #include "vk_common.hh"
 
+#include "render_graph/vk_resource_state_tracker.hh"
 #include "vk_descriptor_pools.hh"
 #include "vk_immediate.hh"
 
@@ -79,15 +81,16 @@ class VKDiscardPool {
   friend class VKBackend;
 
  private:
-  TimelineResources<VkImage> swapchain_images_;
-  TimelineResources<std::pair<VkImage, VmaAllocation>> images_;
-  TimelineResources<std::pair<VkBuffer, VmaAllocation>> buffers_;
+  TimelineResources<ResourceHandle> swapchain_images_;
+  TimelineResources<std::pair<ResourceHandle, VmaAllocation>> images_;
+  TimelineResources<std::pair<ResourceHandle, VmaAllocation>> buffers_;
   TimelineResources<VmaAllocation> allocations_;
   TimelineResources<VkImageView> image_views_;
   TimelineResources<VkBufferView> buffer_views_;
   TimelineResources<VkShaderModule> shader_modules_;
   TimelineResources<VkPipeline> pipelines_;
   TimelineResources<VkPipelineLayout> pipeline_layouts_;
+  TimelineResources<VkAccelerationStructureKHR> acceleration_structures_;
   TimelineResources<std::pair<VkDescriptorPool, VKDescriptorPools *>> descriptor_pools_;
 
   Mutex mutex_;
@@ -97,17 +100,27 @@ class VKDiscardPool {
  public:
   void deinit(VKDevice &device);
 
-  void discard_swapchain_image(VkImage vk_image);
-  void discard_image(VkImage vk_image, VmaAllocation vma_allocation);
-  void discard_allocation(VmaAllocation vma_allocation);
+  void discard_swapchain_image(ResourceHandle image_handle);
+  /**
+   * Discard an image view that belongs to a resource removed outside the discard flow (e.g. a
+   * swapchain image).
+   */
   void discard_image_view(VkImageView vk_image_view);
-  void discard_buffer(VkBuffer vk_buffer, VmaAllocation vma_allocation);
-  void discard_buffer_view(VkBufferView vk_buffer_view);
+  /**
+   * Discard a batch of resources (and their registered views).
+   *
+   * Scheduling a resource that is already scheduled for destruction is an error (asserted).
+   */
+  void discard_resources(
+      Span<render_graph::VKResourceStateTracker::DiscardableResource> discardable,
+      TimelineValue timeline);
+  void discard_allocation(VmaAllocation vma_allocation);
   void discard_shader_module(VkShaderModule vk_shader_module);
   void discard_pipeline(VkPipeline vk_pipeline);
   void discard_pipeline_layout(VkPipelineLayout vk_pipeline_layout);
   void discard_descriptor_pool_for_reuse(VkDescriptorPool vk_descriptor_pool,
                                          VKDescriptorPools *descriptor_pools);
+  void discard_acceleration_structure(VkAccelerationStructureKHR vk_acceleration_structure);
 
   /**
    * Move discarded resources from src_pool into this.

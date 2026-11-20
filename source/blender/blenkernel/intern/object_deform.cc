@@ -13,10 +13,10 @@
 
 #include "BLT_translation.hh"
 
-#include "BLI_ghash.h"
-#include "BLI_listbase.h"
+#include "BLI_ghash.hh"
+#include "BLI_listbase.hh"
 #include "BLI_string_utils.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "DNA_armature_types.h"
 #include "DNA_cloth_types.h"
@@ -151,14 +151,14 @@ bool BKE_object_defgroup_clear(Object *ob, bDeformGroup *dg, const bool use_sele
   if (ob->type == OB_MESH) {
     Mesh *mesh = id_cast<Mesh *>(ob->data);
 
-    if (BMEditMesh *em = mesh->runtime->edit_mesh.get()) {
-      const int cd_dvert_offset = CustomData_get_offset(&em->bm->vdata, CD_MDEFORMVERT);
+    if (BMesh *bm = BKE_editmesh_bmesh_get_for_write(mesh)) {
+      const int cd_dvert_offset = CustomData_get_offset(&bm->vdata, CD_MDEFORMVERT);
 
       if (cd_dvert_offset != -1) {
         BMVert *eve;
         BMIter iter;
 
-        BM_ITER_MESH (eve, &iter, em->bm, BM_VERTS_OF_MESH) {
+        BM_ITER_MESH (eve, &iter, bm, BM_VERTS_OF_MESH) {
           dv = static_cast<MDeformVert *>(BM_ELEM_CD_GET_VOID_P(eve, cd_dvert_offset));
 
           if (dv && dv->dw && (!use_selection || BM_elem_flag_test(eve, BM_ELEM_SELECT))) {
@@ -336,14 +336,14 @@ static void object_defgroup_remove_edit_mode(Object *ob, bDeformGroup *dg)
   /* Else, make sure that any groups with higher indices are adjusted accordingly */
   else if (ob->type == OB_MESH) {
     Mesh *mesh = id_cast<Mesh *>(ob->data);
-    BMEditMesh *em = mesh->runtime->edit_mesh.get();
-    const int cd_dvert_offset = CustomData_get_offset(&em->bm->vdata, CD_MDEFORMVERT);
+    BMesh *bm = BKE_editmesh_bmesh_get_for_write(mesh);
+    const int cd_dvert_offset = CustomData_get_offset(&bm->vdata, CD_MDEFORMVERT);
 
     BMIter iter;
     BMVert *eve;
     MDeformVert *dvert;
 
-    BM_ITER_MESH (eve, &iter, em->bm, BM_VERTS_OF_MESH) {
+    BM_ITER_MESH (eve, &iter, bm, BM_VERTS_OF_MESH) {
       dvert = static_cast<MDeformVert *>(BM_ELEM_CD_GET_VOID_P(eve, cd_dvert_offset));
 
       if (dvert) {
@@ -395,7 +395,7 @@ void BKE_object_defgroup_remove_all_ex(Object *ob, bool only_unlocked)
 {
   ListBaseT<bDeformGroup> *defbase = BKE_object_defgroup_list_mutable(ob);
 
-  bDeformGroup *dg = static_cast<bDeformGroup *>(defbase->first);
+  bDeformGroup *dg = defbase->first();
   const bool edit_mode = BKE_object_is_in_editmode_vgroup(ob);
 
   if (dg) {
@@ -456,9 +456,7 @@ int *BKE_object_defgroup_index_map_create(Object *ob_src, Object *ob_dst, int *r
   bool is_vgroup_remap_needed = false;
   int i;
 
-  for (dg_src = static_cast<bDeformGroup *>(src_defbase->first), i = 0; dg_src;
-       dg_src = dg_src->next, i++)
-  {
+  for (dg_src = src_defbase->first(), i = 0; dg_src; dg_src = dg_src->next, i++) {
     vgroup_index_map[i] = BKE_object_defgroup_name_index(ob_dst, dg_src->name);
     is_vgroup_remap_needed = is_vgroup_remap_needed || (vgroup_index_map[i] != i);
   }
@@ -550,7 +548,7 @@ bool *BKE_object_defgroup_lock_flags_get(Object *ob, const int defbase_tot)
   bool *lock_flags = MEM_new_array_uninitialized<bool>(size_t(defbase_tot), "defflags");
   bDeformGroup *defgroup;
 
-  for (i = 0, defgroup = static_cast<bDeformGroup *>(defbase->first); i < defbase_tot && defgroup;
+  for (i = 0, defgroup = defbase->first(); i < defbase_tot && defgroup;
        defgroup = defgroup->next, i++)
   {
     lock_flags[i] = ((defgroup->flag & DG_LOCK_WEIGHT) != 0);
@@ -588,10 +586,9 @@ bool *BKE_object_defgroup_validmap_get(Object *ob, const int defbase_tot)
   BLI_assert(BLI_ghash_len(gh) == defbase_tot);
 
   /* now loop through the armature modifiers and identify deform bones */
-  for (md = static_cast<ModifierData *>(ob->modifiers.first); md;
-       md = !md->next && step1 ? (step1 = 0),
+  for (md = ob->modifiers.first(); md; md = !md->next && step1 ? (step1 = 0),
       BKE_modifiers_get_virtual_modifierlist(ob, &virtual_modifier_data) :
-       md->next)
+                                       md->next)
   {
     if (!(md->mode & (eModifierMode_Realtime | eModifierMode_Virtual))) {
       continue;
@@ -623,7 +620,7 @@ bool *BKE_object_defgroup_validmap_get(Object *ob, const int defbase_tot)
   defgroup_validmap = MEM_new_array_uninitialized<bool>(size_t(defbase_tot), "wpaint valid map");
 
   /* add all names to a hash table */
-  for (dg = static_cast<bDeformGroup *>(defbase->first), i = 0; dg; dg = dg->next, i++) {
+  for (dg = defbase->first(), i = 0; dg; dg = dg->next, i++) {
     defgroup_validmap[i] = (BLI_ghash_lookup(gh, dg->name) != nullptr);
   }
 
@@ -646,8 +643,7 @@ bool *BKE_object_defgroup_selected_get(Object *ob, int defbase_tot, int *r_dg_fl
 
   if (armob) {
     bPose *pose = armob->pose;
-    for (i = 0, defgroup = static_cast<bDeformGroup *>(defbase->first);
-         i < defbase_tot && defgroup;
+    for (i = 0, defgroup = defbase->first(); i < defbase_tot && defgroup;
          defgroup = defgroup->next, i++)
     {
       bPoseChannel *pchan = BKE_pose_channel_find_name(pose, defgroup->name);
@@ -750,7 +746,7 @@ void BKE_object_defgroup_mirror_selection(Object *ob,
   uint i;
   int i_mirr;
 
-  for (i = 0, defgroup = static_cast<bDeformGroup *>(defbase->first); i < defbase_tot && defgroup;
+  for (i = 0, defgroup = defbase->first(); i < defbase_tot && defgroup;
        defgroup = defgroup->next, i++)
   {
     if (dg_selection[i]) {

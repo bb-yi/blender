@@ -29,8 +29,6 @@ CCL_NAMESPACE_BEGIN
 
 /* RenderServices implementation */
 
-ImageManager *OSLRenderServices::image_manager = nullptr;
-
 OSLRenderServices::OSLRenderServices(const int device_type)
     /* Dummy texture system pointer so OSL doesn't create its own. Such an opaque texture system
      * pointer is supported and normally would be done with the OSL_NO_DEFAULT_TEXTURESYSTEM
@@ -252,13 +250,40 @@ OSL::TextureSystem::TextureHandle *OSLRenderServices::get_texture_handle(
   return get_texture_handle(to_ustring(filename), context, opt);
 }
 
-OSL::TextureSystem::TextureHandle *OSLRenderServices::get_texture_handle(
-    OSL::ustring filename, OSL::ShadingContext * /*context*/, const OSL::TextureOpt * /*options*/)
+void OSLRenderServices::image_manager_add(const OSL::ShadingContext *context,
+                                          ImageManager *image_manager)
 {
+  const thread_scoped_lock lock(image_managers_mutex_);
+  image_managers_[context] = image_manager;
+}
+
+void OSLRenderServices::image_manager_remove(const OSL::ShadingContext *context)
+{
+  const thread_scoped_lock lock(image_managers_mutex_);
+  image_managers_.erase(context);
+}
+
+ImageManager *OSLRenderServices::image_manager_find(const OSL::ShadingContext *context)
+{
+  const thread_scoped_lock lock(image_managers_mutex_);
+  auto it = image_managers_.find(context);
+  return (it != image_managers_.end()) ? it->second : nullptr;
+}
+
+OSL::TextureSystem::TextureHandle *OSLRenderServices::get_texture_handle(
+    OSL::ustring filename, OSL::ShadingContext *context, const OSL::TextureOpt * /*options*/)
+{
+  ImageManager *image_manager = image_manager_find(context);
+  if (image_manager == nullptr) {
+    LOG_WARNING << "Open Shading Language texture call can not resolve " << filename.c_str()
+                << ", filename must be a compile-time constant";
+    return nullptr;
+  }
+
   /* Note the mutex lock in find_or_insert() is not so bad for performance because
    * this function only gets called once per texture handle to create it, not for
    * every texture access. */
-  auto [it, inserted] = textures.find_or_insert(filename,
+  auto [it, inserted] = textures.find_or_insert({filename, image_manager},
                                                 OSLTextureHandle(OSLTextureHandleType::IMAGE));
 
   if (inserted) {
@@ -319,7 +344,7 @@ bool OSLRenderServices::texture(OSLUStringHash filename,
   return osl_shared_texture(globals->kg,
                             globals,
                             texture_handle,
-                            static_cast<void *>(&options),
+                            reinterpret_cast<OSLTextureOptions *>(&options),
                             s,
                             t,
                             dsdx,
@@ -370,7 +395,7 @@ bool OSLRenderServices::texture3d(OSLUStringHash filename,
 bool OSLRenderServices::environment(OSLUStringHash filename,
                                     TextureHandle *texture_handle,
                                     TexturePerthread * /*thread_info*/,
-                                    OSL::TextureOpt & /*options*/,
+                                    OSL::TextureOpt &options,
                                     OSL::ShaderGlobals *sg,
                                     const OSL::Vec3 &R,
                                     const OSL::Vec3 &dRdx,
@@ -394,6 +419,7 @@ bool OSLRenderServices::environment(OSLUStringHash filename,
   return osl_shared_environment(globals->kg,
                                 globals,
                                 texture_handle,
+                                reinterpret_cast<OSLTextureOptions *>(&options),
                                 make_float3(R.x, R.y, R.z),
                                 make_float3(dRdx.x, dRdx.y, dRdx.z),
                                 make_float3(dRdy.x, dRdy.y, dRdy.z),
@@ -570,8 +596,10 @@ bool OSLRenderServices::trace(TraceOpt &options,
   }
   else {
     /* Ray-trace, leaving out shadow opaque to avoid early exit. */
-    const PathRayVisibility visibility = PATH_RAY_VISIBILITY_ALL &
-                                         ~PATH_RAY_VISIBILITY_SHADOW_OPAQUE;
+    PathRayVisibility visibility = PATH_RAY_VISIBILITY_ALL & ~PATH_RAY_VISIBILITY_SHADOW_OPAQUE;
+    if (options.traceset == DeviceStrings::u_traceset_raycast) {
+      visibility = PATH_RAY_VISIBILITY_RAYCAST;
+    }
     tracedata->hit = scene_intersect(kg, &ray, visibility, &tracedata->isect);
     if (tracedata->hit) {
       tracedata->self_hit = tracedata->isect.object == sd->object;

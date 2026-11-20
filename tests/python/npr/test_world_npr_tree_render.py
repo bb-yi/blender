@@ -341,7 +341,7 @@ def attach_glsl_image_to_closure_mix_world_npr(output):
     output.nprtree = npr_tree
 
 
-def attach_glsl_closure_output_sampler_world_npr(output):
+def attach_glsl_closure_output_sampler_world_npr(output, reroutes=0):
     npr_tree = bpy.data.node_groups.new("WorldGLSLClosureOutputSamplerNPRTree", "ShaderNodeTree")
     nodes = npr_tree.nodes
     links = npr_tree.links
@@ -366,7 +366,12 @@ def attach_glsl_closure_output_sampler_world_npr(output):
 
     npr_output = nodes.new("ShaderNodeNPR_Output")
     links.new(rgb.outputs["Color"], closure_output.inputs["Color"])
-    links.new(closure_output.outputs["Closure"], glsl.inputs["tex"])
+    closure = closure_output.outputs["Closure"]
+    for _ in range(reroutes):
+        reroute = nodes.new("NodeReroute")
+        links.new(closure, reroute.inputs[0])
+        closure = reroute.outputs[0]
+    links.new(closure, glsl.inputs["tex"])
     links.new(glsl.outputs["Result"], npr_output.inputs["Color"])
     output.nprtree = npr_tree
 
@@ -500,15 +505,16 @@ def test_world_npr_glsl_image_to_closure_sampler_mix():
 
 
 def test_world_npr_glsl_closure_output_sampler():
-    clear_scene()
-    world_output = configure_scene()
-    attach_glsl_closure_output_sampler_world_npr(world_output)
+    for reroutes in (0, 1, 4):
+        clear_scene()
+        world_output = configure_scene()
+        attach_glsl_closure_output_sampler_world_npr(world_output, reroutes=reroutes)
 
-    pixel = render_center_pixel()
-    print(f"WORLD_NPR_GLSL_CLOSURE_OUTPUT_SAMPLER_CENTER={pixel}")
-    assert pixel[0] < 0.1, f"Expected low red from Closure Output sampler, got {pixel}"
-    assert 0.55 < pixel[1] < 0.9, f"Expected green from Closure Output sampler, got {pixel}"
-    assert 0.15 < pixel[2] < 0.45, f"Expected blue-green from Closure Output sampler, got {pixel}"
+        pixel = render_center_pixel()
+        print(f"WORLD_NPR_GLSL_CLOSURE_OUTPUT_SAMPLER_REROUTES_{reroutes}={pixel}")
+        assert pixel[0] < 0.1, f"Expected low red from Closure Output sampler, got {pixel}"
+        assert 0.55 < pixel[1] < 0.9, f"Expected green from Closure Output sampler, got {pixel}"
+        assert 0.15 < pixel[2] < 0.45, f"Expected blue-green from Closure Output sampler, got {pixel}"
 
 
 def main():

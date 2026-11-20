@@ -20,8 +20,8 @@
 #include "eevee_reverse_z_lib.bsl.hh"
 #include "eevee_thickness_lib.bsl.hh"
 #include "gpu_shader_codegen_lib.glsl"
-#include "gpu_shader_math_fast_lib.glsl"
-#include "gpu_shader_math_matrix_transform_lib.glsl"
+#include "gpu_shader_math_fast.bsl.hh"
+#include "gpu_shader_math_matrix_transform.bsl.hh"
 
 /* Inputs expected to be in view-space. */
 void raytrace_clip_ray_to_near_plane(ViewMatrices view, Ray &ray)
@@ -131,8 +131,10 @@ ScreenTraceHitData raytrace_screen(ViewMatrices view,
   time = mix(prev_time, time, saturate(prev_delta / (prev_delta - delta)));
 
   ScreenTraceHitData result;
-  /* We can only hit a backface if the ray was under the surface. */
-  result.hit_backface = prev_delta < 0.0f;
+  /* We can only hit a backface if the ray was under the surface.
+   * Fast math optimizations can lead to deltas slightly below zero. */
+  const float backface_epsilon = -1e-7f;
+  result.hit_backface = prev_delta < backface_epsilon;
   result.ss_hit_P = ssray.origin.xyz + ssray.direction.xyz * time;
   result.v_hit_P = view.point_screen_to_view(result.ss_hit_P);
   /* Convert to world space ray time. */

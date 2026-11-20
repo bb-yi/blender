@@ -13,9 +13,9 @@
 #include "DNA_object_types.h"
 #include "DNA_screen_types.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_geom.h"
-#include "BLI_rect.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_geom_c.hh"
+#include "BLI_rect.hh"
 
 #include "BKE_action.hh"
 #include "BKE_armature.hh"
@@ -218,6 +218,7 @@ struct foreachScreenVert_userData {
   void (*func)(void *user_data, BMVert *eve, const float screen_co[2], int index);
   void *user_data;
   ViewContext vc;
+  BMesh *bm;
   eV3DProjTest clip_flag;
 };
 
@@ -230,6 +231,7 @@ struct foreachScreenEdge_userData {
                int index);
   void *user_data;
   ViewContext vc;
+  BMesh *bm;
   eV3DProjTest clip_flag;
 
   rctf win_rect; /* copy of: vc.region->winx/winy, use for faster tests, minx/y will always be 0 */
@@ -246,6 +248,7 @@ struct foreachScreenFace_userData {
   void (*func)(void *user_data, BMFace *efa, const float screen_co_b[2], int index);
   void *user_data;
   ViewContext vc;
+  BMesh *bm;
   eV3DProjTest clip_flag;
 };
 
@@ -320,8 +323,8 @@ static void mesh_foreachScreenVert__mapFunc(void *user_data,
                                             const float /*no*/[3])
 {
   foreachScreenVert_userData *data = static_cast<foreachScreenVert_userData *>(user_data);
-  BMVert *eve = BM_vert_at_index(data->vc.em->bm, index);
-  if (UNLIKELY(BM_elem_flag_test(eve, BM_ELEM_HIDDEN))) {
+  BMVert *eve = BM_vert_at_index(data->bm, index);
+  if (BM_elem_flag_test(eve, BM_ELEM_HIDDEN)) [[unlikely]] {
     return;
   }
 
@@ -343,13 +346,14 @@ void mesh_foreachScreenVert(
 {
   foreachScreenVert_userData data;
 
-  Mesh *mesh = bke::editbmesh_get_eval_cage_from_orig(
+  const Mesh *mesh = bke::editbmesh_get_eval_cage_from_orig(
       vc->depsgraph, vc->scene, vc->obedit, &CD_MASK_BAREMESH);
   mesh = BKE_mesh_wrapper_ensure_subdivision(mesh);
 
   ED_view3d_check_mats_rv3d(vc->rv3d);
 
   data.vc = *vc;
+  data.bm = BKE_editmesh_bmesh_get_for_write(vc->obedit);
   data.func = func;
   data.user_data = user_data;
   data.clip_flag = clip_flag;
@@ -359,7 +363,7 @@ void mesh_foreachScreenVert(
                              vc->obedit->object_to_world().ptr()); /* for local clipping lookups */
   }
 
-  BM_mesh_elem_table_ensure(vc->em->bm, BM_VERT);
+  BM_mesh_elem_table_ensure(data.bm, BM_VERT);
   BKE_mesh_foreach_mapped_vert(mesh, mesh_foreachScreenVert__mapFunc, &data, MESH_FOREACH_NOP);
 }
 
@@ -375,8 +379,8 @@ static void mesh_foreachScreenEdge__mapFunc(void *user_data,
                                             const float v_b[3])
 {
   foreachScreenEdge_userData *data = static_cast<foreachScreenEdge_userData *>(user_data);
-  BMEdge *eed = BM_edge_at_index(data->vc.em->bm, index);
-  if (UNLIKELY(BM_elem_flag_test(eed, BM_ELEM_HIDDEN))) {
+  BMEdge *eed = BM_edge_at_index(data->bm, index);
+  if (BM_elem_flag_test(eed, BM_ELEM_HIDDEN)) [[unlikely]] {
     return;
   }
 
@@ -408,13 +412,14 @@ void mesh_foreachScreenEdge(const ViewContext *vc,
 {
   foreachScreenEdge_userData data;
 
-  Mesh *mesh = bke::editbmesh_get_eval_cage_from_orig(
+  const Mesh *mesh = bke::editbmesh_get_eval_cage_from_orig(
       vc->depsgraph, vc->scene, vc->obedit, &CD_MASK_BAREMESH);
   mesh = BKE_mesh_wrapper_ensure_subdivision(mesh);
 
   ED_view3d_check_mats_rv3d(vc->rv3d);
 
   data.vc = *vc;
+  data.bm = BKE_editmesh_bmesh_get_for_write(vc->obedit);
 
   data.win_rect.xmin = 0;
   data.win_rect.ymin = 0;
@@ -438,8 +443,8 @@ void mesh_foreachScreenEdge(const ViewContext *vc,
     data.content_planes_len = 0;
   }
 
-  BM_mesh_elem_table_ensure(vc->em->bm, BM_EDGE);
-  BKE_mesh_foreach_mapped_edge(mesh, vc->em->bm->totedge, mesh_foreachScreenEdge__mapFunc, &data);
+  BM_mesh_elem_table_ensure(data.bm, BM_EDGE);
+  BKE_mesh_foreach_mapped_edge(mesh, data.bm->totedge, mesh_foreachScreenEdge__mapFunc, &data);
 }
 
 /** \} */
@@ -458,8 +463,8 @@ static void mesh_foreachScreenEdge_clip_bb_segment__mapFunc(void *user_data,
                                                             const float v_b[3])
 {
   foreachScreenEdge_userData *data = static_cast<foreachScreenEdge_userData *>(user_data);
-  BMEdge *eed = BM_edge_at_index(data->vc.em->bm, index);
-  if (UNLIKELY(BM_elem_flag_test(eed, BM_ELEM_HIDDEN))) {
+  BMEdge *eed = BM_edge_at_index(data->bm, index);
+  if (BM_elem_flag_test(eed, BM_ELEM_HIDDEN)) [[unlikely]] {
     return;
   }
 
@@ -498,13 +503,14 @@ void mesh_foreachScreenEdge_clip_bb_segment(const ViewContext *vc,
 {
   foreachScreenEdge_userData data;
 
-  Mesh *mesh = bke::editbmesh_get_eval_cage_from_orig(
+  const Mesh *mesh = bke::editbmesh_get_eval_cage_from_orig(
       vc->depsgraph, vc->scene, vc->obedit, &CD_MASK_BAREMESH);
   mesh = BKE_mesh_wrapper_ensure_subdivision(mesh);
 
   ED_view3d_check_mats_rv3d(vc->rv3d);
 
   data.vc = *vc;
+  data.bm = BKE_editmesh_bmesh_get_for_write(vc->obedit);
 
   data.win_rect.xmin = 0;
   data.win_rect.ymin = 0;
@@ -523,17 +529,16 @@ void mesh_foreachScreenEdge_clip_bb_segment(const ViewContext *vc,
     data.content_planes_len = 0;
   }
 
-  BM_mesh_elem_table_ensure(vc->em->bm, BM_EDGE);
+  BM_mesh_elem_table_ensure(data.bm, BM_EDGE);
 
   if ((clip_flag & V3D_PROJ_TEST_CLIP_BB) && (vc->rv3d->clipbb != nullptr)) {
     ED_view3d_clipping_local(
         vc->rv3d, vc->obedit->object_to_world().ptr()); /* for local clipping lookups. */
     BKE_mesh_foreach_mapped_edge(
-        mesh, vc->em->bm->totedge, mesh_foreachScreenEdge_clip_bb_segment__mapFunc, &data);
+        mesh, data.bm->totedge, mesh_foreachScreenEdge_clip_bb_segment__mapFunc, &data);
   }
   else {
-    BKE_mesh_foreach_mapped_edge(
-        mesh, vc->em->bm->totedge, mesh_foreachScreenEdge__mapFunc, &data);
+    BKE_mesh_foreach_mapped_edge(mesh, data.bm->totedge, mesh_foreachScreenEdge__mapFunc, &data);
   }
 }
 
@@ -549,8 +554,8 @@ static void mesh_foreachScreenFace__mapFunc(void *user_data,
                                             const float /*no*/[3])
 {
   foreachScreenFace_userData *data = static_cast<foreachScreenFace_userData *>(user_data);
-  BMFace *efa = BM_face_at_index(data->vc.em->bm, index);
-  if (UNLIKELY(BM_elem_flag_test(efa, BM_ELEM_HIDDEN))) {
+  BMFace *efa = BM_face_at_index(data->bm, index);
+  if (BM_elem_flag_test(efa, BM_ELEM_HIDDEN)) [[unlikely]] {
     return;
   }
 
@@ -573,17 +578,18 @@ void mesh_foreachScreenFace(
   BLI_assert((clip_flag & V3D_PROJ_TEST_CLIP_CONTENT) == 0);
   foreachScreenFace_userData data;
 
-  Mesh *mesh = bke::editbmesh_get_eval_cage_from_orig(
+  const Mesh *mesh = bke::editbmesh_get_eval_cage_from_orig(
       vc->depsgraph, vc->scene, vc->obedit, &CD_MASK_BAREMESH);
   mesh = BKE_mesh_wrapper_ensure_subdivision(mesh);
   ED_view3d_check_mats_rv3d(vc->rv3d);
 
   data.vc = *vc;
+  data.bm = BKE_editmesh_bmesh_get_for_write(vc->obedit);
   data.func = func;
   data.user_data = user_data;
   data.clip_flag = clip_flag;
 
-  BM_mesh_elem_table_ensure(vc->em->bm, BM_FACE);
+  BM_mesh_elem_table_ensure(data.bm, BM_FACE);
 
   const int face_dot_tags_num = mesh->runtime->subsurf_face_dot_tags.size();
   if (face_dot_tags_num && (face_dot_tags_num != mesh->verts_num)) {

@@ -15,12 +15,9 @@ extern const EnumPropertyItem rna_enum_light_shader_parameter_type_items[];
 
 #include "RNA_types.hh"
 
-#ifdef __cplusplus
-
 namespace blender {
 
 class AttributeOwner;
-#endif
 
 struct PointerRNA;
 struct PropertyRNA;
@@ -29,6 +26,7 @@ namespace bke {
 struct bNodeTreeType;
 struct bNodeSocketType;
 struct RuntimeNodeEnumItems;
+
 }  // namespace bke
 
 /* Types */

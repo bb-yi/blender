@@ -8,11 +8,12 @@
 
 #include <climits>
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 
 #include "GPU_attribute_convert.hh"
 
 #include "BKE_attribute.hh"
+#include "BKE_editmesh.hh"
 #include "BKE_editmesh_tangent.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_tangent.hh"
@@ -47,8 +48,9 @@ static Array<Array<float4>> extract_tan_init_common(const MeshRenderData &mr,
     Array<float4> tangents;
     if (mr.extract_type == MeshExtractType::BMesh) {
       Array<float3> positions = BM_mesh_vert_coords_alloc(mr.bm);
+      BKE_mesh_orco_verts_transform(const_cast<Mesh *>(mr.mesh), positions, false);
       tangents = BKE_editmesh_orco_tangents_calc(
-          mr.edit_bmesh, mr.bm_face_normals, mr.bm_loop_normals, positions);
+          mr.bm, mr.edit_bmesh->looptris, mr.bm_face_normals, mr.bm_loop_normals, positions);
     }
     else {
       Span<float3> orco;
@@ -115,7 +117,7 @@ static Array<Array<float4>> extract_tan_init_common(const MeshRenderData &mr,
   Array<Array<float4>> results;
   if (mr.extract_type == MeshExtractType::BMesh) {
     results = BKE_editmesh_uv_tangents_calc(
-        mr.edit_bmesh, mr.bm_face_normals, mr.bm_loop_normals, uv_names);
+        mr.bm, mr.edit_bmesh->looptris, mr.bm_face_normals, mr.bm_loop_normals, uv_names);
   }
   else {
     Array<VArraySpan<float2>> uv_maps(uv_names.size());
@@ -171,12 +173,12 @@ gpu::VertBufPtr extract_tangents(const MeshRenderData &mr,
     BLI_assert(vbo_index == tan_data.size());
   }
   else {
-    MutableSpan tan_data = vbo->data<gpu::PackedNormal>();
+    MutableSpan tan_data = vbo->data<int1010102_norm>();
     int vbo_index = 0;
     for (const int i : tangents.index_range()) {
       const Span<float4> layer_data = tangents[i];
       for (int corner = 0; corner < mr.corners_num; corner++) {
-        tan_data[vbo_index] = gpu::convert_normal<gpu::PackedNormal>(float3(layer_data[corner]));
+        tan_data[vbo_index] = gpu::convert_normal<int1010102_norm>(float3(layer_data[corner]));
         tan_data[vbo_index].w = (layer_data[corner][3] > 0.0f) ? 1 : -2;
         vbo_index++;
       }

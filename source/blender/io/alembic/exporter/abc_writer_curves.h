@@ -12,14 +12,18 @@
 
 #include <Alembic/AbcGeom/OCurves.h>
 
-namespace blender::io::alembic {
+namespace blender::bke {
+class CurvesGeometry;
+}
 
-extern const std::string ABC_CURVE_RESOLUTION_U_PROPNAME;
+namespace blender::io::alembic {
 
 class ABCCurveWriter : public ABCAbstractWriter {
  private:
   Alembic::AbcGeom::OCurves abc_curve_;
   Alembic::AbcGeom::OCurvesSchema abc_curve_schema_;
+
+  std::unique_ptr<AttributeParamMaps> attribute_maps_ = nullptr;
 
  public:
   explicit ABCCurveWriter(const ABCWriterConstructorArgs &args);
@@ -30,6 +34,13 @@ class ABCCurveWriter : public ABCAbstractWriter {
 
  protected:
   void do_write(HierarchyContext &context) override;
+
+ private:
+  void write_arb_geo_params(const bke::CurvesGeometry &curves,
+                            const Object &object,
+                            const size_t num_geom_samples);
+
+  AttributeParamMaps &get_attribute_param_maps();
 };
 
 class ABCCurveMeshWriter : public ABCGenericMeshWriter {

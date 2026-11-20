@@ -74,9 +74,14 @@ GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_gbuffer_data)
 DEFINE("GBUFFER_LOAD")
+#ifdef GLSL_CPP_STUBS
+/* The legacy C++ checker imports resources as namespaces, while BSL uses a resource table. */
 SAMPLER(GBUF_HEADER_TEX_SLOT, usampler2DArray, gbuf_header_tx)
 SAMPLER(GBUF_CLOSURE_TEX_SLOT, sampler2DArray, gbuf_closure_tx)
 SAMPLER(GBUF_NORMAL_TEX_SLOT, sampler2DArray, gbuf_normal_tx)
+#else
+ADDITIONAL_INFO(gbuffer_Reader)
+#endif
 GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_render_pass_out)

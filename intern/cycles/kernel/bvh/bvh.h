@@ -10,6 +10,7 @@
 #include "kernel/bvh/util.h"
 
 #include "kernel/geom/curve_intersect.h"
+#include "kernel/geom/gsplat_intersect.h"
 #include "kernel/geom/motion_triangle_intersect.h"
 #include "kernel/geom/object.h"
 #include "kernel/geom/point_intersect.h"
@@ -117,14 +118,14 @@ ccl_device_intersect void scene_intersect_shadow_all(KernelGlobals kg,
                                                      const uint visibility,
                                                      const uint max_transparent_hits,
                                                      ccl_private uint *num_recorded_hits,
-                                                     ccl_private float *throughput)
+                                                     ccl_private float3 *throughput)
 {
 #  if !defined(__KERNEL_OPTIX__)
   /* OptiX does not perform well with conditional trace calls, so it handles the validity of the
    * ray in the scene_intersect_shadow_all_optix(). */
   if (!intersection_ray_valid(ray)) {
     *num_recorded_hits = 0;
-    *throughput = 1.0f;
+    *throughput = one_float3();
     return;
   }
 #  endif

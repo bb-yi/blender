@@ -6,14 +6,14 @@
  * \ingroup modifiers
  */
 
-#include "BLI_hash.h"
-#include "BLI_rand.h"
+#include "BLI_hash_c.hh"
+#include "BLI_rand_c.hh"
 
 #include "BLT_translation.hh"
 
 #include "BLO_read_write.hh"
 
-#include "DNA_gpencil_modifier_types.h"
+#include "DNA_grease_pencil_modifier_types.h"
 #include "DNA_node_types.h" /* For `GeometryNodeCurveSampleMode` */
 #include "DNA_object_types.h"
 #include "DNA_screen_types.h"

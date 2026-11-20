@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup editors
+ */
+
 #pragma once
 
 #include <optional>
@@ -104,14 +108,20 @@ std::optional<nodes::FoundNestedNodeID> find_nested_node_id_in_root(const SpaceN
 std::optional<nodes::FoundNestedNodeID> find_nested_node_id_in_root(
     const bNodeTree &root_tree, const ComputeContext *compute_context, const int node_id);
 
+/**
+ * Finds the context object for the node editor, taking pinning into account.
+ */
+Object *get_space_editor_object(const bContext *C);
+
 struct ObjectAndModifier {
   const Object *object = nullptr;
   const NodesModifierData *nmd = nullptr;
 };
 /**
- * Finds the context-modifier for the node editor.
+ * Finds the geometry nodes context-modifier for the node editor.
  */
-std::optional<ObjectAndModifier> get_modifier_for_node_editor(const SpaceNode &snode);
+std::optional<ObjectAndModifier> get_geometry_nodes_modifier_for_node_editor(
+    const SpaceNode &snode);
 
 bool node_editor_is_for_geometry_nodes_modifier(const SpaceNode &snode,
                                                 const Object &object,

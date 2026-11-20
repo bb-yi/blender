@@ -11,10 +11,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_math_matrix.h"
-#include "BLI_math_vector.h"
+#include "BLI_listbase.hh"
+#include "BLI_math_matrix_c.hh"
+#include "BLI_math_vector_c.hh"
 
+#include "BKE_compositor.hh"
 #include "BKE_context.hh"
 #include "BKE_mask.hh"
 
@@ -257,6 +258,7 @@ static void createTransMaskingData(bContext *C, TransInfo *t)
   TransDataMasking *tdm = nullptr;
   int count = 0, countsel = 0;
   const bool is_prop_edit = (t->flag & T_PROP_EDIT);
+  const bool is_prop_connected = (t->flag & T_PROP_CONNECTED) != 0;
   float asp[2];
 
   TransDataContainer *tc = TRANS_DATA_CONTAINER_FIRST_SINGLE(t);
@@ -331,7 +333,8 @@ static void createTransMaskingData(bContext *C, TransInfo *t)
 
     for (MaskSpline &spline : masklay.splines) {
       int i;
-
+      TransData *head, *tail;
+      head = tail = td;
       for (i = 0; i < spline.tot_point; i++) {
         MaskSplinePoint *point = &spline.points[i];
 
@@ -340,12 +343,14 @@ static void createTransMaskingData(bContext *C, TransInfo *t)
 
           if (is_prop_edit || BKE_mask_point_selected_knot(point)) {
             td += 3;
+            tail += 3;
             td2d += 3;
             tdm += 3;
           }
           else {
             if (BKE_mask_point_handles_mode_get(point) == MASK_HANDLE_MODE_STICK) {
               td++;
+              tail++;
               td2d++;
               tdm++;
             }
@@ -353,15 +358,30 @@ static void createTransMaskingData(bContext *C, TransInfo *t)
               BezTriple *bezt = &point->bezt;
               if (bezt->f1 & SELECT) {
                 td++;
+                tail++;
                 td2d++;
                 tdm++;
               }
               if (bezt->f3 & SELECT) {
                 td++;
+                tail++;
                 td2d++;
                 tdm++;
               }
             }
+          }
+        }
+      }
+
+      if (is_prop_edit && head != tail) {
+        tail -= 1;
+        if (is_prop_connected) {
+          const bool cyclic = (spline.flag & MASK_SPLINE_CYCLIC) != 0;
+          calc_distanceCurveVerts(head, tail, cyclic);
+        }
+        else {
+          for (td = head; td <= tail; td++) {
+            td->dist = FLT_MAX;
           }
         }
       }
@@ -437,26 +457,27 @@ static void special_aftertrans_update__mask(bContext *C, TransInfo *t)
   Mask *mask = nullptr;
 
   if (t->spacetype == SPACE_CLIP) {
-    SpaceClip *sc = static_cast<SpaceClip *>(t->area->spacedata.first);
+    SpaceClip *sc = t->area->spacedata.first_as<SpaceClip>();
     mask = ED_space_clip_get_mask(sc);
   }
   else if (t->spacetype == SPACE_IMAGE) {
-    SpaceImage *sima = static_cast<SpaceImage *>(t->area->spacedata.first);
+    SpaceImage *sima = t->area->spacedata.first_as<SpaceImage>();
     mask = ED_space_image_get_mask(sima);
   }
   else {
     BLI_assert(0);
   }
 
-  if (t->scene->compositing_node_group) {
+  if (bke::compositor::is_enabled(*t->scene, bke::compositor::ExecutionMode::Preview)) {
     WM_event_add_notifier(C, NC_MASK | ND_DATA, &mask->id);
   }
 
   /* TODO: don't key all masks. */
-  if (animrig::is_autokey_on(t->scene)) {
+  const bool canceled = (t->state == TRANS_CANCEL);
+  if (animrig::is_autokey_on(t->scene) && !canceled) {
     Scene *scene = t->scene;
 
-    if (ED_mask_layer_shape_auto_key_select(mask, scene->r.cfra)) {
+    if (ED_mask_layer_shape_auto_key_select(C, mask, scene->r.cfra)) {
       WM_event_add_notifier(C, NC_MASK | ND_DATA, &mask->id);
       DEG_id_tag_update(&mask->id, 0);
     }

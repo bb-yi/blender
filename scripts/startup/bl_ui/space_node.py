@@ -165,13 +165,23 @@ class NODE_HT_header(Header):
 
             if snode.node_tree_sub_type == 'SCENE':
                 row = layout.row()
+                active_effect = scene.compositor_effects.active
                 if snode.pin:
                     row.enabled = False
-                    row.template_ID(snode, "node_tree", new="node.new_compositing_node_group")
-                elif scene.compositing_node_group:
-                    row.template_ID(scene, "compositing_node_group", new="node.duplicate_compositing_node_group")
+                    row.template_ID(snode, "node_tree", new="scene.new_compositor_effect_node_group")
+                elif active_effect:
+                    if active_effect.node_group:
+                        row.template_ID(
+                            active_effect,
+                            "node_group",
+                            new="scene.duplicate_compositor_effect_node_group")
+                    else:
+                        row.template_ID(
+                            active_effect,
+                            "node_group",
+                            new="scene.new_compositor_effect_node_group")
                 else:
-                    row.template_ID(scene, "compositing_node_group", new="node.new_compositing_node_group")
+                    row.template_ID(snode, "node_tree", new="scene.new_compositor_effect_node_group")
             elif snode.node_tree_sub_type == 'SEQUENCER':
                 row = layout.row()
                 sequencer_scene = context.workspace.sequencer_scene
@@ -236,7 +246,25 @@ class NODE_HT_header(Header):
 
             layout.separator_spacer()
 
-            if snode.tree_type == 'EeveeFilterGraphNodeTree':
+            if snode.tree_type == 'NPRLineNodeTree':
+                layout.label(text=scene.name, icon='SCENE_DATA')
+                layout.template_ID(scene.eevee, "geometry_line_tree",
+                                   new="scene.npr_line_tree_copy" if scene.eevee.geometry_line_tree else
+                                       "scene.npr_line_tree_new")
+                layout.prop(scene.eevee, "use_geometry_lines", text="Enabled")
+                layout.operator("node.npr_line_add_group", text="Add Line Group", icon='ADD')
+                tree = scene.eevee.geometry_line_tree
+                if tree:
+                    layout.prop(tree, "show_performance", text="Line Timings", icon='TIME')
+                if tree and tree.preview_solo_node:
+                    layout.operator("node.npr_line_solo", text="Exit Solo Preview", icon='SOLO_ON').clear = True
+                elif tree:
+                    row = layout.row()
+                    active = snode.edit_tree.nodes.active if snode.edit_tree else None
+                    row.enabled = bool(snode.edit_tree == tree and active and active.bl_idname in {
+                        'NPRLineNodeSettings', 'NPRLineNodeCombine'})
+                    row.operator("node.npr_line_solo", text="Solo Preview", icon='SOLO_OFF')
+            elif snode.tree_type == 'EeveeFilterGraphNodeTree':
                 layout.template_ID(scene.eevee, "filter_graph", new="scene.eevee_filter_graph_new")
             else:
                 layout.template_ID(snode, "node_tree", new="node.new_node_tree")
@@ -345,11 +373,75 @@ class NODE_MT_add(node_add_menu.AddNodeMenu):
             layout.menu_contents("NODE_MT_shader_node_add_all")
         elif snode.tree_type == 'TextureNodeTree':
             layout.menu_contents("NODE_MT_texture_node_add_all")
+        elif snode.tree_type == 'NPRLineNodeTree':
+            layout.menu('NODE_MT_npr_line_node_brush')
+            layout.menu('NODE_MT_npr_line_node_input')
+            layout.menu('NODE_MT_npr_line_node_math')
+            layout.menu('NODE_MT_npr_line_node_color_vector')
+            layout.menu('NODE_MT_npr_line_node_setup')
+            layout.separator()
+            layout.menu('NODE_MT_group_add', text='Node Groups', text_ctxt=i18n_contexts.default)
+            layout.menu('NODE_MT_category_layout')
+            layout.menu('NODE_MT_node_add_root_catalogs', text='Assets', text_ctxt=i18n_contexts.default)
         elif snode.tree_type == 'EeveeFilterGraphNodeTree':
             layout.menu_contents("NODE_MT_filter_graph_node_add_all")
         elif nodeitems_utils.has_node_categories(context):
             # Actual node sub-menus are defined by draw functions from node categories.
             nodeitems_utils.draw_node_categories_menu(self, context)
+
+
+class _NPRLineAddMenu(node_add_menu.AddNodeMenu):
+    bl_space_type = 'NODE_EDITOR'
+    bl_translation_context = i18n_contexts.default
+    node_types = ()
+
+    @classmethod
+    def poll(cls, context):
+        space = context.space_data
+        return space and space.type == 'NODE_EDITOR' and space.tree_type == 'NPRLineNodeTree'
+
+    def draw(self, _context):
+        for node_type in self.node_types:
+            self.node_operator(self.layout, node_type)
+
+
+class NODE_MT_npr_line_node_brush(_NPRLineAddMenu):
+    bl_label = 'Brush'
+
+    def draw(self, _context):
+        layout = self.layout
+        props = layout.operator('node.add_zone', text='Brush Closure', text_ctxt=i18n_contexts.default)
+        props.input_node_type = 'NPRLineNodeBrushClosureInput'
+        props.output_node_type = 'NPRLineNodeBrushClosureOutput'
+        props.add_default_geometry_link = False
+        props.offset = (300, 0)
+        props.use_transform = True
+        self.node_operator(layout, 'NPRLineNodeBrush')
+        layout.separator()
+        layout.operator_menu_enum('node.npr_line_brush_effect', 'effect', text='Brush Effects',
+                                  text_ctxt=i18n_contexts.default)
+
+
+class NODE_MT_npr_line_node_input(_NPRLineAddMenu):
+    bl_label = 'Input'
+    node_types = ('ShaderNodeValue', 'NPRLineNodeUVMap', 'NPRLineNodeColorAttribute',
+                  'NPRLineNodeMaterialAOV', 'ShaderNodeTexImage', 'ShaderNodeTexWhiteNoise')
+
+
+class NODE_MT_npr_line_node_math(_NPRLineAddMenu):
+    bl_label = 'Math'
+    node_types = ('ShaderNodeMath', 'ShaderNodeVectorMath', 'ShaderNodeMapRange', 'ShaderNodeFloatCurve')
+
+
+class NODE_MT_npr_line_node_color_vector(_NPRLineAddMenu):
+    bl_label = 'Color and Vector'
+    node_types = ('ShaderNodeValToRGB', 'ShaderNodeMix', 'ShaderNodeCombineXYZ', 'ShaderNodeSeparateXYZ')
+
+
+class NODE_MT_npr_line_node_setup(_NPRLineAddMenu):
+    bl_label = 'Line Setup'
+    node_types = ('NPRLineNodeObjects', 'NPRLineNodeSettings', 'NPRLineNodeCombine',
+                  'NPRLineNodeOcclusion', 'NPRLineNodeReduction', 'NPRLineNodeMap', 'NPRLineNodeOutput')
 
 
 class NODE_MT_filter_graph_node_input(node_add_menu.AddNodeMenu):
@@ -520,10 +612,6 @@ class NODE_MT_node(Menu):
         props.NODE_OT_translate_attach.TRANSFORM_OT_translate.view2d_edge_pan = True
 
         layout.separator()
-        layout.operator("node.delete", icon='X')
-        layout.operator("node.delete_reconnect")
-
-        layout.separator()
         layout.operator("node.join", text="Join in New Frame")
         layout.operator("node.detach", text="Remove from Frame")
         layout.operator("node.join_nodes", text="Join Group Inputs")
@@ -555,6 +643,10 @@ class NODE_MT_node(Menu):
         if is_compositor:
             layout.separator()
             layout.operator("node.read_viewlayers", icon='RENDERLAYERS')
+
+        layout.separator()
+        layout.operator("node.delete_reconnect")
+        layout.operator("node.delete", icon='X')
 
 
 class NODE_MT_view_pie(Menu):
@@ -694,7 +786,7 @@ class NODE_PT_geometry_node_tool_options(Panel):
         layout.prop(group, "node_tool_idname", text="Identifier")
         layout.template_node_operator_registration_errors(idname=group.node_tool_idname)
         if len(group.node_tool_idname) == 0:
-            layout.label(icon='ERROR', text="Missing operator identifier")
+            layout.label(icon='STATUS_ERROR', text="Missing operator identifier")
 
 
 class NODE_PT_node_color_presets(PresetPanel, Panel):
@@ -815,9 +907,11 @@ class NODE_MT_context_menu(Menu):
 
         layout.separator()
 
-        layout.operator("node.delete", icon='X')
-        layout.operator_context = 'EXEC_REGION_WIN'
-        layout.operator("node.delete_reconnect", text="Dissolve")
+        props = layout.operator("wm.call_panel", text="Rename Active Node...")
+        props.name = "TOPBAR_PT_name"
+        props.keep_open = False
+
+        layout.separator()
 
         if selected_nodes_len > 1:
             layout.separator()
@@ -849,14 +943,14 @@ class NODE_MT_context_menu(Menu):
 
         layout.separator()
 
-        props = layout.operator("wm.call_panel", text="Rename...")
-        props.name = "TOPBAR_PT_name"
-        props.keep_open = False
+        layout.menu("NODE_MT_context_menu_select_menu")
+        layout.menu("NODE_MT_context_menu_show_hide_menu")
 
         layout.separator()
 
-        layout.menu("NODE_MT_context_menu_select_menu")
-        layout.menu("NODE_MT_context_menu_show_hide_menu")
+        layout.operator_context = 'EXEC_REGION_WIN'
+        layout.operator("node.delete_reconnect", text="Dissolve")
+        layout.operator("node.delete", icon='X')
 
         if active_node:
             layout.separator()
@@ -904,7 +998,7 @@ class NODE_PT_active_node_generic(Panel):
         col.prop(node, "show_options")
         col.prop(node, "mute")
 
-        if tree.type in ('GEOMETRY', 'COMPOSITING'):
+        if tree.type in ('GEOMETRY', 'COMPOSITING', 'SHADER'):
             layout.prop(node, "warning_propagation", text="Propagate")
 
 
@@ -1036,6 +1130,10 @@ class NODE_PT_quality(Panel):
         if rd.compositor_device == 'GPU':
             col.prop(rd, "compositor_precision", text="Precision")
 
+        if snode.node_tree_sub_type == 'SCENE':
+            col = layout.column(heading="Cache", align=True)
+            col.prop(rd, "use_compositor_frames_cache", text="Frames")
+
 
 class NODE_PT_overlay(Panel):
     bl_space_type = 'NODE_EDITOR'
@@ -1079,6 +1177,10 @@ class NODE_PT_overlay(Panel):
 
             subcol = col.column(align=True)
             subcol.active = overlay.show_render_size and snode.show_backdrop
+
+            subcol = col.column()
+            subcol.prop(overlay, "show_text_info")
+            subcol.active = snode.show_backdrop
 
             row = subcol.row(align=True)
             row.prop(overlay, "show_render_size", text="Render Region")
@@ -1144,10 +1246,8 @@ class NODE_PT_node_tree_properties(Panel):
         col = layout.column()
         col.prop(group, "name", text="Name", placeholder="Name")
 
-        if group.asset_data:
-            col.prop(group.asset_data, "description", text="Description", placeholder="Description")
-        else:
-            col.prop(group, "description", text="Description", placeholder="Description")
+        data = group.asset_data if group.asset_data else group
+        col.textbox(data, "description", placeholder="Description")
 
         if not group.bl_use_group_interface:
             return
@@ -1174,6 +1274,7 @@ class NODE_PT_node_tree_properties(Panel):
             if body:
                 col = body.column(align=True)
                 col.prop(group, "is_strip_modifier")
+                col.prop(group, "allow_usage_in_scene_compositor_effect")
 
 
 class NODE_PT_node_tree_animation(Panel):
@@ -1209,6 +1310,33 @@ class NODE_PT_node_tree_animation(Panel):
 
 
 # Grease Pencil properties
+class NODE_PT_npr_line_brush_preview(Panel):
+    bl_space_type = 'NODE_EDITOR'
+    bl_region_type = 'UI'
+    bl_category = 'Node'
+    bl_label = 'Brush Preview'
+
+    @classmethod
+    def poll(cls, context):
+        space = context.space_data
+        return (space.tree_type == 'NPRLineNodeTree' and space.edit_tree and
+                space.edit_tree.nodes.active and
+                space.edit_tree.nodes.active.bl_idname in {
+                    'NPRLineNodeBrush', 'NPRLineNodeBrushOutput', 'NPRLineNodeBrushClosureOutput'})
+
+    def draw(self, context):
+        from bl_operators.npr_lines import brush_preview, output_brush_preview
+        layout = self.layout
+        node = context.space_data.edit_tree.nodes.active
+        if node.bl_idname in {'NPRLineNodeBrushOutput', 'NPRLineNodeBrushClosureOutput'}:
+            layout.template_icon(icon_value=output_brush_preview(node, 384, 128).icon_id, scale=12.0)
+            layout.prop(node, 'preview_length')
+            layout.label(text='Scene UV, color attributes and AOV use fallback values', icon='INFO')
+        else:
+            layout.template_icon(icon_value=brush_preview(node).icon_id, scale=12.0)
+            layout.label(text='Local sample; no visibility calculation', icon='INFO')
+
+
 class NODE_PT_annotation(AnnotationDataPanel, Panel):
     bl_space_type = 'NODE_EDITOR'
     bl_region_type = 'UI'
@@ -1292,6 +1420,11 @@ classes = (
     NODE_HT_header,
     NODE_MT_editor_menus,
     NODE_MT_add,
+    NODE_MT_npr_line_node_brush,
+    NODE_MT_npr_line_node_input,
+    NODE_MT_npr_line_node_math,
+    NODE_MT_npr_line_node_color_vector,
+    NODE_MT_npr_line_node_setup,
     NODE_MT_filter_graph_node_input,
     NODE_MT_filter_graph_node_pass,
     NODE_MT_filter_graph_node_output,
@@ -1320,6 +1453,7 @@ classes = (
     NODE_PT_backdrop,
     NODE_PT_quality,
     NODE_PT_annotation,
+    NODE_PT_npr_line_brush_preview,
     NODE_PT_overlay,
     NODE_PT_active_node_properties,
     NODE_PT_active_node_custom_properties,

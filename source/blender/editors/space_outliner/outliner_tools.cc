@@ -29,17 +29,17 @@
 #include "DNA_volume_types.h"
 #include "DNA_world_types.h"
 
-#include "BLI_listbase.h"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
 #include "BLI_set.hh"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.hh"
+#include "BLI_utildefines.hh"
 #include "BLI_vector.hh"
 
 #include "BLT_translation.hh"
 
 #include "BKE_anim_data.hh"
-#include "BKE_animsys.h"
+#include "BKE_animsys.hh"
 #include "BKE_armature.hh"
 #include "BKE_collection.hh"
 #include "BKE_constraint.h"
@@ -48,6 +48,7 @@
 #include "BKE_global.hh"
 #include "BKE_grease_pencil.hh"
 #include "BKE_idtype.hh"
+#include "BKE_image.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_lib_override.hh"
@@ -71,6 +72,7 @@
 #include "ED_screen.hh"
 #include "ED_sequencer.hh"
 #include "ED_undo.hh"
+#include "ED_util.hh"
 
 #include "WM_api.hh"
 #include "WM_message.hh"
@@ -124,9 +126,9 @@ static void get_element_operation_type(
     *datalevel = tselem->type;
   }
   else {
-    const int idcode = int(GS(tselem->id->name));
+    const ID_Type idcode = tselem->id->id_type();
     bool is_standard_id = false;
-    switch (ID_Type(idcode)) {
+    switch (idcode) {
       case ID_SCE:
         *scenelevel = 1;
         break;
@@ -249,7 +251,7 @@ static void unlink_material_fn(bContext * /*C*/,
                                TreeStoreElem *tsep,
                                TreeStoreElem *tselem)
 {
-  const bool te_is_material = TSE_IS_REAL_ID(tselem) && (GS(tselem->id->name) == ID_MA);
+  const bool te_is_material = TSE_IS_REAL_ID(tselem) && (tselem->id->id_type() == ID_MA);
 
   if (!te_is_material) {
     /* Just fail silently. Another element may be selected that is a material, we don't want to
@@ -280,7 +282,7 @@ static void unlink_material_fn(bContext * /*C*/,
   Material **matar = nullptr;
   int a, totcol = 0;
 
-  switch (GS(tsep->id->name)) {
+  switch (tsep->id->id_type()) {
     case ID_OB: {
       Object *ob = id_cast<Object *>(tsep->id);
       totcol = ob->totcol;
@@ -327,7 +329,7 @@ static void unlink_material_fn(bContext * /*C*/,
       BLI_assert_unreachable();
   }
 
-  if (LIKELY(matar != nullptr)) {
+  if (matar != nullptr) [[likely]] {
     for (a = 0; a < totcol; a++) {
       if (a == te->index && matar[a]) {
         id_us_min(&matar[a]->id);
@@ -358,7 +360,7 @@ static void unlink_texture_fn(bContext * /*C*/,
   MTex **mtex = nullptr;
   int a;
 
-  if (GS(tsep->id->name) == ID_LS) {
+  if (tsep->id->id_type() == ID_LS) {
     FreestyleLineStyle *ls = id_cast<FreestyleLineStyle *>(tsep->id);
     mtex = ls->mtex;
   }
@@ -408,20 +410,20 @@ static void unlink_collection_fn(bContext *C,
   }
 
   if (tsep) {
-    if (GS(tsep->id->name) == ID_OB) {
+    if (tsep->id->id_type() == ID_OB) {
       Object *ob = id_cast<Object *>(tsep->id);
       ob->instance_collection = nullptr;
       DEG_id_tag_update(&ob->id, ID_RECALC_TRANSFORM | ID_RECALC_HIERARCHY);
       DEG_relations_tag_update(bmain);
     }
-    else if (GS(tsep->id->name) == ID_GR) {
+    else if (tsep->id->id_type() == ID_GR) {
       Collection *parent = id_cast<Collection *>(tsep->id);
       id_fake_user_set(&collection->id);
       BKE_collection_child_remove(bmain, parent, collection);
       DEG_id_tag_update(&parent->id, ID_RECALC_SYNC_TO_EVAL | ID_RECALC_HIERARCHY);
       DEG_relations_tag_update(bmain);
     }
-    else if (GS(tsep->id->name) == ID_SCE) {
+    else if (tsep->id->id_type() == ID_SCE) {
       Scene *scene = id_cast<Scene *>(tsep->id);
       Collection *parent = scene->master_collection;
       id_fake_user_set(&collection->id);
@@ -453,10 +455,10 @@ static void unlink_object_fn(bContext *C,
   const eSpaceOutliner_Mode outliner_mode = eSpaceOutliner_Mode(
       CTX_wm_space_outliner(C)->outlinevis);
 
-  if (GS(tsep->id->name) == ID_OB) {
+  if (tsep->id->id_type() == ID_OB) {
     /* Parented objects need to find which collection to unlink from. */
     TreeElement *te_parent = te->parent;
-    while (tsep && GS(tsep->id->name) == ID_OB) {
+    while (tsep && tsep->id->id_type() == ID_OB) {
       if (!ID_IS_EDITABLE(tsep->id)) {
         BKE_reportf(reports,
                     RPT_WARNING,
@@ -479,7 +481,7 @@ static void unlink_object_fn(bContext *C,
                   tsep->id->name + 2);
       return;
     }
-    switch (GS(tsep->id->name)) {
+    switch (tsep->id->id_type()) {
       case ID_GR: {
         Collection *parent = id_cast<Collection *>(tsep->id);
         BKE_collection_object_remove(bmain, parent, ob, true);
@@ -516,6 +518,9 @@ static void unlink_object_fn(bContext *C,
     /* NOTE: Cannot risk tagging the object here, as it may have been deleted if its last usage
      * was removed by above code. */
     DEG_id_tag_update(tsep->id, ID_RECALC_HIERARCHY);
+    /* Clear selection flags. Tree store elements are reused by other matching tree elements, see:
+     * !159899 */
+    tselem->flag &= ~(TSE_ACTIVE | TSE_SELECTED);
     DEG_relations_tag_update(bmain);
   }
 }
@@ -662,8 +667,7 @@ static void outliner_do_libdata_operation_selection_set(bContext *C,
                                                         const bool do_active_element_first)
 {
   if (do_active_element_first) {
-    TreeElement *active_element = outliner_find_element_with_flag(&space_outliner->runtime->tree,
-                                                                  TSE_ACTIVE);
+    TreeElement *active_element = get_target_element(space_outliner);
     if (active_element != nullptr) {
       TreeStoreElem *tselem = TREESTORE(active_element);
       ListBaseT<TreeElement> subtree = active_element->subtree;
@@ -1026,7 +1030,7 @@ static void id_local_fn(bContext *C,
       /* Fix an edge case where a data pointer can be invalid during drawing after a grease
        * pencil data block is made local. See
        * https://projects.blender.org/blender/blender/pulls/153750. */
-      if (GS(tselem->id->name) == ID_GP) {
+      if (tselem->id->id_type() == ID_GP) {
         DEG_id_tag_update(tselem->id, ID_RECALC_GEOMETRY);
       }
     }
@@ -1126,7 +1130,7 @@ static void id_override_library_create_hierarchy_pre_process(bContext *C,
   const bool do_hierarchy = data->do_hierarchy;
   ID *id_root_reference = tselem->id;
 
-  if (!BKE_idtype_idcode_is_linkable(GS(id_root_reference->name)) ||
+  if (!BKE_idtype_idcode_is_linkable(id_root_reference->id_type()) ||
       (id_root_reference->flag & (ID_FLAG_EMBEDDED_DATA | ID_FLAG_EMBEDDED_DATA_LIB_OVERRIDE)) !=
           0)
   {
@@ -1161,7 +1165,7 @@ static void id_override_library_create_hierarchy_pre_process(bContext *C,
   BLI_assert(do_hierarchy);
   UNUSED_VARS_NDEBUG(do_hierarchy);
 
-  if (GS(id_root_reference->name) == ID_GR && (tselem->flag & TSE_CLOSED) != 0) {
+  if (id_root_reference->id_type() == ID_GR && (tselem->flag & TSE_CLOSED) != 0) {
     /* If selected element is a (closed) collection, check all of its objects recursively, and also
      * consider the armature ones as 'selected' (i.e. to not become system overrides). */
     Collection *root_collection = reinterpret_cast<Collection *>(id_root_reference);
@@ -1176,7 +1180,7 @@ static void id_override_library_create_hierarchy_pre_process(bContext *C,
   ID *id_instance_hint = nullptr;
   bool is_override_instancing_object = false;
   if (tsep != nullptr && tsep->type == TSE_SOME_ID && tsep->id != nullptr &&
-      GS(tsep->id->name) == ID_OB && !ID_IS_OVERRIDE_LIBRARY(tsep->id))
+      tsep->id->id_type() == ID_OB && !ID_IS_OVERRIDE_LIBRARY(tsep->id))
   {
     Object *ob = reinterpret_cast<Object *>(tsep->id);
     if (ob->type == OB_EMPTY && &ob->instance_collection->id == id_root_reference) {
@@ -1642,7 +1646,7 @@ static void id_override_library_delete_hierarchy_process(bContext *C,
 }
 
 static void id_fake_user_set_fn(bContext * /*C*/,
-                                ReportList * /*reports*/,
+                                ReportList *reports,
                                 Scene * /*scene*/,
                                 TreeElement * /*te*/,
                                 TreeStoreElem * /*tsep*/,
@@ -1650,17 +1654,30 @@ static void id_fake_user_set_fn(bContext * /*C*/,
 {
   ID *id = tselem->id;
 
+  if (ID_IS_LINKED(id)) {
+    BKE_report(reports,
+               RPT_INFO,
+               "Cannot set fake user on a linked datablock, consider referencing it through a "
+               "Custom Property");
+    return;
+  }
+
   id_fake_user_set(id);
 }
 
 static void id_fake_user_clear_fn(bContext * /*C*/,
-                                  ReportList * /*reports*/,
+                                  ReportList *reports,
                                   Scene * /*scene*/,
                                   TreeElement * /*te*/,
                                   TreeStoreElem * /*tsep*/,
                                   TreeStoreElem *tselem)
 {
   ID *id = tselem->id;
+
+  if (ID_IS_LINKED(id)) {
+    BKE_report(reports, RPT_INFO, "Cannot clear fake user on a linked datablock");
+    return;
+  }
 
   id_fake_user_clear(id);
 }
@@ -2648,7 +2665,7 @@ static void outliner_batch_delete_object_hierarchy_tag(
 
   /* Even though the object itself may not be deletable, some of its children may still be
    * deletable. */
-  for (Base *base_iter = static_cast<Base *>(BKE_view_layer_object_bases_get(view_layer)->first);
+  for (Base *base_iter = BKE_view_layer_object_bases_get(view_layer)->first();
        base_iter != nullptr;
        base_iter = base_iter->next)
   {
@@ -2906,7 +2923,7 @@ static TreeTraversalAction outliner_collect_objects_to_delete(TreeElement *te, v
     return TRAVERSE_CONTINUE;
   }
 
-  if ((tselem->type != TSE_SOME_ID) || (tselem->id == nullptr) || (GS(tselem->id->name) != ID_OB))
+  if ((tselem->type != TSE_SOME_ID) || (tselem->id == nullptr) || (tselem->id->id_type() != ID_OB))
   {
     return TRAVERSE_SKIP_CHILDS;
   }
@@ -2918,7 +2935,7 @@ static TreeTraversalAction outliner_collect_objects_to_delete(TreeElement *te, v
     ID *id_parent = tselem_parent->id;
     /* It's not possible to remove an object from an overridden collection (and potentially scene,
      * through the master collection). */
-    if (ELEM(GS(id_parent->name), ID_GR, ID_SCE)) {
+    if (ELEM(id_parent->id_type(), ID_GR, ID_SCE)) {
       if (ID_IS_OVERRIDE_LIBRARY_REAL(id_parent)) {
         return TRAVERSE_SKIP_CHILDS;
       }
@@ -3039,6 +3056,45 @@ void OUTLINER_OT_delete(wmOperatorType *ot)
 
 /** \} */
 
+static wmOperatorStatus outliner_pack_data_exec(bContext *C, wmOperator *op)
+{
+  Main *bmain = CTX_data_main(C);
+  Vector<PointerRNA> selected_idptrs = ED_operator_get_ids_from_context_as_vec(C);
+  int count = 0;
+
+  for (PointerRNA &idptr : selected_idptrs) {
+    ID *id = static_cast<ID *>(idptr.data);
+    if (id->id_type() == ID_IM) {
+      Image *image = reinterpret_cast<Image *>(id);
+      BKE_image_packfile_ensure(bmain, image, op->reports, nullptr, 0);
+      count += BKE_image_has_packedfile(image);
+    }
+  }
+
+  if (count > 0) {
+    BKE_reportf(op->reports, RPT_INFO, "Packed %d images into the .blend file", count);
+    WM_event_add_notifier(C, NC_IMAGE | NA_EDITED, nullptr);
+    return OPERATOR_FINISHED;
+  }
+
+  return OPERATOR_CANCELLED;
+}
+
+void OUTLINER_OT_pack_data(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Pack ID Data";
+  ot->idname = "OUTLINER_OT_pack_data";
+  ot->description = "Embed selected data-blocks into the .blend file";
+
+  /* callbacks */
+  ot->exec = outliner_pack_data_exec;
+  ot->poll = ED_operator_outliner_active;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
 /* -------------------------------------------------------------------- */
 /** \name ID-Data Menu Operator
  * \{ */
@@ -3060,6 +3116,7 @@ enum eOutlinerIdOpTypes {
   OUTLINER_IDOP_RENAME,
 
   OUTLINER_IDOP_SELECT_LINKED,
+  OUTLINER_IDOP_PACK,
 };
 
 /* TODO: implement support for changing the ID-block used. */
@@ -3086,6 +3143,7 @@ static const EnumPropertyItem prop_id_op_types[] = {
     {OUTLINER_IDOP_FAKE_CLEAR, "CLEAR_FAKE", 0, "Clear Fake User", ""},
     {OUTLINER_IDOP_RENAME, "RENAME", 0, "Rename", ""},
     {OUTLINER_IDOP_SELECT_LINKED, "SELECT_LINKED", 0, "Select Linked", ""},
+    {OUTLINER_IDOP_PACK, "PACK", ICON_PACKAGE, "Pack", "Embed data-blocks into the .blend file"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -3132,6 +3190,15 @@ static const EnumPropertyItem *outliner_id_operation_itemf(bContext *C,
   for (const EnumPropertyItem *it = prop_id_op_types; it->identifier != nullptr; it++) {
     if (!outliner_id_operation_item_poll(C, ptr, prop, it->value)) {
       continue;
+    }
+    if (it->value == OUTLINER_IDOP_PACK) {
+      /* Include Pack operation in context menu just for tree elements that represent image IDs. */
+      const SpaceOutliner *space_outliner = CTX_wm_space_outliner(C);
+      const TreeElement *te = get_target_element(space_outliner);
+      const TreeStoreElem *tselem = TREESTORE(te);
+      if (TSE_IS_REAL_ID(tselem) && tselem->id && (tselem->id->id_type() != ID_IM)) {
+        continue;
+      }
     }
     RNA_enum_item_add(&items, &totitem, it);
   }
@@ -3288,7 +3355,6 @@ static wmOperatorStatus outliner_id_operation_exec(bContext *C, wmOperator *op)
     case OUTLINER_IDOP_FAKE_CLEAR: {
       /* clear fake user */
       outliner_do_libdata_operation(C, op->reports, scene, space_outliner, id_fake_user_clear_fn);
-
       WM_event_add_notifier(C, NC_ID | NA_EDITED, nullptr);
       ED_undo_push(C, "Clear Fake User");
       break;
@@ -3306,7 +3372,11 @@ static wmOperatorStatus outliner_id_operation_exec(bContext *C, wmOperator *op)
       ED_outliner_select_sync_from_all_tag(C);
       ED_undo_push(C, "Select");
       break;
-
+    case OUTLINER_IDOP_PACK:
+      if (idlevel == ID_IM) {
+        WM_operator_name_call(
+            C, "OUTLINER_OT_pack_data", wm::OpCallContext::InvokeDefault, nullptr, nullptr);
+      }
     default:
       /* Invalid - unhandled. */
       break;

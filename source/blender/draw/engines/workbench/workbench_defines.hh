@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup draw_engine
+ */
+
 #pragma once
 
 #define WB_RESOLVE_GROUP_SIZE 8
@@ -20,3 +24,7 @@
 /* UBOs (Storage buffers in Workbench Next). */
 #define WB_MATERIAL_SLOT 0
 #define WB_WORLD_SLOT 1
+
+[[maybe_unused]] static constexpr int WORKBENCH_LIGHTING_STUDIO = 0;
+[[maybe_unused]] static constexpr int WORKBENCH_LIGHTING_MATCAP = 1;
+[[maybe_unused]] static constexpr int WORKBENCH_LIGHTING_FLAT = 2;

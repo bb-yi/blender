@@ -4,12 +4,12 @@
 
 #include "testing/testing.h"
 
-/* Keep first since `BLI_utildefines.h` defines `AT` which conflicts with STL. */
+/* Keep first since `BLI_utildefines.hh` defines `AT` which conflicts with STL. */
 #include "exporter/abc_archive.h"
 
 #include "BKE_main.hh"
-#include "BLI_fileops.h"
-#include "BLI_string.h"
+#include "BLI_fileops.hh"
+#include "BLI_string.hh"
 #include "DNA_scene_types.h"
 
 #include "DEG_depsgraph.hh"
@@ -39,7 +39,7 @@ class AlembicExportTest : public testing::Test {
     DEG_register_node_types();
 
     /* TODO(sergey): Pass scene layer somehow? */
-    ViewLayer *view_layer = (ViewLayer *)scene.view_layers.first;
+    ViewLayer *view_layer = (ViewLayer *)scene.view_layers.first_;
     depsgraph = DEG_graph_new(bmain, &scene, view_layer, DAG_EVAL_RENDER);
   }
 

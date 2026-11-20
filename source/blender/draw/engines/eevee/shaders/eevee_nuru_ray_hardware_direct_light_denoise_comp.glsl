@@ -20,6 +20,7 @@
 COMPUTE_SHADER_CREATE_INFO(eevee_ray_hardware_direct_light_denoise)
 
 #define HWRT_DIRECT_EVALUATION
+#include "eevee_light_eval.bsl.hh"
 #include "eevee_nuru_direct_light_lib.glsl"
 #include "eevee_colorspace_lib.bsl.hh"
 #include "eevee_gbuffer_read_lib.glsl"
@@ -29,7 +30,7 @@ COMPUTE_SHADER_CREATE_INFO(eevee_ray_hardware_direct_light_denoise)
 #include "eevee_reverse_z_lib.glsl"
 #include "eevee_sampling_lib.glsl"
 #include "gpu_shader_codegen_lib.glsl"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_utildefines.bsl.hh"
 
 float light_color_importance(LightData light)
 {
@@ -161,40 +162,6 @@ bool hardware_direct_light_supported_closure(ClosureUndetermined cl)
          (cl.type != CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID);
 }
 
-LightData hardware_direct_light_resolved(uint light_index)
-{
-  LightData light = light_buf[light_index];
-  light.color = abs(light.color);
-  const uint local_lights_len = raytrace_buf.hardware_direct_light.local_lights_len;
-  const uint sun_lights_len = raytrace_buf.hardware_direct_light.sun_lights_len;
-  if (sun_lights_len < 2u || light_index < local_lights_len || light_index >= local_lights_len + 2u) {
-    return light;
-  }
-
-  const uint first_index = local_lights_len;
-  const uint second_index = local_lights_len + 1u;
-  LightData first = light_buf[first_index];
-  LightData second = light_buf[second_index];
-  first.color = abs(first.color);
-  second.color = abs(second.color);
-
-  const bool split_pair = dot(first.color - second.color, first.color - second.color) <= 1.0e-6f &&
-                          dot(first.sun().direction, second.sun().direction) >= 0.9999f &&
-                          ((first.power[LIGHT_DIFFUSE] == 0.0f && second.power[LIGHT_SPECULAR] == 0.0f) ||
-                           (first.power[LIGHT_SPECULAR] == 0.0f && second.power[LIGHT_DIFFUSE] == 0.0f));
-  if (!split_pair) {
-    return light;
-  }
-
-  const uint peer_index = (light_index == first_index) ? second_index : first_index;
-  const LightData peer = light_buf[peer_index];
-  light.power[LIGHT_DIFFUSE] = max(light.power[LIGHT_DIFFUSE], peer.power[LIGHT_DIFFUSE]);
-  light.power[LIGHT_SPECULAR] = max(light.power[LIGHT_SPECULAR], peer.power[LIGHT_SPECULAR]);
-  light.power[LIGHT_TRANSMISSION] = max(light.power[LIGHT_TRANSMISSION], peer.power[LIGHT_TRANSMISSION]);
-  light.power[LIGHT_VOLUME] = max(light.power[LIGHT_VOLUME], peer.power[LIGHT_VOLUME]);
-  return light;
-}
-
 LightData hardware_direct_light_exact_local(uint local_light_index)
 {
   LightData light = light_buf[local_light_index];
@@ -324,7 +291,7 @@ void main()
         for (uint sample_index = 0u; sample_index < samples_per_point; sample_index++) {
           uint local_light_index;
           float local_importance;
-          const float local_selector = interleaved_gradient_noise(
+          const float local_selector = random::interleaved_gradient(
               float2(texel) + 0.5f,
               2.0f + float(sample_index),
               sampling_rng_1D_get(SAMPLING_RAYTRACE_U) + float(sample_index) * 0.6180339f);
@@ -359,7 +326,7 @@ void main()
         for (uint sample_index = 0u; sample_index < samples_per_point; sample_index++) {
           uint sun_index;
           float sun_importance;
-          const float sun_selector = interleaved_gradient_noise(
+          const float sun_selector = random::interleaved_gradient(
               float2(texel) + 0.5f,
               17.0f + float(sample_index),
               sampling_rng_1D_get(SAMPLING_RAYTRACE_X) + float(sample_index) * 0.41421356f);

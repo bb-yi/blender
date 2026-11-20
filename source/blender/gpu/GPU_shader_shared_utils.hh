@@ -75,9 +75,9 @@
 #else                /* C / C++ */
 #  ifndef GPU_SHADER /* Avoid parsing this into shader code. */
 
-#    include "BLI_assert.h"
+#    include "BLI_assert.hh"
 #    include "BLI_enum_flags.hh"
-#    include "BLI_sys_types.h"
+#    include "BLI_sys_types.hh"
 
 #    include <math.h>
 
@@ -95,8 +95,10 @@ using blender::int2;
 using blender::int4;
 using blender::uint2;
 using blender::uint4;
-/** IMPORTANT: Do not use in shared struct. Use packed_(float/int/uint)3 instead.
- * Here for static functions usage only. */
+/**
+ * IMPORTANT: Do not use in shared struct. Use packed_(float/int/uint)3 instead.
+ * Here for static functions usage only.
+ */
 using blender::float3;
 using blender::int3;
 using blender::uint3;

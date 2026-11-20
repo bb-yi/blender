@@ -9,7 +9,6 @@ from ..utils.nodes import (
     NWBase,
     nw_check,
     nw_check_not_empty,
-    get_nodes_links,
     node_at_pos,
 )
 from ..utils.draw import (
@@ -27,11 +26,13 @@ class NODE_OT_lazy_mix(Operator, NWBase):
 
     @classmethod
     def poll(cls, context):
-        return nw_check(cls, context) and nw_check_not_empty(cls, context)
+        return (nw_check(cls, context) and nw_check_not_empty(cls, context)
+                and context.space_data.tree_type != 'EeveeFilterGraphNodeTree')
 
     def modal(self, context, event):
         context.area.tag_redraw()
-        nodes, links = get_nodes_links(context)
+        tree = context.space_data.edit_tree
+        nodes = tree.nodes
         cont = True
 
         node1 = None

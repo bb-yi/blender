@@ -15,13 +15,14 @@
 
 #pragma once
 
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 #include "DNA_listBase.h"
 
 namespace blender {
 
 struct GPUInput;
+struct GPUMaterial;
 
 namespace gpu {
 class UniformBuf;
@@ -34,7 +35,12 @@ gpu::UniformBuf *GPU_uniformbuf_create_ex(size_t size, const void *data, const c
  * \param inputs: ListBaseT<LinkData>
  * \return nullptr if failed to create or if `inputs` is empty.
  */
-gpu::UniformBuf *GPU_uniformbuf_create_from_list(ListBaseT<LinkData> *inputs, const char *name);
+gpu::UniformBuf *GPU_uniformbuf_create_from_list(ListBaseT<LinkData> *inputs,
+                                                 const char *name,
+                                                 GPUMaterial *material = nullptr);
+
+/* Sort input list in order to ensure minimum padding. */
+void GPU_uniformbuf_inputs_sort(ListBaseT<LinkData> *inputs);
 
 #define GPU_uniformbuf_create(size) GPU_uniformbuf_create_ex(size, nullptr, __func__);
 

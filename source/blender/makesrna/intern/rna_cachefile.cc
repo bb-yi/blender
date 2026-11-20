@@ -28,8 +28,8 @@ const EnumPropertyItem rna_enum_velocity_unit_items[] = {
 
 #ifdef RNA_RUNTIME
 
-#  include "BLI_listbase.h"
-#  include "BLI_math_base.h"
+#  include "BLI_listbase.hh"
+#  include "BLI_math_base_c.hh"
 
 #  include "BKE_cachefile.hh"
 #  include "BKE_context.hh"
@@ -230,6 +230,7 @@ static void rna_def_cachefile_layers(BlenderRNA *brna, PropertyRNA *cprop)
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
   /* Return type. */
   parm = RNA_def_pointer(func, "layer", "CacheFileLayer", "", "Newly created layer");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));
   RNA_def_function_return(func, parm);
 
   /* Remove a layer. */

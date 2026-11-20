@@ -4,7 +4,7 @@
 
 #include "testing/testing.h"
 
-#include "BLI_math_base.h"
+#include "BLI_math_base_c.hh"
 #include "BLI_math_matrix_types.hh"
 
 #include "GPU_batch.hh"
@@ -959,6 +959,29 @@ Q
   }
 }
 GPU_TEST(shader_preprocessor)
+
+static void test_shader_preprocessor_conditional_call()
+{
+  const std::string input = R"(
+#define AOV_ACTIVE
+void write_aov() { float kept_helper_value = 1.0; }
+void unused_helper() { float discarded_value = 0.0; }
+void main()
+{
+  float before_call = 1.0;
+#ifdef AOV_ACTIVE
+  write_aov();
+#endif
+  float after_call = 2.0;
+}
+)";
+  const std::string result = blender::gpu::Shader::run_preprocessor(input);
+  EXPECT_NE(result.find("void write_aov()"), std::string::npos);
+  EXPECT_NE(result.find("write_aov();"), std::string::npos);
+  EXPECT_NE(result.find("float after_call = 2.0;"), std::string::npos);
+  EXPECT_EQ(result.find("void unused_helper()"), std::string::npos);
+}
+GPU_TEST(shader_preprocessor_conditional_call)
 
 }  // namespace gpu::tests
 }  // namespace blender

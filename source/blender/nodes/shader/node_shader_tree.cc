@@ -17,14 +17,14 @@
 #include "DNA_world_types.h"
 
 #include "BLI_array.hh"
-#include "BLI_linklist.h"
-#include "BLI_listbase.h"
+#include "BLI_linklist.hh"
+#include "BLI_listbase.hh"
 #include "BLI_map.hh"
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_c.hh"
 #include "BLI_set.hh"
 #include "BLI_stack.hh"
-#include "BLI_threads.h"
-#include "BLI_utildefines.h"
+#include "BLI_threads.hh"
+#include "BLI_utildefines.hh"
 #include "BLI_vector.hh"
 
 #include "BKE_context.hh"
@@ -189,8 +189,8 @@ static bool shader_validate_link(eNodeSocketDatatype from, eNodeSocketDatatype t
   if (from == SOCK_SHADER) {
     return to == SOCK_SHADER;
   }
-  if (ELEM(to, SOCK_BUNDLE, SOCK_CLOSURE, SOCK_MENU) ||
-      ELEM(from, SOCK_BUNDLE, SOCK_CLOSURE, SOCK_MENU))
+  if (ELEM(to, SOCK_BUNDLE, SOCK_CLOSURE, SOCK_MENU, SOCK_STRING) ||
+      ELEM(from, SOCK_BUNDLE, SOCK_CLOSURE, SOCK_MENU, SOCK_STRING))
   {
     return from == to;
   }
@@ -209,7 +209,8 @@ static bool shader_node_tree_socket_type_valid(bke::bNodeTreeType * /*ntreetype*
                                                                SOCK_SHADER,
                                                                SOCK_BUNDLE,
                                                                SOCK_CLOSURE,
-                                                               SOCK_MENU);
+                                                               SOCK_MENU,
+                                                               SOCK_STRING);
 }
 
 bke::bNodeTreeType *ntreeType_Shader;
@@ -523,7 +524,9 @@ static bool ntree_weight_tree_tag_nodes(bNode *fromnode, bNode *tonode, void *us
     fromnode->runtime->tmp_flag = *node_count;
     *node_count += (fromnode->type_legacy == SH_NODE_MIX_SHADER) ? 4 : 1;
   }
-  return to_node_from_weight_tree;
+  /* Note: We do not continue recursing after a shader-to-rgb node as they get processed
+   * independently/ */
+  return to_node_from_weight_tree && fromnode->type_legacy != SH_NODE_SHADERTORGB;
 }
 
 /* Invert evaluation order of the weight tree (add & mix closure nodes) to feed the closure nodes
@@ -741,6 +744,7 @@ static void ntree_shader_weight_tree_invert(bNodeTree *ntree, bNode *output_node
             case SH_NODE_HOLDOUT:
             case SH_NODE_PRINCIPLED_NPR:
             case SH_NODE_NPR_SURFACE_DIFFUSION:
+            case SH_NODE_LIGHT_ACCUMULATION:
             case SH_NODE_SUBSURFACE_SCATTERING:
             case SH_NODE_VOLUME_ABSORPTION:
             case SH_NODE_VOLUME_PRINCIPLED:
@@ -1031,7 +1035,7 @@ static bool ntree_branch_node_tag(bNode *fromnode, bNode *tonode, void * /*userd
  * first executed SSS node gets a SSS profile. */
 static void ntree_shader_pruned_unused(bNodeTree *ntree,
                                        bNode *output_node,
-                                       bool keep_side_outputs = true)
+                                       bool keep_outline_control = true)
 {
   ntree_shader_disconnect_inactive_mix_branches(ntree);
 
@@ -1047,12 +1051,12 @@ static void ntree_shader_pruned_unused(bNodeTree *ntree,
     bke::node_chain_iterator_backwards(ntree, output_node, ntree_branch_node_tag, nullptr, 0);
   }
 
-  if (keep_side_outputs) {
-    for (bNode &node : ntree->nodes) {
-      if (ELEM(node.type_legacy, SH_NODE_OUTPUT_AOV, SH_NODE_OUTLINE_CONTROL)) {
-        node.runtime->tmp_flag = 1;
-        bke::node_chain_iterator_backwards(ntree, &node, ntree_branch_node_tag, nullptr, 0);
-      }
+  for (bNode &node : ntree->nodes) {
+    if (node.type_legacy == SH_NODE_OUTPUT_AOV ||
+        (keep_outline_control && node.type_legacy == SH_NODE_OUTLINE_CONTROL))
+    {
+      node.runtime->tmp_flag = 1;
+      bke::node_chain_iterator_backwards(ntree, &node, ntree_branch_node_tag, nullptr, 0);
     }
   }
 
@@ -1180,7 +1184,8 @@ static void ntree_shader_to_rgba_depth_count_of_type(bNodeTree *tree,
   }
 }
 
-bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
+bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat,
+                              nodes::InlineShaderNodeTreeParams &inline_params)
 {
   bNodeTree *npr_tree = npr_tree_get(material_tree);
   if (npr_tree == nullptr) {
@@ -1188,7 +1193,6 @@ bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
   }
 
   bNodeTree *localtree = bke::node_tree_add_tree(nullptr, "NPRShaderTree Inlined", npr_tree->idname);
-  nodes::InlineShaderNodeTreeParams inline_params;
   inline_params.allow_preserving_repeat_zones = true;
   nodes::inline_shader_node_tree(*npr_tree, *localtree, inline_params);
 
@@ -1219,9 +1223,101 @@ void ntreeGPULightShaderNodes(bNodeTree *localtree, GPUMaterial *mat)
   ntreeShaderEndExecTree(exec);
 }
 
-void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
+static void ntree_shader_setup_custom_lighting_zone(bNodeTree *ntree)
 {
-  bNodeTreeExec *exec;
+  /* Safeguard to not emit a LIGHT_ITER_INTERNAL_INPUT without a LIGHT_ITER_INTERNAL_OUTPUT raising
+   * an assert in the shader dead code optimization. */
+  bool has_light_accumulation = false;
+  for (bNode &node : ntree->nodes) {
+    if (node.type_legacy == SH_NODE_LIGHT_ACCUMULATION) {
+      has_light_accumulation = true;
+      break;
+    }
+  }
+
+  if (!has_light_accumulation) {
+    return;
+  }
+
+  bNode *zone_input = nullptr;
+  bNode *zone_output = nullptr;
+
+  auto ensure_nodes = [&]() {
+    if (!zone_input) {
+      zone_input = bke::node_add_static_node(nullptr, *ntree, SH_NODE_LIGHT_ITER_INTERNAL_INPUT);
+      zone_output = bke::node_add_static_node(nullptr, *ntree, SH_NODE_LIGHT_ITER_INTERNAL_OUTPUT);
+      zone_input->custom3 = *reinterpret_cast<float *>(&zone_output->identifier);
+    }
+  };
+
+  Map<bNodeSocket *, bNodeSocket *> accumulation_out_to_zone_out;
+
+  for (bNode &node : ntree->nodes) {
+    if (ELEM(node.type_legacy,
+             SH_NODE_LIGHT_ACCUMULATION,
+             SH_NODE_LIGHT_INFO,
+             SH_NODE_LIGHT_EVALUATION,
+             SH_NODE_SHADOW_RAYCAST) ||
+        (node.type_legacy == SH_NODE_ATTRIBUTE &&
+         static_cast<NodeShaderAttribute *>(node.storage)->type == SHD_ATTRIBUTE_LIGHT) ||
+        (node.type_legacy == SH_NODE_VECT_TRANSFORM &&
+         ELEM(SHD_VECT_TRANSFORM_SPACE_LIGHT,
+              static_cast<NodeShaderVectTransform *>(node.storage)->convert_from,
+              static_cast<NodeShaderVectTransform *>(node.storage)->convert_to)))
+    {
+      ensure_nodes();
+      /* Connect LightIndex socket */
+      bke::node_add_link(*ntree,
+                         *zone_input,
+                         *ntree_shader_node_output_get(zone_input, 0),
+                         node,
+                         *ntree_shader_node_input_get(&node, 0));
+
+      if (node.type_legacy == SH_NODE_LIGHT_ACCUMULATION) {
+        /* Connect accumulation result to the zone output node.
+         * Create one zone IO for each Light Accumulation node. */
+        bke::node_add_static_socket(
+            *ntree, *zone_input, SOCK_IN, SOCK_SHADER, PROP_NONE, "ShaderZoneIO", "ShaderZoneIO");
+        bke::node_add_static_socket(
+            *ntree, *zone_input, SOCK_OUT, SOCK_SHADER, PROP_NONE, "ShaderZoneIO", "ShaderZoneIO");
+        bNodeSocket *socket_in = bke::node_add_static_socket(
+            *ntree, *zone_output, SOCK_IN, SOCK_SHADER, PROP_NONE, "ShaderZoneIO", "ShaderZoneIO");
+        bNodeSocket *socket_out = bke::node_add_static_socket(*ntree,
+                                                              *zone_output,
+                                                              SOCK_OUT,
+                                                              SOCK_SHADER,
+                                                              PROP_NONE,
+                                                              "ShaderZoneIO",
+                                                              "ShaderZoneIO");
+
+        bNodeSocket &accumulation_out = *ntree_shader_node_output_get(&node, 0);
+        bke::node_add_link(*ntree, node, accumulation_out, *zone_output, *socket_in);
+        accumulation_out_to_zone_out.add(&accumulation_out, socket_out);
+      }
+    }
+  }
+
+  Vector<bNodeLink *> links_to_remove;
+  for (bNodeLink &link : ntree->links) {
+    if (link.fromnode->type_legacy == SH_NODE_LIGHT_ACCUMULATION &&
+        link.tonode->type_legacy != SH_NODE_LIGHT_ITER_INTERNAL_OUTPUT)
+    {
+      bke::node_add_link(*ntree,
+                         *zone_output,
+                         *accumulation_out_to_zone_out.lookup(link.fromsock),
+                         *link.tonode,
+                         *link.tosock);
+      links_to_remove.append(&link);
+    }
+  }
+
+  for (bNodeLink *link : links_to_remove) {
+    bke::node_remove_link(ntree, *link);
+  }
+}
+
+void ntreeGPUMaterialNodesPreprocess(bNodeTree *localtree, GPUMaterial *mat)
+{
   const bool is_filter_material = gpu_material_uses_filter_domain(mat);
   const bool is_outline_shell = GPU_material_is_outline_shell(mat);
 
@@ -1230,6 +1326,11 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
   bNode *output = is_outline_shell ? ntreeShaderOutlineShellOutputNode(localtree) :
                   is_filter_material ? ntreeShaderFilterOutputNode(localtree) :
                                        ntreeShaderOutputNode(localtree, SHD_OUTPUT_EEVEE);
+
+  /* Prune before implicit casts update the localized tree. Otherwise unreachable GLSL Function
+   * nodes have their declarations rebuilt and sources parsed for every material pass before
+   * being removed. Keep the later prune to also remove branches disconnected by the casts. */
+  ntree_shader_pruned_unused(localtree, output, !is_outline_shell);
 
   /* Tree is valid if it contains no undefined implicit socket type cast. */
   bool valid_tree = is_filter_material ? true : ntree_shader_implicit_closure_cast(localtree);
@@ -1241,10 +1342,22 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
       if (!is_outline_shell) {
         ntree_shader_weight_tree_invert(localtree, output);
       }
+      ntree_shader_setup_custom_lighting_zone(localtree);
     }
   }
+}
 
-  exec = ntreeShaderBeginExecTree(localtree);
+void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat, const bool preprocessed)
+{
+  if (!preprocessed) {
+    ntreeGPUMaterialNodesPreprocess(localtree, mat);
+  }
+  const bool is_filter_material = gpu_material_uses_filter_domain(mat);
+  const bool is_outline_shell = GPU_material_is_outline_shell(mat);
+  bNode *output = is_outline_shell ? ntreeShaderOutlineShellOutputNode(localtree) :
+                  is_filter_material ? ntreeShaderFilterOutputNode(localtree) :
+                                       ntreeShaderOutputNode(localtree, SHD_OUTPUT_EEVEE);
+  bNodeTreeExec *exec = ntreeShaderBeginExecTree(localtree);
   if (is_filter_material) {
     if (output != nullptr) {
       ntreeExecGPUNodes(exec, mat, output);
@@ -1262,14 +1375,10 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
   if (output != nullptr) {
     iter_shader_to_rgba_depth_count(localtree, output, max_depth);
   }
-  if (!is_outline_shell) {
-    ntree_shader_to_rgba_depth_count_of_type(localtree, SH_NODE_OUTPUT_AOV, max_depth);
-  }
+  ntree_shader_to_rgba_depth_count_of_type(localtree, SH_NODE_OUTPUT_AOV, max_depth);
   for (int depth = max_depth; depth >= 0; depth--) {
     ntreeExecGPUNodes(exec, mat, output, &depth);
-    if (!is_outline_shell) {
-      ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTPUT_AOV, &depth);
-    }
+    ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTPUT_AOV, &depth);
   }
   if (!is_outline_shell) {
     ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTLINE_CONTROL);

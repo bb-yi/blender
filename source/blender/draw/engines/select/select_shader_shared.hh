@@ -2,13 +2,16 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup draw_engine
+ */
+
 #pragma once
 
+#include "GPU_shader_shared_utils.hh"
+
 #ifndef GPU_SHADER
-#  include "GPU_shader_shared_utils.hh"
-
 namespace blender::draw::select {
-
 #endif
 
 /* Matches eV3DSelectMode */

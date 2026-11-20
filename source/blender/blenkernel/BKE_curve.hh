@@ -15,7 +15,7 @@
 #include "BLI_math_matrix_types.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
-#include "BLI_sys_types.h"
+#include "BLI_sys_types.hh"
 
 #include "DNA_curve_types.h"
 #include "DNA_listBase.h"
@@ -24,7 +24,7 @@ namespace blender {
 
 struct BezTriple;
 struct BevList;
-struct BMEditMesh;
+struct BMesh;
 struct BPoint;
 struct Curve;
 struct Depsgraph;
@@ -435,7 +435,7 @@ void BKE_curve_deform_coords_with_editmesh(const Object *ob_curve,
                                            int defgrp_index,
                                            short flag,
                                            short defaxis,
-                                           const BMEditMesh *em_target);
+                                           const BMesh &bm_target);
 
 /**
  * \param orco: Input vec and orco = local coord in curve space

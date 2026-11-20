@@ -24,7 +24,7 @@ bool shader_info_is_world_sun_light(uint light_index, LightData light, bool is_l
 
   float3 world_sun_direction = world_sun.object_to_world.z_axis();
   float color_delta = length(light.color - world_sun.color);
-  float direction_alignment = dot(light.sun().direction, world_sun_direction);
+  float direction_alignment = dot(light_sun_data_get(light).direction, world_sun_direction);
   return (color_delta < 1e-4f) && (direction_alignment > 0.9999f);
 }
 
@@ -52,7 +52,7 @@ bool shader_info_apply_light_shader(uint light_index,
   attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
   if (!is_directional) {
     attenuation *= light_influence_cutoff(lv.dist,
-                                          light.local().local.influence_radius_invsqr_surface);
+                                          light_local_data_get(light).local.influence_radius_invsqr_surface);
   }
   return true;
 #else
@@ -68,15 +68,86 @@ float shader_info_light_ltc(LightData light,
                             bool light_shader_no_distance_falloff,
                             bool is_directional)
 {
-  LightVertices light_shape_vertices = light_shape_corners(light, lv);
-  float ltc_result = light_ltc(utility_tx, light, normal, view_vector, lv, ltc_mat, light_shape_vertices);
+  float ltc_result = eevee_light_ltc(utility_tx, light, normal, view_vector, lv, ltc_mat);
   if (light_shader_no_distance_falloff) {
     ltc_result /= max(light_point_light(light, is_directional, lv), 1e-8f);
   }
   return ltc_result;
 }
 
-void shader_info_eval_light(uint l_idx,
+/* A same-frame cache is valid only for the actual opaque receiver. Custom node inputs,
+ * displaced/depth-offset surfaces, probes and unrepresented layers keep direct evaluation. */
+#if defined(MAT_NODE_SHADOW_CACHE) && defined(GPU_FRAGMENT_SHADER)
+float3 shader_info_cache_position(KernelGlobals &kg, ShadingData &sd, int2 pixel, int2 extent)
+{
+  float2 uv = (float2(pixel) + 0.5f) / float2(extent);
+  float depth = shader_info_shadow_screen_depth_fetch(kg, sd, uv);
+  return kg.view_matrices_get(sd).point_screen_to_world(float3(uv, depth));
+}
+#endif
+
+bool shader_info_cache_surface(KernelGlobals &kg, ShadingData &sd, float3 P, float3 Ng, float3 N)
+{
+#if defined(MAT_NODE_SHADOW_CACHE) && defined(GPU_FRAGMENT_SHADER)
+  int2 extent = textureSize(node_shadow_cache_tx, 0).xy - int2(1, 0);
+  int2 pixel = int2(gl_FragCoord.xy);
+  if (any(lessThan(extent, int2(2))) || any(greaterThanEqual(pixel, extent))) {
+    return false;
+  }
+  /* The shared prepass stores 16-bit IDs. Larger instances must use their full ID in
+   * direct shadow evaluation instead of aliasing a different cached receiver. */
+  if (texelFetch(object_id_tx, pixel, 0).r != kg.resource_id_get(sd)) {
+    return false;
+  }
+  float4 packed_normal = texelFetch(prepass_normal_tx, pixel, 0);
+  if (packed_normal.a < 0.5f) {
+    return false;
+  }
+  float3 N_ref = safe_normalize(packed_normal.xyz * 2.0f - 1.0f);
+  if (dot(N, N_ref) < 0.995f) {
+    return false;
+  }
+  float3 center = shader_info_cache_position(kg, sd, pixel, extent);
+  int2 lo = max(pixel - 1, int2(0)), hi = min(pixel + 1, extent - 1);
+  float3 dx0 = center - shader_info_cache_position(kg, sd, int2(lo.x, pixel.y), extent);
+  float3 dx1 = shader_info_cache_position(kg, sd, int2(hi.x, pixel.y), extent) - center;
+  float3 dy0 = center - shader_info_cache_position(kg, sd, int2(pixel.x, lo.y), extent);
+  float3 dy1 = shader_info_cache_position(kg, sd, int2(pixel.x, hi.y), extent) - center;
+  float lx0 = length_squared(dx0), lx1 = length_squared(dx1);
+  float ly0 = length_squared(dy0), ly1 = length_squared(dy1);
+  float3 dx = lx0 == 0.0f ? dx1 : lx1 == 0.0f ? dx0 : lx0 < lx1 ? dx0 : dx1;
+  float3 dy = ly0 == 0.0f ? dy1 : ly1 == 0.0f ? dy0 : ly0 < ly1 ? dy0 : dy1;
+  float3 Ng_ref = safe_normalize(cross(dx, dy));
+  float pixel_world = min(length(dx), length(dy));
+  float coordinate_error = reduce_max(abs(P)) * 4.0f * FLT_EPSILON;
+  if (coordinate_error > pixel_world * 0.125f) {
+    return false;
+  }
+  float tolerance = max(pixel_world * 0.25f, coordinate_error);
+  return abs(dot(Ng_ref, Ng)) > 0.98f && distance(P, center) <= tolerance;
+#else
+  return false;
+#endif
+}
+
+float4 shader_info_cached_shadow(uint light_index, float cache_eligible, int quality)
+{
+#if defined(MAT_NODE_SHADOW_CACHE) && defined(GPU_FRAGMENT_SHADER)
+  if (cache_eligible > 0.5f) {
+    int3 extent = textureSize(node_shadow_cache_tx, 0);
+    for (int layer = 0; layer < extent.z; layer++) {
+      float4 header = texelFetch(node_shadow_cache_tx, int3(extent.x - 1, 0, layer), 0);
+      int index = int(header.x) | (int(header.y) << 8);
+      if (header.z > 0.0f && index == int(light_index) && int(header.w) == quality) {
+        return texelFetch(node_shadow_cache_tx, int3(int2(gl_FragCoord.xy), layer), 0);
+      }
+    }
+  }
+#endif
+  return float4(-1.0f);
+}
+
+void shader_info_eval_light(KernelGlobals &kg, ShadingData &sd, uint l_idx,
                             bool is_local,
                             float3 position,
                             float3 shading_normal,
@@ -89,6 +160,9 @@ void shader_info_eval_light(uint l_idx,
                             float geometry_offset,
                             float shadow_mode,
                             float stable_shadow_samples,
+                            float pcf_radius,
+                            float max_penumbra,
+                            float cache_eligible,
                             float3 &diffuse_shading_sum,
                             float &visibility_sum,
                             float &self_shadow_sum,
@@ -166,41 +240,71 @@ void shader_info_eval_light(uint l_idx,
   if (diffuse_power >= LIGHT_ATTENUATION_THRESHOLD &&
       surface_attenuation > LIGHT_ATTENUATION_THRESHOLD)
   {
+    float4 shadow_sample = shader_info_cached_shadow(l_idx, cache_eligible, int(stable_shadow_samples));
 #if defined(SHADOW_CASTER_CLASSIFY)
-    ShaderInfoShadowClassification classification = shader_info_shadow_classified_visibility(
-        light,
-        is_directional,
-        lv.L,
-        position,
-        geometry_normal,
-        shading_normal,
-        normal_offset,
-        geometry_offset,
-        shadow_mode,
-        stable_shadow_samples);
+    const bool classify = true;
+#else
+    const bool classify = false;
+#endif
+#if defined(MAT_NODE_SHADOW_FILTER_METHODS)
+    if (int(shadow_mode) >= 3) {
+      shadow_sample = eevee_shadow_filter_material(light, is_directional, sd.frag_co.xy, position,
+                                                  geometry_normal, shading_normal, normal_offset,
+                                                  geometry_offset, int(shadow_mode), pcf_radius, max_penumbra,
+                                                  int(stable_shadow_samples), classify,
+                                                  kg.resource_id_get(sd));
+    }
+#endif
+    if (shader_info_shadow_is_builtin(shadow_mode) && pcf_radius >= 0.0f) {
+      shadow_sample = eevee_shadow_node_raytrace(light, is_directional, sd.frag_co.xy,
+                                                 position, geometry_normal, shading_normal,
+                                                 normal_offset, geometry_offset,
+                                                 eevee_uniform_data_get().shadow.ray_count,
+                                                 classify, kg.resource_id_get(sd),
+                                                 min(pcf_radius, 64.0f));
+    }
+#if defined(SHADOW_CASTER_CLASSIFY)
+    ShaderInfoShadowClassification classification;
+    if (shadow_sample.x >= 0.0f) {
+      classification.visibility = shadow_sample.x;
+      classification.self_shadow = shadow_sample.y;
+      classification.cast_shadow = shadow_sample.z;
+    }
+    else {
+      classification = shader_info_shadow_classified_visibility(kg, sd, light,
+                                                                is_directional,
+                                                                lv.L,
+                                                                position,
+                                                                geometry_normal,
+                                                                shading_normal,
+                                                                normal_offset,
+                                                                geometry_offset,
+                                                                shadow_mode,
+                                                                stable_shadow_samples);
+    }
     float visibility = classification.visibility;
     self_shadow_sum += classification.self_shadow * surface_attenuation * diffuse_weight;
     cast_shadow_sum += classification.cast_shadow * surface_attenuation * diffuse_weight;
 #else
-    float visibility = shader_info_shadow_visibility(light,
-                                                     is_directional,
-                                                     lv.L,
-                                                     position,
-                                                     geometry_normal,
-                                                     shading_normal,
-                                                     normal_offset,
-                                                     geometry_offset,
-                                                     shadow_mode,
-                                                     stable_shadow_samples);
+    float visibility = shadow_sample.x >= 0.0f ? shadow_sample.x :
+                                          shader_info_shadow_visibility(kg, sd, light,
+                                                                        is_directional,
+                                                                        lv.L,
+                                                                        position,
+                                                                        geometry_normal,
+                                                                        shading_normal,
+                                                                        normal_offset,
+                                                                        geometry_offset,
+                                                                        shadow_mode,
+                                                                        stable_shadow_samples);
 #endif
-    float shadow_visibility = visibility * surface_attenuation;
-    visibility_sum += shadow_visibility * diffuse_weight;
+    visibility_sum += visibility * diffuse_weight;
     shadow_weight_sum += diffuse_weight;
   }
 }
 
 #if defined(CREATE_INFO_eevee_LightprobeRenderData)
-float4 shader_info_ambient_lighting(float3 position,
+float4 shader_info_ambient_lighting(KernelGlobals &kg, ShadingData &sd, float3 position,
                                     float3 probe_bias_normal,
                                     float3 view_vector,
                                     float3 shading_normal)
@@ -212,7 +316,7 @@ float4 shader_info_ambient_lighting(float3 position,
   eevee::LightProbeSample probe_sample = lightprobes.load(
       gl_FragCoord.xy, position, probe_bias_normal, view_vector);
   probe_sample.volume_irradiance = spherical_harmonics::clamp_energy(
-      probe_sample.volume_irradiance, uniform_buf.clamp.surface_indirect);
+      probe_sample.volume_irradiance, eevee_uniform_data_get().clamp.surface_indirect);
   float3 ambient = probe_sample.volume_irradiance.evaluate_lambert(shading_normal).rgb;
   return float4(max(ambient, float3(0.0f)), 1.0f);
 }
@@ -222,9 +326,12 @@ float4 shader_info_ambient_lighting(float3 position,
 void node_shader_info(float3 position,
                       float3 normal_in,
                       float exponent,
+                      float pcf_radius,
+                      float max_penumbra,
                       float shadow_mode,
                       float stable_shadow_samples,
                       float lightgroup_id_value,
+                      float cache_eligible, [[resource_table]] KernelGlobals &kg, ShadingData &sd,
                       out float4 diffuse_shading,
                       out float shadow,
                       out float4 ambient_lighting,
@@ -236,18 +343,23 @@ void node_shader_info(float3 position,
 #if defined(GPU_FRAGMENT_SHADER) && \
     (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER) || \
      defined(MAT_BAKE_COLOR))
-  float3 shading_normal = shader_info_resolve_normal(normal_in);
-  float3 geometry_normal = shader_info_resolve_normal(g_data.Ng);
-  float3 probe_bias_normal = shader_info_resolve_normal(g_data.Ni);
-  const ViewMatrices view = view_matrices_get();
+  float3 shading_normal = shader_info_resolve_normal(kg, sd, normal_in);
+  float3 geometry_normal = shader_info_resolve_normal(kg, sd, sd.Ng);
+  float3 probe_bias_normal = shader_info_resolve_normal(kg, sd, sd.Ni);
+  const ViewMatrices view = kg.view_matrices_get(sd);
   float3 view_vector = view.world_incident_vector(position);
   float safe_exponent = max(exponent, 1.0f);
   int lightgroup_id = int(round(lightgroup_id_value));
 
-  ObjectInfos object_infos = object_infos_get();
+  ObjectInfos object_infos = kg.object_infos_get(sd);
   uchar receiver_light_set = receiver_light_set_get(object_infos);
   float normal_offset = object_infos.shadow_terminator_normal_offset;
   float geometry_offset = object_infos.shadow_terminator_geometry_offset;
+  cache_eligible = cache_eligible > 0.5f && shader_info_shadow_is_soft_filtered(shadow_mode) &&
+                           (normal_offset == 0.0f || geometry_offset == 0.0f) &&
+                           shader_info_cache_surface(kg, sd, position, geometry_normal, shading_normal) ?
+                       1.0f :
+                       0.0f;
 
   float3 diffuse_shading_sum = float3(0.0f);
   float visibility_sum = 0.0f;
@@ -258,7 +370,7 @@ void node_shader_info(float3 position,
   float blinn_phong_sum = 0.0f;
 
   for (uint l_idx = light_cull_buf.local_lights_len; l_idx < light_cull_buf.items_count; l_idx++) {
-    shader_info_eval_light(l_idx,
+    shader_info_eval_light(kg, sd, l_idx,
                            false,
                            position,
                            shading_normal,
@@ -271,6 +383,9 @@ void node_shader_info(float3 position,
                            geometry_offset,
                            shadow_mode,
                            stable_shadow_samples,
+                           pcf_radius,
+                           max_penumbra,
+                           cache_eligible,
                            diffuse_shading_sum,
                            visibility_sum,
                            self_shadow_sum,
@@ -280,7 +395,7 @@ void node_shader_info(float3 position,
                            blinn_phong_sum);
   }
   for (uint l_idx = 0u; l_idx < light_cull_buf.visible_count; l_idx++) {
-    shader_info_eval_light(l_idx,
+    shader_info_eval_light(kg, sd, l_idx,
                            true,
                            position,
                            shading_normal,
@@ -293,6 +408,9 @@ void node_shader_info(float3 position,
                            geometry_offset,
                            shadow_mode,
                            stable_shadow_samples,
+                           pcf_radius,
+                           max_penumbra,
+                           cache_eligible,
                            diffuse_shading_sum,
                            visibility_sum,
                            self_shadow_sum,
@@ -303,7 +421,7 @@ void node_shader_info(float3 position,
   }
 
   diffuse_shading = float4(diffuse_shading_sum, 1.0f);
-  shadow = (shadow_weight_sum > 1e-8f) ? saturate(visibility_sum / shadow_weight_sum) : 0.0f;
+  shadow = (shadow_weight_sum > 1e-8f) ? saturate(visibility_sum / shadow_weight_sum) : 1.0f;
   self_shadow = (shadow_weight_sum > 1e-8f) ?
                     1.0f - saturate(self_shadow_sum / shadow_weight_sum) :
                     1.0f;
@@ -312,7 +430,7 @@ void node_shader_info(float3 position,
                     1.0f;
 
 #  if defined(CREATE_INFO_eevee_LightprobeRenderData)
-  ambient_lighting = shader_info_ambient_lighting(
+  ambient_lighting = shader_info_ambient_lighting(kg, sd,
       position, probe_bias_normal, view_vector, shading_normal);
 #  else
   ambient_lighting = float4(0.0f);
@@ -331,13 +449,48 @@ void node_shader_info(float3 position,
 #endif
 }
 
-[[node]]
+void node_shader_info(float3 position,
+                      float3 normal_in,
+                      float exponent,
+                      float shadow_mode,
+                      float stable_shadow_samples,
+                      float lightgroup_id_value,[[resource_table]] KernelGlobals &kg, ShadingData &sd,
+                      out float4 diffuse_shading,
+                      out float shadow,
+                      out float4 ambient_lighting,
+                      out float half_lambert_factor,
+                      out float blinn_phong_factor,
+                      out float self_shadow,
+                      out float cast_shadow)
+{
+  node_shader_info(position,
+                   normal_in,
+                   exponent,
+                   -1.0f,
+                   0.25f,
+                   shadow_mode,
+                   stable_shadow_samples,
+                   lightgroup_id_value,
+                   0.0f,
+                   kg,
+                   sd,
+                   diffuse_shading,
+                   shadow,
+                   ambient_lighting,
+                   half_lambert_factor,
+                   blinn_phong_factor,
+                   self_shadow,
+                   cast_shadow);
+}
+
 void node_shader_info(float3 position,
                       float3 normal_in,
                       float exponent,
                       float shadow_mode,
                       float stable_shadow_samples,
                       float lightgroup_id_value,
+                      [[resource_table]] KernelGlobals &kg,
+                      ShadingData &sd,
                       out float4 diffuse_shading,
                       out float shadow,
                       out float4 ambient_lighting,
@@ -351,7 +504,7 @@ void node_shader_info(float3 position,
                    exponent,
                    shadow_mode,
                    stable_shadow_samples,
-                   lightgroup_id_value,
+                   lightgroup_id_value,kg, sd,
                    diffuse_shading,
                    shadow,
                    ambient_lighting,

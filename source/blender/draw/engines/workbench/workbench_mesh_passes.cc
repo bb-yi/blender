@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup draw_engine
+ */
+
 #include "workbench_private.hh"
 
 namespace blender::workbench {
@@ -71,7 +75,7 @@ PassMain::Sub &MeshPass::get_subpass(eGeometryType geometry_type,
 {
   is_empty_ = false;
 
-  if (texture && texture->gpu.texture && *texture->gpu.texture) {
+  if (texture && texture->gpu.texture) {
     auto add_cb = [&] {
       PassMain::Sub *sub_pass = &get_subpass(geometry_type, eShaderType::TEXTURE);
       sub_pass = &sub_pass->sub(texture->name);
@@ -93,7 +97,7 @@ PassMain::Sub &MeshPass::get_subpass(eGeometryType geometry_type,
     };
 
     return *texture_subpass_map_.lookup_or_add_cb(
-        {*texture->gpu.texture, texture->sampler_state, geometry_type}, add_cb);
+        {texture->gpu.texture, texture->sampler_state, geometry_type}, add_cb);
   }
 
   return get_subpass(geometry_type, eShaderType::MATERIAL);
@@ -197,8 +201,13 @@ void OpaquePass::draw(Manager &manager,
     clear_fb.bind();
     GPU_framebuffer_clear_stencil(clear_fb, 0);
 
-    shadow_pass->draw(
-        manager, view, resources, **&shadow_depth_stencil_tx, !gbuffer_in_front_ps_.is_empty());
+    shadow_pass->draw(manager,
+                      view,
+                      resources,
+                      *shadow_depth_stencil_tx.gpu_texture(),
+                      *gbuffer_normal_tx.gpu_texture(),
+                      resolution,
+                      !gbuffer_in_front_ps_.is_empty());
     deferred_ps_stencil_tx = shadow_depth_stencil_tx.stencil_view();
   }
   else {

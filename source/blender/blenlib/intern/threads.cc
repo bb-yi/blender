@@ -14,10 +14,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_listbase.h"
-#include "BLI_threads.h"
-#include "BLI_time.h"
-#include "BLI_utildefines.h"
+#include "BLI_listbase.hh"
+#include "BLI_simd.hh"
+#include "BLI_threads.hh"
+#include "BLI_time.hh"
+#include "BLI_utildefines.hh"
 
 /* for checking system threads - BLI_system_thread_count */
 #ifdef WIN32
@@ -173,6 +174,9 @@ int BLI_threadpool_available_thread_index(ListBaseT<ThreadSlot> *threadbase)
 
 static void *tslot_thread_start(void *tslot_p)
 {
+  /* Match the denormal handling of the task scheduler threads, see #BLI_task_scheduler_init. */
+  SIMD_SET_FLUSH_TO_ZERO;
+
   ThreadSlot *tslot = static_cast<ThreadSlot *>(tslot_p);
   return tslot->do_thread(tslot->callerdata);
 }
@@ -258,7 +262,7 @@ int BLI_system_thread_count()
   if (threads_override_num != 0) {
     return threads_override_num;
   }
-  if (LIKELY(t != -1)) {
+  if (t != -1) [[likely]] {
     return t;
   }
 

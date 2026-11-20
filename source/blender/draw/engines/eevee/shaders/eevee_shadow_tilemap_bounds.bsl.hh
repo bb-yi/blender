@@ -12,10 +12,10 @@
 #pragma once
 
 #include "draw_shader_shared.hh"
-#include "draw_shape_lib.glsl"
 #include "eevee_light_shared.hh"
+#include "draw_shape.bsl.hh"
 #include "eevee_shadow_shared.hh"
-#include "gpu_shader_utildefines_lib.glsl"
+#include "gpu_shader_utildefines.bsl.hh"
 
 namespace eevee::shadow {
 
@@ -55,7 +55,7 @@ struct TilemapBoundsCtx {
   bool is_valid;
   uint local_id;
 
-  void eval_directional([[resource_table]] TilemapBounds &srt, uint l_index, LightData light)
+  void eval_directional(TilemapBounds &srt, uint l_index, LightData light)
   {
     if (light.tilemap_index == LIGHT_NO_SHADOW) {
       return;
@@ -105,9 +105,7 @@ struct TilemapBoundsCtx {
      * thread 0. */
   }
 
-  void eval_local([[resource_table]] TilemapBounds & /*srt*/, uint /*index*/, LightData /*light*/)
-  {
-  }
+  void eval_local(TilemapBounds & /*srt*/, uint /*index*/, LightData /*light*/) {}
 };
 
 }  // namespace eevee::shadow
@@ -153,6 +151,67 @@ void tilemap_bounds_min_max([[resource_table]] TilemapBounds &srt,
   }
 }
 
+struct TilemapBoundsStable {
+  [[storage(LIGHT_CULL_BUF_SLOT, read)]] const LightCullingData &light_cull_buf;
+  [[storage(LIGHT_BUF_SLOT, read_write)]] LightData (&light_buf)[];
+  [[storage(5, read)]] const ShadowTileMapData (&tilemaps_buf)[];
+  [[storage(7, read_write)]] ShadowTileMapClip (&tilemaps_clip_buf)[];
+};
+
+[[compute, local_size(SHADOW_CLIPMAP_GROUP_SIZE)]]
+void tilemap_bounds_stabilize_main([[resource_table]] TilemapBoundsStable &srt,
+                                   [[global_invocation_id]] const uint3 global_id)
+{
+  uint light_index = srt.light_cull_buf.local_lights_len + global_id.x;
+  if (light_index >= srt.light_cull_buf.items_count) {
+    return;
+  }
+  LightData light = srt.light_buf[light_index];
+  if (light.tilemap_index == LIGHT_NO_SHADOW) {
+    return;
+  }
+  float requested_near = orderedIntBitsToFloat(light.clip_near);
+  float requested_far = orderedIntBitsToFloat(light.clip_far);
+  /* The outermost level survives when fine levels change. All levels and LightData
+   * must share one depth origin. Dirty/reused maps start from current caster bounds. */
+  ShadowTileMapData history_map = srt.tilemaps_buf[light.tilemap_max_get()];
+  ShadowTileMapClip history = srt.tilemaps_clip_buf[history_map.clip_data_index];
+  float stored_near = history.clip_near_stored;
+  float stored_far = history.clip_far_stored;
+  float requested_span = requested_far - requested_near;
+  float stored_span = stored_far - stored_near;
+  bool request_valid = requested_span > 0.0f && requested_span < FLT_MAX * 0.5f &&
+                       max(abs(requested_near), abs(requested_far)) < FLT_MAX * 0.25f;
+  bool history_valid = stored_span > 0.0f && stored_span < FLT_MAX * 0.5f &&
+                       max(abs(stored_near), abs(stored_far)) < FLT_MAX * 0.25f;
+  if (request_valid) {
+    bool contains = history_valid && !history_map.is_dirty &&
+                    stored_near <= requested_near && stored_far >= requested_far;
+    /* Geometric hysteresis, independent of pass/sample/view counts. Repeated identical
+     * bounds cannot trigger a delayed cache invalidation during TAA or a Render Texture. */
+    if (!contains || requested_span < stored_span * 0.25f) {
+      float margin = max(requested_span * 0.125f,
+                         max(abs(requested_near), abs(requested_far)) * 1e-6f);
+      stored_near = requested_near - margin;
+      stored_far = requested_far + margin;
+    }
+  }
+  else if (!history_valid) {
+    /* No finite caster extent: keep the encoding finite until valid casters appear. */
+    stored_near = -1.0f;
+    stored_far = 1.0f;
+  }
+  light.clip_near = floatBitsToOrderedInt(stored_near);
+  light.clip_far = floatBitsToOrderedInt(stored_far);
+  srt.light_buf[light_index] = light;
+  for (int i = light.tilemap_index; i <= light.tilemap_max_get(); i++) {
+    int clip_index = srt.tilemaps_buf[i].clip_data_index;
+    srt.tilemaps_clip_buf[clip_index].clip_near = light.clip_near;
+    srt.tilemaps_clip_buf[clip_index].clip_far = light.clip_far;
+  }
+}
+
+PipelineCompute tilemap_bounds_stabilize(tilemap_bounds_stabilize_main);
 PipelineCompute tilemap_bounds_init(tilemap_bounds_clear);
 PipelineCompute tilemap_bounds(tilemap_bounds_min_max);
 
