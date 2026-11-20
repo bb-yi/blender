@@ -105,6 +105,11 @@ static void material_generated_dependency_append(const GPUMaterial *gpumat,
   const GPUMaterialGeneratedSource *generated_source = material_generated_source_find(
       gpumat, dependency_name);
   if (generated_source == nullptr) {
+    if (dependency_name == "gpu_shader_material_shader_info.glsl" &&
+        GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADOW_FILTER_METHODS))
+    {
+      r_static_dependencies.add("eevee_shadow_filter_methods.bsl.hh");
+    }
     r_static_dependencies.add(dependency_name);
     return;
   }
@@ -611,11 +616,13 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
     request(SHADOW_SHADERS, AS_SPAN(shader_list));
   }
   {
-    const eShaderType shader_list[] = {SHADOW_NODE_CACHE_ESTIMATE,
-                                       SHADOW_NODE_CACHE_RESOLVE,
-                                       SHADOW_NODE_CACHE_RESOLVE_CLASSIFIED,
-                                       SHADOW_NODE_CACHE_FILTER};
+    const eShaderType shader_list[] = {SHADOW_NODE_CACHE_RESOLVE,
+                                       SHADOW_NODE_CACHE_RESOLVE_CLASSIFIED};
     request(NODE_SHADOW_CACHE_SHADERS, AS_SPAN(shader_list));
+  }
+  {
+    const eShaderType shader_list[] = {SHADOW_MOMENT_SAT};
+    request(SHADOW_MOMENT_SHADERS, AS_SPAN(shader_list));
   }
   {
     const eShaderType shader_list[] = {SUBSURFACE_CONVOLVE, SUBSURFACE_SETUP};
@@ -989,20 +996,18 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_shadow_tilemap_bounds_init";
     case SHADOW_DEBUG:
       return "eevee_shadow_debug";
-    case SHADOW_NODE_CACHE_ESTIMATE:
-      return "eevee_shadow_node_cache_estimate";
     case SHADOW_NODE_CACHE_RESOLVE:
       return "eevee_shadow_node_cache_resolve";
     case SHADOW_NODE_CACHE_RESOLVE_CLASSIFIED:
       return "eevee_shadow_node_cache_resolve_classified";
-    case SHADOW_NODE_CACHE_FILTER:
-      return "eevee_shadow_node_cache_reconstruct";
     case SHADOW_MASK_FILTER:
       return "eevee_shadow_mask_filter";
     case SHADOW_MASK_FILTER_LAYERED:
       return "eevee_shadow_mask_filter_layered";
     case SHADOW_PAGE_ALLOCATE:
       return "eevee_shadow_page_allocate";
+    case SHADOW_MOMENT_SAT:
+      return "eevee_shadow_moment_sat";
     case SHADOW_PAGE_CLEAR:
       return "eevee_shadow_page_clear";
     case SHADOW_PAGE_DEFRAG:
@@ -2182,6 +2187,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   if (use_light_shader_texture_eval || use_npr_foreach_shadow) {
     info.compilation_constant(gpu::shader::Type::bool_t, "shadow_random", true);
   }
+  info.compilation_constant(gpu::shader::Type::bool_t, "use_node_moment_atlas",
+                            GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADOW_MOMENTS));
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADOW_FILTER_METHODS)) {
+    info.define("MAT_NODE_SHADOW_FILTER_METHODS");
+  }
 
   /* Always need to be defined. */
   info.compilation_constant(
@@ -2243,6 +2253,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                                 material_texture_reserved_slot_last(pipeline_type, geometry_type));
   }
+  slots.reserve_sampler(SHADOW_MOMENT_SAT_TEX_SLOT);
   if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD)) {
     slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
   }
@@ -2418,14 +2429,18 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
 
   if (GPU_material_has_node_shadow_cache(gpumat) &&
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR) &&
       ELEM(geometry_type, MAT_GEOM_MESH, MAT_GEOM_MESH_TESS) &&
       !GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) &&
       !GPU_material_has_depth_offset_output(gpumat) && probe_capture == MAT_PROBE_NONE)
   {
-    info.define("MAT_NODE_SHADOW_CACHE");
-    slots.reserve_slots(info);
-    info.sampler(slots.get_next_sampler(), ImageType::Float2DArray, "node_shadow_cache_tx");
+    if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR)) {
+      info.define("MAT_NODE_SHADOW_CACHE");
+      slots.reserve_slots(info);
+      info.sampler(slots.get_next_sampler(), ImageType::Float2DArray, "node_shadow_cache_tx");
+    }
+    if (ELEM(pipeline_type, MAT_PIPE_PREPASS_DEFERRED, MAT_PIPE_PREPASS_DEFERRED_VELOCITY)) {
+      info.define("MAT_NODE_SHADOW_CACHE_RECEIVER");
+    }
   }
 
   if (GPU_material_stencil_value_readable(gpumat)) {

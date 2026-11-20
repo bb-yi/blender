@@ -2965,19 +2965,22 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
     has_raycast = true;
   }
   const bool hide_from_raycast = ob->visibility_flag & OB_HIDE_RAYCAST;
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADOW_MOMENTS)) {
+    inst_.shadows.tag_moment_sat_needed();
+  }
   if (GPU_material_has_node_soft_shadow(gpumat) &&
       (pipeline_type == MAT_PIPE_DEFERRED || pipeline_type == MAT_PIPE_DEFERRED_NPR ||
        pipeline_type == MAT_PIPE_FORWARD))
   {
     inst_.shadows.tag_node_soft_shadow_needed();
-    if (GPU_material_has_node_shadow_cache(gpumat) && probe_capture == MAT_PROBE_NONE &&
-        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR) && ob->type == OB_MESH &&
-        !GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) &&
-        !GPU_material_has_depth_offset_output(gpumat) && draw_state.depth_write &&
-        draw_state.color_write && !draw_state.is_outline_shell)
-    {
-      inst_.shadows.tag_node_cache_needed(GPU_material_node_shadow_cache_quality(gpumat));
-    }
+  }
+  if (GPU_material_has_node_shadow_cache(gpumat) && probe_capture == MAT_PROBE_NONE &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR) && ob->type == OB_MESH &&
+      !GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) &&
+      !GPU_material_has_depth_offset_output(gpumat) && draw_state.depth_write &&
+      draw_state.color_write && !draw_state.is_outline_shell)
+  {
+    inst_.shadows.tag_node_cache_needed(GPU_material_node_shadow_cache_quality(gpumat));
   }
   if (GPU_material_has_shader_info_shadow_classification(gpumat) &&
       (pipeline_type == MAT_PIPE_DEFERRED || pipeline_type == MAT_PIPE_DEFERRED_NPR ||

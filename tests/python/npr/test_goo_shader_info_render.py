@@ -425,6 +425,16 @@ def assert_shadow_response(output_name):
     )
 
 
+def assert_shadow_ignores_light_falloff():
+    build_scene("Shadow", with_light=True, with_blocker=False)
+    light = bpy.data.objects["ShaderInfoPoint"].data
+    light.use_custom_distance = True
+    light.cutoff_distance = 6.0
+    pixels, width, height = render_image()
+    clear_values = [sample_world_point(pixels, width, height, x, 0.0)[0] for x in (-2.0, 0.0, 2.0)]
+    assert all(value > 0.999 for value in clear_values), clear_values
+
+
 def assert_self_and_cast_shadow_classification():
     build_self_shadow_scene("Self Shadow")
     self_pixels, self_width, self_height = render_image()
@@ -481,19 +491,21 @@ def assert_self_and_cast_shadow_classification():
     )
 
 
-def assert_no_light_black(output_name):
+def assert_no_light_value(output_name, expected=0.0):
     build_scene(output_name, with_light=False, with_blocker=False)
     pixels, width, height = render_image()
     center = sample_world_point(pixels, width, height, 0.0, 0.0)
-    assert center[0] < 0.05, f"{output_name} should be black without scene lights, got {center}"
+    assert abs(center[0] - expected) < 0.05, (
+        f"{output_name} should output {expected} without scene lights, got {center}"
+    )
 
 
-def assert_world_sun_black(output_name):
+def assert_world_sun_value(output_name, expected=0.0):
     build_scene(output_name, with_light=False, with_blocker=False, world_mode="sky")
     pixels, width, height = render_image()
     center = sample_world_point(pixels, width, height, 0.0, 0.0)
-    assert center[0] < 0.05, (
-        f"{output_name} should ignore Eevee world sun extraction, got {center}"
+    assert abs(center[0] - expected) < 0.05, (
+        f"{output_name} should output {expected} with only an Eevee world sun, got {center}"
     )
 
 
@@ -664,8 +676,8 @@ assert_light_shader_output_texture_response()
 assert_diffuse_sun_gradient_on_sphere()
 assert_diffuse_point_gradient_on_plane()
 assert_unshadowed_response("Diffuse Shading", min_value=0.2, tolerance=0.05)
-assert_no_light_black("Diffuse Shading")
-assert_world_sun_black("Diffuse Shading")
+assert_no_light_value("Diffuse Shading")
+assert_world_sun_value("Diffuse Shading")
 assert_unshadowed_response("Half-Lambert Factor", min_value=0.2, tolerance=0.05)
 assert_half_lambert_lifts_negative_ndotl()
 assert_half_lambert_gradient_on_sphere()
@@ -674,10 +686,11 @@ assert_unshadowed_response("Blinn-Phong Factor", min_value=0.05, tolerance=0.08)
 assert_blinn_phong_gradient_on_sphere()
 assert_blinn_phong_point_gradient_on_plane()
 assert_shadow_response("Shadow")
+assert_shadow_ignores_light_falloff()
 assert_self_and_cast_shadow_classification()
-assert_no_light_black("Blinn-Phong Factor")
-assert_no_light_black("Shadow")
-assert_no_light_black("Half-Lambert Factor")
-assert_world_sun_black("Blinn-Phong Factor")
-assert_world_sun_black("Shadow")
-assert_world_sun_black("Half-Lambert Factor")
+assert_no_light_value("Blinn-Phong Factor")
+assert_no_light_value("Shadow", expected=1.0)
+assert_no_light_value("Half-Lambert Factor")
+assert_world_sun_value("Blinn-Phong Factor")
+assert_world_sun_value("Shadow", expected=1.0)
+assert_world_sun_value("Half-Lambert Factor")

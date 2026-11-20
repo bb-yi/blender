@@ -1022,6 +1022,15 @@ void ShadowModule::invalidate_node_cache()
   node_cache_ref_ = node_cache_dummy_tx_.gpu_texture();
 }
 
+void ShadowModule::free_node_cache_history()
+{
+  node_cache_result_tx_.free();
+  node_cache_history_tx_.free();
+  node_cache_surface_tx_.free();
+  node_cache_surface_history_tx_.free();
+  node_cache_history_sample_ = 0;
+}
+
 void ShadowModule::render_node_cache(View &view, int2 extent)
 {
   invalidate_node_cache();
@@ -1030,10 +1039,9 @@ void ShadowModule::render_node_cache(View &view, int2 extent)
   {
     return;
   }
-  /* Scratch images are shared by all lights. Count all images in the fixed budget, including
-   * the full-resolution statistics and reconstruction inputs. Excess lights use direct PCSS. */
+  /* Account for both visibility histories and receiver signatures. Excess lights trace directly.
+   */
   constexpr int64_t budget = 256LL * 1024 * 1024;
-  const int64_t pixels = int64_t(extent.x) * extent.y;
   int lights = 0;
   for (const auto &item : inst_.lights.light_map_.items()) {
     const Light &light = item.value;
@@ -1041,23 +1049,19 @@ void ShadowModule::render_node_cache(View &view, int2 extent)
      * `used` flags for the next sync. Names distinguish object lights from extracted world suns.
      */
     if (!inst_.lights.light_names_.contains(item.key) || light.tilemap_index == LIGHT_NO_SHADOW ||
+        (light.flags & LIGHT_USE_SHADOW_JITTER) == 0 ||
         (light.color.x == 0.0f && light.color.y == 0.0f && light.color.z == 0.0f))
     {
       continue;
     }
-    const bool soft = is_sun_light(light.type) ?
-                          light.sun.shadow_angle > 0.0f :
-                      is_area_light(light.type) ?
-                          light.area.shadow_scale > 0.0f :
-                          ELEM(light.type, LIGHT_OMNI_SPHERE, LIGHT_OMNI_DISK) &&
-                              light.local.local.shadow_radius > 0.0f;
-    lights += int(soft);
+    lights++;
   }
   const int64_t cache_pixels = int64_t(extent.x + 1) * extent.y;
-  const int64_t scratch_bytes = pixels * 8 + int64_t(extent.x + 4) * (extent.y + 4) * 8;
+  const int64_t surface_bytes = int64_t(extent.x) * extent.y * 16;
   const int layers = int(std::min<int64_t>(
-      std::min(lights, 8), std::max<int64_t>(0, (budget - scratch_bytes) / (cache_pixels * 8))));
+      std::min(lights, 8), std::max<int64_t>(0, (budget - surface_bytes) / (cache_pixels * 16))));
   if (layers == 0) {
+    free_node_cache_history();
     return;
   }
   /* Optional node reconstruction must not add shader compilation to ordinary EEVEE scenes. */
@@ -1066,19 +1070,31 @@ void ShadowModule::render_node_cache(View &view, int2 extent)
   {
     return;
   }
-  node_cache_stats_tx_.ensure_2d(
-      gpu::TextureFormat::SFLOAT_32_32, extent, GPU_TEXTURE_USAGE_GENERAL);
-  node_cache_raw_tx_.ensure_2d(
-      gpu::TextureFormat::SFLOAT_16_16_16_16, extent + int2(4), GPU_TEXTURE_USAGE_GENERAL);
   node_cache_result_tx_.ensure_2d_array(gpu::TextureFormat::SFLOAT_16_16_16_16,
                                         extent + int2(1, 0),
                                         layers,
                                         GPU_TEXTURE_USAGE_GENERAL);
-  if (!node_cache_stats_tx_.is_valid() || !node_cache_raw_tx_.is_valid() ||
-      !node_cache_result_tx_.is_valid())
+  node_cache_history_tx_.ensure_2d_array(gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                         extent + int2(1, 0),
+                                         layers,
+                                         GPU_TEXTURE_USAGE_GENERAL);
+  node_cache_surface_tx_.ensure_2d(
+      gpu::TextureFormat::SFLOAT_32_32, extent, GPU_TEXTURE_USAGE_GENERAL);
+  node_cache_surface_history_tx_.ensure_2d(
+      gpu::TextureFormat::SFLOAT_32_32, extent, GPU_TEXTURE_USAGE_GENERAL);
+  if (!node_cache_result_tx_.is_valid() || !node_cache_history_tx_.is_valid() ||
+      !node_cache_surface_tx_.is_valid() || !node_cache_surface_history_tx_.is_valid())
   {
+    node_cache_history_sample_ = 0;
     return;
   }
+  const uint64_t sample = inst_.is_viewport() ? inst_.sampling.viewport_sample_index() :
+                                                inst_.sampling.sample_index();
+  const bool history_valid = sample > 1 && sample == node_cache_history_sample_ + 1 &&
+                             node_cache_history_extent_ == extent &&
+                             node_cache_history_layers_ == layers &&
+                             node_cache_history_quality_ == node_cache_quality_ &&
+                             node_cache_history_classify_ == use_caster_atlas_;
   PassSimple pass = {"Shadow.NodeCache"};
   pass.init();
   auto bind_surface = [&](PassSimple::Sub &sub, eShaderType shader, int layer) {
@@ -1086,9 +1102,12 @@ void ShadowModule::render_node_cache(View &view, int2 extent)
     sub.shader_set(program);
     sub.push_constant("cache_layer", layer);
     sub.push_constant("cache_quality", node_cache_quality_);
+    sub.push_constant("history_valid", int(history_valid));
     sub.bind_texture(0, &inst_.render_buffers.depth_tx);
     sub.bind_texture(1, &inst_.render_buffers.prepass_normal_tx);
     sub.bind_texture(3, &inst_.render_buffers.object_id_tx);
+    sub.bind_texture(12, &node_cache_history_tx_);
+    sub.bind_texture(13, &node_cache_surface_history_tx_);
     sub.bind_resources(inst_.uniform_data);
     sub.bind_resources(inst_.lights);
     sub.bind_resources(inst_.sampling);
@@ -1097,34 +1116,29 @@ void ShadowModule::render_node_cache(View &view, int2 extent)
   };
   const int3 groups(math::divide_ceil(extent, int2(8)), 1);
   for (int layer = 0; layer < layers; layer++) {
-    PassSimple::Sub &estimate = pass.sub("Estimate");
-    bind_surface(estimate, SHADOW_NODE_CACHE_ESTIMATE, layer);
-    estimate.bind_image(0, &node_cache_stats_tx_);
-    estimate.dispatch(groups);
-    estimate.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
-
-    PassSimple::Sub &resolve = pass.sub("Resolve");
+    PassSimple::Sub &resolve = pass.sub("Trace");
     bind_surface(resolve,
                  use_caster_atlas_ ? SHADOW_NODE_CACHE_RESOLVE_CLASSIFIED : SHADOW_NODE_CACHE_RESOLVE,
                  layer);
-    resolve.bind_texture(12, &node_cache_stats_tx_);
-    resolve.bind_image(0, &node_cache_raw_tx_);
-    resolve.dispatch(int3(math::divide_ceil(extent + int2(4), int2(8)), 1));
+    resolve.bind_image(0, &node_cache_result_tx_);
+    resolve.bind_image(1, &node_cache_surface_tx_);
+    resolve.dispatch(groups);
     resolve.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
-
-    PassSimple::Sub &filter = pass.sub("Reconstruct");
-    bind_surface(filter, SHADOW_NODE_CACHE_FILTER, layer);
-    filter.bind_texture(12, &node_cache_raw_tx_);
-    filter.bind_image(0, &node_cache_result_tx_);
-    filter.dispatch(groups);
-    filter.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
   }
   inst_.manager->submit(pass, view);
-  node_cache_ref_ = node_cache_result_tx_.gpu_texture();
+  Texture::swap(node_cache_result_tx_, node_cache_history_tx_);
+  Texture::swap(node_cache_surface_tx_, node_cache_surface_history_tx_);
+  node_cache_ref_ = node_cache_history_tx_.gpu_texture();
+  node_cache_history_sample_ = sample;
+  node_cache_history_extent_ = extent;
+  node_cache_history_layers_ = layers;
+  node_cache_history_quality_ = node_cache_quality_;
+  node_cache_history_classify_ = use_caster_atlas_;
 }
 
 void ShadowModule::begin_sync()
 {
+  moment_sat_requested_ = false;
   use_caster_atlas_next_ = false;
   node_soft_shadow_next_ = false;
   node_cache_needed_next_ = false;
@@ -1274,14 +1288,17 @@ void ShadowModule::sync_bake_receiver_bounds(const ResourceHandleRange &resource
 
 void ShadowModule::end_sync()
 {
+  /* Offline sync also begins a new motion-blur time step. Do not mix visibility
+   * from a previous scene state even when its receiver IDs happen to be unchanged. */
+  if (!inst_.is_viewport() || inst_.sampling.is_reset()) {
+    node_cache_history_sample_ = 0;
+  }
   node_soft_shadow_enabled_ = int(node_soft_shadow_next_);
-  node_cache_needed_ = node_cache_needed_next_;
+  node_cache_needed_ = node_cache_needed_next_ && data_.use_jitter;
   node_cache_quality_ = std::max(1, node_cache_quality_next_);
   invalidate_node_cache();
   if (!node_cache_needed_) {
-    node_cache_stats_tx_.free();
-    node_cache_raw_tx_.free();
-    node_cache_result_tx_.free();
+    free_node_cache_history();
   }
   const bool previous_use_caster_atlas = use_caster_atlas_;
   const bool requested_use_caster_atlas = use_caster_atlas_next_ && enabled_ &&
@@ -1296,6 +1313,38 @@ void ShadowModule::end_sync()
   ensure_caster_atlas();
   update_caster_atlas_ref();
   data_.use_caster_atlas = bool32_t(use_caster_atlas_);
+
+  /* Derive filter data only after pages have received their current shadow depths. A new
+   * allocation must repopulate even pages that would otherwise survive from a previous view. */
+  moment_sat_enabled_ = moment_sat_requested_ && enabled_ && !inst_.is_baking() &&
+                        std::getenv("BLENDER_NPR_SHADOW_DISABLE_SAT") == nullptr &&
+                        (inst_.shaders.static_shaders_wait_ready(SHADOW_MOMENT_SHADERS) &
+                         SHADOW_MOMENT_SHADERS);
+  constexpr auto moment_format = gpu::TextureFormat::SFLOAT_32_32_32_32;
+  constexpr auto moment_usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
+  if (moment_sat_enabled_) {
+    const int3 size = atlas_tx_.size();
+    constexpr int cell_size = SHADOW_PAGE_CLEAR_GROUP_SIZE / 4;
+    const bool created = moment_sat_tx_.ensure_2d_array(
+        moment_format, math::max(size.xy() / cell_size, int2(1)), max_ii(size.z * 2, 1), moment_usage);
+    moment_sat_enabled_ = moment_sat_tx_.is_valid() && size.x >= cell_size;
+    do_full_update_ |= created && moment_sat_enabled_;
+  }
+  moment_sat_ps_.init();
+  if (moment_sat_enabled_) {
+    moment_sat_ps_.shader_set(inst_.shaders.static_shader_get(SHADOW_MOMENT_SAT));
+    moment_sat_ps_.bind_texture("depth_tx", &atlas_tx_);
+    moment_sat_ps_.bind_texture("caster_tx", caster_atlas_ref());
+    moment_sat_ps_.push_constant("has_casters", use_caster_atlas_);
+    moment_sat_ps_.bind_image("sat_img", &moment_sat_tx_);
+    moment_sat_ps_.bind_ssbo("dst_coord_buf", &dst_coord_buf_);
+    moment_sat_ps_.barrier(GPU_BARRIER_COMMAND | GPU_BARRIER_SHADER_STORAGE | GPU_BARRIER_TEXTURE_FETCH);
+    moment_sat_ps_.dispatch(clear_dispatch_buf_);
+    moment_sat_ps_.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+  }
+  else {
+    moment_sat_tx_.ensure_2d_array(moment_format, int2(1), 1, moment_usage);
+  }
 
   const DirectionalFocusData old_focus = directional_focus_data_ensure(*this);
   bool needs_scaled_directional_focus = false;
@@ -2110,6 +2159,9 @@ void ShadowModule::render(View &view, int2 extent)
         }
 
         GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+        if (moment_sat_enabled_) {
+          inst_.manager->submit(moment_sat_ps_, view);
+        }
       }
     }
     GPU_debug_group_end();

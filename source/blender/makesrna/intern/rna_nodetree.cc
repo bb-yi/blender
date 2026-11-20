@@ -11143,18 +11143,35 @@ static void def_sh_basis_transform(BlenderRNA * /*brna*/, StructRNA *srna)
 static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem shadow_mode_items[] = {
-      {SHD_SHADER_INFO_SHADOW_SOFT_FILTERED,
-       "SOFT_FILTERED",
-       0,
-       "Soft Filtered",
-       "Use fixed blocker search and contact-hardening filtering for sun and point lights; "
-       "other lights use spatial filtering"},
       {SHD_SHADER_INFO_SHADOW_TEMPORAL,
        "TEMPORAL",
        0,
        "Built-in",
-       "Use Eevee's built-in shadow evaluation. This is the default behavior and best matches "
-       "normal material shading"},
+       "Use Eevee's built-in shadow evaluation. PCF Radius -1 inherits the light's Filter, "
+       "0 disables PCF, and positive values override the radius in shadow-map texels"},
+      {SHD_SHADER_INFO_SHADOW_SOFT_FILTERED,
+       "SOFT_FILTERED",
+       0,
+       "Soft Filtered",
+       "Use native Eevee shadow ray tracing with the light's Filter and the node's Shadow Samples; "
+       "this is filtered sampling, not blocker-search PCSS"},
+      {SHD_SHADER_INFO_SHADOW_PCSS,
+       "PCSS",
+       0,
+       "PCSS",
+       "Search for blockers to estimate a contact-hardening penumbra. PCF Radius sets the "
+       "upper limit of the automatic penumbra radius in shadow-map texels"},
+      RNA_ENUM_ITEM_SEPR,
+      {SHD_SHADER_INFO_SHADOW_HARD, "HARD", 0, "Hard Shadow Map", "One virtual shadow-map depth comparison"},
+      {SHD_SHADER_INFO_SHADOW_PCF,
+       "PCF",
+       0,
+       "PCF (Fixed Radius)",
+       "Filter shadow-map depth comparisons with a fixed radius"},
+      {SHD_SHADER_INFO_SHADOW_VSM, "VSM", 0, "Variance (VSM)", "Estimate visibility using two filtered depth moments"},
+      {SHD_SHADER_INFO_SHADOW_VSSM, "VSSM", 0, "Variance Soft (VSSM)", "Estimate blocker depth and visibility using depth moments"},
+      {SHD_SHADER_INFO_SHADOW_MSM, "MSM", 0, "Four Moments (MSM)", "Estimate visibility using four filtered depth moments"},
+      {SHD_SHADER_INFO_SHADOW_CHS, "CHS", 0, "Contact Hardening (CHS)", "Contact-hardening depth comparisons with world-space extent and multiscale shadow tiles"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -11171,9 +11188,8 @@ static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_int_sdna(prop, nullptr, "custom2");
   RNA_def_property_range(prop, 1, 32);
   RNA_def_property_ui_range(prop, 1, 32, 1, 3);
-  RNA_def_property_ui_text(prop,
-                           "Shadow Samples",
-                           "Quality of fixed blocker-search and filter sampling in Soft Filtered mode");
+  RNA_def_property_ui_text(
+      prop, "Shadow Samples", "Shadow rays or filter samples per shading evaluation");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 
   RNA_def_struct_sdna_from(srna, "NodeShaderShaderInfo", "storage");

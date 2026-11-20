@@ -970,6 +970,8 @@ if(WITH_GPU_RENDER_TESTS)
     eevee_native_light_accumulation_animation
     eevee_probe_shader_compilation
     eevee_deferred_refraction_light_passes
+    shader_info_pcf_radius
+    shader_info_shadow_methods
     render_texture_updates
     render_texture_performance
     render_texture_layers

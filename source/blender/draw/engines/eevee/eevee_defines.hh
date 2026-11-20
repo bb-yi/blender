@@ -305,6 +305,7 @@
  * present. The textures are shared; only sampler declarations and binding slots are distinct. */
 #define NPR_SHADOW_OBJECT_ID_TEX_SLOT 45
 #define NPR_SHADOW_NORMAL_TEX_SLOT 46
+#define SHADOW_MOMENT_SAT_TEX_SLOT 47
 
 /* Images. */
 #define RBUFS_COLOR_SLOT 0

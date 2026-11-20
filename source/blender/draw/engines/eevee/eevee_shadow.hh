@@ -285,6 +285,10 @@ class ShadowModule {
   static constexpr gpu::TextureFormat atlas_type = gpu::TextureFormat::UINT_32;
   /** Atlas containing all physical pages. */
   Texture atlas_tx_ = {"shadow_atlas_tx_"};
+  Texture moment_sat_tx_ = {"Shadow.MomentSAT"};
+  PassSimple moment_sat_ps_ = {"Shadow.MomentSAT.Update"};
+  bool moment_sat_requested_ = false;
+  bool moment_sat_enabled_ = false;
   /** Optional atlas containing packed shadow caster identifiers for Shader Info classification. */
   Texture caster_atlas_tx_ = {"shadow_caster_atlas_tx_"};
   Texture caster_atlas_dummy_tx_ = {"shadow_caster_atlas_dummy_tx_"};
@@ -297,9 +301,15 @@ class ShadowModule {
   bool node_cache_needed_ = false;
   int node_cache_quality_next_ = 0;
   int node_cache_quality_ = 8;
-  Texture node_cache_stats_tx_ = {"Shadow.NodeCache.Statistics"};
-  Texture node_cache_raw_tx_ = {"Shadow.NodeCache.Raw"};
   Texture node_cache_result_tx_ = {"Shadow.NodeCache.Result"};
+  Texture node_cache_history_tx_ = {"Shadow.NodeCache.History"};
+  Texture node_cache_surface_tx_ = {"Shadow.NodeCache.Surface"};
+  Texture node_cache_surface_history_tx_ = {"Shadow.NodeCache.SurfaceHistory"};
+  uint64_t node_cache_history_sample_ = 0;
+  int node_cache_history_quality_ = 0;
+  int2 node_cache_history_extent_ = int2(0);
+  int node_cache_history_layers_ = 0;
+  bool node_cache_history_classify_ = false;
   Texture node_cache_dummy_tx_ = {"Shadow.NodeCache.Dummy"};
   gpu::Texture *node_cache_ref_ = nullptr;
   bool caster_atlas_allocation_failed_ = false;
@@ -430,6 +440,10 @@ class ShadowModule {
   void render(View &view, int2 extent);
 
   void render_node_cache(View &view, int2 extent);
+  void tag_moment_sat_needed()
+  {
+    moment_sat_requested_ = true;
+  }
   void invalidate_node_cache();
   void tag_node_cache_needed(int quality)
   {
@@ -490,6 +504,7 @@ class ShadowModule {
     pass.bind_texture(SHADOW_ATLAS_TEX_SLOT, &atlas_tx_);
     pass.bind_texture(SHADOW_TILEMAPS_TEX_SLOT, &tilemap_pool.tilemap_tx);
     pass.bind_texture(SHADOW_CASTER_ATLAS_TEX_SLOT, &caster_atlas_ref_);
+    pass.bind_texture(SHADOW_MOMENT_SAT_TEX_SLOT, &moment_sat_tx_);
   }
 
   const ShadowSceneData &get_data()
@@ -515,6 +530,7 @@ class ShadowModule {
 
  private:
   void remove_unused();
+  void free_node_cache_history();
   bool shadow_update_finished(int loop_count);
 
   /** Compute approximate punctual shadow pixel world space radius, 1 unit away of the light. */

@@ -169961,6 +169961,51 @@ msgstr "仅自身"
 msgid "Shadow Quality"
 msgstr "阴影质量"
 
+msgid "PCF Radius"
+msgstr "PCF 半径"
+
+msgid "Filter radius in shadow-map texels. For PCSS and VSSM this limits the automatic penumbra radius. Negative uses the light filter or automatic contact hardening; zero disables the material filter"
+msgstr "以阴影贴图纹素计的过滤半径。在 PCSS 和 VSSM 中限制自动半影的最大半径。负值沿用灯光过滤或自动接触硬化，零关闭材质过滤"
+
+msgid "Use Eevee's built-in shadow evaluation. PCF Radius -1 inherits the light's Filter, 0 disables PCF, and positive values override the radius in shadow-map texels"
+msgstr "使用 EEVEE 原生阴影。PCF 半径为 -1 时沿用灯光的过滤设置，为 0 时关闭 PCF，正值以阴影贴图纹素为单位覆盖半径"
+
+msgid "Use native Eevee shadow ray tracing with the light's Filter and the node's Shadow Samples; this is filtered sampling, not blocker-search PCSS"
+msgstr "使用 EEVEE 原生阴影光线追踪，沿用灯光过滤和节点阴影采样数；这是过滤采样，不是搜索遮挡物的 PCSS"
+
+msgid "Search for blockers to estimate a contact-hardening penumbra. PCF Radius sets the upper limit of the automatic penumbra radius in shadow-map texels"
+msgstr "搜索遮挡物以估算接触硬化半影。PCF 半径限定自动半影的最大半径，单位为阴影贴图纹素"
+
+msgid "Hard Shadow Map"
+msgstr "硬阴影贴图"
+
+msgid "PCF (Fixed Radius)"
+msgstr "PCF（固定半径）"
+
+msgid "Filter shadow-map depth comparisons with a fixed radius"
+msgstr "以固定半径过滤阴影贴图的深度比较结果"
+
+msgid "Variance (VSM)"
+msgstr "方差阴影 (VSM)"
+
+msgid "Variance Soft (VSSM)"
+msgstr "方差软阴影 (VSSM)"
+
+msgid "Four Moments (MSM)"
+msgstr "四矩阴影 (MSM)"
+
+msgid "Contact Hardening (CHS)"
+msgstr "接触硬化阴影 (CHS)"
+
+msgid "Max Penumbra"
+msgstr "最大半影半径"
+
+msgid "Maximum contact-hardening filter radius in world units"
+msgstr "以世界单位计的接触硬化过滤半径上限"
+
+msgid "Shadow rays or filter samples per shading evaluation"
+msgstr "每次着色求值使用的阴影射线或过滤采样数"
+
 msgid "Shadow Samples"
 msgstr "阴影采样数"
 
