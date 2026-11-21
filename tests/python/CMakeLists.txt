@@ -1016,6 +1016,9 @@ if(WITH_GPU_RENDER_TESTS)
           list(REMOVE_ITEM test_blender_args --background)
           list(APPEND test_blender_args --no-window-focus --no-window-frame --window-geometry 0 0 700 550)
         endif()
+        if(test STREQUAL "eevee_native_light_accumulation_animation" AND backend STREQUAL "vulkan")
+          list(APPEND test_blender_args --debug-gpu --debug-gpu-backend-no-fallback)
+        endif()
         add_blender_test_impl(${test_name} "${test_environment}" "${TEST_BLENDER_EXE}"
           ${test_blender_args}
           "${TEST_BLENDER_EXE_PARAMS_NO_THUMB}"
@@ -1024,6 +1027,12 @@ if(WITH_GPU_RENDER_TESTS)
         )
         if(test STREQUAL "instance_viewport_cache")
           set_tests_properties(${test_name} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
+        endif()
+        if(test STREQUAL "eevee_native_light_accumulation_animation" AND backend STREQUAL "vulkan")
+          # The Vulkan debug check can log a missing binding even when the render completes.
+          set_tests_properties(${test_name} PROPERTIES
+            FAIL_REGULAR_EXPRESSION "Missing Texture bind.*light_shader_tx"
+          )
         endif()
       endforeach()
     endif()
