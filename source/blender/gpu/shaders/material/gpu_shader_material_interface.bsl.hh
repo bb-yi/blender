@@ -437,6 +437,8 @@ void node_light_accumulation_impl([[resource_table]] KernelGlobals & /*kg*/,
                                   float3 /*transmission_light*/,
                                   float3 /*transmission_color*/,
                                   float /*weight*/,
+                                  int /*active_lobes*/,
+                                  int /*explicit_color_lobes*/,
                                   Closure & /*result*/)
 {
 }
@@ -444,6 +446,7 @@ void node_light_accumulation_impl([[resource_table]] KernelGlobals & /*kg*/,
 /* Light Info Node. */
 
 void node_light_info_impl([[resource_table]] KernelGlobals & /*kg*/,
+                          const ShadingData & /*sd*/,
                           const int /*light_index*/,
                           float4 & /*color*/,
                           float & /*power*/,

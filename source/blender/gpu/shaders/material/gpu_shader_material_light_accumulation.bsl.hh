@@ -15,6 +15,8 @@ void node_light_accumulation(const float light_index,
                              float4 transmission_light,
                              float4 transmission_color,
                              float weight,
+                             int active_lobes,
+                             int explicit_color_lobes,
                              [[resource_table]] KernelGlobals &kg,
                              ShadingData &sd,
                              Closure &result)
@@ -36,5 +38,7 @@ void node_light_accumulation(const float light_index,
                                transmission_light.rgb,
                                transmission_color.rgb,
                                weight,
+                               active_lobes,
+                               explicit_color_lobes,
                                result);
 }

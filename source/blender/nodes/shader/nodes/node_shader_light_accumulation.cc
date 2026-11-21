@@ -8,6 +8,9 @@
 
 #include "node_shader_util.hh"
 
+#include "BLI_set.hh"
+#include "BLI_vector.hh"
+
 namespace blender {
 
 namespace nodes::node_shader_light_accumulation_cc {
@@ -43,6 +46,30 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Shader>("Shader"_ustr);
 }
 
+static bool uses_light_info_color(const bNodeSocket &light_input)
+{
+  Vector<const bNodeSocket *> inputs{&light_input};
+  Set<const bNodeSocket *> visited;
+  while (!inputs.is_empty()) {
+    const bNodeSocket &input = *inputs.pop_last();
+    if (!visited.add(&input)) {
+      continue;
+    }
+    for (const bNodeSocket *output : input.logically_linked_sockets()) {
+      const bNode &node = output->owner_node();
+      if (node.type_legacy == SH_NODE_LIGHT_INFO && STREQ(output->identifier, "Color")) {
+        return true;
+      }
+      for (const bNodeSocket *upstream : node.input_sockets()) {
+        if (upstream->is_available()) {
+          inputs.append(upstream);
+        }
+      }
+    }
+  }
+  return false;
+}
+
 static int node_shader_gpu_light_accumulation(GPUMaterial *mat,
                                               bNode *node,
                                               bNodeExecData * /*execdata*/,
@@ -57,8 +84,27 @@ static int node_shader_gpu_light_accumulation(GPUMaterial *mat,
 
   GPU_material_flag_set(mat, GPU_MATFLAG_LIGHTING);
 
-  return GPU_stack_link(
-      mat, node, "node_light_accumulation", in, out, GPU_kernel_globals(), GPU_shading_data());
+  int active_lobes = 0;
+  int explicit_color_lobes = 0;
+  for (const int lobe : IndexRange(3)) {
+    const int socket_index = 1 + 2 * lobe;
+    if (in[socket_index].hasinput) {
+      active_lobes |= 1 << lobe;
+      /* A graph that reads the evaluated light color already controls how it is applied. */
+      if (uses_light_info_color(*node->input_sockets()[socket_index])) {
+        explicit_color_lobes |= 1 << lobe;
+      }
+    }
+  }
+  return GPU_stack_link(mat,
+                        node,
+                        "node_light_accumulation",
+                        in,
+                        out,
+                        GPU_constant(&active_lobes),
+                        GPU_constant(&explicit_color_lobes),
+                        GPU_kernel_globals(),
+                        GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_light_accumulation_cc

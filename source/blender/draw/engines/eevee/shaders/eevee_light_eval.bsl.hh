@@ -435,22 +435,8 @@ template<bool is_transmission> struct EvalCtx {
     if (!is_transmission) [[static_branch]] {
       if (srt.constants.use_light_shader_texture_eval) [[static_branch]] {
         [[resource_table]] const LightShaderEvalData &light_shader_data = srt.light_shader_data;
-        int light_shader_index = light_shader_data.light_shader_index_buf[l_idx];
-        int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
-        if (light_shader_uniform_index >= 0) {
-          float4 light_shader =
-              light_shader_data.light_shader_uniform_buf[light_shader_uniform_index];
-          light_shader_eval_apply(light,
-                                  lv,
-                                  is_directional,
-                                  light_shader,
-                                  attenuation,
-                                  light_shader_no_distance_falloff);
-        }
-        else if (light_shader_index >= 0) {
-          float4 light_shader = texelFetch(light_shader_data.light_shader_tx,
-                                           int3(int2(texel), light_shader_index),
-                                           0);
+        float4 light_shader;
+        if (light_shader_data.fetch(int(l_idx), int2(texel), light_shader)) {
           light_shader_eval_apply(light,
                                   lv,
                                   is_directional,

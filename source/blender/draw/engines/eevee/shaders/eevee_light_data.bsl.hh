@@ -23,6 +23,20 @@ struct LightShaderEvalData {
   [[sampler(LIGHT_SHADER_TEX_SLOT)]] sampler2DArray light_shader_tx;
   [[storage(LIGHT_SHADER_INDEX_BUF_SLOT, read)]] const int (&light_shader_index_buf)[];
   [[storage(LIGHT_SHADER_UNIFORM_BUF_SLOT, read)]] const float4 (&light_shader_uniform_buf)[];
+
+  bool fetch(int light_index, int2 texel, float4 &result) const
+  {
+    int index = light_shader_index_buf[light_index];
+    if (index < -1) {
+      result = light_shader_uniform_buf[-index - 2];
+      return true;
+    }
+    if (index >= 0) {
+      result = texelFetch(light_shader_tx, int3(texel, index), 0);
+      return true;
+    }
+    return false;
+  }
 };
 
 struct LightShaderSurfelEvalData {

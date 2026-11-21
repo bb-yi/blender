@@ -39,7 +39,8 @@ static int node_shader_gpu_light_info(GPUMaterial *mat,
     return false;
   }
 
-  return GPU_stack_link(mat, node, "node_light_info", in, out, GPU_kernel_globals());
+  return GPU_stack_link(
+      mat, node, "node_light_info", in, out, GPU_kernel_globals(), GPU_shading_data());
 }
 
 }  // namespace nodes::node_shader_light_info_cc

@@ -9,9 +9,10 @@
 [[node]]
 void node_light_info(const float light_index,
                      [[resource_table]] KernelGlobals &kg,
+                     const ShadingData &sd,
                      float4 &color,
                      float &power,
                      float3 &position)
 {
-  node_light_info_impl(kg, int(light_index), color, power, position);
+  node_light_info_impl(kg, sd, int(light_index), color, power, position);
 }

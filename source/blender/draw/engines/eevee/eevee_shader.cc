@@ -1611,6 +1611,7 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           pipeline_info_name = "eevee_surf_bake_color_infos_";
           info.name_ += "_bake_color";
           info.compilation_constant(Type::bool_t, "use_velocity", false);
+          info.compilation_constant(Type::bool_t, "use_lighting_nodes", use_lighting_nodes);
           info.fragment_source("eevee_surf_bake_color.bsl.hh");
           info.fragment_function("eevee_surf_bake_color");
           break;

@@ -16,6 +16,11 @@ float4 bake_lighting_eval(KernelGlobals &kg, ShadingData &sd)
   float3 radiance, transmittance;
   eevee::forward_lighting_eval(kg, sd, kg.view_matrices_get(sd), kg.resource_id_get(sd),
                                sd.thickness, sd.frag_co.xy, radiance, transmittance);
+  if (kg.pipe.use_lighting_nodes) [[static_branch]] {
+    radiance += sd.light_accum.diffuse_light;
+    radiance += sd.light_accum.glossy_light;
+    radiance += sd.light_accum.transmission_light;
+  }
   return float4(radiance, saturate(1.0f - average(transmittance)));
 }
 

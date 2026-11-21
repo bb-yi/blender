@@ -224,6 +224,9 @@ struct KernelGlobals {
 
   [[resource_table]] [[condition(use_lighting_nodes)]] eevee::LightRenderData lrd;
   [[resource_table]] [[condition(use_lighting_nodes)]] eevee::ShadowRenderData srd;
+  [[resource_table]] eevee::LightEvalConstants light_eval_constants;
+  [[resource_table]] [[condition(use_lighting_nodes && use_light_shader_texture_eval)]]
+  eevee::LightShaderEvalData light_shader;
 
   uint resource_id_get(const ShadingData &sd)
   {
@@ -1604,8 +1607,27 @@ bool light_iter_should_skip(KernelGlobals &kg, eevee::light::VisibleLightIterato
   } \
   }
 
-void node_light_info_impl(
-    KernelGlobals &kg, const int light_index, float4 &color, float &power, float3 &position)
+bool native_light_shader_fetch([[resource_table]] KernelGlobals &kg,
+                               const ShadingData &sd,
+                               int light_index,
+                               float4 &result)
+{
+#if defined(GPU_FRAGMENT_SHADER) || defined(GLSL_CPP_STUBS)
+  if (kg.pipe.use_lighting_nodes && kg.light_eval_constants.use_light_shader_texture_eval)
+      [[static_branch]]
+  {
+    return kg.light_shader.fetch(light_index, int2(sd.frag_co.xy), result);
+  }
+#endif
+  return false;
+}
+
+void node_light_info_impl(KernelGlobals &kg,
+                          const ShadingData &sd,
+                          const int light_index,
+                          float4 &color,
+                          float &power,
+                          float3 &position)
 {
   if (kg.pipe.use_lighting_nodes) [[static_branch]] {
     const eevee::LightRenderData &lrd = kg.lrd;
@@ -1613,7 +1635,10 @@ void node_light_info_impl(
 
     LightData light = lrd.light_buf[light_index];
 
-    color = float4(light.color, 1.0f);
+    float4 evaluated;
+    color = native_light_shader_fetch(kg, sd, light_index, evaluated) ?
+                float4(evaluated.rgb, 1.0f) :
+                float4(light.color, 1.0f);
     /* Pre-divide power by PI,
      * so users get a closer match to physically correct energy by default. */
     power = light.point_power * M_1_PI;
@@ -1678,6 +1703,12 @@ void node_light_evaluation_impl(KernelGlobals &kg,
     /* Remove the base power (exposed in Light Info).
      * The goal is to get a somewhat normalized factor. */
     factor /= (light.point_power * M_1_PI);
+
+    float4 evaluated;
+    if (!is_directional && native_light_shader_fetch(kg, sd, light_index, evaluated)) {
+      /* The light shader defines distance falloff. Keep the LTC angular response. */
+      factor *= safe_rcp(light_point_light(light, is_directional, lv));
+    }
   }
 }
 
@@ -1799,14 +1830,24 @@ void node_light_accumulation_impl(KernelGlobals &kg,
                                   float3 transmission_light,
                                   float3 transmission_color,
                                   float weight,
+                                  int active_lobes,
+                                  int explicit_color_lobes,
                                   Closure &result)
 {
 #if defined(GPU_FRAGMENT_SHADER) || defined(GLSL_CPP_STUBS)
   if (kg.pipe.use_lighting_nodes) [[static_branch]] {
     LightData light = kg.lrd.light_buf[light_index];
-    float3 diffuse_color_weight = diffuse_color * weight;
-    float3 glossy_color_weight = glossy_color * weight;
-    float3 transmission_color_weight = transmission_color * weight;
+    float3 diffuse_color_weight = (active_lobes & 1) != 0 ? diffuse_color * weight : float3(0.0f);
+    float3 glossy_color_weight = (active_lobes & 2) != 0 ? glossy_color * weight : float3(0.0f);
+    float3 transmission_color_weight = (active_lobes & 4) != 0 ? transmission_color * weight :
+                                                               float3(0.0f);
+    float4 evaluated;
+    if (native_light_shader_fetch(kg, sd, light_index, evaluated)) {
+      diffuse_light *= evaluated.a * ((explicit_color_lobes & 1) != 0 ? float3(1.0f) : evaluated.rgb);
+      glossy_light *= evaluated.a * ((explicit_color_lobes & 2) != 0 ? float3(1.0f) : evaluated.rgb);
+      transmission_light *= evaluated.a *
+                            ((explicit_color_lobes & 4) != 0 ? float3(1.0f) : evaluated.rgb);
+    }
     sd.light_accum.diffuse_light += diffuse_color_weight * diffuse_light *
                                     light.power_factor[LIGHT_DIFFUSE];
     sd.light_accum.glossy_light += glossy_color_weight * glossy_light *
