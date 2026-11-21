@@ -2248,6 +2248,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
     reserve_deferred_npr_pass_samplers(slots);
+    const char *direct_radiance_info = probe_capture == MAT_PROBE_NONE ?
+                                          "eevee_surf_npr_direct_radiance" :
+                                          "eevee_surf_npr_probe_direct_radiance";
+    add_create_info_and_reserve(info, slots, direct_radiance_info);
   }
   else {
     slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,

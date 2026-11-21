@@ -185,6 +185,7 @@ void npr_input_impl(TextureHandle &combined_color,
                     TextureHandle &specular_color,
                     TextureHandle &specular_direct,
                     TextureHandle &specular_indirect,
+                    TextureHandle &emission,
                     TextureHandle &position,
                     TextureHandle &normal)
 {
@@ -197,6 +198,7 @@ void npr_input_impl(TextureHandle &combined_color,
   specular_indirect = TextureHandle{TEX_HANDLE_WORLD_SPECULAR_INDIRECT, 0};
   position = TextureHandle{TEX_HANDLE_WORLD_POSITION, 0};
   normal = TextureHandle{TEX_HANDLE_WORLD_NORMAL, 0};
+  emission = TEXTURE_HANDLE_DEFAULT;
 }
 
 void npr_refraction_impl(TextureHandle &combined_color, TextureHandle &position)

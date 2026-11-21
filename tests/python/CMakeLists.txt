@@ -970,6 +970,7 @@ if(WITH_GPU_RENDER_TESTS)
     eevee_native_light_accumulation_animation
     eevee_probe_shader_compilation
     eevee_deferred_refraction_light_passes
+    npr_input_emission
     instance_motion_history
     instance_pointcloud_alpha
     shader_info_pcf_radius

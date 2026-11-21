@@ -2045,9 +2045,7 @@ void DeferredLayer::begin_sync()
   this->gbuffer_pass_sync(inst_);
   this->npr_pass_sync(inst_, [&]() {
     npr_ps_.bind_texture(NPR_RADIANCE_TEX_SLOT, &npr_radiance_input_tx_);
-    npr_ps_.bind_texture(DIRECT_RADIANCE_NPR_TX_SLOT_1 + 0, &direct_radiance_npr_views_[0]);
-    npr_ps_.bind_texture(DIRECT_RADIANCE_NPR_TX_SLOT_1 + 1, &direct_radiance_npr_views_[1]);
-    npr_ps_.bind_texture(DIRECT_RADIANCE_NPR_TX_SLOT_1 + 2, &direct_radiance_npr_views_[2]);
+    npr_ps_.bind_texture(DIRECT_RADIANCE_NPR_TX_SLOT_1, &direct_radiance_txs_);
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 0, &indirect_result_.closures[0]);
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 1, &indirect_result_.closures[1]);
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 2, &indirect_result_.closures[2]);
@@ -2583,10 +2581,6 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   /* Only three layers of closures are ever written,. */
   direct_radiance_txs_.acquire_2d_array(
       extent, max_ii(3, closure_count_), gpu::TextureFormat::DEFERRED_RADIANCE_FORMAT, usage_rw);
-  direct_radiance_txs_.ensure_layer_views();
-  for (int bin = 0; bin < 3; bin++) {
-    direct_radiance_npr_views_[bin] = direct_radiance_txs_.layer_view(bin);
-  }
 
   /* Ray tracing can rewrite shared feedback before the combine and NPR passes. Preserve the
    * previous layer while it still contains that layer's visible radiance. */
@@ -2963,6 +2957,9 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
 {
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST)) {
     has_raycast = true;
+  }
+  if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+    needs_npr_emission |= GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_EMISSION);
   }
   const bool hide_from_raycast = ob->visibility_flag & OB_HIDE_RAYCAST;
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADOW_MOMENTS)) {

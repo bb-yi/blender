@@ -13,10 +13,11 @@
 #include "eevee_renderpass_lib.glsl"
 #include "gpu_shader_shared_exponent.bsl.hh"
 
-float3 load_radiance_direct(int2 texel, uchar i)
+float3 load_radiance_direct(int2 texel, uchar bin)
 {
+#ifdef MAT_PROBE_CAPTURE
   uint data = 0u;
-  switch (i) {
+  switch (bin) {
     case 0:
       data = texelFetch(direct_radiance_1_tx, texel, 0).r;
       break;
@@ -29,6 +30,9 @@ float3 load_radiance_direct(int2 texel, uchar i)
     default:
       break;
   }
+#else
+  uint data = texelFetch(direct_radiance_txs, int3(texel, bin), 0).r;
+#endif
   return rgb9e5_decode(data);
 }
 

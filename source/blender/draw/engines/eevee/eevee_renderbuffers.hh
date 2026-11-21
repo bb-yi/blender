@@ -52,6 +52,7 @@ class RenderBuffers {
   Instance &inst_;
 
   int2 extent_;
+  int emission_pass_id_ = -1;
 
  public:
   RenderBuffers(Instance &inst, RenderBuffersInfoData &data) : data(data), inst_(inst) {};

@@ -49,7 +49,8 @@ void RenderBuffers::init()
   data.specular_color_id = pass_index_get(EEVEE_RENDER_PASS_SPECULAR_COLOR,
                                           EEVEE_RENDER_PASS_SPECULAR_LIGHT);
   data.volume_light_id = pass_index_get(EEVEE_RENDER_PASS_VOLUME_LIGHT);
-  data.emission_id = pass_index_get(EEVEE_RENDER_PASS_EMIT);
+  emission_pass_id_ = pass_index_get(EEVEE_RENDER_PASS_EMIT);
+  data.emission_id = emission_pass_id_;
   data.environment_id = pass_index_get(EEVEE_RENDER_PASS_ENVIRONMENT);
   data.shadow_id = pass_index_get(EEVEE_RENDER_PASS_SHADOW);
   data.ambient_occlusion_id = pass_index_get(EEVEE_RENDER_PASS_AO);
@@ -133,6 +134,11 @@ int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
       marker = color_len;
       color_len += 2;
     }
+  }
+
+  data.emission_id = emission_pass_id_;
+  if (data.emission_id < 0 && inst_.pipelines.needs_npr_emission) {
+    data.emission_id = color_len++;
   }
 
   created += rp_color_tx.ensure_2d_array(color_format,

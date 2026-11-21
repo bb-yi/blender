@@ -60,6 +60,7 @@ void npr_input_impl(TextureHandle &combined_color,
                     TextureHandle &specular_color,
                     TextureHandle &specular_direct,
                     TextureHandle &specular_indirect,
+                    TextureHandle &emission,
                     TextureHandle &position,
                     TextureHandle &normal);
 void npr_refraction_impl(TextureHandle &combined_color, TextureHandle &position);

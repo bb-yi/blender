@@ -662,8 +662,6 @@ class DeferredLayer : DeferredLayerBase {
    * NOTE: Not to be confused with the render passes.
    */
   TextureFromPool direct_radiance_txs_ = {"direct_radiance"};
-  /* NPR uses the three stable closure-bin slots, including potentially empty bins. */
-  gpu::Texture *direct_radiance_npr_views_[3] = {};
   /* Used when there is no indirect radiance buffer. */
   Texture dummy_black = {"dummy_black"};
   /* Reference to ray-tracing results. */
@@ -1239,6 +1237,7 @@ class PipelineModule {
   PipelineInfoData &data;
 
   bool has_raycast = false;
+  bool needs_npr_emission = false;
 
   PipelineModule(Instance &inst, PipelineInfoData &data)
       : inst_(inst),
@@ -1269,6 +1268,7 @@ class PipelineModule {
     capture.sync();
 
     has_raycast = false;
+    needs_npr_emission = false;
   }
 
   void end_sync()

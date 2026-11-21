@@ -38,6 +38,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_surf_npr)
 #define TEX_HANDLE_NORMAL 18u
 #define TEX_HANDLE_BACK_COMBINED_COLOR 19u
 #define TEX_HANDLE_BACK_POSITION 20u
+#define TEX_HANDLE_EMISSION 21u
 
 Closure nodetree_surface(KernelGlobals kg, ShadingData &sd, float closure_rand);
 
@@ -49,6 +50,7 @@ void npr_input_impl(out TextureHandle combined_color,
                     out TextureHandle specular_color,
                     out TextureHandle specular_direct,
                     out TextureHandle specular_indirect,
+                    out TextureHandle emission,
                     out TextureHandle position,
                     out TextureHandle normal)
 {
@@ -61,6 +63,9 @@ void npr_input_impl(out TextureHandle combined_color,
   specular_indirect = TextureHandle(TEX_HANDLE_SPECULAR_INDIRECT, 0);
   position = TextureHandle(TEX_HANDLE_POSITION, 0);
   normal = TextureHandle(TEX_HANDLE_NORMAL, 0);
+  int emission_id = uniform_buf.render_pass.emission_id;
+  emission = emission_id >= 0 ? TextureHandle(TEX_HANDLE_EMISSION, emission_id) :
+                                TEXTURE_HANDLE_DEFAULT;
 }
 
 void npr_refraction_impl(out TextureHandle combined_color, out TextureHandle position)
@@ -107,6 +112,16 @@ float4 swap_alpha(float4 v)
 {
   v.a = 1.0f - saturate(v.a);
   return v;
+}
+
+float4 npr_emission_sample(int2 texel, int layer)
+{
+  const gbuffer::Header header = gbuffer::Header::from_data(
+      texelFetch(gbuf_header_tx, int3(texel, 0), 0).r);
+  if (header.is_empty()) {
+    return float4(0.0f);
+  }
+  return float4(imageLoad(rp_color_img, int3(texel, layer)).rgb, 0.0f);
 }
 
 #define TEXTURE_HANDLE_EVAL_DEFINED
@@ -327,6 +342,8 @@ float4 TextureHandle_eval_impl(KernelGlobals &kg, ShadingData &sd, TextureHandle
         return swap_alpha(g_specular_direct);
       case TEX_HANDLE_SPECULAR_INDIRECT:
         return swap_alpha(g_specular_indirect);
+      case TEX_HANDLE_EMISSION:
+        return float4(imageLoad(rp_color_img, int3(int2(gl_FragCoord.xy), tex.index)).rgb, 0.0f);
       case TEX_HANDLE_POSITION:
 #ifdef MAT_DEPTH_OFFSET
       {
@@ -374,6 +391,8 @@ float4 TextureHandle_eval_impl(KernelGlobals &kg, ShadingData &sd, TextureHandle
   const float front_depth = npr_depth_at_texel(front_texel);
 
   switch (tex.type) {
+    case TEX_HANDLE_EMISSION:
+      return npr_emission_sample(texel, tex.index);
     case TEX_HANDLE_RP_COLOR:
       /* AOV color passes are data buffers; keep them opaque when exposed through NPR output. */
       return float4(imageLoad(rp_color_img, int3(texel, tex.index)).rgb, 0.0f);
@@ -483,6 +502,8 @@ float4 TextureHandle_eval_uv_impl(KernelGlobals &kg, ShadingData &sd, TextureHan
   const float front_depth = npr_depth_at_texel(front_texel);
 
   switch (tex.type) {
+    case TEX_HANDLE_EMISSION:
+      return npr_emission_sample(texel, tex.index);
     case TEX_HANDLE_RP_COLOR:
       return float4(imageLoad(rp_color_img, int3(texel, tex.index)).rgb, 0.0f);
     case TEX_HANDLE_RP_VALUE:

@@ -331,6 +331,7 @@ void npr_input(TextureHandle &combined_color,
                TextureHandle &specular_color,
                TextureHandle &specular_direct,
                TextureHandle &specular_indirect,
+               TextureHandle &emission,
                TextureHandle &position,
                TextureHandle &normal)
 {
@@ -342,6 +343,7 @@ void npr_input(TextureHandle &combined_color,
                  specular_color,
                  specular_direct,
                  specular_indirect,
+                 emission,
                  position,
                  normal);
 #else
@@ -352,6 +354,7 @@ void npr_input(TextureHandle &combined_color,
   specular_color = TEXTURE_HANDLE_DEFAULT;
   specular_direct = TEXTURE_HANDLE_DEFAULT;
   specular_indirect = TEXTURE_HANDLE_DEFAULT;
+  emission = TEXTURE_HANDLE_DEFAULT;
   position = TEXTURE_HANDLE_DEFAULT;
   normal = TEXTURE_HANDLE_DEFAULT;
 #endif

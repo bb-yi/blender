@@ -8,6 +8,8 @@ namespace blender {
 
 namespace nodes::node_shader_npr_input_cc {
 
+static constexpr int emission_socket_index = 7;
+
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_output<decl::Image>("Combined Color"_ustr);
@@ -17,6 +19,8 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Image>("Specular Color"_ustr);
   b.add_output<decl::Image>("Specular Direct"_ustr);
   b.add_output<decl::Image>("Specular Indirect"_ustr);
+  b.add_output<decl::Image>("Emission"_ustr)
+      .description("Surface emission before NPR processing");
   b.add_output<decl::Image>("Position"_ustr);
   b.add_output<decl::Image>("Normal"_ustr);
 }
@@ -27,6 +31,9 @@ static int node_shader_gpu_npr_input(GPUMaterial *mat,
                                      GPUNodeStack *in,
                                      GPUNodeStack *out)
 {
+  if (out[emission_socket_index].hasoutput) {
+    GPU_material_flag_set(mat, GPU_MATFLAG_NPR_EMISSION);
+  }
   return GPU_stack_link(mat, node, "npr_input", in, out);
 }
 
