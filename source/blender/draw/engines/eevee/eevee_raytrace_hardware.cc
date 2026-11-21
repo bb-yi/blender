@@ -820,8 +820,8 @@ void RayTraceModule::render_hardware_shadows(View &view,
                         light.y_axis() * light.local.local.shadow_position.y +
                         light.z_axis() * light.local.local.shadow_position.z;
       if (is_area_light(light.type)) {
-        p.area_size_x = light.area.size.x;
-        p.area_size_y = light.area.size.y;
+        p.area_size_x = light.area.hwrt_shadow_half_size.x;
+        p.area_size_y = light.area.hwrt_shadow_half_size.y;
       }
       p.normal_bias = std::max(4.0e-3f, light.filter_radius * 4.0e-3f);
       p.sample_count = sample_count;
@@ -1131,8 +1131,8 @@ void RayTraceModule::render_hardware_hit_shadows(GPUHardwareRaytraceScene *scene
                         light.y_axis() * light.local.local.shadow_position.y +
                         light.z_axis() * light.local.local.shadow_position.z;
       if (is_area_light(light.type)) {
-        p.area_size_x = light.area.size.x;
-        p.area_size_y = light.area.size.y;
+        p.area_size_x = light.area.hwrt_shadow_half_size.x;
+        p.area_size_y = light.area.hwrt_shadow_half_size.y;
       }
       p.normal_bias = std::max(4.0e-3f, light.filter_radius * 4.0e-3f);
       p.sample_count = sample_count;

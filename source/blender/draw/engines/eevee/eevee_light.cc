@@ -621,21 +621,22 @@ void Light::shape_parameters_set(const blender::Light *la,
   else if (is_area_light(this->type)) {
     LightAreaData &l_area = this->area;
     const bool is_irregular = ELEM(la->area_shape, LA_AREA_RECT, LA_AREA_ELLIPSE);
-    l_area.size = float2(la->area_size, is_irregular ? la->area_sizey : la->area_size);
-    /* Scale and clamp to minimum value before float imprecision artifacts appear. */
-    l_area.size *= scale.xy() / 2.0f;
-    this->hwrt_shadow_size = length(l_area.size);
+    l_area.hwrt_shadow_half_size =
+        float2(la->area_size, is_irregular ? la->area_sizey : la->area_size) * scale.xy() / 2.0f;
+    this->hwrt_shadow_size = length(l_area.hwrt_shadow_half_size);
     l_area.shadow_scale = trace_scaling_fac;
     l_area.local.shadow_radius = this->hwrt_shadow_size * trace_scaling_fac;
     /* Set to default position. */
     l_area.local.shadow_position = float3(0.0f);
-    /* Do not render lights that have no area. */
-    if (l_area.size.x * l_area.size.y < 0.00001f) {
-      /* Forces light to be culled. */
+    /* A normalized light keeps its power in the zero-area limit. Cull zero-area lights whose
+     * power is specified per unit area. */
+    if ((la->mode & LA_UNNORMALIZED) &&
+        (l_area.hwrt_shadow_half_size.x == 0.0f || l_area.hwrt_shadow_half_size.y == 0.0f))
+    {
       l_area.local.influence_radius_max = 0.0f;
     }
-    /* Clamp to minimum value before float imprecision artifacts appear. */
-    l_area.size = max(float2(0.003f), l_area.size);
+    /* Keep the LTC shape numerically stable as the hardware shadow rays approach a point. */
+    l_area.size = max(float2(0.003f), l_area.hwrt_shadow_half_size);
     /* For volume point lighting. */
     l_area.local.shape_radius = max(0.001f, length(l_area.size) / 2.0f);
   }

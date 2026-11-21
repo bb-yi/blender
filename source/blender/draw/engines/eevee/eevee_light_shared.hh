@@ -148,8 +148,8 @@ struct [[host_shared]] LightAreaData {
   /** Number of allocated tilemap for this local light. */
   int tilemaps_count; /* Leaked from LightLocalCommon because of alignment. */
   float _pad0;
-  float _pad1;
-  float _pad2;
+  /** Physical half-extents for hardware shadow rays, before the shading clamp. */
+  float2 hwrt_shadow_half_size;
 
   /** Shape size. */
   float2 size;
