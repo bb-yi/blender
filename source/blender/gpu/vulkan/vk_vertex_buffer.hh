@@ -45,6 +45,10 @@ class VKVertexBuffer : public VertBuf {
   {
     return buffer_.resource();
   }
+  size_t size_in_bytes_get() const
+  {
+    return buffer_.size_in_bytes();
+  }
 
   inline bool has_device_address() const
   {

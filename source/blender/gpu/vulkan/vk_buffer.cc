@@ -171,6 +171,13 @@ void VKBuffer::flush() const
   vmaFlushAllocation(allocator, allocation_, 0, max_ulul(size_in_bytes(), 1));
 }
 
+bool VKBuffer::invalidate() const
+{
+  BLI_assert(is_mapped());
+  VmaAllocator allocator = VKBackend::get().device.mem_allocator_get();
+  return vmaInvalidateAllocation(allocator, allocation_, 0, size_in_bytes_) == VK_SUCCESS;
+}
+
 void VKBuffer::clear(VKContext &context, uint32_t clear_value)
 {
   render_graph::VKFillBufferNode::CreateInfo fill_buffer = {};

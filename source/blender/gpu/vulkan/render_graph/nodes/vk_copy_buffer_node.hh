@@ -18,6 +18,7 @@ struct VKCopyBufferData {
   VKResourceWithHandle<VkBuffer> src_buffer;
   VKResourceWithHandle<VkBuffer> dst_buffer;
   VkBufferCopy region;
+  bool host_readback;
 };
 
 class VKCopyBufferNode : public VKNodeInfo<VKNodeType::COPY_BUFFER,
@@ -63,6 +64,26 @@ class VKCopyBufferNode : public VKNodeInfo<VKNodeType::COPY_BUFFER,
   {
     command_buffer.copy_buffer(
         data.src_buffer.vk_handle, data.dst_buffer.vk_handle, 1, &data.region);
+    if (data.host_readback) {
+      VkBufferMemoryBarrier barrier = {};
+      barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+      barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+      barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      barrier.buffer = data.dst_buffer.vk_handle;
+      barrier.offset = data.region.dstOffset;
+      barrier.size = data.region.size;
+      command_buffer.pipeline_barrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                      VK_PIPELINE_STAGE_HOST_BIT,
+                                      0,
+                                      0,
+                                      nullptr,
+                                      1,
+                                      &barrier,
+                                      0,
+                                      nullptr);
+    }
   }
 };
 }  // namespace blender::gpu::render_graph

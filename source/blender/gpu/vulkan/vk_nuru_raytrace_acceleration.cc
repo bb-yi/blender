@@ -39,6 +39,7 @@
 
 #include "BLI_fileops.hh"
 #include "BLI_hash.hh"
+#include "BLI_map.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_path_utils.hh"
@@ -794,18 +795,127 @@ static float scene_emissive_energy_sum(Span<SceneGeometryBuild> geometry)
   return energy_sum;
 }
 
+/* Collect all dirty batches before waiting. A material subrange can share an index buffer
+ * with many other entries, and several requested attributes can occupy the same VBO. */
+class SceneGeometryReadback {
+  struct Region {
+    VKResourceWithHandle<VkBuffer> source;
+    size_t offset;
+    size_t size;
+    std::vector<uint8_t> individual_data;
+  };
+
+  Map<ResourceHandle, Region> regions_;
+  VKBuffer staging_;
+  size_t size_ = 0;
+
+  static bool create_staging(VKBuffer &buffer, const size_t size)
+  {
+    return buffer.create(size,
+                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                         VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+                         VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
+                         0.4f,
+                         false,
+                         "HWRTGeometryReadback");
+  }
+
+  static void copy_to_staging(VKContext &context,
+                              const Region &region,
+                              const VKBuffer &target,
+                              const size_t offset)
+  {
+    render_graph::VKCopyBufferNode::CreateInfo copy = {};
+    copy.src_buffer = region.source;
+    copy.dst_buffer = target.resource();
+    copy.region.dstOffset = offset;
+    copy.region.size = region.size;
+    copy.host_readback = true;
+    context.render_graph().add_node(copy);
+  }
+
+  static bool wait_for_readback(VKContext &context, const VKBuffer &target)
+  {
+    context.rendering_end();
+    const TimelineValue timeline = context.flush_render_graph(
+        RenderGraphFlushFlags::SUBMIT | RenderGraphFlushFlags::WAIT_FOR_COMPLETION |
+        RenderGraphFlushFlags::RENEW_RENDER_GRAPH);
+    return timeline != 0 && target.invalidate();
+  }
+
+ public:
+  void add(const VKResourceWithHandle<VkBuffer> &source, const size_t size)
+  {
+    if (source.vk_handle == VK_NULL_HANDLE || size == 0 ||
+        regions_.contains(source.resource_handle))
+    {
+      return;
+    }
+    const size_t offset = (size_ + 15) & ~size_t(15);
+    regions_.add_new(source.resource_handle, Region{source, offset, size, {}});
+    size_ = offset + size;
+  }
+
+  bool read(VKContext &context)
+  {
+    if (regions_.is_empty()) {
+      return true;
+    }
+    if (create_staging(staging_, size_)) {
+      for (const Region &region : regions_.values()) {
+        copy_to_staging(context, region, staging_, region.offset);
+      }
+      return wait_for_readback(context, staging_);
+    }
+
+    /* A scene can exceed the maximum size of one staging allocation while each source
+     * buffer still fits. Fall back to a separate transfer and wait per source buffer. */
+    if (staging_.is_allocated()) {
+      staging_.free();
+    }
+    for (Region &region : regions_.values()) {
+      VKBuffer individual;
+      if (!create_staging(individual, region.size)) {
+        return false;
+      }
+      copy_to_staging(context, region, individual, 0);
+      if (!wait_for_readback(context, individual)) {
+        return false;
+      }
+      region.individual_data.resize(region.size);
+      std::memcpy(region.individual_data.data(), individual.mapped_memory_get(), region.size);
+    }
+    return true;
+  }
+
+  Span<uint8_t> data(const VKResourceWithHandle<VkBuffer> &source) const
+  {
+    const Region *region = regions_.lookup_ptr(source.resource_handle);
+    if (!region || region->source.vk_handle != source.vk_handle) {
+      return {};
+    }
+    if (!region->individual_data.empty()) {
+      return region->individual_data;
+    }
+    return {static_cast<const uint8_t *>(staging_.mapped_memory_get()) + region->offset,
+            int64_t(region->size)};
+  }
+};
+
 struct VertexAttributeInput {
-  /* CPU copy of the whole VBO. */
-  std::vector<uint8_t> data;
+  Span<uint8_t> data;
   size_t offset = 0;
   size_t stride = 0;
   uint vertex_count = 0;
   VertAttrType format = VertAttrType::SFLOAT_32_32_32;
 };
 
-static bool resolve_attribute_input(Batch *batch, const char *name, VertexAttributeInput &r_input)
+static VKVertexBuffer *find_attribute_buffer(Batch &batch,
+                                             const char *name,
+                                             const bool upload,
+                                             int &r_attr_id)
 {
-  for (VertBuf *vert_buf : Span<VertBuf *>(batch->verts, GPU_BATCH_VBO_MAX_LEN)) {
+  for (VertBuf *vert_buf : Span<VertBuf *>(batch.verts, GPU_BATCH_VBO_MAX_LEN)) {
     if (vert_buf == nullptr) {
       continue;
     }
@@ -815,30 +925,70 @@ static bool resolve_attribute_input(Batch *batch, const char *name, VertexAttrib
       continue;
     }
 
-    const GPUVertAttr &attr = vert_buf->format.attrs[attr_id];
-    /* Upload so the device-side buffer matches what rasterization uses, then read it back. This
-     * mirrors the Metal path that reads the shared-storage MTLBuffer contents. */
-    vert_buf->upload();
-    const size_t buffer_size = std::max(vert_buf->size_alloc_get(), vert_buf->size_used_get());
-    if (buffer_size == 0 || vert_buf->format.stride == 0) {
+    if (upload) {
+      vert_buf->upload();
+    }
+    VKVertexBuffer *source = unwrap(vert_buf);
+    if (source->vk_handle() == VK_NULL_HANDLE || source->size_in_bytes_get() == 0 ||
+        vert_buf->format.stride == 0)
+    {
       continue;
     }
-    r_input.data.resize(buffer_size + 16, 0);
-    static_cast<VKVertexBuffer *>(vert_buf)->read(r_input.data.data());
-    r_input.offset = attr.offset;
-    r_input.stride = vert_buf->format.stride;
-    if (vert_buf->format.deinterleaved) {
-      r_input.offset = 0;
-      for (int i = 0; i < attr_id; i++) {
-        r_input.offset += size_t(vert_buf->format.attrs[i].type.size()) * vert_buf->vertex_len;
-      }
-      r_input.stride = attr.type.size();
-    }
-    r_input.vertex_count = vert_buf->vertex_len;
-    r_input.format = attr.type.format;
-    return true;
+    r_attr_id = attr_id;
+    return source;
   }
-  return false;
+  return nullptr;
+}
+
+static void queue_geometry_readback(const GPUHardwareRaytraceSceneEntry &entry,
+                                    SceneGeometryReadback &readback)
+{
+  if (!entry.batch) {
+    return;
+  }
+  Batch &batch = *entry.batch;
+  const char *names[] = {"pos", "nor", entry.shadow_alpha.uv_attribute};
+  for (const char *name : names) {
+    if (name[0] == '\0') {
+      continue;
+    }
+    int attr_id;
+    if (VKVertexBuffer *source = find_attribute_buffer(batch, name, true, attr_id)) {
+      readback.add(source->resource(), source->size_in_bytes_get());
+    }
+  }
+  if (batch.elem && batch.elem->index_len_get() > 0) {
+    VKIndexBuffer &source = *unwrap(batch.elem);
+    source.upload_data();
+    readback.add(source.resource(), source.size_in_bytes_get());
+  }
+}
+
+static bool resolve_attribute_input(Batch &batch,
+                                    const char *name,
+                                    const SceneGeometryReadback &readback,
+                                    VertexAttributeInput &r_input)
+{
+  int attr_id;
+  const VKVertexBuffer *source = find_attribute_buffer(batch, name, false, attr_id);
+  if (!source || source->vertex_len == 0) {
+    return false;
+  }
+  const GPUVertAttr &attr = source->format.attrs[attr_id];
+  r_input.data = readback.data(source->resource());
+  r_input.offset = attr.offset;
+  r_input.stride = source->format.stride;
+  if (source->format.deinterleaved) {
+    r_input.offset = 0;
+    for (int i = 0; i < attr_id; i++) {
+      r_input.offset += size_t(source->format.attrs[i].type.size()) * source->vertex_len;
+    }
+    r_input.stride = attr.type.size();
+  }
+  r_input.vertex_count = source->vertex_len;
+  r_input.format = attr.type.format;
+  return r_input.offset + size_t(r_input.vertex_count - 1) * r_input.stride +
+             attr.type.size() <= size_t(r_input.data.size());
 }
 
 static float3 read_vertex_position(const VertexAttributeInput &input, const uint vertex_index)
@@ -924,7 +1074,7 @@ static std::vector<float4> build_triangle_normal_data(const VertexAttributeInput
                                                       const size_t triangle_count)
 {
   std::vector<float4> triangle_normals(triangle_count, float4(0.0f));
-  if (triangle_count == 0 || positions.data.empty()) {
+  if (triangle_count == 0 || positions.data.is_empty()) {
     return triangle_normals;
   }
 
@@ -1002,7 +1152,7 @@ static std::vector<float4> build_triangle_local_position_data(
     const size_t triangle_count)
 {
   std::vector<float4> local_positions(triangle_count * 3, float4(0.0f));
-  if (triangle_count == 0 || positions.data.empty()) {
+  if (triangle_count == 0 || positions.data.is_empty()) {
     return local_positions;
   }
 
@@ -1034,18 +1184,24 @@ static bool blas_skip(const GPUHardwareRaytraceSceneEntry &entry, const char *re
 }
 /* END DIAGNOSTIC */
 
-static bool build_entry_blas(const GPUHardwareRaytraceSceneEntry &entry,
-                             SceneGeometryBuild &r_geometry,
-                             AccelerationStructureBuildBatch &build_batch)
+struct SceneGeometryInput {
+  VertexAttributeInput positions;
+  std::vector<uint32_t> indices;
+};
+
+static bool read_entry_geometry(const GPUHardwareRaytraceSceneEntry &entry,
+                                const SceneGeometryReadback &readback,
+                                SceneGeometryInput &r_input,
+                                SceneGeometryBuild &r_geometry)
 {
   if (entry.batch == nullptr) {
     return blas_skip(entry, "null_batch", 0);
   }
 
-  Batch *batch = entry.batch;
+  Batch &batch = *entry.batch;
 
-  VertexAttributeInput positions;
-  if (!resolve_attribute_input(batch, "pos", positions)) {
+  VertexAttributeInput &positions = r_input.positions;
+  if (!resolve_attribute_input(batch, "pos", readback, positions)) {
     return blas_skip(entry, "no_pos_attribute", 0);
   }
   switch (positions.format) {
@@ -1058,15 +1214,15 @@ static bool build_entry_blas(const GPUHardwareRaytraceSceneEntry &entry,
   }
 
   VertexAttributeInput normals;
-  const bool has_normal_input = resolve_attribute_input(batch, "nor", normals);
+  const bool has_normal_input = resolve_attribute_input(batch, "nor", readback, normals) &&
+                                normals.vertex_count >= positions.vertex_count;
 
-  const GPUPrimType final_primitive_type = batch->prim_type;
-  uint32_t index_base = 0;
+  const GPUPrimType final_primitive_type = batch.prim_type;
   size_t triangle_count = 0;
-  std::vector<uint32_t> indices;
+  std::vector<uint32_t> &indices = r_input.indices;
 
-  if (batch->elem != nullptr) {
-    IndexBuf *index_buf = batch->elem;
+  if (batch.elem != nullptr) {
+    VKIndexBuffer *index_buf = unwrap(batch.elem);
     const uint index_count = index_buf->index_len_get();
     if (index_count == 0) {
       return blas_skip(entry, "empty_index_buffer", 0);
@@ -1075,17 +1231,13 @@ static bool build_entry_blas(const GPUHardwareRaytraceSceneEntry &entry,
       return blas_skip(entry, "indexed_prim_type", int(final_primitive_type));
     }
 
-    index_buf->upload_data();
-    /* `read()` returns the full storage of the (subrange-resolved) source buffer, so size the
-     * host copy from the allocated device size, not the subrange length. */
-    const size_t index_storage_size = static_cast<VKIndexBuffer *>(index_buf)->
-                                          allocated_size_get();
-    std::vector<uint8_t> raw_indices(index_storage_size + 16, 0);
-    static_cast<VKIndexBuffer *>(index_buf)->read(
-        reinterpret_cast<uint32_t *>(raw_indices.data()));
-
+    const Span<uint8_t> raw_indices = readback.data(index_buf->resource());
     const uint index_start = index_buf->index_start_get();
-    index_base = index_buf->index_base_get();
+    const uint32_t index_base = index_buf->index_base_get();
+    const size_t index_size = index_buf->is_32bit() ? sizeof(uint32_t) : sizeof(uint16_t);
+    if ((size_t(index_start) + index_count) * index_size > size_t(raw_indices.size())) {
+      return blas_skip(entry, "index_buffer_bounds", int(index_count));
+    }
     indices.resize(index_count);
     if (index_buf->is_32bit()) {
       const uint32_t *src = reinterpret_cast<const uint32_t *>(raw_indices.data()) + index_start;
@@ -1121,13 +1273,65 @@ static bool build_entry_blas(const GPUHardwareRaytraceSceneEntry &entry,
   if (triangle_count == 0) {
     return blas_skip(entry, "zero_triangles", 0);
   }
+  if (std::any_of(indices.begin(), indices.end(), [&positions](uint32_t index) {
+        return index >= positions.vertex_count;
+      }))
+  {
+    return blas_skip(entry, "index_outside_vertex_buffer", int(positions.vertex_count));
+  }
 
+  r_geometry.triangle_count = uint32_t(triangle_count);
+  r_geometry.vertex_count = positions.vertex_count;
+  r_geometry.object_to_world = entry.object_to_world;
+  r_geometry.instance_count = std::max(entry.instance_count, uint32_t(1));
+  r_geometry.user_id = entry.user_id;
+  r_geometry.emissive_radiance = entry.emissive_radiance;
+  r_geometry.diffuse_albedo = entry.diffuse_albedo;
+  r_geometry.reflection_color = entry.reflection_color;
+  r_geometry.reflection_roughness = entry.reflection_roughness;
+  r_geometry.transmission_color = entry.transmission_color;
+  r_geometry.transmission_roughness = entry.transmission_roughness;
+  r_geometry.reflection_ior = entry.reflection_ior;
+  r_geometry.refraction_ior = entry.refraction_ior;
+  r_geometry.packed_thickness = entry.packed_thickness;
+  r_geometry.alpha = entry.alpha;
+  r_geometry.reflection_layer_coverage = entry.reflection_layer_coverage;
+  r_geometry.shadow_terminator_geometry_offset = entry.shadow_terminator_geometry_offset;
+  r_geometry.closure_type = entry.closure_type;
+  r_geometry.proxy_flags = entry.proxy_flags;
+  r_geometry.triangle_normals = build_triangle_normal_data(positions, indices, triangle_count);
+  r_geometry.triangle_smooth_normals = build_triangle_smooth_normal_data(
+      normals, has_normal_input, indices, triangle_count, r_geometry.triangle_normals);
+  r_geometry.triangle_local_positions = build_triangle_local_position_data(
+      positions, indices, triangle_count);
+  r_geometry.has_shadow_alpha = entry.shadow_alpha.image != nullptr;
+  r_geometry.casts_shadow = entry.casts_shadow;
+  if (r_geometry.has_shadow_alpha) {
+    r_geometry.triangle_shadow_uvs.resize(indices.size(), float2(0.0f));
+    VertexAttributeInput uv;
+    if (resolve_attribute_input(batch, entry.shadow_alpha.uv_attribute, readback, uv) &&
+        uv.format == VertAttrType::SFLOAT_32_32)
+    {
+      for (const size_t corner : IndexRange(indices.size())) {
+        if (indices[corner] < uv.vertex_count) {
+          const size_t offset = uv.offset + size_t(indices[corner]) * uv.stride;
+          memcpy(&r_geometry.triangle_shadow_uvs[corner], uv.data.data() + offset, sizeof(float2));
+        }
+      }
+    }
+  }
+  return true;
+}
+
+static bool build_entry_blas(const SceneGeometryInput &input,
+                             SceneGeometryBuild &r_geometry,
+                             AccelerationStructureBuildBatch &build_batch)
+{
+  const VertexAttributeInput &positions = input.positions;
+  const std::vector<uint32_t> &indices = input.indices;
   /* Upload tightly packed float3 positions + uint32 indices into RT-owned buffers with
    * acceleration-structure build usage. */
   const uint32_t vertex_count = positions.vertex_count;
-  if (vertex_count == 0) {
-    return blas_skip(entry, "zero_vertices", 0);
-  }
   std::vector<float> packed_positions(size_t(vertex_count) * 3, 0.0f);
   for (uint v = 0; v < vertex_count; v++) {
     const float3 co = read_vertex_position(positions, v);
@@ -1177,7 +1381,7 @@ static bool build_entry_blas(const GPUHardwareRaytraceSceneEntry &entry,
   build_info.pGeometries = &geometry;
 
   VkAccelerationStructureBuildRangeInfoKHR range_info = {};
-  range_info.primitiveCount = uint32_t(triangle_count);
+  range_info.primitiveCount = r_geometry.triangle_count;
 
   VkAccelerationStructureKHR acceleration_structure = VK_NULL_HANDLE;
   RTBuffer acceleration_buffer;
@@ -1197,46 +1401,6 @@ static bool build_entry_blas(const GPUHardwareRaytraceSceneEntry &entry,
   r_geometry.acceleration_buffer = acceleration_buffer;
   r_geometry.vertex_buffer = vertex_buffer;
   r_geometry.index_buffer = index_buffer;
-  r_geometry.triangle_count = uint32_t(triangle_count);
-  r_geometry.vertex_count = vertex_count;
-  r_geometry.object_to_world = entry.object_to_world;
-  r_geometry.instance_count = std::max(entry.instance_count, uint32_t(1));
-  r_geometry.user_id = entry.user_id;
-  r_geometry.emissive_radiance = entry.emissive_radiance;
-  r_geometry.diffuse_albedo = entry.diffuse_albedo;
-  r_geometry.reflection_color = entry.reflection_color;
-  r_geometry.reflection_roughness = entry.reflection_roughness;
-  r_geometry.transmission_color = entry.transmission_color;
-  r_geometry.transmission_roughness = entry.transmission_roughness;
-  r_geometry.reflection_ior = entry.reflection_ior;
-  r_geometry.refraction_ior = entry.refraction_ior;
-  r_geometry.packed_thickness = entry.packed_thickness;
-  r_geometry.alpha = entry.alpha;
-  r_geometry.reflection_layer_coverage = entry.reflection_layer_coverage;
-  r_geometry.shadow_terminator_geometry_offset = entry.shadow_terminator_geometry_offset;
-  r_geometry.closure_type = entry.closure_type;
-  r_geometry.proxy_flags = entry.proxy_flags;
-  r_geometry.triangle_normals = build_triangle_normal_data(positions, indices, triangle_count);
-  r_geometry.triangle_smooth_normals = build_triangle_smooth_normal_data(
-      normals, has_normal_input, indices, triangle_count, r_geometry.triangle_normals);
-  r_geometry.triangle_local_positions = build_triangle_local_position_data(
-      positions, indices, triangle_count);
-  r_geometry.has_shadow_alpha = entry.shadow_alpha.image != nullptr;
-  r_geometry.casts_shadow = entry.casts_shadow;
-  if (r_geometry.has_shadow_alpha) {
-    r_geometry.triangle_shadow_uvs.resize(indices.size(), float2(0.0f));
-    VertexAttributeInput uv;
-    if (resolve_attribute_input(batch, entry.shadow_alpha.uv_attribute, uv) &&
-        uv.format == VertAttrType::SFLOAT_32_32)
-    {
-      for (const size_t corner : IndexRange(indices.size())) {
-        if (indices[corner] < uv.vertex_count) {
-          const size_t offset = uv.offset + size_t(indices[corner]) * uv.stride;
-          memcpy(&r_geometry.triangle_shadow_uvs[corner], uv.data.data() + offset, sizeof(float2));
-        }
-      }
-    }
-  }
   return true;
 }
 
@@ -3122,8 +3286,14 @@ GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntr
   std::vector<SceneGeometryBuild> built_geometry;
   built_geometry.reserve(entries.size());
 
-  /* Read back geometry first (this synchronizes with the render graph internally), then batch
-   * all BLAS builds into one submission. */
+  SceneGeometryReadback readback;
+  for (const GPUHardwareRaytraceSceneEntry &entry : entries) {
+    queue_geometry_readback(entry, readback);
+  }
+  if (!readback.read(*context)) {
+    return nullptr;
+  }
+
   AccelerationStructureBuildBatch blas_build_batch;
   if (!begin_acceleration_structure_build_batch(blas_build_batch)) {
     return nullptr;
@@ -3132,7 +3302,9 @@ GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntr
   GPUHardwareRaytraceScene *scene = new GPUHardwareRaytraceScene();
   for (const GPUHardwareRaytraceSceneEntry &entry : entries) {
     SceneGeometryBuild geometry;
-    const bool built = build_entry_blas(entry, geometry, blas_build_batch);
+    SceneGeometryInput input;
+    const bool built = read_entry_geometry(entry, readback, input, geometry) &&
+                       build_entry_blas(input, geometry, blas_build_batch);
     if (!built) {
       /* Keep a 1:1 placeholder slot. `raytrace_scene_update()` requires per-entry arrays so
        * object transforms can refresh the TLAS instead of triggering a full scene rebuild
@@ -3277,31 +3449,74 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
    * objects are only destroyed in the success-path swap below so a failed build leaves the
    * scene untouched. */
   std::vector<std::pair<int, SceneGeometryBuild>> rebuilt_blas;
+  auto free_replacements = [&]() {
+    for (auto &pair : rebuilt_blas) {
+      destroy_acceleration_structure(pair.second.acceleration_structure,
+                                     pair.second.acceleration_buffer);
+      rt_buffer_free(pair.second.vertex_buffer);
+      rt_buffer_free(pair.second.index_buffer);
+    }
+  };
+  double readback_ms = 0.0;
+  int reused_blas_count = 0;
+  int built_blas_count = 0;
   if (!update_params.rebuild_blas_indices.is_empty()) {
-    AccelerationStructureBuildBatch blas_build_batch;
-    if (!begin_acceleration_structure_build_batch(blas_build_batch)) {
+    const double readback_start = perf_logging_enabled ? BLI_time_now_seconds() : 0.0;
+    SceneGeometryReadback readback;
+    for (const int index : update_params.rebuild_blas_indices) {
+      if (entries.index_range().contains(index)) {
+        queue_geometry_readback(entries[index], readback);
+      }
+    }
+    if (!readback.read(*context)) {
       return false;
     }
+    if (perf_logging_enabled) {
+      readback_ms = (BLI_time_now_seconds() - readback_start) * 1000.0;
+    }
+
+    AccelerationStructureBuildBatch blas_build_batch;
     for (const int index : update_params.rebuild_blas_indices) {
-      if (index < 0 || index >= entries.size()) {
+      if (!entries.index_range().contains(index)) {
         continue;
       }
       SceneGeometryBuild geometry;
-      if (!build_entry_blas(entries[index], geometry, blas_build_batch)) {
+      SceneGeometryInput input;
+      if (read_entry_geometry(entries[index], readback, input, geometry)) {
+        /* Armature dependencies can mark a rigidly moved object as deformed. Reuse only if
+         * the local positions, shading normals, and Alpha UVs still match in BLAS order. */
+        if (scene->bottom_level_acceleration_structures[index] != VK_NULL_HANDLE &&
+            geometry.triangle_local_positions == scene->local_triangle_positions[index] &&
+            geometry.triangle_smooth_normals == scene->local_triangle_smooth_normals[index] &&
+            geometry.triangle_shadow_uvs == scene->local_triangle_shadow_uvs[index])
+        {
+          reused_blas_count++;
+          continue;
+        }
+        if (blas_build_batch.command_buffer == VK_NULL_HANDLE &&
+            !begin_acceleration_structure_build_batch(blas_build_batch))
+        {
+          free_replacements();
+          return false;
+        }
+        if (!build_entry_blas(input, geometry, blas_build_batch)) {
+          commit_acceleration_structure_build_batch(blas_build_batch);
+          free_replacements();
+          return false;
+        }
+        built_blas_count++;
+      }
+      else {
         /* Keep a placeholder slot like `raytrace_scene_build` does. */
-        geometry = {};
         geometry.user_id = uint32_t(index);
         geometry.instance_count = 0;
       }
       rebuilt_blas.emplace_back(index, std::move(geometry));
     }
-    if (!commit_acceleration_structure_build_batch(blas_build_batch)) {
-      for (auto &pair : rebuilt_blas) {
-        destroy_acceleration_structure(pair.second.acceleration_structure,
-                                       pair.second.acceleration_buffer);
-        rt_buffer_free(pair.second.vertex_buffer);
-        rt_buffer_free(pair.second.index_buffer);
-      }
+    if (blas_build_batch.command_buffer != VK_NULL_HANDLE &&
+        !commit_acceleration_structure_build_batch(blas_build_batch))
+    {
+      free_replacements();
       return false;
     }
   }
@@ -3355,6 +3570,7 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
   }
 
   if (updated_geometry.empty() || instance_count == 0) {
+    free_replacements();
     return false;
   }
 
@@ -3362,6 +3578,7 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
   RTBuffer new_tlas_buffer;
   if (update_params.update_tlas) {
     if (!build_top_level_acceleration_structure(updated_geometry, new_tlas, new_tlas_buffer)) {
+      free_replacements();
       return false;
     }
   }
@@ -3394,12 +3611,7 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     rt_buffer_free(new_triangle_local_positions);
     rt_buffer_free(new_triangle_normal_ranges);
     rt_buffer_free(new_shadow_object_transforms);
-    for (auto &pair : rebuilt_blas) {
-      destroy_acceleration_structure(pair.second.acceleration_structure,
-                                     pair.second.acceleration_buffer);
-      rt_buffer_free(pair.second.vertex_buffer);
-      rt_buffer_free(pair.second.index_buffer);
-    }
+    free_replacements();
   };
 
   if (update_params.update_emissive_data) {
@@ -3557,7 +3769,7 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
   if (r_stats != nullptr) {
     r_stats->geometry_count = scene->geometry_count;
     r_stats->instance_count = scene->instance_count;
-    r_stats->built_blas_count = 0;
+    r_stats->built_blas_count = built_blas_count;
     r_stats->emissive_light_count = scene->emissive_light_count;
     r_stats->emissive_energy_sum = scene_emissive_energy_sum(updated_geometry);
     r_stats->built_scene = true;
@@ -3566,14 +3778,18 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     const double elapsed_ms = (BLI_time_now_seconds() - update_start_time) * 1000.0;
     std::fprintf(stderr,
                  "EEVEE HWRT perf rt_scene_update tlas=%d emissive=%d material=%d world_geom=%d "
-                 "geometries=%d instances=%d elapsed_ms=%.2f\n",
+                 "geometries=%d instances=%d elapsed_ms=%.2f readback_ms=%.2f "
+                 "rebuilt_blas=%d reused_blas=%d\n",
                  update_params.update_tlas ? 1 : 0,
                  update_params.update_emissive_data ? 1 : 0,
                  update_params.update_material_data ? 1 : 0,
                  update_params.update_world_geometry_data ? 1 : 0,
                  scene->geometry_count,
                  scene->instance_count,
-                 elapsed_ms);
+                 elapsed_ms,
+                 readback_ms,
+                 built_blas_count,
+                 reused_blas_count);
   }
   return true;
 }

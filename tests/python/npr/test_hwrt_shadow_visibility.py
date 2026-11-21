@@ -160,6 +160,19 @@ try:
     light.data.shadow_soft_size = 0
     capture("point_close_contact")
 
+    # Dirty tags alone must preserve the shadow, while vertex edits at the same object
+    # transform must update the acceleration structure.
+    opaque.data.update()
+    capture("unchanged_geometry_update")
+    for vertex in opaque.data.vertices:
+        vertex.co.x += 3.0
+    opaque.data.update()
+    capture("vertex_edit_away")
+    for vertex in opaque.data.vertices:
+        vertex.co.x -= 3.0
+    opaque.data.update()
+    capture("vertex_edit_back")
+
     blended = mat("Blended receiver", .6)
     blended.surface_render_method = "BLENDED"
     receiver.data.materials[0] = blended
@@ -178,10 +191,13 @@ for name in (
     "caster_reenabled",
     "opaque_behind_translucent",
     "point_close_contact",
+    "unchanged_geometry_update",
+    "vertex_edit_back",
     "blended_close_contact",
 ):
     assert values[name] < .05, (name, values)
 assert values["self_shadow_only"] > .95, values
+assert values["vertex_edit_away"] > .95, values
 assert values["caster_reference"] > .1, values
 assert abs(values["caster_disabled"] - values["caster_reference"]) < .02, values
 assert .47 < values["translucent_only"] < .53, values

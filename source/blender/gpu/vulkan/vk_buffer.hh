@@ -67,6 +67,7 @@ class VKBuffer : public NonCopyable {
    */
   void update_render_graph(VKContext &context, void *data) const;
   void flush() const;
+  bool invalidate() const;
 
   /**
    * Read the buffer (synchronously).
