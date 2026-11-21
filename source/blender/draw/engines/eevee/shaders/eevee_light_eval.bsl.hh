@@ -5,6 +5,7 @@
 #pragma once
 
 #include "eevee_bxdf_types.bsl.hh"
+#include "eevee_forward_hwrt_shadow.bsl.hh"
 #include "eevee_light_iter.bsl.hh"
 #include "eevee_light_lib.bsl.hh"
 #include "eevee_hiz.bsl.hh"
@@ -33,6 +34,7 @@ struct LightEvalConstants {
   [[compilation_constant]] bool use_light_shader_surfel_eval;
   [[compilation_constant]] bool use_npr_light_policy;
   [[compilation_constant]] bool use_hardware_shadow_data;
+  [[compilation_constant]] bool use_hardware_forward_shadow;
   [[compilation_constant]] int light_closure_eval_count_reflect;
   [[compilation_constant]] int light_closure_eval_count_transmit;
   /* Same as above but clamped to a minimum of 1 to avoid zero sized arrays. */
@@ -44,6 +46,7 @@ struct LightEvalData {
   [[resource_table]] LightEvalConstants constants;
 
   [[resource_table, condition(use_hardware_shadow_data)]] HardwareShadowData hardware_shadow;
+  [[resource_table, condition(use_hardware_forward_shadow)]] ForwardHardwareShadow forward_shadow;
   [[resource_table]] ShadowRenderData shadow_data;
   [[resource_table]] UtilityTexture utility_tx;
   [[resource_table, condition(use_npr_light_policy)]] NPRShadowSurfaceData npr_surface;
@@ -385,11 +388,12 @@ template<bool is_transmission> struct EvalCtx {
                     LightShape shape,
                     ClosureLight &cl,
                     float attenuation,
-                    float3 native_shadow,
+                    float3 shadow,
+                    bool use_hardware_shadow,
                     bool light_shader_no_distance_falloff,
                     bool is_directional)
   {
-    float3 visibility = native_shadow;
+    float3 visibility = shadow;
     if (srt.constants.use_npr_light_policy) [[static_branch]] {
       if (closure_npr_policy_enabled(cl.npr_policy)) {
         /* This is native direct illumination, including the SSS back-light term. Custom NPR
@@ -402,19 +406,26 @@ template<bool is_transmission> struct EvalCtx {
         if (group != 16383u && int(group) != light.lightgroup_id) {
           return;
         }
-        NPRShadowContext shadow_ctx;
-        shadow_ctx.P = P;
-        shadow_ctx.Ng = Ng;
-        shadow_ctx.N = cl.shadow_N;
-        shadow_ctx.texel = texel;
-        shadow_ctx.terminator_offset = float2(terminator_normal_offset, terminator_geometry_offset);
-        shadow_ctx.thickness = thickness;
-        shadow_ctx.receiver_id = receiver_id;
-        shadow_ctx.transmission_path = is_transmission;
-        shadow_ctx.is_translucent_with_thickness =
-            is_transmission && cl.type == LIGHT_TRANSLUCENT_WITH_THICKNESS;
-        visibility = float3(npr_shadow_visibility(srt, light, is_directional, lv.L,
-                                                   shadow_ctx, cl.npr_policy));
+        if (use_hardware_shadow) {
+          const float strength = closure_npr_policy_shadow_type(cl.npr_policy) == 0u ?
+                                     0.0f : cl.npr_policy.strength;
+          visibility = mix(float3(1.0f), shadow, strength);
+        }
+        else {
+          NPRShadowContext shadow_ctx;
+          shadow_ctx.P = P;
+          shadow_ctx.Ng = Ng;
+          shadow_ctx.N = cl.shadow_N;
+          shadow_ctx.texel = texel;
+          shadow_ctx.terminator_offset = float2(terminator_normal_offset, terminator_geometry_offset);
+          shadow_ctx.thickness = thickness;
+          shadow_ctx.receiver_id = receiver_id;
+          shadow_ctx.transmission_path = is_transmission;
+          shadow_ctx.is_translucent_with_thickness =
+              is_transmission && cl.type == LIGHT_TRANSLUCENT_WITH_THICKNESS;
+          visibility = float3(npr_shadow_visibility(srt, light, is_directional, lv.L,
+                                                     shadow_ctx, cl.npr_policy));
+        }
       }
     }
     [[resource_table]] const UtilityTexture &util = srt.utility_tx;
@@ -519,18 +530,24 @@ template<bool is_transmission> struct EvalCtx {
         }
       }
     }
-    if (light.tilemap_index != LIGHT_NO_SHADOW && needs_native_shadow) {
-      bool use_hardware_shadow = false;
-      if (srt.constants.use_hardware_shadow_data) [[static_branch]] {
-        const HardwareShadowData &hwrt = srt.hardware_shadow;
-        use_hardware_shadow = hwrt.use_hardware_rt_shadows && light.hwrt_shadow_layer >= 0;
-        if (use_hardware_shadow) {
-          shadow = texelFetch(hwrt.hardware_shadow_visibility_tx,
-                               int3(int2(texel), light.hwrt_shadow_layer), 0).rgb;
-        }
+    bool use_hardware_shadow = false;
+    if (srt.constants.use_hardware_forward_shadow) [[static_branch]] {
+      const ForwardHardwareShadow &hwrt = srt.forward_shadow;
+      use_hardware_shadow = hwrt.forward_shadow_options.x > 0.0f && light.hwrt_shadow_layer >= 0;
+      if (use_hardware_shadow) {
+        shadow = hwrt.evaluate(light, lv, is_directional, P, Ng);
       }
-      if (!use_hardware_shadow) {
-        shadow = float3(shadow_eval(srt.shadow_data,
+    }
+    if (srt.constants.use_hardware_shadow_data) [[static_branch]] {
+      const HardwareShadowData &hwrt = srt.hardware_shadow;
+      use_hardware_shadow = hwrt.use_hardware_rt_shadows && light.hwrt_shadow_layer >= 0;
+      if (use_hardware_shadow) {
+        shadow = texelFetch(hwrt.hardware_shadow_visibility_tx,
+                            int3(int2(texel), light.hwrt_shadow_layer), 0).rgb;
+      }
+    }
+    if (!use_hardware_shadow && light.tilemap_index != LIGHT_NO_SHADOW && needs_native_shadow) {
+      shadow = float3(shadow_eval(srt.shadow_data,
                            light,
                            is_directional,
                            is_transmission,
@@ -545,7 +562,6 @@ template<bool is_transmission> struct EvalCtx {
                            1.0f,
                            ray_count,
                            ray_step_count));
-      }
     }
 
     LightShape shape = LightShape::get(light, lv);
@@ -563,6 +579,7 @@ template<bool is_transmission> struct EvalCtx {
                               stack.cl[i],
                               attenuation,
                               shadow,
+                              use_hardware_shadow,
                               light_shader_no_distance_falloff,
                               is_directional);
         }
@@ -576,6 +593,7 @@ template<bool is_transmission> struct EvalCtx {
                               stack.cl[i],
                               attenuation,
                               shadow,
+                              use_hardware_shadow,
                               light_shader_no_distance_falloff,
                               is_directional);
         }

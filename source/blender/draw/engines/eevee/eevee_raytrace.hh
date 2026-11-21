@@ -290,6 +290,11 @@ class RayTraceModule {
 
   uint32_t hardware_feature_mask_ = 0;
   uint32_t current_hardware_feature_mask_ = 0;
+  bool hardware_shadows_require_native_ = false;
+  GPUHardwareRaytraceScene *hardware_forward_empty_scene_ = nullptr;
+  GPUHardwareRaytraceForwardBindings hardware_forward_bindings_;
+  float4 hardware_forward_shadow_options_ = float4(0);
+  int hardware_forward_shadow_samples_ = 1;
   GPUHardwareRaytraceScene *hardware_rt_scene_cache_ = nullptr;
   GPUHardwareRaytraceSceneStats hardware_rt_scene_stats_cache_ = {};
   Vector<HardwareRaytraceSceneEntry> hardware_rt_scene_entries_cache_;
@@ -391,22 +396,30 @@ class RayTraceModule {
 
   bool use_hardware_tracing_method() const
   {
-    return use_raytracing_ && tracing_method_ == RAYTRACE_EEVEE_METHOD_HARDWARE &&
-           GPU_viewport_hardware_raytracing_support();
+    return use_raytracing_ && tracing_method_ == RAYTRACE_EEVEE_METHOD_HARDWARE;
   }
   bool use_hardware_tracing() const
   {
-    return use_hardware_tracing_method() && hardware_feature_mask_ != 0;
+    return use_hardware_tracing_method() && active_hardware_feature_mask() != 0;
+  }
+  /** Both hardware transport and screen tracing with hardware shadows need scene geometry. */
+  bool use_hardware_scene() const
+  {
+    return use_raytracing_ && hardware_feature_mask_ != 0;
   }
   uint32_t active_hardware_feature_mask() const
   {
-    return hardware_feature_mask_;
+    return hardware_shadows_require_native_ ?
+               hardware_feature_mask_ & ~uint32_t(RAYTRACE_EEVEE_HARDWARE_SHADOWS) :
+               hardware_feature_mask_;
   }
   bool use_hardware_shadows() const
   {
-    return use_hardware_tracing() &&
-           (hardware_feature_mask_ & RAYTRACE_EEVEE_HARDWARE_SHADOWS) != 0;
+    return use_raytracing_ && (active_hardware_feature_mask() & RAYTRACE_EEVEE_HARDWARE_SHADOWS) != 0;
   }
+  void resolve_shadow_backend();
+  void bind_forward_shadows(PassMain::Sub &pass);
+  void prepare_forward_shadows();
   const bool *hardware_shadow_ready() const
   {
     return &hardware_shadow_ready_;
@@ -415,7 +428,10 @@ class RayTraceModule {
   {
     return &hardware_shadow_visibility_tx_;
   }
-  void render_hardware_shadows(View &view, gpu::Texture *depth_tx, int2 extent);
+  void render_hardware_shadows(View &view,
+                               gpu::Texture *depth_tx,
+                               int2 extent,
+                               bool from_prepass = false);
   void render_hardware_direct_light(View &view, gpu::Texture *depth_tx, int2 extent);
   const bool *hardware_direct_replace() const
   {

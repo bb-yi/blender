@@ -26,6 +26,7 @@
 #include "vk_device.hh"
 #include "vk_index_buffer.hh"
 #include "vk_nuru_raytrace_kernels.hh"
+#include "vk_ray_tracing.hh"
 #ifdef WITH_NURU_OPTIX_DENOISER
 #  include "vk_nuru_optix_denoise.hh"
 #endif
@@ -34,6 +35,7 @@
 #include "vk_vertex_buffer.hh"
 
 #include "BKE_appdir.hh"
+#include "BKE_image.hh"
 
 #include "BLI_fileops.hh"
 #include "BLI_hash.hh"
@@ -41,6 +43,8 @@
 #include "BLI_math_vector.hh"
 #include "BLI_path_utils.hh"
 #include "BLI_time.hh"
+#include "DNA_image_types.h"
+#include "IMB_imbuf_types.hh"
 
 #include "shaderc/shaderc.hpp"
 
@@ -84,6 +88,7 @@ struct RTBuffer {
   VkDeviceAddress device_address = 0;
   void *mapped = nullptr;
   size_t size = 0;
+  gpu::VKResourceWithHandle<VkBuffer> graphics_resource;
 };
 
 }  // namespace nuru_vk
@@ -95,6 +100,15 @@ struct GPUHardwareRaytraceScene {
   nuru_vk::RTBuffer emissive_light_buffer;
   nuru_vk::RTBuffer diffuse_albedo_buffer;
   nuru_vk::RTBuffer material_proxy_buffer;
+  nuru_vk::RTBuffer shadow_caster_buffer;
+  nuru_vk::RTBuffer shadow_uv_buffer;
+  nuru_vk::RTBuffer shadow_alpha_buffer;
+  bool has_shadow_alpha = false;
+  std::optional<gpu::VKTopLevelAS> forward_tlas;
+  std::optional<gpu::VKStorageBuffer> forward_casters;
+  std::optional<gpu::VKStorageBuffer> forward_uvs;
+  std::optional<gpu::VKStorageBuffer> forward_alpha;
+  std::optional<gpu::VKStorageBuffer> forward_proxies;
   nuru_vk::RTBuffer triangle_normal_buffer;
   nuru_vk::RTBuffer triangle_smooth_normal_buffer;
   nuru_vk::RTBuffer triangle_local_position_buffer;
@@ -110,6 +124,7 @@ struct GPUHardwareRaytraceScene {
   std::vector<std::vector<float4>> local_triangle_normals;
   std::vector<std::vector<float4>> local_triangle_smooth_normals;
   std::vector<std::vector<float4>> local_triangle_positions;
+  std::vector<std::vector<float2>> local_triangle_shadow_uvs;
   /* Translation does not change the packed world normals. Keep the linear transforms that
    * produced them so moving an object need not rebuild these whole-scene buffers. */
   std::vector<float3x3> normal_transforms;
@@ -226,7 +241,10 @@ static void rt_buffer_free(RTBuffer &buffer)
     return;
   }
   VKDevice &device = VKBackend::get().device;
-  if (buffer.external_memory != VK_NULL_HANDLE) {
+  if (buffer.graphics_resource.vk_handle != VK_NULL_HANDLE) {
+    device.resources.deref_resource(buffer.graphics_resource.resource_handle);
+  }
+  else if (buffer.external_memory != VK_NULL_HANDLE) {
 #ifdef _WIN32
     if (buffer.external_handle != nullptr) {
       CloseHandle(buffer.external_handle);
@@ -757,6 +775,9 @@ struct SceneGeometryBuild {
   std::vector<float4> triangle_normals;
   std::vector<float4> triangle_smooth_normals;
   std::vector<float4> triangle_local_positions;
+  std::vector<float2> triangle_shadow_uvs;
+  bool has_shadow_alpha = false;
+  bool casts_shadow = true;
 };
 
 static float scene_emissive_energy_sum(Span<SceneGeometryBuild> geometry)
@@ -806,6 +827,13 @@ static bool resolve_attribute_input(Batch *batch, const char *name, VertexAttrib
     static_cast<VKVertexBuffer *>(vert_buf)->read(r_input.data.data());
     r_input.offset = attr.offset;
     r_input.stride = vert_buf->format.stride;
+    if (vert_buf->format.deinterleaved) {
+      r_input.offset = 0;
+      for (int i = 0; i < attr_id; i++) {
+        r_input.offset += size_t(vert_buf->format.attrs[i].type.size()) * vert_buf->vertex_len;
+      }
+      r_input.stride = attr.type.size();
+    }
     r_input.vertex_count = vert_buf->vertex_len;
     r_input.format = attr.type.format;
     return true;
@@ -1193,18 +1221,31 @@ static bool build_entry_blas(const GPUHardwareRaytraceSceneEntry &entry,
       normals, has_normal_input, indices, triangle_count, r_geometry.triangle_normals);
   r_geometry.triangle_local_positions = build_triangle_local_position_data(
       positions, indices, triangle_count);
+  r_geometry.has_shadow_alpha = entry.shadow_alpha.image != nullptr;
+  r_geometry.casts_shadow = entry.casts_shadow;
+  if (r_geometry.has_shadow_alpha) {
+    r_geometry.triangle_shadow_uvs.resize(indices.size(), float2(0.0f));
+    VertexAttributeInput uv;
+    if (resolve_attribute_input(batch, entry.shadow_alpha.uv_attribute, uv) &&
+        uv.format == VertAttrType::SFLOAT_32_32)
+    {
+      for (const size_t corner : IndexRange(indices.size())) {
+        if (indices[corner] < uv.vertex_count) {
+          const size_t offset = uv.offset + size_t(indices[corner]) * uv.stride;
+          memcpy(&r_geometry.triangle_shadow_uvs[corner], uv.data.data() + offset, sizeof(float2));
+        }
+      }
+    }
+  }
   return true;
 }
 
 static bool build_top_level_acceleration_structure(
     const std::vector<SceneGeometryBuild> &geometry,
     VkAccelerationStructureKHR &r_tlas,
-    RTBuffer &r_tlas_buffer)
+    RTBuffer &r_tlas_buffer,
+    bool allow_empty = false)
 {
-  if (geometry.empty()) {
-    return false;
-  }
-
   size_t instance_count = 0;
   for (const SceneGeometryBuild &entry : geometry) {
     if (entry.acceleration_structure == VK_NULL_HANDLE) {
@@ -1213,7 +1254,7 @@ static bool build_top_level_acceleration_structure(
     }
     instance_count += entry.instance_count;
   }
-  if (instance_count == 0) {
+  if (instance_count == 0 && !allow_empty) {
     return false;
   }
 
@@ -1224,7 +1265,7 @@ static bool build_top_level_acceleration_structure(
 
   RTBuffer instance_buffer;
   if (!rt_buffer_create(instance_buffer,
-                        instance_count * sizeof(VkAccelerationStructureInstanceKHR),
+                        std::max<size_t>(1, instance_count) * sizeof(VkAccelerationStructureInstanceKHR),
                         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                         /*host_visible=*/true))
@@ -1258,9 +1299,11 @@ static bool build_top_level_acceleration_structure(
       /* Vulkan instance custom index is 24-bit; user ids are Eevee geometry indices and stay far
        * below that limit. Mask defensively to avoid touching the visibility mask bits. */
       instance.instanceCustomIndex = entry.user_id & 0x00FFFFFFu;
-      instance.mask = 0xFFu;
+      /* Reserve bit zero for shadow rays. Transport and receiver recovery see every instance. */
+      instance.mask = entry.casts_shadow ? 0xFFu : 0xFEu;
       instance.instanceShaderBindingTableRecordOffset = 0;
-      instance.flags = VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
+      instance.flags = entry.has_shadow_alpha ? VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR :
+                                                VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
       instance.accelerationStructureReference = blas_address;
     }
   }
@@ -1480,6 +1523,100 @@ static bool build_material_proxy_buffer(const std::vector<SceneGeometryBuild> &g
   return true;
 }
 
+struct ShadowCasterRecord {
+  uint4 identity;
+  float4 uv_x;
+  float4 uv_y;
+};
+
+static uint32_t append_shadow_alpha_image(Image *image, std::vector<uint32_t> &data)
+{
+  const uint32_t offset = uint32_t(data.size());
+  void *lock = nullptr;
+  ImBuf *buffer = BKE_image_acquire_ibuf(image, nullptr, &lock);
+  if (!buffer || buffer->x <= 0 || buffer->y <= 0 ||
+      (!buffer->float_buffer.data && !buffer->byte_buffer.data))
+  {
+    data.insert(data.end(), {1, 1, 0xFFFFFFFFu});
+    BKE_image_release_ibuf(image, buffer, lock);
+    return offset;
+  }
+  const size_t pixels = size_t(buffer->x) * size_t(buffer->y);
+  data.push_back(uint32_t(buffer->x));
+  data.push_back(uint32_t(buffer->y));
+  data.resize(data.size() + (pixels + 1) / 2, 0);
+  const int channels = buffer->channels ? buffer->channels : 4;
+  for (size_t i = 0; i < pixels; i++) {
+    float alpha = 1.0f;
+    if (image->alpha_mode != IMA_ALPHA_IGNORE) {
+      if (buffer->float_buffer.data && channels == 4) {
+        alpha = buffer->float_buffer.data[i * 4 + 3];
+      }
+      else if (!buffer->float_buffer.data && buffer->byte_buffer.data) {
+        alpha = float(buffer->byte_buffer.data[i * 4 + 3]) / 255.0f;
+      }
+    }
+    const float clamped_alpha = std::isfinite(alpha) ? std::clamp(alpha, 0.0f, 1.0f) : 1.0f;
+    data[size_t(offset) + 2 + i / 2] |= uint32_t(clamped_alpha * 65535.0f + 0.5f) <<
+                                       ((i % 2) * 16);
+  }
+  BKE_image_release_ibuf(image, buffer, lock);
+  return offset;
+}
+
+static bool build_shadow_caster_buffers(Span<GPUHardwareRaytraceSceneEntry> entries,
+                                        const std::vector<SceneGeometryBuild> &geometry,
+                                        RTBuffer &r_casters,
+                                        RTBuffer &r_uv,
+                                        RTBuffer &r_alpha,
+                                        bool &r_has_alpha)
+{
+  std::vector<ShadowCasterRecord> casters(std::max<int64_t>(1, entries.size()));
+  std::vector<float2> uvs(1, float2(0));
+  std::vector<uint32_t> alpha_data(1, 0);
+  std::vector<std::pair<Image *, uint32_t>> image_offsets;
+  for (const int i : entries.index_range()) {
+    const GPUHardwareRaytraceSceneEntry &entry = entries[i];
+    const GPUHardwareRaytraceShadowAlpha &alpha = entry.shadow_alpha;
+    ShadowCasterRecord &caster = casters[entry.user_id];
+    caster.identity = uint4(entry.shadow_caster_id, entry.shadow_blocker_set, 0, 0);
+    if (!alpha.image || geometry[i].triangle_shadow_uvs.empty()) {
+      continue;
+    }
+    const auto image_offset = std::find_if(image_offsets.begin(), image_offsets.end(),
+                                           [&alpha](const auto &item) {
+                                             return item.first == alpha.image;
+                                           });
+    uint32_t offset = 0;
+    if (image_offset == image_offsets.end()) {
+      offset = append_shadow_alpha_image(alpha.image, alpha_data);
+      image_offsets.emplace_back(alpha.image, offset);
+    }
+    else {
+      offset = image_offset->second;
+    }
+    caster.identity.z = uint32_t(uvs.size());
+    caster.identity.w = offset;
+    caster.uv_x = alpha.uv_x;
+    caster.uv_x.w = float(alpha.extension);
+    caster.uv_y = alpha.uv_y;
+    caster.uv_y.w = alpha.nearest ? 1.0f : 0.0f;
+    uvs.insert(uvs.end(), geometry[i].triangle_shadow_uvs.begin(),
+               geometry[i].triangle_shadow_uvs.end());
+  }
+  if (!rt_storage_buffer_create(r_casters, casters.size() * sizeof(ShadowCasterRecord)) ||
+      !rt_storage_buffer_create(r_uv, uvs.size() * sizeof(float2)) ||
+      !rt_storage_buffer_create(r_alpha, alpha_data.size() * sizeof(uint32_t)))
+  {
+    return false;
+  }
+  memcpy(r_casters.mapped, casters.data(), casters.size() * sizeof(ShadowCasterRecord));
+  memcpy(r_uv.mapped, uvs.data(), uvs.size() * sizeof(float2));
+  memcpy(r_alpha.mapped, alpha_data.data(), alpha_data.size() * sizeof(uint32_t));
+  r_has_alpha = !image_offsets.empty();
+  return true;
+}
+
 static bool build_shadow_object_transform_buffer(const std::vector<SceneGeometryBuild> &geometry,
                                                 RTBuffer &r_buffer)
 {
@@ -1661,6 +1798,7 @@ struct HardwareShadowUniforms {
   float4 shadow_params;
   int4 world_sun_slot_pad;
   float4 sampling_rand;
+  uint4 shadow_options;
 };
 
 struct HardwareReceiverGIUniforms {
@@ -1681,6 +1819,7 @@ struct HardwareLocalShadowUniforms {
   float4 sampling_rand;
   /* Nuru: caustic-shadow extras. .x = Photons intensity (0..10). Remaining slots reserved. */
   float4 caustic_params;
+  uint4 shadow_options;
 };
 
 struct HardwareEnvironmentVisibilityUniforms {
@@ -1825,7 +1964,8 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       specs.push_back({1, BK::ACCELERATION_STRUCTURE});
       add_range(2, 5, BK::SSBO); /* sunlight, proxies, tri normals, smooth, ranges. */
       add_range(8, 2, BK::SSBO); /* Terminator positions and object matrices. */
-      add_range(16, 3, BK::SAMPLED);
+      add_range(10, 3, BK::SSBO); /* Caster metadata, UVs and packed Alpha. */
+      add_range(16, 5, BK::SAMPLED); /* Depth, GBuffer header/normals, prepass normal/ID. */
       specs.push_back({40 + 3, BK::STORAGE_IMAGE});
       break;
     case NuruKernel::DIRECTIONAL_HIT_SHADOW:
@@ -1833,6 +1973,7 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       specs.push_back({1, BK::ACCELERATION_STRUCTURE});
       add_range(2, 6, BK::SSBO);
       add_range(8, 2, BK::SSBO);
+      add_range(10, 3, BK::SSBO);
       add_range(16, 3, BK::SAMPLED);
       specs.push_back({40 + 3, BK::STORAGE_IMAGE});
       break;
@@ -1854,7 +1995,8 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       specs.push_back({1, BK::ACCELERATION_STRUCTURE});
       add_range(2, 4, BK::SSBO);
       add_range(8, 2, BK::SSBO);
-      add_range(16, 3, BK::SAMPLED);
+      add_range(10, 3, BK::SSBO);
+      add_range(16, 5, BK::SAMPLED);
       specs.push_back({40 + 3, BK::STORAGE_IMAGE});
       break;
     case NuruKernel::LOCAL_HIT_SHADOW:
@@ -1862,6 +2004,7 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       specs.push_back({1, BK::ACCELERATION_STRUCTURE});
       add_range(2, 5, BK::SSBO);
       add_range(8, 2, BK::SSBO);
+      add_range(10, 3, BK::SSBO);
       add_range(16, 3, BK::SAMPLED);
       specs.push_back({40 + 3, BK::STORAGE_IMAGE});
       break;
@@ -1996,11 +2139,16 @@ static bool compile_kernel_spirv(const NuruKernel kernel, std::vector<uint32_t> 
   /* Raw Vulkan kernels do not use Blender's shader include resolver. Expand this shared
    * implementation before hashing, so edits invalidate every consumer's SPIR-V cache. */
   std::string expanded_source(source);
-  constexpr const char *terminator_include = "#include \"vk_nuru_shadow_terminator_lib.glsl\"";
-  const size_t include_pos = expanded_source.find(terminator_include);
-  if (include_pos != std::string::npos) {
-    expanded_source.replace(include_pos, std::strlen(terminator_include),
-                            nuru_kernels::shadow_terminator_lib_glsl());
+  for (const auto &[marker, library] :
+       {std::pair{"#include \"vk_nuru_shadow_terminator_lib.glsl\"",
+                  nuru_kernels::shadow_terminator_lib_glsl()},
+        std::pair{"#include \"vk_nuru_shadow_visibility_lib.glsl\"",
+                  nuru_kernels::shadow_visibility_lib_glsl()}})
+  {
+    const size_t include_pos = expanded_source.find(marker);
+    if (include_pos != std::string::npos) {
+      expanded_source.replace(include_pos, std::strlen(marker), library);
+    }
   }
   source = expanded_source.c_str();
 
@@ -2896,6 +3044,63 @@ static bool dispatch_kernel(GPUHardwareRaytraceScene *scene,
 /** \name Public API
  * \{ */
 
+static const VKResourceWithHandle<VkBuffer> &track_for_graphics(RTBuffer &buffer)
+{
+  if (buffer.graphics_resource.vk_handle == VK_NULL_HANDLE) {
+    VKDevice &device = VKBackend::get().device;
+    buffer.graphics_resource = {device.resources.add_buffer(buffer.buffer, buffer.allocation),
+                                buffer.buffer};
+  }
+  return buffer.graphics_resource;
+}
+
+GPUHardwareRaytraceScene *raytrace_empty_scene()
+{
+  if (!GPU_hardware_raytracing_support() || VKContext::get() == nullptr) {
+    return nullptr;
+  }
+  auto *scene = new GPUHardwareRaytraceScene();
+  if (!build_top_level_acceleration_structure(
+          {}, scene->top_level_acceleration_structure, scene->top_level_buffer, true) ||
+      !build_material_proxy_buffer({}, scene->material_proxy_buffer) ||
+      !build_shadow_caster_buffers({},
+                                   {},
+                                   scene->shadow_caster_buffer,
+                                   scene->shadow_uv_buffer,
+                                   scene->shadow_alpha_buffer,
+                                   scene->has_shadow_alpha))
+  {
+    delete scene;
+    return nullptr;
+  }
+  return scene;
+}
+
+bool raytrace_forward_bindings(GPUHardwareRaytraceScene &scene,
+                                GPUHardwareRaytraceForwardBindings &r_bindings)
+{
+  if (!scene.forward_tlas) {
+    scene.forward_tlas.emplace("EEVEE Hardware Shadow TLAS");
+    scene.forward_casters.emplace(scene.shadow_caster_buffer.size, GPU_USAGE_STATIC, "HWRT Casters");
+    scene.forward_uvs.emplace(scene.shadow_uv_buffer.size, GPU_USAGE_STATIC, "HWRT UVs");
+    scene.forward_alpha.emplace(scene.shadow_alpha_buffer.size, GPU_USAGE_STATIC, "HWRT Alpha");
+    scene.forward_proxies.emplace(scene.material_proxy_buffer.size, GPU_USAGE_STATIC, "HWRT Proxies");
+  }
+  scene.forward_tlas->borrow(scene.top_level_acceleration_structure,
+                             track_for_graphics(scene.top_level_buffer),
+                             scene.top_level_buffer.size);
+  scene.forward_casters->borrow(track_for_graphics(scene.shadow_caster_buffer),
+                                scene.shadow_caster_buffer.size);
+  scene.forward_uvs->borrow(track_for_graphics(scene.shadow_uv_buffer), scene.shadow_uv_buffer.size);
+  scene.forward_alpha->borrow(track_for_graphics(scene.shadow_alpha_buffer),
+                              scene.shadow_alpha_buffer.size);
+  scene.forward_proxies->borrow(track_for_graphics(scene.material_proxy_buffer),
+                                scene.material_proxy_buffer.size);
+  r_bindings = {&*scene.forward_tlas, &*scene.forward_casters, &*scene.forward_uvs,
+                &*scene.forward_alpha, &*scene.forward_proxies, scene.has_shadow_alpha};
+  return true;
+}
+
 GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntry> entries,
                                                GPUHardwareRaytraceSceneStats *r_stats)
 {
@@ -2943,6 +3148,7 @@ GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntr
     scene->local_triangle_normals.push_back(geometry.triangle_normals);
     scene->local_triangle_smooth_normals.push_back(geometry.triangle_smooth_normals);
     scene->local_triangle_positions.push_back(geometry.triangle_local_positions);
+    scene->local_triangle_shadow_uvs.push_back(geometry.triangle_shadow_uvs);
     scene->normal_transforms.emplace_back(entry.object_to_world);
     scene->geometry_buffers.push_back(geometry.vertex_buffer);
     scene->geometry_buffers.push_back(geometry.index_buffer);
@@ -2987,6 +3193,12 @@ GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntr
           built_geometry, scene->emissive_light_buffer, scene->emissive_light_count) ||
       !build_diffuse_albedo_buffer(built_geometry, scene->diffuse_albedo_buffer) ||
       !build_material_proxy_buffer(built_geometry, scene->material_proxy_buffer) ||
+      !build_shadow_caster_buffers(entries,
+                                   built_geometry,
+                                   scene->shadow_caster_buffer,
+                                   scene->shadow_uv_buffer,
+                                   scene->shadow_alpha_buffer,
+                                   scene->has_shadow_alpha) ||
       !build_triangle_normal_buffer(
           built_geometry, scene->triangle_normal_buffer, triangle_normal_ranges) ||
       !build_triangle_smooth_normal_buffer(built_geometry, scene->triangle_smooth_normal_buffer) ||
@@ -3030,6 +3242,7 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
       scene->local_triangle_normals.size() != entries.size() ||
       scene->local_triangle_smooth_normals.size() != entries.size() ||
       scene->local_triangle_positions.size() != entries.size() ||
+      scene->local_triangle_shadow_uvs.size() != entries.size() ||
       scene->normal_transforms.size() != entries.size())
   {
     return false;
@@ -3133,6 +3346,10 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
                                                  scene->local_triangle_smooth_normals[i];
     geometry.triangle_local_positions = rebuilt ? rebuilt->triangle_local_positions :
                                                   scene->local_triangle_positions[i];
+    geometry.has_shadow_alpha = entry.shadow_alpha.image != nullptr;
+    geometry.casts_shadow = entry.casts_shadow;
+    geometry.triangle_shadow_uvs = rebuilt ? rebuilt->triangle_shadow_uvs :
+                                             scene->local_triangle_shadow_uvs[i];
     updated_geometry.push_back(std::move(geometry));
     instance_count += int(updated_geometry.back().instance_count);
   }
@@ -3154,6 +3371,10 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
   RTBuffer new_emissive_lights;
   RTBuffer new_diffuse;
   RTBuffer new_proxy;
+  RTBuffer new_shadow_casters;
+  RTBuffer new_shadow_uvs;
+  RTBuffer new_shadow_alpha;
+  bool has_shadow_alpha = false;
   RTBuffer new_triangle_normals;
   RTBuffer new_triangle_smooth_normals;
   RTBuffer new_triangle_local_positions;
@@ -3165,6 +3386,9 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     rt_buffer_free(new_emissive_lights);
     rt_buffer_free(new_diffuse);
     rt_buffer_free(new_proxy);
+    rt_buffer_free(new_shadow_casters);
+    rt_buffer_free(new_shadow_uvs);
+    rt_buffer_free(new_shadow_alpha);
     rt_buffer_free(new_triangle_normals);
     rt_buffer_free(new_triangle_smooth_normals);
     rt_buffer_free(new_triangle_local_positions);
@@ -3194,6 +3418,19 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
       cleanup_news();
       return false;
     }
+  }
+  const bool update_shadow_casters = update_params.update_material_data ||
+                                     (scene->has_shadow_alpha && !rebuilt_blas.empty());
+  if (update_shadow_casters &&
+      !build_shadow_caster_buffers(entries,
+                                   updated_geometry,
+                                   new_shadow_casters,
+                                   new_shadow_uvs,
+                                   new_shadow_alpha,
+                                   has_shadow_alpha))
+  {
+    cleanup_news();
+    return false;
   }
   if (update_params.update_tlas &&
       !build_shadow_object_transform_buffer(updated_geometry, new_shadow_object_transforms))
@@ -3231,6 +3468,10 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
 
   /* Old GPU objects may still be referenced by in-flight submissions; drain them first. */
   collect_finished_submissions(true);
+  if (scene->forward_tlas) {
+    /* The forward draw borrows this TLAS, including its referenced BLAS allocations. */
+    GPU_finish();
+  }
 
   if (!rebuilt_blas.empty()) {
     for (auto &pair : rebuilt_blas) {
@@ -3247,6 +3488,7 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
       scene->local_triangle_normals[i] = std::move(geometry.triangle_normals);
       scene->local_triangle_smooth_normals[i] = std::move(geometry.triangle_smooth_normals);
       scene->local_triangle_positions[i] = std::move(geometry.triangle_local_positions);
+      scene->local_triangle_shadow_uvs[i] = std::move(geometry.triangle_shadow_uvs);
     }
     /* Ownership transferred into the scene; do not free in any later cleanup. */
     rebuilt_blas.clear();
@@ -3282,6 +3524,15 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
       scene->shadow_terminator_max_cutoff = std::max(
           scene->shadow_terminator_max_cutoff, entry.shadow_terminator_geometry_offset);
     }
+  }
+  if (update_shadow_casters) {
+    rt_buffer_free(scene->shadow_caster_buffer);
+    rt_buffer_free(scene->shadow_uv_buffer);
+    rt_buffer_free(scene->shadow_alpha_buffer);
+    scene->shadow_caster_buffer = new_shadow_casters;
+    scene->shadow_uv_buffer = new_shadow_uvs;
+    scene->shadow_alpha_buffer = new_shadow_alpha;
+    scene->has_shadow_alpha = has_shadow_alpha;
   }
   if (update_world_normals) {
     rt_buffer_free(scene->triangle_normal_buffer);
@@ -3677,7 +3928,8 @@ bool raytrace_scene_trace_directional_shadow(
   uniforms.viewinv = params.viewinv;
   uniforms.wininv = params.wininv;
   uniforms.resolution_layer = int4(
-      params.full_resolution.x, params.full_resolution.y, std::max(params.shadow_layer, 0), 0);
+      params.full_resolution.x, params.full_resolution.y, std::max(params.shadow_layer, 0),
+      params.use_prepass_receiver ? (params.prepass_normal_tx ? 1 : 2) : 0);
   uniforms.light_direction_bias = float4(params.light_direction,
                                          std::max(params.normal_bias, 0.0f));
   /* Nuru: `shadow_params.z` = Color Intensity (0..1), `.w` = Photons intensity (0..10). */
@@ -3692,6 +3944,8 @@ bool raytrace_scene_trace_directional_shadow(
       gpu_vulkan_shadow_transparency_bits(scene->shadow_terminator_max_cutoff),
       gpu_vulkan_shadow_transparency_bits(params.shadow_transparency));
   uniforms.sampling_rand = params.sampling_rand;
+  uniforms.shadow_options = uint4(params.shadow_link_mask, uint32_t(params.classify_shadow),
+                                  uint32_t(scene->has_shadow_alpha));
 
   KernelArgs args;
   args.uniforms_data = &uniforms;
@@ -3718,10 +3972,16 @@ bool raytrace_scene_trace_directional_shadow(
 
   args.ssbos.push_back(rt_buffer_binding(8, scene->triangle_local_position_buffer));
   args.ssbos.push_back(rt_buffer_binding(9, scene->shadow_object_transform_buffer));
+  args.ssbos.push_back(rt_buffer_binding(10, scene->shadow_caster_buffer));
+  args.ssbos.push_back(rt_buffer_binding(11, scene->shadow_uv_buffer));
+  args.ssbos.push_back(rt_buffer_binding(12, scene->shadow_alpha_buffer));
 
   args.images.push_back(sampled_binding(16 + 0, params.depth_tx));
   args.images.push_back(sampled_binding(16 + 1, params.gbuf_header_tx, /*arrayed=*/true));
   args.images.push_back(sampled_binding(16 + 2, params.gbuf_normal_tx, /*arrayed=*/true));
+  args.images.push_back(sampled_binding(19, params.prepass_normal_tx ? params.prepass_normal_tx :
+                                                                      params.depth_tx));
+  args.images.push_back(sampled_binding(20, params.receiver_id_tx));
   args.images.push_back(storage_binding(40 + 3, params.shadow_visibility_tx, /*arrayed=*/true));
 
   args.group_count = int3((std::max(params.full_resolution.x, 1) + 7) / 8,
@@ -3763,6 +4023,8 @@ bool raytrace_scene_trace_directional_hit_shadow(
       0,
       gpu_vulkan_shadow_transparency_bits(params.shadow_transparency));
   uniforms.sampling_rand = params.sampling_rand;
+  uniforms.shadow_options = uint4(params.shadow_link_mask, 0u,
+                                  uint32_t(scene->has_shadow_alpha));
 
   KernelArgs args;
   args.uniforms_data = &uniforms;
@@ -3794,6 +4056,9 @@ bool raytrace_scene_trace_directional_hit_shadow(
 
   args.ssbos.push_back(rt_buffer_binding(8, scene->triangle_local_position_buffer));
   args.ssbos.push_back(rt_buffer_binding(9, scene->shadow_object_transform_buffer));
+  args.ssbos.push_back(rt_buffer_binding(10, scene->shadow_caster_buffer));
+  args.ssbos.push_back(rt_buffer_binding(11, scene->shadow_uv_buffer));
+  args.ssbos.push_back(rt_buffer_binding(12, scene->shadow_alpha_buffer));
 
   args.images.push_back(sampled_binding(16 + 0, params.hit_normal_tx));
   args.images.push_back(sampled_binding(16 + 1, params.hit_world_position_tx));
@@ -3935,10 +4200,12 @@ bool raytrace_scene_trace_local_shadow(GPUHardwareRaytraceScene *scene,
                                     params.use_caustics ? 1.0f : 0.0f,
                                     std::clamp(params.color_intensity, 0.0f, 1.0f));
   uniforms.sampling_rand = params.sampling_rand;
+  uniforms.shadow_options = uint4(params.shadow_link_mask, uint32_t(params.classify_shadow),
+                                  uint32_t(scene->has_shadow_alpha));
   uniforms.caustic_params = float4(std::max(params.photons_intensity, 0.0f),
                                    std::clamp(params.shadow_transparency, 0.0f, 1.0f),
                                    scene->shadow_terminator_max_cutoff,
-                                   0.0f);
+                                   params.use_prepass_receiver ? (params.prepass_normal_tx ? 1.0f : 2.0f) : 0.0f);
 
   KernelArgs args;
   args.uniforms_data = &uniforms;
@@ -3952,10 +4219,16 @@ bool raytrace_scene_trace_local_shadow(GPUHardwareRaytraceScene *scene,
 
   args.ssbos.push_back(rt_buffer_binding(8, scene->triangle_local_position_buffer));
   args.ssbos.push_back(rt_buffer_binding(9, scene->shadow_object_transform_buffer));
+  args.ssbos.push_back(rt_buffer_binding(10, scene->shadow_caster_buffer));
+  args.ssbos.push_back(rt_buffer_binding(11, scene->shadow_uv_buffer));
+  args.ssbos.push_back(rt_buffer_binding(12, scene->shadow_alpha_buffer));
 
   args.images.push_back(sampled_binding(16 + 0, params.depth_tx));
   args.images.push_back(sampled_binding(16 + 1, params.gbuf_header_tx, /*arrayed=*/true));
   args.images.push_back(sampled_binding(16 + 2, params.gbuf_normal_tx, /*arrayed=*/true));
+  args.images.push_back(sampled_binding(19, params.prepass_normal_tx ? params.prepass_normal_tx :
+                                                                      params.depth_tx));
+  args.images.push_back(sampled_binding(20, params.receiver_id_tx));
   args.images.push_back(storage_binding(40 + 3, params.shadow_visibility_tx, /*arrayed=*/true));
 
   args.group_count = int3((std::max(params.full_resolution.x, 1) + 7) / 8,
@@ -3996,6 +4269,8 @@ bool raytrace_scene_trace_local_hit_shadow(GPUHardwareRaytraceScene *scene,
                                     params.use_caustics ? 1.0f : 0.0f,
                                     std::clamp(params.color_intensity, 0.0f, 1.0f));
   uniforms.sampling_rand = params.sampling_rand;
+  uniforms.shadow_options = uint4(params.shadow_link_mask, 0u,
+                                  uint32_t(scene->has_shadow_alpha));
   uniforms.caustic_params = float4(std::max(params.photons_intensity, 0.0f),
                                    std::clamp(params.shadow_transparency, 0.0f, 1.0f),
                                    0.0f,
@@ -4018,6 +4293,9 @@ bool raytrace_scene_trace_local_hit_shadow(GPUHardwareRaytraceScene *scene,
 
   args.ssbos.push_back(rt_buffer_binding(8, scene->triangle_local_position_buffer));
   args.ssbos.push_back(rt_buffer_binding(9, scene->shadow_object_transform_buffer));
+  args.ssbos.push_back(rt_buffer_binding(10, scene->shadow_caster_buffer));
+  args.ssbos.push_back(rt_buffer_binding(11, scene->shadow_uv_buffer));
+  args.ssbos.push_back(rt_buffer_binding(12, scene->shadow_alpha_buffer));
 
   args.images.push_back(sampled_binding(16 + 0, params.hit_normal_tx));
   args.images.push_back(sampled_binding(16 + 1, params.hit_world_position_tx));
@@ -4743,6 +5021,9 @@ namespace blender {
 
 GPUHardwareRaytraceScene::~GPUHardwareRaytraceScene()
 {
+  if (forward_tlas && gpu::VKContext::get()) {
+    GPU_finish();
+  }
   using namespace gpu::vulkan;
   /* Submissions may still reference the acceleration structures and buffers. */
   if (shadow_batch_submission != nullptr) {
@@ -4756,6 +5037,9 @@ GPUHardwareRaytraceScene::~GPUHardwareRaytraceScene()
   rt_buffer_free(emissive_light_buffer);
   rt_buffer_free(diffuse_albedo_buffer);
   rt_buffer_free(material_proxy_buffer);
+  rt_buffer_free(shadow_caster_buffer);
+  rt_buffer_free(shadow_uv_buffer);
+  rt_buffer_free(shadow_alpha_buffer);
   rt_buffer_free(shadow_object_transform_buffer);
   rt_buffer_free(triangle_normal_buffer);
   rt_buffer_free(triangle_smooth_normal_buffer);

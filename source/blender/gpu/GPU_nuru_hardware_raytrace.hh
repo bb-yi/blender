@@ -15,6 +15,9 @@
 
 namespace blender {
 
+struct Image;
+struct GPUHardwareRaytraceScene;
+
 /** Must match #HWRT_SPECULAR_MAX_BOUNCES in eevee_raytrace_shared.hh. */
 static constexpr int GPU_HARDWARE_RAYTRACE_SPECULAR_MAX_BOUNCES = 8;
 
@@ -22,6 +25,7 @@ namespace gpu {
 class Batch;
 class StorageBuf;
 class Texture;
+class TopLevelAS;
 }
 
 enum GPUHardwareRaytraceMaterialEvalPolicy : uint32_t {
@@ -38,6 +42,18 @@ enum GPUHardwareRaytraceMaterialProxySet : uint32_t {
   GPU_HARDWARE_RAYTRACE_PROXY_INDIRECT_DIFFUSE = 0u,
   /** Direct/specular fallback needs one dominant closure family plus tint/roughness/IOR. */
   GPU_HARDWARE_RAYTRACE_PROXY_DIRECT_AND_SPECULAR = 1u,
+};
+
+struct GPUHardwareRaytraceShadowAlpha {
+  Image *image = nullptr;
+  char uv_attribute[32] = {};
+  float4 uv_x = float4(1, 0, 0, 0);
+  float4 uv_y = float4(0, 1, 0, 0);
+  uint64_t image_update = 0;
+  uint32_t extension = 0;
+  bool nearest = false;
+
+  bool operator==(const GPUHardwareRaytraceShadowAlpha &) const = default;
 };
 
 struct GPUHardwareRaytraceSceneEntry {
@@ -63,7 +79,24 @@ struct GPUHardwareRaytraceSceneEntry {
   int material_slot = -1;
   bool is_sculpt = false;
   float shadow_terminator_geometry_offset = 0.1f;
+  uint32_t shadow_caster_id = 0xFFFFFFFFu;
+  uint32_t shadow_blocker_set = 0;
+  bool casts_shadow = true;
+  GPUHardwareRaytraceShadowAlpha shadow_alpha;
 };
+
+struct GPUHardwareRaytraceForwardBindings {
+  gpu::TopLevelAS *tlas = nullptr;
+  gpu::StorageBuf *casters = nullptr;
+  gpu::StorageBuf *uvs = nullptr;
+  gpu::StorageBuf *alpha = nullptr;
+  gpu::StorageBuf *proxies = nullptr;
+  bool has_alpha = false;
+};
+
+bool GPU_hardware_raytrace_forward_bindings(GPUHardwareRaytraceScene *scene,
+                                           GPUHardwareRaytraceForwardBindings &r_bindings);
+GPUHardwareRaytraceScene *GPU_hardware_raytrace_empty_scene();
 
 struct GPUHardwareRaytraceTraceParams {
   /** Full replay is a later sparse stage; traversal itself stays on proxy-only material data. */
@@ -152,9 +185,14 @@ struct GPUHardwareRaytraceTraceParams {
 };
 
 struct GPUHardwareRaytraceDirectionalShadowParams {
+  gpu::Texture *receiver_id_tx = nullptr;
+  uint2 shadow_link_mask = uint2(0xFFFFFFFFu);
+  bool classify_shadow = false;
   gpu::Texture *depth_tx = nullptr;
   gpu::Texture *gbuf_header_tx = nullptr;
   gpu::Texture *gbuf_normal_tx = nullptr;
+  gpu::Texture *prepass_normal_tx = nullptr;
+  bool use_prepass_receiver = false;
   gpu::Texture *shadow_visibility_tx = nullptr;
   gpu::StorageBuf *world_sunlight_direction_buf = nullptr;
   float4x4 viewinv = float4x4::identity();
@@ -178,6 +216,7 @@ struct GPUHardwareRaytraceDirectionalShadowParams {
 };
 
 struct GPUHardwareRaytraceDirectionalHitShadowParams {
+  uint2 shadow_link_mask = uint2(0xFFFFFFFFu);
   gpu::Texture *hit_normal_tx = nullptr;
   gpu::Texture *hit_world_position_tx = nullptr;
   gpu::Texture *hit_identity_tx = nullptr;
@@ -200,9 +239,14 @@ struct GPUHardwareRaytraceDirectionalHitShadowParams {
 };
 
 struct GPUHardwareRaytraceLocalShadowParams {
+  gpu::Texture *receiver_id_tx = nullptr;
+  uint2 shadow_link_mask = uint2(0xFFFFFFFFu);
+  bool classify_shadow = false;
   gpu::Texture *depth_tx = nullptr;
   gpu::Texture *gbuf_header_tx = nullptr;
   gpu::Texture *gbuf_normal_tx = nullptr;
+  gpu::Texture *prepass_normal_tx = nullptr;
+  bool use_prepass_receiver = false;
   gpu::Texture *shadow_visibility_tx = nullptr;
   float4x4 viewinv = float4x4::identity();
   float4x4 wininv = float4x4::identity();
@@ -227,6 +271,7 @@ struct GPUHardwareRaytraceLocalShadowParams {
 };
 
 struct GPUHardwareRaytraceLocalHitShadowParams {
+  uint2 shadow_link_mask = uint2(0xFFFFFFFFu);
   gpu::Texture *hit_normal_tx = nullptr;
   gpu::Texture *hit_world_position_tx = nullptr;
   gpu::Texture *hit_identity_tx = nullptr;

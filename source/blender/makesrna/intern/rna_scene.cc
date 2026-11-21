@@ -9366,6 +9366,15 @@ static void rna_def_raytrace_eevee(BlenderRNA *brna)
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
 
+  prop = RNA_def_property(srna, "use_hardware_shadows", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "flag", RAYTRACE_EEVEE_SCREEN_HARDWARE_SHADOWS);
+  RNA_def_property_ui_text(prop,
+                           "Hardware Shadows",
+                           "Replace shadow maps with hardware ray-traced shadows when the scene "
+                           "and GPU support it. Shader Info follows this scene setting");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
   prop = RNA_def_property(srna, "use_backface_hit", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "flag", RAYTRACE_EEVEE_USE_BACKFACE);
   RNA_def_property_ui_text(prop, "Hit Backfaces", "Consider rays hitting backfaces as valid");

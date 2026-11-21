@@ -214,12 +214,16 @@ void ShadingView::render()
 
   const bool with_raycast = inst_.pipelines.has_raycast;
   const bool with_prepass_normal = with_raycast || inst_.outline.enabled() ||
-                                   inst_.lights.needs_front_light_shader();
+                                   inst_.lights.needs_front_light_shader() ||
+                                   inst_.pipelines.deferred.uses_hardware_shadow_prepass();
   prepass_fb_.ensure(
       GPU_ATTACHMENT_TEXTURE(rbufs.depth_tx),
       with_prepass_normal ? GPU_ATTACHMENT_TEXTURE(rbufs.prepass_normal_tx) : GPU_ATTACHMENT_NONE,
       with_raycast ? GPU_ATTACHMENT_TEXTURE(rbufs.object_id_tx) : GPU_ATTACHMENT_NONE,
-      GPU_ATTACHMENT_TEXTURE(rbufs.vector_tx));
+      GPU_ATTACHMENT_TEXTURE(rbufs.vector_tx),
+      inst_.pipelines.hardware_shadow_classifies_receivers() ?
+          GPU_ATTACHMENT_TEXTURE(rbufs.hwrt_receiver_id_tx) :
+          GPU_ATTACHMENT_NONE);
 
   GBuffer &gbuf = inst_.gbuffer;
   {
@@ -688,7 +692,8 @@ void CaptureView::render_probes()
     rbufs.acquire(extent);
 
     const bool with_raycast = inst_.pipelines.has_raycast;
-    const bool with_prepass_normal = with_raycast || inst_.lights.needs_front_light_shader();
+    const bool with_prepass_normal = with_raycast || inst_.lights.needs_front_light_shader() ||
+                                     inst_.pipelines.deferred.uses_hardware_shadow_prepass();
     prepass_fb.ensure(GPU_ATTACHMENT_TEXTURE(rbufs.depth_tx),
                       with_prepass_normal ? GPU_ATTACHMENT_TEXTURE(rbufs.prepass_normal_tx) :
                                             GPU_ATTACHMENT_NONE,

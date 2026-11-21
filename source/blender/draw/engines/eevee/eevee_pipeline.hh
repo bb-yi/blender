@@ -260,7 +260,7 @@ class Prepass {
                      bool hide_from_raycast,
                      bool force_write_id = false);
 
-  void end_sync();
+  void end_sync(bool needs_receiver_normals = false, bool write_hwrt_receiver_id = false);
 
   void render(View &view, gpu::Texture *fb_depth_tx, bool can_raycast);
 };
@@ -320,6 +320,7 @@ class ForwardLayer {
 
   bool has_opaque_ = false;
   bool has_transparent_ = false;
+  bool has_hardware_shadow_receivers_ = false;
   bool has_no_depth_ = false;
   bool has_colored_transparency_ = false;
   bool has_holdout_ = false;
@@ -682,6 +683,9 @@ class DeferredLayer : DeferredLayerBase {
   gpu::Texture *npr_background_depth_tx_ = nullptr;
   bool32_t npr_background_resolved_ = false;
   gpu::Texture *npr_radiance_input_tx_ = nullptr;
+  int shader_info_hardware_shadow_layers_ = 0;
+  bool has_hardware_shadow_surface_ = false;
+  bool bind_shader_info_hardware_shadow(PassMain::Sub &pass, gpu::Shader *shader);
 
   /**
    * Tile texture containing several bool per tile indicating presence of feature.
@@ -805,6 +809,7 @@ class DeferredPipeline {
 
   void begin_sync();
   void end_sync();
+  bool uses_hardware_shadow_prepass() const;
 
   PassMain::Sub *early_stencil_add(blender::Material *material, GPUMaterial *gpumat);
   PassMain::Sub *stencil_surface_add(blender::Material *material, GPUMaterial *gpumat);
@@ -1255,6 +1260,8 @@ class PipelineModule {
   PipelineInfoData &data;
 
   bool has_raycast = false;
+  bool has_hardware_shadow_classification = false;
+  const char *native_shadow_requirement = nullptr;
 
   PipelineModule(Instance &inst, PipelineInfoData &data)
       : inst_(inst),
@@ -1273,6 +1280,7 @@ class PipelineModule {
 
   void begin_sync()
   {
+    native_shadow_requirement = nullptr;
     data.ray_type = RAY_TYPE_CAMERA;
     data.can_raycast = true;
     probe.begin_sync();
@@ -1285,6 +1293,16 @@ class PipelineModule {
     capture.sync();
 
     has_raycast = false;
+    has_hardware_shadow_classification = false;
+  }
+
+  bool hardware_shadow_classifies_receivers() const;
+
+  void require_native_shadows(const char *reason)
+  {
+    if (native_shadow_requirement == nullptr) {
+      native_shadow_requirement = reason;
+    }
   }
 
   void end_sync()

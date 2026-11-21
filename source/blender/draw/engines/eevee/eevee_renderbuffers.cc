@@ -96,7 +96,8 @@ int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
   /* TODO(fclem): Make vector pass allocation optional if no TAA or motion blur is needed. */
   vector_tx.acquire_2d(extent, vector_tx_format(), usage_attachment_read_write);
   const bool use_prepass_normal = inst_.pipelines.has_raycast || inst_.outline.enabled() ||
-                                  inst_.lights.needs_front_light_shader();
+                                  inst_.lights.needs_front_light_shader() ||
+                                  inst_.pipelines.deferred.uses_hardware_shadow_prepass();
   if (inst_.pipelines.has_raycast) {
     raycast_depth_tx.acquire_2d(extent, raycast_depth_format, GPU_TEXTURE_USAGE_SHADER_READ);
     object_id_tx.acquire_2d(extent, object_id_format, usage_attachment_read);
@@ -111,6 +112,13 @@ int RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
   }
   else {
     prepass_normal_tx.acquire_2d(int2(1), prepass_normal_format, GPU_TEXTURE_USAGE_SHADER_READ);
+  }
+  if (inst_.raytracing.use_hardware_shadows()) {
+    const bool classify = inst_.pipelines.hardware_shadow_classifies_receivers();
+    hwrt_receiver_id_tx.acquire_2d(classify ? extent : int2(1),
+                                    gpu::TextureFormat::UINT_32,
+                                    usage_attachment_read);
+    hwrt_receiver_id_tx.clear(uint4(0xFFFFFFFFu));
   }
 
   const bool do_motion_vectors_swizzle = vector_tx_format() == gpu::TextureFormat::SFLOAT_16_16;
@@ -193,6 +201,7 @@ void RenderBuffers::release()
   vector_tx.release();
   raycast_depth_tx.release();
   object_id_tx.release();
+  hwrt_receiver_id_tx.release();
   prepass_normal_tx.release();
 
   cryptomatte_tx.release();

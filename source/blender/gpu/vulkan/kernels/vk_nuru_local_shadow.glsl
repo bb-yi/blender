@@ -34,6 +34,7 @@ layout(scalar, binding = 0) uniform NuruUniforms {
   vec4 normal_bias_pad;
   vec4 sampling_rand;
   vec4 caustic_params;
+  uvec4 shadow_options;
 } uniforms;
 layout(binding = 1) uniform accelerationStructureEXT scene;
 layout(scalar, binding = 2) readonly buffer B2 { HardwareMaterialProxy material_proxies[]; };
@@ -43,6 +44,8 @@ layout(scalar, binding = 5) readonly buffer B5 { TriangleNormalRange triangle_no
 layout(binding = 16) uniform sampler2D depth_tx;
 layout(binding = 17) uniform usampler2DArray gbuf_header_tx;
 layout(binding = 18) uniform sampler2DArray gbuf_normal_tx;
+layout(binding = 19) uniform sampler2D prepass_normal_tx;
+layout(binding = 20) uniform usampler2D receiver_id_tx;
 layout(binding = 43) uniform writeonly image2DArray shadow_visibility_img;
 
 #include "vk_nuru_shadow_terminator_lib.glsl"
@@ -106,43 +109,6 @@ bool load_gbuffer_receiver_normal(ivec2 texel,
   r_N = geometry_normal_unpack(header, surface_N);
   return !any(isnan(r_N)) && !any(isinf(r_N)) && (dot(r_N, r_N) > 1.0e-10);
 }
-/* See `vk_nuru_directional_shadow.glsl` `view_ray_receiver_slack`: bound the depth
- * reconstruction error along the view ray to keep shadow origins on the camera side of the
- * receiver surface. Accept coplanar deltas (grazing recession) and near-range deltas (adjacent
- * perpendicular face of the same edge); far off-plane silhouette gaps must not pull the origin
- * or they rim edges with light. */
-float view_ray_receiver_slack(
-    ivec2 texel, float depth, vec3 P, vec3 view_dir, vec3 receiver_Ng, sampler2D depth_tx)
-{
-  const float pitch = length(point_screen_to_world(texel + ivec2(1, 0), depth) - P);
-  float slack = 0.0;
-  const ivec2 offsets[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
-  for (int i = 0; i < 4; i++) {
-    const float neighbor_depth = sample_depth_clamped(texel + offsets[i], depth_tx);
-    if (!depth_is_valid(neighbor_depth)) {
-      continue;
-    }
-    const vec3 offset = point_screen_to_world(texel + offsets[i], neighbor_depth) - P;
-    const float offset_len = length(offset);
-    if (!(offset_len > 1.0e-9)) {
-      continue;
-    }
-    const float along_view = dot(offset, view_dir);
-    if (along_view < 0.0) {
-      /* Nearer neighbor: always occlusion-safe to pull by (see directional kernel). */
-      slack = max(slack, -along_view);
-      continue;
-    }
-    const bool coplanar = abs(dot(offset, receiver_Ng)) <= 0.25 * offset_len;
-    const bool near_range = offset_len <= 8.0 * max(pitch, 1.0e-9);
-    if (!coplanar && !near_range) {
-      continue;
-    }
-    slack = max(slack, along_view);
-  }
-  return slack;
-}
-
 vec3 estimate_world_normal(ivec2 texel, float depth, sampler2D depth_tx)
 {
   const vec3 P = point_screen_to_world(texel, depth);
@@ -285,7 +251,7 @@ vec3 opaque_shadow_visibility(accelerationStructureEXT scene,
   float current_tmin = t_min;
   for (int b = 0; b < 8; b++) {
     rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, scene, gl_RayFlagsOpaqueEXT, 0xFFu, origin, current_tmin, dir, t_max);
+    rayQueryInitializeEXT(rq, scene, gl_RayFlagsOpaqueEXT, HWRT_SHADOW_CASTER_MASK, origin, current_tmin, dir, t_max);
     int proceed_guard_rq = 4096;
     while (rayQueryProceedEXT(rq) && (proceed_guard_rq-- > 0)) {
     }
@@ -299,7 +265,7 @@ vec3 opaque_shadow_visibility(accelerationStructureEXT scene,
     if ((proxy_flags & HWRT_PROXY_FLAG_THIN_GLASS) == 0u) {
       return vec3(0.0);
     }
-    current_tmin = hit_distance + 1.0e-4;
+    current_tmin = shadow_ray_after_hit(hit_distance);
     if (current_tmin >= t_max) {
       return vec3(1.0);
     }
@@ -334,7 +300,7 @@ vec3 transparent_shadow_caustic_only(accelerationStructureEXT scene,
   bool ray_was_bent = false;
   for (int b = 0; b < max_transparent_bounces; b++) {
     rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, scene, gl_RayFlagsOpaqueEXT, 0xFFu, origin, current_tmin, dir, current_tmax);
+    rayQueryInitializeEXT(rq, scene, gl_RayFlagsOpaqueEXT, HWRT_SHADOW_CASTER_MASK, origin, current_tmin, dir, current_tmax);
     int proceed_guard_rq = 4096;
     while (rayQueryProceedEXT(rq) && (proceed_guard_rq-- > 0)) {
     }
@@ -360,7 +326,7 @@ vec3 transparent_shadow_caustic_only(accelerationStructureEXT scene,
     const HardwareMaterialProxy proxy = material_proxies[user_id];
     const uint proxy_flags = uint(proxy.ior_closure_type.w);
     if ((proxy_flags & HWRT_PROXY_FLAG_THIN_GLASS) != 0u) {
-      current_tmin = hit_distance + 1.0e-4;
+      current_tmin = shadow_ray_after_hit(hit_distance);
       if (current_tmin >= current_tmax) {
         return ray_was_bent ? throughput : vec3(0.0);
       }
@@ -430,7 +396,7 @@ vec3 transparent_shadow_caustic_only(accelerationStructureEXT scene,
       ray_was_bent = true;
     }
     else {
-      current_tmin = hit_distance + 1.0e-4;
+      current_tmin = shadow_ray_after_hit(hit_distance);
       if (current_tmin >= current_tmax) {
         if (!ray_was_bent) {
           return vec3(0.0);
@@ -476,7 +442,7 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene,
   const float vis_scale = min(t, 1.0);
   for (int b = 0; b < max_transparent_bounces; b++) {
     rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, scene, gl_RayFlagsOpaqueEXT, 0xFFu, origin, current_tmin, dir, t_max);
+    rayQueryInitializeEXT(rq, scene, gl_RayFlagsOpaqueEXT, HWRT_SHADOW_CASTER_MASK, origin, current_tmin, dir, t_max);
     int proceed_guard_rq = 4096;
     while (rayQueryProceedEXT(rq) && (proceed_guard_rq-- > 0)) {
     }
@@ -504,7 +470,7 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene,
        * walk). It must not flag `any_hit`, otherwise a pure thin-glass path gets multiplied by
        * `vis_scale` and the shadow jumps from fully lit (transparency 0) to nearly black at
        * transparency 0.001. */
-      current_tmin = hit_distance + 1.0e-4;
+      current_tmin = shadow_ray_after_hit(hit_distance);
       if (current_tmin >= t_max) {
         return any_hit ? hardware_shadow_apply_color_transmission(throughput, color_intensity) *
                              vis_scale :
@@ -530,7 +496,7 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene,
     if (max_through < 1.0e-3) {
       return vec3(0.0);
     }
-    current_tmin = hit_distance + 1.0e-4;
+    current_tmin = shadow_ray_after_hit(hit_distance);
     if (current_tmin >= t_max) {
       const vec3 tinted = hardware_shadow_apply_color_transmission(throughput, color_intensity);
       vec3 visibility = tinted * vis_scale;
@@ -546,6 +512,8 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene,
   }
   return vec3(0.0);
 }
+#include "vk_nuru_shadow_visibility_lib.glsl"
+
 void main()
 {
   const uvec2 tid = gl_GlobalInvocationID.xy;
@@ -553,7 +521,8 @@ void main()
     return;
   }
   const vec2 uv = (vec2(tid) + 0.5) / vec2(uniforms.resolution_layer_type.xy);
-  const float depth = 1.0 - textureLod(depth_tx, uv, 0.0).r;
+  const float reverse_depth = textureLod(depth_tx, uv, 0.0).r;
+  const float depth = 1.0f - reverse_depth;
   if (!depth_is_valid(depth)) {
     imageStore(shadow_visibility_img, ivec3(ivec2(tid), int(uint(uniforms.resolution_layer_type.z))), vec4(1.0));
     return;
@@ -568,32 +537,38 @@ void main()
   }
   L /= light_distance;
   vec3 N = vec3(0.0);
-  if (!load_gbuffer_receiver_normal(ivec2(tid), gbuf_header_tx, gbuf_normal_tx, N)) {
+  const int receiver_source = int(uniforms.caustic_params.w);
+  if (receiver_source != 0 ||
+      !load_gbuffer_receiver_normal(ivec2(tid), gbuf_header_tx, gbuf_normal_tx, N)) {
     N = estimate_world_normal(ivec2(tid), depth, depth_tx);
   }
   if (dot(N, N) < 1.0e-10) {
     N = L;
   }
-  const float normal_bias = max(4.0e-3, uniforms.normal_bias_pad.x);
-  const float ray_tmin = max(5.0e-4, normal_bias * 0.25);
   const vec3 camera_position = uniforms.viewinv[3].xyz;
   const vec3 to_receiver = P - camera_position;
   const float receiver_distance = max(length(to_receiver), 1.0e-6);
-  const vec3 view_dir = to_receiver / receiver_distance;
-  const float receiver_slack = min(
-      view_ray_receiver_slack(ivec2(tid), depth, P, view_dir, N, depth_tx),
-      0.5 * receiver_distance);
-  const vec3 P_corrected = P - view_dir * receiver_slack;
-  const vec3 smooth_N = normal_unpack(texelFetch(gbuf_normal_tx, ivec3(tid, 0), 0).xy);
+  const bool is_orthographic = uniforms.wininv[2].w == 0.0f;
+  const vec3 toward_camera = is_orthographic ?
+                                 normalize(uniforms.viewinv[2].xyz) :
+                                 -to_receiver / receiver_distance;
+  N = dot(N, toward_camera) >= 0.0f ? N : -N;
+  const float normal_bias = max(max(max(abs(P.x), abs(P.y)),
+                                    max(abs(P.z), receiver_distance)) * 1.25e-6f, 1.0e-7f);
+  const float ray_tmin = 0.0f;
+  const vec3 P_corrected = point_screen_to_world(
+      ivec2(tid), shadow_receiver_front_depth(reverse_depth, is_orthographic));
+  const vec3 unshifted_origin = P_corrected + N * normal_bias;
+  const vec3 smooth_N = receiver_source == 0 ?
+      normal_unpack(texelFetch(gbuf_normal_tx, ivec3(tid, 0), 0).xy) :
+      prepass_shadow_smooth_normal(prepass_normal_tx, ivec2(tid), receiver_source, N);
   const vec3 center_L = normalize(uniforms.light_position_radius.xyz +
                                   uniforms.shadow_offset_scale.xyz - P);
-  const float precision_bias = max(max(max(abs(P.x), abs(P.y)),
-                                       max(abs(P.z), receiver_distance)) * 1.25e-6, 1.0e-7);
   TerminatorReceiver receiver = terminator_none();
   if (uniforms.caustic_params.z > 0.0 &&
       min(dot(N, center_L), dot(smooth_N, center_L)) < uniforms.caustic_params.z + 0.25) {
-    const vec3 toward_camera = normalize(point_screen_to_world(ivec2(tid), 0.0) - P);
-    receiver = terminator_raster_receiver(P, toward_camera, smooth_N, precision_bias * 16.0);
+    const float recovery_distance = max(normal_bias * 16.0, length(P_corrected - P) * 2.0);
+    receiver = terminator_raster_receiver(P, toward_camera, recovery_distance);
   }
   const bool area_soft = is_area_light(uint(uniforms.resolution_layer_type.w)) && (max(uniforms.light_x_axis_size_x.w, uniforms.light_y_axis_size_y.w) * uniforms.shadow_offset_scale.w > 1.0e-6);
   const bool local_soft = (!is_area_light(uint(uniforms.resolution_layer_type.w))) && (uniforms.light_position_radius.w > 1.0e-6);
@@ -602,27 +577,42 @@ void main()
   const float color_intensity = clamp(uniforms.normal_bias_pad.w, 0.0, 1.0);
   const float photons_intensity = max(uniforms.caustic_params.x, 0.0);
   const float transparent_shadows = uniforms.caustic_params.y;
-  vec3 visibility = vec3(0.0);
+  vec4 visibility = vec4(0.0f);
+  const bool detailed = shadow_needs_hit_details();
+  const uint receiver_id = uniforms.shadow_options.z != 0u ?
+                               texelFetch(receiver_id_tx, ivec2(tid), 0).r :
+                               SHADOW_UNKNOWN_RECEIVER_ID;
   for (int sample_index = 0; sample_index < sample_count; sample_index++) {
     const vec3 target = sample_local_shadow_target(tid, sample_index, P);
-    vec3 sample_L = target - P_corrected;
+    vec3 sample_L = target - unshifted_origin;
     const float sample_distance = length(sample_L);
     if (!(sample_distance > 1.0e-5)) {
-      visibility += vec3(1.0);
+      visibility += vec4(1.0, 1.0, 1.0, 0.0);
       continue;
     }
     sample_L /= sample_distance;
     float ray_tmax = max(ray_tmin, sample_distance);
-    const vec3 offset = terminator_shadow_offset(receiver, P, sample_L, precision_bias);
-    const vec3 origin = P_corrected + N * normal_bias + offset;
+    const vec3 offset = terminator_shadow_offset(receiver, unshifted_origin, sample_L, normal_bias);
+    const vec3 origin = unshifted_origin + offset;
     if (dot(offset, offset) > 0.0) {
       /* Keep the sampled light point fixed when lifting the shadow-ray origin. */
       sample_L = target - origin;
-      ray_tmax = max(ray_tmin, length(sample_L));
-      sample_L = normalize(sample_L);
+      ray_tmax = length(sample_L);
+      if (!(ray_tmax > 1.0e-5)) {
+        visibility += vec4(1.0, 1.0, 1.0, 0.0);
+        continue;
+      }
+      sample_L /= ray_tmax;
     }
-    visibility += hardware_shadow_visibility(scene, origin, sample_L, ray_tmin, ray_tmax, transparent_shadows, enable_caustics, false, target, color_intensity, photons_intensity);
+    if (detailed) {
+      visibility += hardware_shadow_detailed_visibility(scene, origin, sample_L, ray_tmin,
+                                                         ray_tmax, transparent_shadows,
+                                                         color_intensity, receiver_id);
+    }
+    else {
+      visibility.rgb += hardware_shadow_visibility(scene, origin, sample_L, ray_tmin, ray_tmax, transparent_shadows, enable_caustics, false, target, color_intensity, photons_intensity);
+    }
   }
   visibility /= float(sample_count);
-  imageStore(shadow_visibility_img, ivec3(ivec2(tid), int(uint(uniforms.resolution_layer_type.z))), vec4(visibility, 1.0));
+  imageStore(shadow_visibility_img, ivec3(ivec2(tid), int(uint(uniforms.resolution_layer_type.z))), visibility);
 }

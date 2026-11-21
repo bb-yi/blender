@@ -3,6 +3,10 @@ eevee = bpy.context.scene.eevee
 options = eevee.ray_tracing_options
 
 eevee.ray_tracing_method = 'SCREEN'
+options.use_hardware_shadows = False
+eevee.hardware_raytracing_shadow_samples = 2
+eevee.hardware_raytracing_shadow_color_intensity = 0.5
+eevee.hardware_raytracing_shadow_transparency = 0.5
 options.resolution_scale = '2'
 options.trace_max_roughness = 0.5
 options.screen_trace_quality = 0.25

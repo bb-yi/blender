@@ -14,6 +14,30 @@ layout(scalar, binding = 9) readonly buffer TerminatorTransforms
   mat4 terminator_transforms[];
 };
 
+/* Bit zero in each TLAS instance's mask represents participation in shadow rays. */
+const uint HWRT_SHADOW_CASTER_MASK = 0x01u;
+
+float shadow_ray_after_hit(float distance)
+{
+  /* Advance just beyond the hit. A fixed world-space step can cross another thin surface. */
+  /* Avoid a subnormal TMin on drivers that flush it to zero. */
+  return uintBitsToFloat(max(floatBitsToUint(abs(distance)) + 1u, 0x00800000u));
+}
+
+float shadow_receiver_front_depth(float reverse_depth, bool is_orthographic)
+{
+  /* Cover rounding in the stored reverse-Z sample as well as in forward-depth unprojection.
+   * A neighboring pixel's depth is not an error bound for this receiver. */
+  const float depth = 1.0f - reverse_depth;
+  /* Orthographic depth is linear. At a long clip range, four stored depth steps could
+   * cross an otherwise resolvable close caster. Cover just one stored step there. */
+  const uint reverse_steps = is_orthographic ? 1u : 4u;
+  const float reverse_front = uintBitsToFloat(min(floatBitsToUint(reverse_depth) + reverse_steps,
+                                                floatBitsToUint(1.0f)));
+  return min(1.0f - reverse_front,
+             uintBitsToFloat(max(floatBitsToUint(depth), 4u) - 4u));
+}
+
 struct TerminatorReceiver {
   vec3 offset;
   vec3 Ns;
@@ -26,7 +50,7 @@ TerminatorReceiver terminator_none()
   return TerminatorReceiver(vec3(0), vec3(0), vec3(0), 0.0);
 }
 
-TerminatorReceiver terminator_receiver(vec3 P, vec3 shading_N, uint object_id, uint primitive_id)
+TerminatorReceiver terminator_receiver(vec3 P, vec3 receiver_side, uint object_id, uint primitive_id)
 {
   if (object_id == 0xFFFFFFFFu || object_id >= triangle_normal_ranges.length()) {
     return terminator_none();
@@ -73,11 +97,22 @@ TerminatorReceiver terminator_receiver(vec3 P, vec3 shading_N, uint object_id, u
   local_P = V[0] * bary.x + V[1] * bary.y + V[2] * bary.z;
   vec3 n = N[0] * bary.x + N[1] * bary.y + N[2] * bary.z;
   vec3 Ns = normalize(transpose(inv_linear) * n);
-  vec3 Ng = normalize(cross(linear * e0, linear * e1));
-  Ng = dot(Ng, shading_N) < 0.0 ? -Ng : Ng;
-  Ns = dot(Ns, shading_N) < 0.0 ? -Ns : Ns;
-  if (dot(Ns, Ng) < 0.2) {
+  const vec3 mesh_Ng = normalize(transpose(inv_linear) * cross(e0, e1));
+  /* Reject a bent shading normal before orienting either normal for two-sided shading.
+   * Flipping the geometric normal first can validate an offset into the mesh. Use the normal
+   * transform for the local winding so mirrored instances take the same hemisphere test. */
+  if (!(dot(Ns, mesh_Ng) >= 0.2)) {
     return terminator_none();
+  }
+  /* A rasterized back face still carries the mesh's original vertex normals. Reconstruct the
+   * smoothing offset on the side that was actually hit, so it cannot lift a shadow ray through
+   * the receiving sheet onto its lit side. Flip the corner normals together with the face. */
+  const float side = dot(mesh_Ng, receiver_side) < 0.0 ? -1.0 : 1.0;
+  const vec3 Ng = mesh_Ng * side;
+  Ns *= side;
+  n *= side;
+  for (uint i = 0u; i < 3u; i++) {
+    N[i] *= side;
   }
   float a = dot(N[2] - N[0], V[0] - V[2]);
   float b = dot(N[2] - N[1], V[1] - V[2]);
@@ -108,10 +143,7 @@ TerminatorReceiver terminator_receiver(vec3 P, vec3 shading_N, uint object_id, u
 
 /* Raster receivers lack a primitive ID. Recover only a very short segment around the
  * known depth position, along the view ray; a miss never substitutes another surface. */
-TerminatorReceiver terminator_raster_receiver(vec3 P,
-                                              vec3 toward_camera,
-                                              vec3 shading_N,
-                                              float epsilon)
+TerminatorReceiver terminator_raster_receiver(vec3 P, vec3 toward_camera, float epsilon)
 {
   rayQueryEXT query;
   rayQueryInitializeEXT(query,
@@ -122,18 +154,21 @@ TerminatorReceiver terminator_raster_receiver(vec3 P,
                         0.0,
                         -toward_camera,
                         2.0 * epsilon);
-  while (rayQueryProceedEXT(query)) {
+  int remaining = 4096;
+  while (remaining-- > 0 && rayQueryProceedEXT(query)) {
   }
-  if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+  if (remaining < 0 ||
+      rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT)
+  {
     return terminator_none();
   }
   return terminator_receiver(P,
-                             shading_N,
+                             toward_camera,
                              rayQueryGetIntersectionInstanceCustomIndexEXT(query, true),
                              rayQueryGetIntersectionPrimitiveIndexEXT(query, true));
 }
 
-vec3 terminator_shadow_offset(TerminatorReceiver receiver, vec3 P, vec3 L, float epsilon)
+vec3 terminator_shadow_offset(TerminatorReceiver receiver, vec3 origin, vec3 L, float epsilon)
 {
   if (receiver.cutoff <= 0.0) {
     return vec3(0);
@@ -156,14 +191,26 @@ vec3 terminator_shadow_offset(TerminatorReceiver receiver, vec3 P, vec3 L, float
                         scene,
                         gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
                         0xFFu,
-                        P + receiver.Ng * epsilon,
+                        origin,
                         0.0,
                         offset / distance,
                         distance);
-  while (rayQueryProceedEXT(guard)) {
+  int remaining = 4096;
+  while (remaining-- > 0 && rayQueryProceedEXT(guard)) {
   }
-  if (rayQueryGetIntersectionTypeEXT(guard, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+  if (remaining < 0 ||
+      rayQueryGetIntersectionTypeEXT(guard, true) == gl_RayQueryCommittedIntersectionTriangleEXT)
+  {
     return vec3(0);
   }
   return offset;
+}
+/* Source 1 carries an interpolated camera-prepass normal. Source 2 uses depth alone. */
+vec3 prepass_shadow_smooth_normal(sampler2D normals, ivec2 texel, int source, vec3 fallback)
+{
+  if (source != 1) {
+    return fallback;
+  }
+  const vec3 encoded = texelFetch(normals, texel, 0).xyz;
+  return any(greaterThan(encoded, vec3(0.0))) ? normalize(encoded * 2.0 - 1.0) : fallback;
 }

@@ -108982,6 +108982,38 @@ msgid "Screen-Trace"
 msgstr "屏幕追踪"
 
 
+msgid "Hardware Shadows"
+msgstr "硬件阴影"
+
+
+msgid "Replace shadow maps with hardware ray-traced shadows when the scene and GPU support it. Shader Info follows this scene setting"
+msgstr "在场景和显卡支持时，用硬件光追阴影替换阴影贴图。着色器信息节点跟随场景设置"
+
+
+msgid "Using shadow maps for the whole scene: {}"
+msgstr "全场景使用阴影贴图：{}"
+
+
+msgid "Hardware shadows require NVIDIA RTX and Vulkan"
+msgstr "硬件阴影需要 NVIDIA RTX 和 Vulkan"
+
+
+msgid "Using shadow maps for curves, point clouds or tessellated casters"
+msgstr "场景中有曲线、点云或曲面细分投影物体，已使用阴影贴图"
+
+
+msgid "Insufficient memory for hardware shadows; using shadow maps"
+msgstr "硬件阴影显存不足，已使用阴影贴图"
+
+
+msgid "Shadow Rays"
+msgstr "阴影光线数"
+
+
+msgid "Shadow Transparency"
+msgstr "阴影透明度"
+
+
 msgid "Raytrace against the depth buffer. Fallback to light probes for invalid rays."
 msgstr "对深度缓冲进行光线追踪。无效光线回退到光照探头。"
 

@@ -203,6 +203,7 @@ struct ResourceBind {
     gpu::IndexBuf *index_buf;
     gpu::IndexBuf **index_buf_ref;
     gpu::TopLevelAS *tlas;
+    gpu::TopLevelAS **tlas_ref;
   };
 
   ResourceBind() = default;
@@ -217,6 +218,8 @@ struct ResourceBind {
       : slot(slot_), is_reference(true), type(Type::StorageBuf), storage_buf_ref(res) {};
   ResourceBind(int slot_, gpu::TopLevelAS *res)
       : slot(slot_), is_reference(false), type(Type::TopLevelAS), tlas(res) {};
+  ResourceBind(int slot_, gpu::TopLevelAS **res)
+      : slot(slot_), is_reference(true), type(Type::TopLevelAS), tlas_ref(res) {};
   ResourceBind(int slot_, gpu::UniformBuf *res, Type /*type*/)
       : slot(slot_), is_reference(false), type(Type::UniformAsStorageBuf), uniform_buf(res) {};
   ResourceBind(int slot_, gpu::UniformBuf **res, Type /*type*/)

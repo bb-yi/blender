@@ -110,7 +110,7 @@ void ResourceBind::execute() const
       GPU_indexbuf_bind_as_ssbo(is_reference ? *index_buf_ref : index_buf, slot);
       break;
     case ResourceBind::Type::TopLevelAS:
-      tlas->bind(slot);
+      (is_reference ? *tlas_ref : tlas)->bind(slot);
       break;
   }
 }

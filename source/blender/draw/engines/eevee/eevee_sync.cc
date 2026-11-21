@@ -585,7 +585,8 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
                     material_pass_tessellation_level(material, pass.gpumat));
     });
 
-    capture_hardware_raytrace_scene_entry(ob_handle, material, geom, i, false);
+    capture_hardware_raytrace_scene_entry(
+        ob_handle, ob_ref.get_blocker_shadow_set(), material, geom, i, false);
 
     geometry_call(material.outline_shell_prepass.sub_pass, geom, ob_handle.res_handle);
     geometry_call(material.outline_shell_shading.sub_pass, geom, ob_handle.res_handle);
@@ -686,7 +687,8 @@ bool SyncModule::sync_sculpt(const ObjectRef &ob_ref)
       }
     }
 
-    capture_hardware_raytrace_scene_entry(ob_handle, material, geom, batch.material_slot, true);
+    capture_hardware_raytrace_scene_entry(
+        ob_handle, ob_ref.get_blocker_shadow_set(), material, geom, batch.material_slot, true);
 
     sync_common_passes(material, [&](const MaterialPass &pass) {
       const bool use_npr_geom = pass.gpumat == material.npr.gpumat ||
@@ -761,6 +763,8 @@ void SyncModule::sync_pointcloud(const ObjectRef &ob_ref)
     }
   }
 
+  /* The hardware scene only contains triangle batches. Keep native shadows for these casters. */
+  has_untraced_shadow_caster_ |= material.shadow.sub_pass != nullptr;
   sync_common_passes(material, [&](const MaterialPass &pass) { drawcall_add(pass); });
 
   sync_outline_occlusion_passes(
@@ -895,6 +899,7 @@ void SyncModule::sync_curves(const ObjectRef &ob_ref, HairParticleInfo const *ha
     }
   }
 
+  has_untraced_shadow_caster_ |= material.shadow.sub_pass != nullptr;
   sync_common_passes(material, [&](const MaterialPass &pass) { drawcall_add(pass); });
 
   sync_outline_occlusion_passes(

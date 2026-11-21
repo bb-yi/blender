@@ -30,6 +30,37 @@ static bool hardware_perf_logging_enabled()
 RayTraceModule::~RayTraceModule()
 {
   free_hardware_rt_scene_cache();
+  GPU_hardware_raytrace_scene_free(hardware_forward_empty_scene_);
+}
+
+void RayTraceModule::bind_forward_shadows(PassMain::Sub &pass)
+{
+  pass.bind_tlas("forward_shadow_as", &hardware_forward_bindings_.tlas);
+  pass.bind_ssbo("forward_shadow_casters", &hardware_forward_bindings_.casters);
+  pass.bind_ssbo("forward_shadow_uvs", &hardware_forward_bindings_.uvs);
+  pass.bind_ssbo("forward_shadow_alpha", &hardware_forward_bindings_.alpha);
+  pass.bind_ssbo("forward_shadow_proxies", &hardware_forward_bindings_.proxies);
+  pass.push_constant("forward_shadow_options", &hardware_forward_shadow_options_);
+  pass.push_constant("forward_shadow_samples", &hardware_forward_shadow_samples_);
+}
+
+void RayTraceModule::prepare_forward_shadows()
+{
+  GPUHardwareRaytraceScene *scene = this->use_hardware_shadows() ? acquire_hardware_rt_scene(nullptr) :
+                                                                 nullptr;
+  const bool ready = GPU_hardware_raytrace_forward_bindings(scene, hardware_forward_bindings_);
+  if (!ready) {
+    if (!hardware_forward_empty_scene_) {
+      hardware_forward_empty_scene_ = GPU_hardware_raytrace_empty_scene();
+    }
+    GPU_hardware_raytrace_forward_bindings(hardware_forward_empty_scene_, hardware_forward_bindings_);
+  }
+  const SceneEEVEE &options = inst_.scene->eevee;
+  hardware_forward_shadow_options_ = float4(ready ? 1.0f : 0.0f,
+                                           hardware_forward_bindings_.has_alpha ? 1.0f : 0.0f,
+                                           options.hardware_raytracing_shadow_transparency,
+                                           options.hardware_raytracing_shadow_color_intensity);
+  hardware_forward_shadow_samples_ = clamp_i(options.hardware_raytracing_shadow_samples, 1, 16);
 }
 
 static Vector<GPUHardwareRaytraceSceneEntry> build_hardware_rt_scene_entries(
@@ -60,6 +91,10 @@ static Vector<GPUHardwareRaytraceSceneEntry> build_hardware_rt_scene_entries(
     rt_entry.object_to_world = entry.object_to_world;
     rt_entry.instance_count = std::max(1u, entry.instance_count);
     rt_entry.user_id = user_id++;
+    rt_entry.shadow_caster_id = entry.resource_handle.index();
+    rt_entry.shadow_blocker_set = entry.shadow_blocker_set;
+    rt_entry.casts_shadow = entry.casts_shadow;
+    rt_entry.shadow_alpha = entry.shadow_alpha;
     rt_entry.emissive_radiance = entry.emissive_radiance;
     rt_entry.diffuse_albedo = entry.diffuse_albedo;
     rt_entry.reflection_color = entry.reflection_color;
@@ -160,6 +195,11 @@ static const char *hardware_scene_entries_geometry_mismatch_reason(
       }
       return "is_sculpt";
     }
+    if ((entry.shadow_alpha.image != nullptr) != (cached.shadow_alpha.image != nullptr) ||
+        strcmp(entry.shadow_alpha.uv_attribute, cached.shadow_alpha.uv_attribute) != 0)
+    {
+      return "shadow UV layout";
+    }
     /* Entries with a geometry recalc are rebuilt selectively from their fresh batch; a changed
      * batch pointer or resource range is expected there and must not force a full scene
      * rebuild. */
@@ -217,7 +257,7 @@ static bool hardware_scene_entries_transform_changed(
   return false;
 }
 
-static bool hardware_scene_entries_instance_count_changed(
+static bool hardware_scene_entries_instance_metadata_changed(
     const Vector<HardwareRaytraceSceneEntry> &entries,
     const Vector<HardwareRaytraceSceneEntry> &cached_entries)
 {
@@ -227,7 +267,7 @@ static bool hardware_scene_entries_instance_count_changed(
   for (const int i : entries.index_range()) {
     const HardwareRaytraceSceneEntry &entry = entries[i];
     const HardwareRaytraceSceneEntry &cached = cached_entries[i];
-    if (entry.instance_count != cached.instance_count) {
+    if (entry.instance_count != cached.instance_count || entry.casts_shadow != cached.casts_shadow) {
       return true;
     }
   }
@@ -256,6 +296,9 @@ static bool hardware_scene_entries_material_proxy_changed(
         entry.reflection_layer_coverage != cached.reflection_layer_coverage ||
         entry.shadow_terminator_geometry_offset != cached.shadow_terminator_geometry_offset ||
         entry.closure_type != cached.closure_type || entry.proxy_flags != cached.proxy_flags ||
+        entry.resource_handle.index() != cached.resource_handle.index() ||
+        entry.shadow_blocker_set != cached.shadow_blocker_set ||
+        entry.shadow_alpha != cached.shadow_alpha ||
         entry.material_runtime_hash != cached.material_runtime_hash)
     {
       return true;
@@ -330,7 +373,7 @@ GPUHardwareRaytraceScene *RayTraceModule::acquire_hardware_rt_scene(
   const double perf_start_time = perf_logging_enabled ? BLI_time_now_seconds() : 0.0;
   const uint64_t current_scene_signature = inst_.sync.hardware_raytrace_scene_signature();
 
-  if (!use_hardware_tracing() || active_hardware_feature_mask() == 0) {
+  if (!use_hardware_scene()) {
     free_hardware_rt_scene_cache();
     return nullptr;
   }
@@ -377,11 +420,11 @@ GPUHardwareRaytraceScene *RayTraceModule::acquire_hardware_rt_scene(
   const bool transform_changed = geometry_matches_cache &&
                                  hardware_scene_entries_transform_changed(
                                      sorted_scene_entries, hardware_rt_scene_entries_cache_);
-  const bool instance_count_changed = geometry_matches_cache &&
-                                      hardware_scene_entries_instance_count_changed(
+  const bool instance_metadata_changed = geometry_matches_cache &&
+                                         hardware_scene_entries_instance_metadata_changed(
                                           sorted_scene_entries,
                                           hardware_rt_scene_entries_cache_);
-  const bool animation_changed = transform_changed || instance_count_changed;
+  const bool animation_changed = transform_changed || instance_metadata_changed;
   const bool emissive_changed = geometry_matches_cache &&
                                 hardware_scene_entries_emissive_changed(
                                     sorted_scene_entries, hardware_rt_scene_entries_cache_);
@@ -615,7 +658,7 @@ void RayTraceModule::render_scene_final_specular(RayTraceBuffer &rt_buffer,
   PassSimple pass("Trace.SceneFinalSpecular");
   pass.init();
   pass.shader_set(inst_.shaders.static_shader_get(RAY_SCENE_FINAL_SPECULAR));
-  pass.push_constant("feature_mask", int(hardware_feature_mask_));
+  pass.push_constant("feature_mask", int(active_hardware_feature_mask()));
   pass.push_constant("use_shared_indirect", result.use_shared_indirect);
   pass.bind_texture("specular_0_tx", &result.closures[0]);
   pass.bind_texture("specular_1_tx", &result.closures[1]);
@@ -655,7 +698,7 @@ void RayTraceModule::merge_specular_result(RayTraceBuffer &rt_buffer,
   PassSimple pass("Trace.MergeSpecular");
   pass.init();
   pass.shader_set(inst_.shaders.static_shader_get(RAY_MERGE_SPECULAR));
-  pass.push_constant("feature_mask", int(hardware_feature_mask_));
+  pass.push_constant("feature_mask", int(active_hardware_feature_mask()));
   pass.push_constant("use_shared_indirect", result.use_shared_indirect);
   pass.bind_image("indirect_0_img", &result.closures[0]);
   pass.bind_image("indirect_1_img", &result.closures[1]);
@@ -673,29 +716,41 @@ void RayTraceModule::merge_specular_result(RayTraceBuffer &rt_buffer,
   inst_.manager->submit(pass, render_view);
 }
 
-void RayTraceModule::render_hardware_shadows(View &view, gpu::Texture *depth_tx, int2 extent)
+void RayTraceModule::render_hardware_shadows(View &view,
+                                             gpu::Texture *depth_tx,
+                                             int2 extent,
+                                             bool from_prepass)
 {
   hardware_shadow_ready_ = false;
   const int lights_len = inst_.lights.light_count();
-  if (!use_hardware_shadows() || lights_len == 0 ||
+  const int layers = inst_.lights.hardware_shadow_layer_count();
+  const float unoccluded[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  if (!use_hardware_shadows() || layers == 0 ||
       inst_.sync.hardware_raytrace_scene_entries().is_empty())
   {
-    const float visibility[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     hardware_shadow_visibility_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1,
-        GPU_TEXTURE_USAGE_SHADER_READ, visibility);
+        GPU_TEXTURE_USAGE_SHADER_READ, unoccluded);
     return;
   }
 
   GPUHardwareRaytraceSceneStats stats;
   GPUHardwareRaytraceScene *scene = acquire_hardware_rt_scene(&stats);
   if (!scene || !stats.built_scene) {
+    inst_.info_append_i18n("Could not build the hardware shadow scene");
     return;
   }
 
   constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
   hardware_shadow_visibility_tx_.ensure_2d_array(
-      gpu::TextureFormat::SFLOAT_16_16_16_16, extent, lights_len, usage);
+      gpu::TextureFormat::SFLOAT_16_16_16_16, extent, layers, usage);
+  if (!hardware_shadow_visibility_tx_.is_valid()) {
+    inst_.info_append_i18n("Insufficient memory for hardware shadows");
+    hardware_shadow_visibility_tx_.ensure_2d_array(
+        gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1,
+        GPU_TEXTURE_USAGE_SHADER_READ, unoccluded);
+    return;
+  }
   hardware_shadow_visibility_tx_.clear(float4(1.0f));
   GPU_flush();
 
@@ -705,6 +760,9 @@ void RayTraceModule::render_hardware_shadows(View &view, gpu::Texture *depth_tx,
   const float4 sampling_rand(rng, inst_.sampling.rng_get(SAMPLING_SHADOW_X));
   const bool log_perf = hardware_perf_logging_enabled();
   const double start = log_perf ? BLI_time_now_seconds() : 0.0;
+  /* The ray-cast prepass can retain another surface's normal at the same pixel. */
+  gpu::Texture *prepass_normal = from_prepass && !inst_.pipelines.has_raycast ?
+                                     inst_.render_buffers.prepass_normal_tx.gpu_texture() : nullptr;
   bool success = true;
   int traced = 0;
   GPU_debug_group_begin("Hardware RT Shadows");
@@ -716,9 +774,14 @@ void RayTraceModule::render_hardware_shadows(View &view, gpu::Texture *depth_tx,
     }
     if (is_sun_light(light.type)) {
       GPUHardwareRaytraceDirectionalShadowParams p;
+      p.receiver_id_tx = inst_.render_buffers.hwrt_receiver_id_tx;
+      p.shadow_link_mask = light.shadow_set_membership;
+      p.classify_shadow = inst_.pipelines.hardware_shadow_classifies_receivers();
       p.depth_tx = depth_tx;
       p.gbuf_header_tx = inst_.gbuffer.header_tx;
       p.gbuf_normal_tx = inst_.gbuffer.normal_tx;
+      p.prepass_normal_tx = prepass_normal;
+      p.use_prepass_receiver = from_prepass;
       p.shadow_visibility_tx = hardware_shadow_visibility_tx_;
       p.viewinv = view.viewinv();
       p.wininv = view.wininv();
@@ -726,7 +789,7 @@ void RayTraceModule::render_hardware_shadows(View &view, gpu::Texture *depth_tx,
       p.shadow_layer = light.hwrt_shadow_layer;
       p.light_direction = math::normalize(float3(light.sun.direction));
       p.normal_bias = std::max(5.0e-3f, light.filter_radius * 5.0e-3f);
-      p.shadow_angle = light.sun.shadow_angle;
+      p.shadow_angle = light.hwrt_shadow_size;
       p.sample_count = sample_count;
       p.color_intensity = options.hardware_raytracing_shadow_color_intensity;
       p.shadow_transparency = options.hardware_raytracing_shadow_transparency;
@@ -737,9 +800,14 @@ void RayTraceModule::render_hardware_shadows(View &view, gpu::Texture *depth_tx,
     }
     else {
       GPUHardwareRaytraceLocalShadowParams p;
+      p.receiver_id_tx = inst_.render_buffers.hwrt_receiver_id_tx;
+      p.shadow_link_mask = light.shadow_set_membership;
+      p.classify_shadow = inst_.pipelines.hardware_shadow_classifies_receivers();
       p.depth_tx = depth_tx;
       p.gbuf_header_tx = inst_.gbuffer.header_tx;
       p.gbuf_normal_tx = inst_.gbuffer.normal_tx;
+      p.prepass_normal_tx = prepass_normal;
+      p.use_prepass_receiver = from_prepass;
       p.shadow_visibility_tx = hardware_shadow_visibility_tx_;
       p.viewinv = view.viewinv();
       p.wininv = view.wininv();
@@ -747,7 +815,7 @@ void RayTraceModule::render_hardware_shadows(View &view, gpu::Texture *depth_tx,
       p.shadow_layer = light.hwrt_shadow_layer;
       p.light_type = uint32_t(light.type);
       p.light_position = light.position();
-      p.shadow_radius = light.local.local.shadow_radius;
+      p.shadow_radius = light.hwrt_shadow_size;
       p.light_x_axis = light.x_axis();
       p.light_y_axis = light.y_axis();
       p.shadow_offset = light.x_axis() * light.local.local.shadow_position.x +
@@ -756,7 +824,6 @@ void RayTraceModule::render_hardware_shadows(View &view, gpu::Texture *depth_tx,
       if (is_area_light(light.type)) {
         p.area_size_x = light.area.size.x;
         p.area_size_y = light.area.size.y;
-        p.area_shadow_scale = light.area.shadow_scale;
       }
       p.normal_bias = std::max(4.0e-3f, light.filter_radius * 4.0e-3f);
       p.sample_count = sample_count;
@@ -776,12 +843,13 @@ void RayTraceModule::render_hardware_shadows(View &view, gpu::Texture *depth_tx,
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
   hardware_shadow_ready_ = success;
   if (!success) {
-    inst_.info_append_i18n("Hardware ray-traced shadows failed; using shadow maps");
+    inst_.info_append_i18n("Hardware ray-traced shadows failed");
   }
   if (log_perf) {
     std::fprintf(stderr,
-                 "EEVEE HWRT primary_shadows lights=%d samples=%d success=%d submit_ms=%.3f\n",
-                 traced, sample_count, int(success), (BLI_time_now_seconds() - start) * 1000.0);
+                 "EEVEE HWRT primary_shadows lights=%d samples=%d success=%d submit_ms=%.3f receiver=%s\n",
+                 traced, sample_count, int(success), (BLI_time_now_seconds() - start) * 1000.0,
+                 from_prepass ? "prepass" : "gbuffer");
   }
 }
 
@@ -793,7 +861,8 @@ void RayTraceModule::render_hardware_direct_light(View &view, gpu::Texture *dept
   constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
   /* Nuru's viewport-reference path also includes image renders: GI consumes the resolved
    * direct light in both. Only primary viewport shading replaces the native evaluator. */
-  if ((!inst_.is_viewport() && !inst_.is_image_render) || !hardware_shadow_ready_ ||
+  if (!use_hardware_tracing_method() || (!inst_.is_viewport() && !inst_.is_image_render) ||
+      !hardware_shadow_ready_ ||
       std::getenv("BLENDER_EEVEE_HWRT_NATIVE_DIRECT") != nullptr)
   {
     hardware_direct_closures_tx_.ensure_2d_array(
@@ -1024,6 +1093,7 @@ void RayTraceModule::render_hardware_hit_shadows(GPUHardwareRaytraceScene *scene
     }
     if (is_sun_light(light.type)) {
       GPUHardwareRaytraceDirectionalHitShadowParams p;
+      p.shadow_link_mask = light.shadow_set_membership;
       p.hit_normal_tx = hit.normal;
       p.hit_world_position_tx = hit.world_position;
       p.hit_identity_tx = hit.identity;
@@ -1034,7 +1104,7 @@ void RayTraceModule::render_hardware_hit_shadows(GPUHardwareRaytraceScene *scene
       p.shadow_layer = light.hwrt_shadow_layer;
       p.light_direction = math::normalize(float3(light.sun.direction));
       p.normal_bias = std::max(5.0e-3f, light.filter_radius * 5.0e-3f);
-      p.shadow_angle = light.sun.shadow_angle;
+      p.shadow_angle = light.hwrt_shadow_size;
       p.sample_count = sample_count;
       p.color_intensity = options.hardware_raytracing_shadow_color_intensity;
       p.shadow_transparency = options.hardware_raytracing_shadow_transparency;
@@ -1045,6 +1115,7 @@ void RayTraceModule::render_hardware_hit_shadows(GPUHardwareRaytraceScene *scene
     }
     else {
       GPUHardwareRaytraceLocalHitShadowParams p;
+      p.shadow_link_mask = light.shadow_set_membership;
       p.hit_normal_tx = hit.normal;
       p.hit_world_position_tx = hit.world_position;
       p.hit_identity_tx = hit.identity;
@@ -1055,7 +1126,7 @@ void RayTraceModule::render_hardware_hit_shadows(GPUHardwareRaytraceScene *scene
       p.shadow_layer = light.hwrt_shadow_layer;
       p.light_type = uint32_t(light.type);
       p.light_position = light.position();
-      p.shadow_radius = light.local.local.shadow_radius;
+      p.shadow_radius = light.hwrt_shadow_size;
       p.light_x_axis = light.x_axis();
       p.light_y_axis = light.y_axis();
       p.shadow_offset = light.x_axis() * light.local.local.shadow_position.x +
@@ -1064,7 +1135,6 @@ void RayTraceModule::render_hardware_hit_shadows(GPUHardwareRaytraceScene *scene
       if (is_area_light(light.type)) {
         p.area_size_x = light.area.size.x;
         p.area_size_y = light.area.size.y;
-        p.area_shadow_scale = light.area.shadow_scale;
       }
       p.normal_bias = std::max(4.0e-3f, light.filter_radius * 4.0e-3f);
       p.sample_count = sample_count;
@@ -1085,7 +1155,7 @@ void RayTraceModule::render_hardware_hit_shadows(GPUHardwareRaytraceScene *scene
 
   hit.shadows_valid = success;
   if (!success) {
-    inst_.info_append_i18n("Hardware hit shadows failed; using shadow maps");
+    inst_.info_append_i18n("Hardware hit shadows failed");
   }
   if (log_perf) {
     std::fprintf(stderr,

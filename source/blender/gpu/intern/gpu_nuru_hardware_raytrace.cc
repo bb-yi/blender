@@ -17,6 +17,29 @@
 
 namespace blender {
 
+GPUHardwareRaytraceScene *GPU_hardware_raytrace_empty_scene()
+{
+#ifdef WITH_VULKAN_BACKEND
+  if (GPU_backend_get_type() == GPU_BACKEND_VULKAN) {
+    return gpu::vulkan::raytrace_empty_scene();
+  }
+#endif
+  return nullptr;
+}
+
+bool GPU_hardware_raytrace_forward_bindings(GPUHardwareRaytraceScene *scene,
+                                           GPUHardwareRaytraceForwardBindings &r_bindings)
+{
+#ifdef WITH_VULKAN_BACKEND
+  if (scene && GPU_backend_get_type() == GPU_BACKEND_VULKAN) {
+    return gpu::vulkan::raytrace_forward_bindings(*scene, r_bindings);
+  }
+#else
+  UNUSED_VARS(scene, r_bindings);
+#endif
+  return false;
+}
+
 GPUHardwareRaytraceScene *GPU_hardware_raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntry> entries,
                                                       GPUHardwareRaytraceSceneStats *r_stats)
 {

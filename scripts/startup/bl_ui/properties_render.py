@@ -447,15 +447,28 @@ class RENDER_PT_eevee_raytracing(RenderButtonsPanel, Panel):
         col = layout.column()
         col.prop(props, "ray_tracing_method", text="Method")
 
+        options = props.ray_tracing_options
+        if props.ray_tracing_method in {'SCREEN', 'PROBE', 'HARDWARE'}:
+            shadows = col.column()
+            if props.ray_tracing_method != 'HARDWARE':
+                if not props.is_hardware_raytracing_supported:
+                    col.label(text="Hardware shadows require NVIDIA RTX and Vulkan", icon='INFO')
+                shadows.active = props.is_hardware_raytracing_supported
+                shadows.prop(options, "use_hardware_shadows")
+                show_settings = options.use_hardware_shadows
+            else:
+                if not props.is_hardware_raytracing_supported:
+                    shadows.label(text="Requires Windows NVIDIA RTX / Vulkan", icon='INFO')
+                shadows.prop(props, "use_hardware_raytracing_shadows")
+                show_settings = True
+            if show_settings:
+                sub = shadows.column(align=True)
+                sub.active = props.ray_tracing_method != 'HARDWARE' or props.use_hardware_raytracing_shadows
+                sub.prop(props, "hardware_raytracing_shadow_samples")
+                sub.prop(props, "hardware_raytracing_shadow_color_intensity")
+                sub.prop(props, "hardware_raytracing_shadow_transparency")
+
         if props.ray_tracing_method == 'HARDWARE':
-            if not props.is_hardware_raytracing_supported:
-                col.label(text="Requires Windows NVIDIA RTX / Vulkan", icon='INFO')
-            col.prop(props, "use_hardware_raytracing_shadows")
-            sub = col.column(align=True)
-            sub.active = props.use_hardware_raytracing_shadows
-            sub.prop(props, "hardware_raytracing_shadow_samples")
-            sub.prop(props, "hardware_raytracing_shadow_color_intensity")
-            sub.prop(props, "hardware_raytracing_shadow_transparency")
             col.prop(props, "use_hardware_raytracing_reflections")
             sub = col.column()
             sub.active = props.use_hardware_raytracing_reflections
@@ -475,9 +488,9 @@ class RENDER_PT_eevee_raytracing(RenderButtonsPanel, Panel):
             rays.active = props.use_hardware_raytracing_secondary_gi
             rays.prop(props, "hardware_raytracing_secondary_gi_samples")
 
-        options = context.scene.eevee.ray_tracing_options
-
         col.prop(options, "resolution_scale")
+
+
 class RENDER_PT_eevee_screen_trace(RenderButtonsPanel, Panel):
     bl_label = "Screen Tracing"
     bl_options = {'DEFAULT_CLOSED'}

@@ -147,6 +147,16 @@ float4 shader_info_cached_shadow(uint light_index, float cache_eligible, int qua
   return float4(-1.0f);
 }
 
+[[node]]
+void node_shader_info_hardware_shadow(out float use_hardware_shadow)
+{
+#if defined(MAT_SHADER_INFO_HARDWARE_SHADOW) && defined(GPU_FRAGMENT_SHADER)
+  use_hardware_shadow = shader_info_hardware_shadow_layers > 0 ? 1.0f : 0.0f;
+#else
+  use_hardware_shadow = 0.0f;
+#endif
+}
+
 void shader_info_eval_light(KernelGlobals &kg, ShadingData &sd, uint l_idx,
                             bool is_local,
                             float3 position,
@@ -163,6 +173,7 @@ void shader_info_eval_light(KernelGlobals &kg, ShadingData &sd, uint l_idx,
                             float pcf_radius,
                             float max_penumbra,
                             float cache_eligible,
+                            float use_hardware_shadow,
                             float3 &diffuse_shading_sum,
                             float &visibility_sum,
                             float &self_shadow_sum,
@@ -240,6 +251,18 @@ void shader_info_eval_light(KernelGlobals &kg, ShadingData &sd, uint l_idx,
   if (diffuse_power >= LIGHT_ATTENUATION_THRESHOLD &&
       surface_attenuation > LIGHT_ATTENUATION_THRESHOLD)
   {
+    float3 hardware_shadow = use_hardware_shadow > 0.5f ?
+                                 shader_info_hardware_shadow_sample(light, sd.frag_co.xy) :
+                                 float3(-1.0f);
+    if (hardware_shadow.x >= 0.0f) {
+      visibility_sum += hardware_shadow.x * diffuse_weight;
+      shadow_weight_sum += diffuse_weight;
+#if defined(SHADOW_CASTER_CLASSIFY)
+      self_shadow_sum += hardware_shadow.y * surface_attenuation * diffuse_weight;
+      cast_shadow_sum += hardware_shadow.z * surface_attenuation * diffuse_weight;
+#endif
+      return;
+    }
     float4 shadow_sample = shader_info_cached_shadow(l_idx, cache_eligible, int(stable_shadow_samples));
 #if defined(SHADOW_CASTER_CLASSIFY)
     const bool classify = true;
@@ -331,7 +354,9 @@ void node_shader_info(float3 position,
                       float shadow_mode,
                       float stable_shadow_samples,
                       float lightgroup_id_value,
-                      float cache_eligible, [[resource_table]] KernelGlobals &kg, ShadingData &sd,
+                      float cache_eligible,
+                      float use_hardware_shadow,
+                      [[resource_table]] KernelGlobals &kg, ShadingData &sd,
                       out float4 diffuse_shading,
                       out float shadow,
                       out float4 ambient_lighting,
@@ -386,6 +411,7 @@ void node_shader_info(float3 position,
                            pcf_radius,
                            max_penumbra,
                            cache_eligible,
+                           use_hardware_shadow,
                            diffuse_shading_sum,
                            visibility_sum,
                            self_shadow_sum,
@@ -411,6 +437,7 @@ void node_shader_info(float3 position,
                            pcf_radius,
                            max_penumbra,
                            cache_eligible,
+                           use_hardware_shadow,
                            diffuse_shading_sum,
                            visibility_sum,
                            self_shadow_sum,
@@ -471,6 +498,7 @@ void node_shader_info(float3 position,
                    shadow_mode,
                    stable_shadow_samples,
                    lightgroup_id_value,
+                   0.0f,
                    0.0f,
                    kg,
                    sd,

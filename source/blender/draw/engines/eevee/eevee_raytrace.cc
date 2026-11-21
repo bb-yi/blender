@@ -9,6 +9,7 @@
  */
 
 #include "GPU_debug.hh"
+#include "CLG_log.h"
 
 #include "eevee_instance.hh"
 
@@ -70,22 +71,40 @@ void RayTraceModule::init()
   data_.thickness = ray_tracing_options_.screen_trace_thickness;
 
   tracing_method_ = RaytraceEEVEE_Method(sce_eevee.ray_tracing_method);
-  hardware_feature_mask_ = sce_eevee.hardware_raytracing_features;
+  hardware_feature_mask_ = 0;
   data_.hardware_trace_phase = HWRT_TRACE_PHASE_FULL;
   data_.hardware_feature_mask = 0;
   data_.use_hardware_tracing_method = false;
-  if (tracing_method_ == RAYTRACE_EEVEE_METHOD_HARDWARE &&
-      !GPU_viewport_hardware_raytracing_support())
-  {
-    tracing_method_ = RAYTRACE_EEVEE_METHOD_SCREEN;
+  if (tracing_method_ == RAYTRACE_EEVEE_METHOD_HARDWARE) {
+    if (GPU_viewport_hardware_raytracing_support()) {
+      hardware_feature_mask_ = sce_eevee.hardware_raytracing_features;
+    }
+    else {
+      tracing_method_ = RAYTRACE_EEVEE_METHOD_SCREEN;
+    }
   }
+  else if (ELEM(tracing_method_, RAYTRACE_EEVEE_METHOD_SCREEN, RAYTRACE_EEVEE_METHOD_PROBE) &&
+           (ray_tracing_options_.flag & RAYTRACE_EEVEE_SCREEN_HARDWARE_SHADOWS) &&
+           GPU_viewport_hardware_raytracing_support())
+  {
+    hardware_feature_mask_ = RAYTRACE_EEVEE_HARDWARE_SHADOWS;
+  }
+  if (!(sce_eevee.flag & SCE_EEVEE_SHADOW_ENABLED)) {
+    hardware_feature_mask_ &= ~uint32_t(RAYTRACE_EEVEE_HARDWARE_SHADOWS);
+  }
+  hardware_shadows_require_native_ = false;
   fast_gi_ray_count_ = sce_eevee.fast_gi_ray_count;
   fast_gi_step_count_ = sce_eevee.fast_gi_step_count;
   fast_gi_ao_only_ = (sce_eevee.fast_gi_method == FAST_GI_AO_ONLY);
 
   use_raytracing_ = (sce_eevee.flag & SCE_EEVEE_SSR_ENABLED) != 0;
+  /* TODO: Support raytracing for panoramic camera. */
+  if (use_raytracing_ && inst_.camera.is_panoramic()) {
+    use_raytracing_ = false;
+    inst_.info_append_i18n("Raytracing is not supported with panoramic camera yet");
+  }
   hardware_shadow_ready_ = false;
-  if (!use_hardware_tracing()) {
+  if (!use_hardware_scene()) {
     free_hardware_rt_scene_cache();
   }
   if (!use_hardware_shadows()) {
@@ -96,12 +115,6 @@ void RayTraceModule::init()
     hardware_shadow_visibility_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1,
         GPU_TEXTURE_USAGE_SHADER_READ, visibility);
-  }
-
-  /* TODO: Support raytracing for panoramic camera. */
-  if (use_raytracing_ && inst_.camera.is_panoramic()) {
-    use_raytracing_ = false;
-    inst_.info_append_i18n("Raytracing is not supported with panoramic camera yet");
   }
 
   float4 data(0.0f);
@@ -486,6 +499,42 @@ void RayTraceModule::sync()
   }
 }
 
+void RayTraceModule::resolve_shadow_backend()
+{
+  hardware_shadows_require_native_ = false;
+  if (!use_hardware_shadows()) {
+    return;
+  }
+
+  const char *reason = inst_.pipelines.native_shadow_requirement;
+  if (inst_.is_baking() || inst_.is_color_bake) {
+    reason = "the scene is baking lighting";
+  }
+  else if (inst_.volume.needs_shadow_tagging()) {
+    reason = "the scene uses lit volumes";
+  }
+  else if (inst_.sync.has_untraced_shadow_caster()) {
+    reason = "curves, point clouds, or tessellated surfaces cast shadows";
+  }
+  if (reason == nullptr) {
+    reason = inst_.lights.hardware_shadow_unsupported_reason();
+  }
+  if (reason == nullptr) {
+    return;
+  }
+
+  hardware_shadows_require_native_ = true;
+  if (active_hardware_feature_mask() == 0) {
+    free_hardware_rt_scene_cache();
+  }
+  if (inst_.is_viewport()) {
+    inst_.info_append_i18n("Using shadow maps for the whole scene: {}", reason);
+  }
+  else {
+    CLOG_WARN(&Instance::log, "Using shadow maps for the whole scene: %s", reason);
+  }
+}
+
 void RayTraceModule::debug_pass_sync() {}
 
 void RayTraceModule::debug_draw(View & /*view*/, gpu::FrameBuffer * /*view_fb*/) {}
@@ -545,7 +594,7 @@ RayTraceResult RayTraceModule::render_phase(RayTraceBuffer &rt_buffer,
   }
   const uint32_t specular_mask = RAYTRACE_EEVEE_HARDWARE_REFLECTIONS |
                                  RAYTRACE_EEVEE_HARDWARE_REFRACTIONS;
-  current_hardware_feature_mask_ = hardware_feature_mask_;
+  current_hardware_feature_mask_ = active_hardware_feature_mask();
   if (phase == HWRT_TRACE_PHASE_PRECOMBINE) {
     current_hardware_feature_mask_ &= ~specular_mask;
   }
@@ -554,7 +603,7 @@ RayTraceResult RayTraceModule::render_phase(RayTraceBuffer &rt_buffer,
   }
   data_.use_hardware_tracing_method = use_hardware_tracing_method();
   data_.hardware_trace_phase = use_hardware_tracing_method() ? phase : HWRT_TRACE_PHASE_FULL;
-  data_.hardware_feature_mask = use_hardware_tracing_method() ? hardware_feature_mask_ : 0;
+  data_.hardware_feature_mask = use_hardware_tracing_method() ? active_hardware_feature_mask() : 0;
 
   if (rt_buffer.npr_history_reset_generation != npr_history_reset_generation_) {
     for (RayTraceBuffer::DenoiseBuffer &buffer : rt_buffer.closures) {

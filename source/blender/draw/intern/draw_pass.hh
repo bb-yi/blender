@@ -405,6 +405,7 @@ class PassBase {
   void bind_ssbo(int slot, gpu::IndexBuf *buffer);
   void bind_ssbo(int slot, gpu::IndexBuf **buffer);
   void bind_tlas(const char *name, gpu::TopLevelAS *tlas);
+  void bind_tlas(const char *name, gpu::TopLevelAS **tlas);
   void bind_tlas(int slot, gpu::TopLevelAS *tlas);
   void bind_ubo(const char *name, gpu::UniformBuf *buffer);
   void bind_ubo(const char *name, gpu::UniformBuf **buffer);
@@ -1353,6 +1354,15 @@ template<class T> inline void PassBase<T>::bind_tlas(const char *name, gpu::TopL
 {
   BLI_assert(tlas != nullptr);
   this->bind_tlas(GPU_shader_get_tlas_binding(shader_, name), tlas);
+}
+
+template<class T> inline void PassBase<T>::bind_tlas(const char *name, gpu::TopLevelAS **tlas)
+{
+  BLI_assert(tlas != nullptr);
+  const int slot = GPU_shader_get_tlas_binding(shader_, name);
+  if (slot >= 0) {
+    create_command(Type::ResourceBind).resource_bind = {slot, tlas};
+  }
 }
 
 template<class T> inline void PassBase<T>::bind_ubo(const char *name, gpu::UniformBuf *buffer)

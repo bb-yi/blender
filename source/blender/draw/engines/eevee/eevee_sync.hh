@@ -17,6 +17,7 @@
 #include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
 #include "DRW_render.hh"
+#include "GPU_nuru_hardware_raytrace.hh"
 
 #include "draw_handle.hh"
 #include "draw_pass.hh"
@@ -79,6 +80,9 @@ struct HardwareRaytraceSceneEntry {
   /* Compiled during sync, so sparse draws never re-enter material sync with a stale ObjectRef. */
   GPUMaterial *hit_eval_material = nullptr;
   float shadow_terminator_geometry_offset = 0.1f;
+  uint32_t shadow_blocker_set = 0;
+  bool casts_shadow = true;
+  GPUHardwareRaytraceShadowAlpha shadow_alpha;
 };
 
 class SyncModule {
@@ -87,6 +91,7 @@ class SyncModule {
   Vector<HardwareRaytraceSceneEntry> hardware_raytrace_scene_entries_;
   uint64_t hardware_raytrace_scene_signature_ = 0;
   uint64_t hardware_raytrace_sync_generation_ = 0;
+  bool has_untraced_shadow_caster_ = false;
   /* Keep draws sharing a material and expansion budget batched together. */
   Map<std::pair<PassMain::Sub *, int>, PassMain::Sub *> tessellation_passes_;
   /* Cache only the request schema. Object/instance attribute values are read on every sync. */
@@ -110,6 +115,10 @@ class SyncModule {
   uint64_t hardware_raytrace_scene_signature() const
   {
     return hardware_raytrace_scene_signature_;
+  }
+  bool has_untraced_shadow_caster() const
+  {
+    return has_untraced_shadow_caster_;
   }
 
   int64_t object_attribute_request_count() const
@@ -138,6 +147,7 @@ class SyncModule {
 
  private:
   void capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_handle,
+                                              uint32_t shadow_blocker_set,
                                              const Material &material,
                                              gpu::Batch *geom,
                                              int material_slot,

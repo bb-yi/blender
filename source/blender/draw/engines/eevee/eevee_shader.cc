@@ -10,6 +10,7 @@
  */
 
 #include "GPU_capabilities.hh"
+#include "GPU_context.hh"
 
 #include "BKE_material.hh"
 #include "BKE_node_runtime.hh"
@@ -2049,6 +2050,14 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
 
   const bool depth_offset_affect_lighting = material_depth_offset_affects_lighting(blender_mat);
+  if (pipeline_type == MAT_PIPE_FORWARD && probe_capture == MAT_PROBE_NONE && blender_mat &&
+      blender_mat->surface_render_method == MA_SURFACE_METHOD_FORWARD &&
+      GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) &&
+      geometry_type == MAT_GEOM_MESH && GPU_backend_get_type() == GPU_BACKEND_VULKAN &&
+      GPU_viewport_hardware_raytracing_support())
+  {
+    info.compilation_constant(gpu::shader::Type::bool_t, "use_hardware_forward_shadow", true);
+  }
   const bool has_depth_offset = GPU_material_has_depth_offset_output(gpumat) &&
                                 material_pipeline_supports_depth_offset(pipeline_type,
                                                                         geometry_type);
@@ -2538,6 +2547,34 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
+  const eGPUMaterialNPRFeature npr_features = GPU_material_npr_features_get(gpumat);
+  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR) &&
+      probe_capture == MAT_PROBE_NONE &&
+      geometry_type == MAT_GEOM_MESH && GPU_viewport_hardware_raytracing_support() &&
+      (!GPU_material_has_shader_info_shadow_classification(gpumat) ||
+       GPU_backend_get_type() == GPU_BACKEND_VULKAN) &&
+      !GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) &&
+      !GPU_material_has_depth_offset_output(gpumat))
+  {
+    const char *shadow_request = "node_shader_info_hardware_shadow(";
+    const GPUGraphOutput &graph = pipeline_type == MAT_PIPE_DEFERRED ? codegen.surface : codegen.npr;
+    const bool npr_shadows = (npr_features & (GPU_MAT_NPR_SHADOW_STABLE |
+                                             GPU_MAT_NPR_SHADOW_TEMPORAL |
+                                             GPU_MAT_NPR_SHADOW_SOFT)) != 0;
+    bool uses_hardware_shadow = npr_shadows ||
+                                material_graph_serialized_contains(graph, shadow_request);
+    for (const GPUGraphOutput &graph : codegen.material_functions) {
+      uses_hardware_shadow |= material_graph_serialized_contains(graph, shadow_request);
+    }
+    if (uses_hardware_shadow) {
+      info.define("MAT_SHADER_INFO_HARDWARE_SHADOW");
+      slots.reserve_slots(info);
+      info.sampler(slots.get_next_sampler(), ImageType::Float2DArray,
+                   "shader_info_hardware_visibility_tx");
+      info.push_constant(gpu::shader::Type::int_t, "shader_info_hardware_shadow_layers");
+    }
+  }
+
   if (GPU_material_stencil_value_readable(gpumat)) {
     /* Use the same allocator as material textures, after all engine resources are known. A high
      * fixed binding can exceed the OpenGL texture-binding API limit even with few samplers. */
@@ -2584,7 +2621,6 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.define("MAT_NPR_SURFACE_DIFFUSION");
   }
   /* Local Color also evaluates direct highlights without emitting an NPR closure. */
-  const eGPUMaterialNPRFeature npr_features = GPU_material_npr_features_get(gpumat);
   if (npr_features & GPU_MAT_NPR_FINITE_HIGHLIGHT) {
     info.define("MAT_NPR_FINITE_HIGHLIGHT");
   }

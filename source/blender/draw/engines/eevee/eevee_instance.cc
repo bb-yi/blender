@@ -652,6 +652,11 @@ void Instance::object_sync(ObjectRef &ob_ref, Manager & /*manager*/)
         break;
       case OB_LIGHTPROBE:
         light_probes.sync_probe(ob_ref);
+        if (DRW_object_get_data_for_drawing<const blender::LightProbe>(*ob).type !=
+            LIGHTPROBE_TYPE_VOLUME)
+        {
+          pipelines.require_native_shadows("the scene captures sphere or planar reflection probes");
+        }
         break;
       default:
         break;
@@ -698,6 +703,7 @@ void Instance::end_sync()
     ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndVolumeShadowsLights);
     render_textures.end_sync();
     volume.end_sync();  /* Needs to be before shadows. */
+    raytracing.resolve_shadow_backend();
     shadows.end_sync(); /* Needs to be before lights. */
     lights.end_sync();
   }

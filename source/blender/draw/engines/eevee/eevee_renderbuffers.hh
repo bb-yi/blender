@@ -40,6 +40,7 @@ class RenderBuffers {
   TextureFromPool vector_tx;
   TextureFromPool raycast_depth_tx;
   TextureFromPool object_id_tx;
+  TextureFromPool hwrt_receiver_id_tx;
   TextureFromPool prepass_normal_tx;
   TextureFromPool cryptomatte_tx;
   TextureFromPool outline_color_tx;

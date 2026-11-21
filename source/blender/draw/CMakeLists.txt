@@ -473,6 +473,7 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/eevee_filter_material_frag.glsl
   engines/eevee/shaders/eevee_filter_material.bsl.hh
   engines/eevee/shaders/eevee_forward_lib.bsl.hh
+  engines/eevee/shaders/eevee_forward_hwrt_shadow.bsl.hh
   engines/eevee/shaders/eevee_forward_lib.glsl
   engines/eevee/shaders/eevee_forward_resolve.bsl.hh
   engines/eevee/shaders/eevee_gbuffer_read.bsl.hh

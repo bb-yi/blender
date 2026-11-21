@@ -35,6 +35,7 @@ class VKTopLevelAS : public TopLevelAS {
   Vector<const BottomLevelAS *> blas_per_instance_;
   VKBuffer instances_buffer_;
   bool is_dirty_ = true;
+  bool borrowed_ = false;
 
  public:
   VKTopLevelAS(const char *name);
@@ -43,6 +44,9 @@ class VKTopLevelAS : public TopLevelAS {
   void update_instance(InstanceID instance_id, const float4x4 &mat, uint8_t mask) override;
   void build() override;
   void bind(int slot) override;
+  void borrow(VkAccelerationStructureKHR handle,
+              const VKResourceWithHandle<VkBuffer> &backing,
+              size_t size);
 
   VkAccelerationStructureKHR vk_acceleration_structure() const
   {

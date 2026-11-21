@@ -12,6 +12,10 @@
 
 namespace blender::gpu::vulkan {
 
+GPUHardwareRaytraceScene *raytrace_empty_scene();
+bool raytrace_forward_bindings(GPUHardwareRaytraceScene &scene,
+                                GPUHardwareRaytraceForwardBindings &r_bindings);
+
 GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntry> entries,
                                                GPUHardwareRaytraceSceneStats *r_stats);
 bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,

@@ -2604,6 +2604,7 @@ struct SceneDisplay {
 enum RaytraceEEVEE_Flag : int {
   RAYTRACE_EEVEE_USE_DENOISE = (1 << 0),
   RAYTRACE_EEVEE_USE_BACKFACE = (1 << 1),
+  RAYTRACE_EEVEE_SCREEN_HARDWARE_SHADOWS = (1 << 2),
 };
 ENUM_OPERATORS(RaytraceEEVEE_Flag)
 

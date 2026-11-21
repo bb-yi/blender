@@ -15,6 +15,7 @@
 extern "C" char datatoc_vk_nuru_trace_override_glsl[];
 extern "C" char datatoc_vk_nuru_receiver_gi_glsl[];
 extern "C" char datatoc_vk_nuru_shadow_terminator_lib_glsl[];
+extern "C" char datatoc_vk_nuru_shadow_visibility_lib_glsl[];
 extern "C" char datatoc_vk_nuru_directional_shadow_glsl[];
 extern "C" char datatoc_vk_nuru_directional_hit_shadow_glsl[];
 extern "C" char datatoc_vk_nuru_environment_visibility_glsl[];
@@ -29,6 +30,11 @@ namespace blender::gpu::vulkan::nuru_kernels {
 inline const char *shadow_terminator_lib_glsl()
 {
   return datatoc_vk_nuru_shadow_terminator_lib_glsl;
+}
+
+inline const char *shadow_visibility_lib_glsl()
+{
+  return datatoc_vk_nuru_shadow_visibility_lib_glsl;
 }
 
 inline const char *trace_override_glsl()

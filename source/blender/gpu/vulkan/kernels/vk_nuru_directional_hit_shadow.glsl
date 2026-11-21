@@ -28,6 +28,7 @@ layout(scalar, binding = 0) uniform NuruUniforms {
   vec4 shadow_params;
   ivec4 world_sun_slot_pad;
   vec4 sampling_rand;
+  uvec4 shadow_options;
 } uniforms;
 
 layout(binding = 1) uniform accelerationStructureEXT scene;
@@ -164,7 +165,7 @@ vec3 opaque_shadow_visibility(accelerationStructureEXT scene_as,
   float current_tmin = t_min;
   for (int b = 0; b < 8; b++) {
     rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, 0xFFu, origin, current_tmin, dir, t_max);
+    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, HWRT_SHADOW_CASTER_MASK, origin, current_tmin, dir, t_max);
     int proceed_guard_rq = 4096;
     while (rayQueryProceedEXT(rq) && (proceed_guard_rq-- > 0)) {
     }
@@ -177,7 +178,7 @@ vec3 opaque_shadow_visibility(accelerationStructureEXT scene_as,
     if ((proxy_flags & HWRT_PROXY_FLAG_THIN_GLASS) == 0u) {
       return vec3(0.0f);
     }
-    current_tmin = rayQueryGetIntersectionTEXT(rq, true) + 1.0e-4f;
+    current_tmin = shadow_ray_after_hit(rayQueryGetIntersectionTEXT(rq, true));
     if (current_tmin >= t_max) {
       return vec3(1.0f);
     }
@@ -214,7 +215,7 @@ vec3 transparent_shadow_caustic_only(accelerationStructureEXT scene_as,
   bool ray_was_bent = false;
   for (int b = 0; b < max_transparent_bounces; b++) {
     rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, 0xFFu, origin, current_tmin, dir, current_tmax);
+    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, HWRT_SHADOW_CASTER_MASK, origin, current_tmin, dir, current_tmax);
     int proceed_guard_rq = 4096;
     while (rayQueryProceedEXT(rq) && (proceed_guard_rq-- > 0)) {
     }
@@ -240,7 +241,7 @@ vec3 transparent_shadow_caustic_only(accelerationStructureEXT scene_as,
     const HardwareMaterialProxy proxy = material_proxies[user_id];
     const uint proxy_flags = uint(proxy.ior_closure_type.w);
     if ((proxy_flags & HWRT_PROXY_FLAG_THIN_GLASS) != 0u) {
-      current_tmin = hit_distance + 1.0e-4f;
+      current_tmin = shadow_ray_after_hit(hit_distance);
       if (current_tmin >= current_tmax) {
         return ray_was_bent ? throughput : vec3(0.0f);
       }
@@ -310,7 +311,7 @@ vec3 transparent_shadow_caustic_only(accelerationStructureEXT scene_as,
       ray_was_bent = true;
     }
     else {
-      current_tmin = hit_distance + 1.0e-4f;
+      current_tmin = shadow_ray_after_hit(hit_distance);
       if (current_tmin >= current_tmax) {
         if (!ray_was_bent) {
           return vec3(0.0f);
@@ -357,7 +358,7 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene_as,
   const float vis_scale = min(t, 1.0f);
   for (int b = 0; b < max_transparent_bounces; b++) {
     rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, 0xFFu, origin, current_tmin, dir, t_max);
+    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, HWRT_SHADOW_CASTER_MASK, origin, current_tmin, dir, t_max);
     int proceed_guard_rq = 4096;
     while (rayQueryProceedEXT(rq) && (proceed_guard_rq-- > 0)) {
     }
@@ -385,7 +386,7 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene_as,
        * walk). It must not flag `any_hit`, otherwise a pure thin-glass path gets multiplied by
        * `vis_scale` and the shadow jumps from fully lit (transparency 0) to nearly black at
        * transparency 0.001. */
-      current_tmin = hit_distance + 1.0e-4f;
+      current_tmin = shadow_ray_after_hit(hit_distance);
       if (current_tmin >= t_max) {
         return any_hit ? hardware_shadow_apply_color_transmission(throughput, color_intensity) *
                              vis_scale :
@@ -411,7 +412,7 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene_as,
     if (max_through < 1.0e-3f) {
       return vec3(0.0f);
     }
-    current_tmin = hit_distance + 1.0e-4f;
+    current_tmin = shadow_ray_after_hit(hit_distance);
     if (current_tmin >= t_max) {
       const vec3 tinted = hardware_shadow_apply_color_transmission(throughput, color_intensity);
       vec3 visibility = tinted * vis_scale;
@@ -427,6 +428,8 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene_as,
   }
   return vec3(0.0f);
 }
+
+#include "vk_nuru_shadow_visibility_lib.glsl"
 
 void main()
 {
@@ -455,15 +458,25 @@ void main()
   const float color_intensity = clamp(uniforms.shadow_params.z, 0.0f, 1.0f);
   const float photons_intensity = max(uniforms.shadow_params.w, 0.0f);
   const float transparent_shadows = uintBitsToFloat(uint(uniforms.world_sun_slot_pad.w));
-  vec3 visibility = vec3(0.0f);
+  vec4 visibility = vec4(0.0f);
+  const bool detailed = shadow_needs_hit_details();
   for (int sample_index = 0; sample_index < sample_count; sample_index++) {
     const vec3 sample_dir = sample_directional_shadow_direction(tid, sample_index);
-    const vec3 offset = terminator_shadow_offset(receiver, P, sample_dir, normal_bias);
-    const vec3 origin = P + shadow_N * normal_bias + offset;
-    visibility += hardware_shadow_visibility(scene, origin, sample_dir, ray_tmin, 100000.0f, transparent_shadows, enable_caustics, true, sample_dir, color_intensity, photons_intensity);
+    const vec3 unshifted_origin = P + shadow_N * normal_bias;
+    const vec3 offset = terminator_shadow_offset(receiver, unshifted_origin, sample_dir, normal_bias);
+    const vec3 origin = unshifted_origin + offset;
+    if (detailed) {
+      visibility += hardware_shadow_detailed_visibility(scene, origin, sample_dir, ray_tmin,
+                                                         100000.0f, transparent_shadows,
+                                                         color_intensity,
+                                                         SHADOW_UNKNOWN_RECEIVER_ID);
+    }
+    else {
+      visibility.rgb += hardware_shadow_visibility(scene, origin, sample_dir, ray_tmin, 100000.0f, transparent_shadows, enable_caustics, true, sample_dir, color_intensity, photons_intensity);
+    }
   }
   visibility /= float(sample_count);
   imageStore(shadow_visibility_img,
              ivec3(ivec2(tid), int(uint(uniforms.resolution_layer.z))),
-             vec4(visibility, 1.0f));
+             visibility);
 }

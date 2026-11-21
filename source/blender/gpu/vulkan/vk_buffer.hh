@@ -30,6 +30,7 @@ class VKBuffer : public NonCopyable {
   TimelineValue async_timeline_ = 0;
   /** Has a previous allocation failed. Will skip reallocations. */
   bool allocation_failed_ = false;
+  bool borrowed_ = false;
 
   /* Pointer to the virtually mapped memory. */
   void *mapped_memory_ = nullptr;
@@ -42,6 +43,8 @@ class VKBuffer : public NonCopyable {
 
   /** Has this buffer been allocated? */
   bool is_allocated() const;
+  /** Borrow a buffer registered by its external owner for read-only shader binding. */
+  void borrow(const VKResourceWithHandle<VkBuffer> &resource, size_t size);
 
   /**
    * Allocate the buffer.
@@ -168,7 +171,7 @@ inline bool VKBuffer::is_mapped() const
 
 inline bool VKBuffer::is_allocated() const
 {
-  return allocation_ != VK_NULL_HANDLE;
+  return allocation_ != VK_NULL_HANDLE || (borrowed_ && resource_.vk_handle != VK_NULL_HANDLE);
 }
 
 /**

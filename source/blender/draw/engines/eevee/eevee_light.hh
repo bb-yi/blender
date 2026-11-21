@@ -81,9 +81,6 @@ struct Light : public LightData, NonCopyable {
   ShadowDirectional *directional = nullptr;
   ShadowPunctual *punctual = nullptr;
 
-  /** Used by shadow sync. */
-  uint2 shadow_set_membership = uint2(0);
-
   Light()
   {
     /* Avoid valgrind warning. */
@@ -193,6 +190,7 @@ class LightModule {
   int local_lights_len_ = 0;
   /** Sun plus local lights count for convenience. */
   int lights_len_ = 0;
+  int hardware_shadow_layers_ = 0;
   Map<ObjectKey, std::string> light_names_;
   Vector<TelemetryShadowLightCost> shadow_light_costs_;
 
@@ -300,6 +298,13 @@ class LightModule {
   {
     return lights_len_;
   }
+
+  int hardware_shadow_layer_count() const
+  {
+    return hardware_shadow_layers_;
+  }
+
+  const char *hardware_shadow_unsupported_reason() const;
 
   const LightData &sync_light(int index) const
   {

@@ -10,11 +10,18 @@
  */
 
 #include "BKE_compute_context_cache.hh"
+#include "BKE_image.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_object.hh"
 #include "BLI_hash.hh"
+#include "BLI_math_matrix.hh"
+#include "BLI_math_rotation.hh"
+#include "BLI_string_utf8.hh"
+#include "DNA_image_types.h"
 #include "DNA_node_types.h"
+#include "GPU_context.hh"
+#include "GPU_vertex_format.hh"
 #include "NOD_shader.h"
 #include "NOD_socket_value_inference.hh"
 
@@ -62,7 +69,91 @@ struct HardwareMaterialProxy {
   float reflection_layer_coverage = 0.0f;
   uint32_t closure_type = HWRT_CLOSURE_DIFFUSE;
   uint32_t flags = 0u;
+  bool dynamic_shadow_alpha = false;
+  GPUHardwareRaytraceShadowAlpha shadow_alpha;
 };
+
+static const bNodeLink *shadow_alpha_input_link(const bNodeSocket *socket)
+{
+  const bNodeLink *link = socket ? socket->link : nullptr;
+  /* Resolve reroutes without changing the graph or following muted links. */
+  while (link && (link->flag & NODE_LINK_VALID) && link->is_used()) {
+    if (link->fromnode->type_legacy != NODE_REROUTE) {
+      return link;
+    }
+    link = link->fromnode->input_sockets().first()->link;
+  }
+  return nullptr;
+}
+
+static GPUHardwareRaytraceShadowAlpha shadow_alpha_texture(const bNodeSocket *alpha_socket)
+{
+  const bNodeLink *alpha = shadow_alpha_input_link(alpha_socket);
+  if (!alpha || alpha->fromnode->type_legacy != SH_NODE_TEX_IMAGE ||
+      StringRef(alpha->fromsock->identifier) != "Alpha")
+  {
+    return {};
+  }
+  const bNode &node = *alpha->fromnode;
+  blender::Image *image = id_cast<blender::Image *>(node.id);
+  const auto *texture = static_cast<const NodeTexImage *>(node.storage);
+  if (node.flag & NODE_MUTED || !image || !texture ||
+      !ELEM(image->source, IMA_SRC_FILE, IMA_SRC_GENERATED) ||
+      texture->projection != SHD_PROJ_FLAT ||
+      !ELEM(texture->interpolation, SHD_INTERP_LINEAR, SHD_INTERP_CLOSEST))
+  {
+    return {};
+  }
+
+  GPUHardwareRaytraceShadowAlpha result;
+  result.image = image;
+  result.image_update = image->runtime ? image->runtime->update_count : 0;
+  result.extension = texture->extension;
+  result.nearest = texture->interpolation == SHD_INTERP_CLOSEST;
+  SNPRINTF_UTF8(result.uv_attribute, "%s", "a");
+  const bNodeLink *uv = shadow_alpha_input_link(node.input_by_identifier("Vector"_ustr));
+  if (uv && uv->fromnode->type_legacy == SH_NODE_MAPPING) {
+    const bNode &mapping = *uv->fromnode;
+    if (mapping.flag & NODE_MUTED ||
+        !ELEM(mapping.custom1, NODE_MAPPING_TYPE_POINT, NODE_MAPPING_TYPE_VECTOR))
+    {
+      return {};
+    }
+    const bNodeSocket *location = mapping.input_by_identifier("Location"_ustr);
+    const bNodeSocket *rotation = mapping.input_by_identifier("Rotation"_ustr);
+    const bNodeSocket *scale = mapping.input_by_identifier("Scale"_ustr);
+    if (!location || location->link || !rotation || rotation->link || !scale || scale->link) {
+      return {};
+    }
+    const float3 translation = mapping.custom1 == NODE_MAPPING_TYPE_POINT ?
+                                   float3(location->default_value_typed<bNodeSocketValueVector>()->value) :
+                                   float3(0);
+    const float3 angles(rotation->default_value_typed<bNodeSocketValueVector>()->value);
+    const float3 factors(scale->default_value_typed<bNodeSocketValueVector>()->value);
+    const float4x4 transform = math::from_loc_rot_scale<float4x4>(
+        translation, math::EulerXYZ(angles), factors);
+    result.uv_x = float4(transform[0][0], transform[1][0], transform[3][0], 0);
+    result.uv_y = float4(transform[0][1], transform[1][1], transform[3][1], 0);
+    uv = shadow_alpha_input_link(mapping.input_by_identifier("Vector"_ustr));
+    if (!uv) {
+      return {};
+    }
+  }
+  if (uv) {
+    if (uv->fromnode->type_legacy != SH_NODE_UVMAP || !uv->fromnode->storage ||
+        uv->fromnode->custom1 != 0 || (uv->fromnode->flag & NODE_MUTED))
+    {
+      return {};
+    }
+    const auto *uv_map = static_cast<const NodeShaderUVMap *>(uv->fromnode->storage);
+    if (uv_map->uv_map[0]) {
+      char safe_name[GPU_MAX_SAFE_ATTR_NAME];
+      GPU_vertformat_safe_attr_name(uv_map->uv_map, safe_name, sizeof(safe_name));
+      SNPRINTF_UTF8(result.uv_attribute, "a%s", safe_name);
+    }
+  }
+  return result;
+}
 
 static float3 socket_color_value(const bNodeSocket *socket)
 {
@@ -575,6 +666,12 @@ static HardwareMaterialProxy material_hardware_proxy(const blender::Material *bl
          * proxy alpha-transparent below so rays attenuate-and-continue (`throughput *= 1 - alpha`)
          * rather than terminate. */
         const bool alpha_textured = inferred_socket_float_is_dynamic(alpha_socket, inferencer);
+        if (alpha_textured && (blender_mat->blend_flag & MA_BL_TRANSPARENT_SHADOW) &&
+            GPU_backend_get_type() == GPU_BACKEND_VULKAN)
+        {
+          proxy.dynamic_shadow_alpha = true;
+          proxy.shadow_alpha = shadow_alpha_texture(alpha_socket);
+        }
         const float alpha = alpha_textured ?
                                 0.5f :
                                 clamp_f(inferred_socket_float_value(alpha_socket, inferencer),
@@ -839,21 +936,38 @@ void SyncModule::begin_sync()
   hardware_raytrace_sync_generation_++;
   hardware_raytrace_scene_entries_.clear();
   hardware_raytrace_scene_signature_ = 0;
+  has_untraced_shadow_caster_ = false;
 }
 
 void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_handle,
+                                                       uint32_t shadow_blocker_set,
                                                        const Material &material,
                                                        gpu::Batch *geom,
                                                        int material_slot,
                                                        bool is_sculpt)
 {
-  if (!inst_.raytracing.use_hardware_tracing() || geom == nullptr) {
+  if (!inst_.raytracing.use_hardware_scene() || geom == nullptr) {
+    return;
+  }
+  has_untraced_shadow_caster_ |= material.shadow.sub_pass != nullptr &&
+                                 material.tessellation_level > 0;
+  const bool casts_shadow = material.shadow.sub_pass != nullptr;
+  /* A shadows-only scene must honor EEVEE's object and material caster exclusions. */
+  if (!inst_.raytracing.use_hardware_tracing_method() && !casts_shadow) {
     return;
   }
 
   GPUMaterial *gpumat = material.shading.gpumat;
   blender::Material *blender_mat = gpumat ? GPU_material_get_material(gpumat) : nullptr;
   HardwareMaterialProxy proxy = material_hardware_proxy(blender_mat, ob_handle.object);
+  if (casts_shadow && proxy.dynamic_shadow_alpha &&
+      (is_sculpt || proxy.shadow_alpha.image == nullptr))
+  {
+    inst_.pipelines.require_native_shadows("a shadow caster uses an unsupported Alpha node graph");
+  }
+  if (!casts_shadow) {
+    proxy.shadow_alpha = {};
+  }
   const uint64_t material_hash = gpu_material_runtime_hash(gpumat);
   const float3 emission = material_emissive_radiance(blender_mat);
   const float3 albedo = hardware_raytrace_diffuse_albedo(blender_mat, proxy);
@@ -892,10 +1006,14 @@ void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_ha
          proxy.flags,
          material_hash,
          material.hit_eval.gpumat,
-         ob_handle.object->shadow_terminator_geometry_offset});
+         ob_handle.object->shadow_terminator_geometry_offset,
+         shadow_blocker_set,
+         casts_shadow,
+         proxy.shadow_alpha});
     hardware_raytrace_scene_signature_ = get_default_hash(
         hardware_raytrace_scene_signature_, ObjectKey(ob_handle, instance).hash(),
-        geom, material_slot, is_sculpt, material_hash);
+        geom, material_slot, is_sculpt,
+        get_default_hash(material_hash, casts_shadow, shadow_blocker_set));
   }
 }
 

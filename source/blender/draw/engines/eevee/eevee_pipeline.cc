@@ -18,6 +18,7 @@
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 #include "GPU_capabilities.hh"
+#include "GPU_context.hh"
 #include <cstdio>
 #include <cstdlib>
 
@@ -600,7 +601,7 @@ void ShadowPipeline::sync()
     pass.state_set(state);
     pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
     pass.bind_ssbo(SHADOW_RENDER_VIEW_BUF_SLOT, &inst_.shadows.render_view_buf_);
-    pass.bind_image(SHADOW_ATLAS_IMG_SLOT, inst_.shadows.atlas_tx_);
+    pass.bind_image(SHADOW_ATLAS_IMG_SLOT, &inst_.shadows.atlas_tx_);
     pass.bind_image(SHADOW_CASTER_ATLAS_IMG_SLOT, inst_.shadows.caster_atlas_ref());
     pass.bind_ssbo(SHADOW_RENDER_MAP_BUF_SLOT, &inst_.shadows.render_map_buf_);
     pass.bind_ssbo(SHADOW_PAGE_INFO_SLOT, &inst_.shadows.pages_infos_data_);
@@ -844,12 +845,13 @@ PassMain::Sub *Prepass::add(const SurfaceDrawState &draw_state,
   return &sub;
 }
 
-void Prepass::end_sync()
+void Prepass::end_sync(bool needs_receiver_normals, bool write_hwrt_receiver_id)
 {
   const bool has_raycast = inst_.pipelines.has_raycast;
   const bool needs_camera_prepass_normal = !has_raycast &&
                                            (inst_.outline.enabled() ||
-                                            inst_.lights.needs_front_light_shader());
+                                            inst_.lights.needs_front_light_shader() ||
+                                            needs_receiver_normals);
 
   for (bool hide_from_raycast : {false, true}) {
     for (int ztest_mode = MA_ZTEST_LESS_EQUAL; ztest_mode <= MA_ZTEST_NEVER; ztest_mode++) {
@@ -868,7 +870,9 @@ void Prepass::end_sync()
             DRWState state = material_ztest_state_replace(
                 common_state_, eMaterialZTestMode(ztest_mode), inst_.film.depth.test_state);
             state |= material_surface_cull_state(eMaterialCullMethod(cull_method));
-            SET_FLAG_FROM_TEST(state, write_normal || write_motion, DRW_STATE_WRITE_COLOR);
+            SET_FLAG_FROM_TEST(state,
+                               write_normal || write_motion || write_hwrt_receiver_id,
+                               DRW_STATE_WRITE_COLOR);
             sub->state_set(state);
             sub->subpass_transition(
                 GPU_ATTACHMENT_WRITE,
@@ -878,7 +882,8 @@ void Prepass::end_sync()
                  (write_raycast && write_id) ?
                      GPU_ATTACHMENT_WRITE :
                      (read_raycast ? GPU_ATTACHMENT_READ : GPU_ATTACHMENT_IGNORE),
-                 write_motion ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
+                 write_motion ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE,
+                 write_hwrt_receiver_id ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
           }
         }
       }
@@ -1311,6 +1316,7 @@ void ForwardLayer::sync()
   camera_forward_ = inst_.camera.forward();
   has_opaque_ = false;
   has_transparent_ = false;
+  has_hardware_shadow_receivers_ = false;
   has_no_depth_ = false;
   has_colored_transparency_ = false;
   has_holdout_ = false;
@@ -1545,6 +1551,21 @@ PassMain::Sub *ForwardLayer::material_no_depth_add(const Object *ob,
   return pass;
 }
 
+static bool forward_material_needs_lighting(GPUMaterial *material)
+{
+  const eGPUMaterialFlag lighting = GPU_MATFLAG_DIFFUSE | GPU_MATFLAG_GLOSSY |
+                                   GPU_MATFLAG_REFRACT | GPU_MATFLAG_SUBSURFACE |
+                                   GPU_MATFLAG_TRANSLUCENT | GPU_MATFLAG_LIGHTING |
+                                   GPU_MATFLAG_NPR_FOREACH_LIGHT | GPU_MATFLAG_GLSL_LIGHT_ACCESS;
+  return GPU_material_flag_get(material, lighting);
+}
+
+static bool forward_material_has_hardware_shadow(GPUMaterial *material)
+{
+  gpu::Shader *shader = GPU_material_get_shader(material);
+  return shader && GPU_shader_get_tlas_binding(shader, "forward_shadow_as") >= 0;
+}
+
 void ForwardLayer::transparent_add(const Object *ob,
                                    const float3 &ob_location,
                                    blender::Material *blender_mat,
@@ -1569,6 +1590,13 @@ void ForwardLayer::transparent_add(const Object *ob,
   material_state |= material_surface_cull_state(draw_state.cull_method);
 
   has_transparent_ = true;
+  const bool hardware_shadows = forward_material_has_hardware_shadow(gpumat);
+  has_hardware_shadow_receivers_ |= hardware_shadows;
+  if (forward_material_needs_lighting(gpumat) &&
+      (!hardware_shadows || GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO)))
+  {
+    inst_.pipelines.require_native_shadows("a blended material needs unsupported shadow lighting");
+  }
   has_colored_transparency_ |= GPU_material_flag_get(gpumat,
                                                      GPU_MATFLAG_TRANSPARENT_MAYBE_COLORED);
   has_holdout_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_HOLDOUT) ||
@@ -1589,6 +1617,10 @@ void ForwardLayer::transparent_add(const Object *ob,
     PassMain::Sub *pass = &transparent_ps_.sub(GPU_material_get_name(gpumat), sorting_value);
     pass->state_set(prepass_state);
     pass->material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
+    if (hardware_shadows) {
+      inst_.raytracing.bind_forward_shadows(*pass);
+      pass->push_constant("forward_shadow_options", float4(0));
+    }
     pass->push_constant("surface_cull_mode", int(draw_state.cull_method));
     material_stencil_test_only_state_set(*pass, blender_mat);
     if (has_raycast) {
@@ -1605,6 +1637,9 @@ void ForwardLayer::transparent_add(const Object *ob,
     PassMain::Sub *pass = &transparent_ps_.sub(GPU_material_get_name(gpumat), sorting_value);
     pass->state_set(material_state);
     pass->material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
+    if (hardware_shadows) {
+      inst_.raytracing.bind_forward_shadows(*pass);
+    }
     pass->push_constant("surface_cull_mode", int(draw_state.cull_method));
     if (!draw_state.is_outline_shell) {
       material_stencil_test_only_state_set(*pass, blender_mat);
@@ -1730,6 +1765,9 @@ void ForwardLayer::render(View &view,
       inst_.render_buffers.data.transparent_id == -1)
   {
     return;
+  }
+  if (has_hardware_shadow_receivers_) {
+    inst_.raytracing.prepare_forward_shadows();
   }
 
   inst_.hiz_buffer.swap_layer();
@@ -1986,6 +2024,7 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
 
 void DeferredLayer::begin_sync()
 {
+  has_hardware_shadow_surface_ = false;
   has_outline_ = false;
   has_prepass_ = false;
   has_stencil_ = false;
@@ -2080,7 +2119,8 @@ void DeferredLayer::end_sync(bool is_first_pass,
                              bool next_layer_has_transmission)
 {
   is_first_pass_ = is_first_pass;
-  prepass_.end_sync();
+  prepass_.end_sync(inst_.pipelines.deferred.uses_hardware_shadow_prepass(),
+                    inst_.pipelines.hardware_shadow_classifies_receivers());
 
   const bool has_any_closure = closure_bits_ != 0;
   /* We need the feedback output in case of refraction in the next pass (see #126455). */
@@ -2390,6 +2430,8 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat,
   }
   PassMain::Sub *pass = get_gbuffer_subpass(draw_state, gpumat, uses_hybrid_pipeline);
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
+  has_hardware_shadow_surface_ |= bind_shader_info_hardware_shadow(
+      *material_pass, GPU_pass_shader_get(GPU_material_get_pass(gpumat)));
   bind_npr_shadow_surface(*material_pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
   if (GPU_material_has_node_shadow_cache(gpumat)) {
     inst_.shadows.bind_node_cache(*material_pass, gpumat);
@@ -2433,6 +2475,21 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat,
   return material_pass;
 }
 
+bool DeferredLayer::bind_shader_info_hardware_shadow(PassMain::Sub &pass, gpu::Shader *shader)
+{
+  if (shader == nullptr) {
+    return false;
+  }
+  const int slot = GPU_shader_get_sampler_binding(shader, "shader_info_hardware_visibility_tx");
+  if (slot < 0) {
+    return false;
+  }
+  pass.shader_set(shader);
+  pass.bind_texture(slot, inst_.raytracing.hardware_shadow_visibility_tx());
+  pass.push_constant("shader_info_hardware_shadow_layers", &shader_info_hardware_shadow_layers_);
+  return true;
+}
+
 PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMaterial *gpumat)
 {
   BLI_assert(GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR));
@@ -2454,7 +2511,9 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
 
   /* Bind the material shader before setting NPR-specific push constants. */
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
-  material_pass->shader_set(GPU_pass_shader_get(gpupass));
+  gpu::Shader *shader = GPU_pass_shader_get(gpupass);
+  material_pass->shader_set(shader);
+  bind_shader_info_hardware_shadow(*material_pass, shader);
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_REFRACTION)) {
     material_pass->push_constant("npr_background_resolved", &npr_background_resolved_);
   }
@@ -2579,6 +2638,16 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     volume_compute_done = true;
   }
 
+  shader_info_hardware_shadow_layers_ = 0;
+  const bool trace_before_material = has_hardware_shadow_surface_ &&
+                                     inst_.raytracing.use_hardware_shadows();
+  if (trace_before_material) {
+    inst_.raytracing.render_hardware_shadows(render_view, rb.depth_tx, extent, true);
+    if (*inst_.raytracing.hardware_shadow_ready()) {
+      shader_info_hardware_shadow_layers_ = inst_.lights.hardware_shadow_layer_count();
+    }
+  }
+
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                            TelemetryStageId::MainDeferredGBufferPass);
@@ -2593,7 +2662,10 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   }
   inst_.lights.eval_light_shaders(render_view, extent);
 
-  inst_.raytracing.render_hardware_shadows(render_view, rb.depth_tx, extent);
+  /* Surface nodes, deferred lighting and NPR nodes share one visibility dispatch. */
+  if (!trace_before_material) {
+    inst_.raytracing.render_hardware_shadows(render_view, rb.depth_tx, extent);
+  }
   inst_.raytracing.render_hardware_direct_light(render_view, rb.depth_tx, extent);
 
   /* Only three layers of closures are ever written,. */
@@ -2727,6 +2799,8 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   }
 
   if (!npr_ps_.is_empty()) {
+    shader_info_hardware_shadow_layers_ = *inst_.raytracing.hardware_shadow_ready() ?
+                                             inst_.lights.hardware_shadow_layer_count() : 0;
     gpu::Texture *shadow_source_tx = (rb.data.shadow_id >= 0) ? rb.rp_value_tx.gpu_texture() :
                                                                  nullptr;
     {
@@ -3027,6 +3101,11 @@ void DeferredPipeline::debug_draw(draw::View &view, gpu::FrameBuffer *combined_f
   inst.manager->submit(debug_draw_ps_, view);
 }
 
+bool PipelineModule::hardware_shadow_classifies_receivers() const
+{
+  return has_hardware_shadow_classification && inst_.raytracing.use_hardware_shadows();
+}
+
 PassMain::Sub *PipelineModule::material_add(Object *ob,
                                             blender::Material *blender_mat,
                                             GPUMaterial *gpumat,
@@ -3034,6 +3113,50 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
                                             eMaterialProbe probe_capture,
                                             const SurfaceDrawState &draw_state)
 {
+  if (pipeline_type == MAT_PIPE_SHADOW && draw_state.is_outline_shell) {
+    require_native_shadows("an outline shell casts shadows");
+  }
+  if (probe_capture == MAT_PROBE_NONE && draw_state.color_write &&
+      !(ob->visibility_flag & OB_HIDE_CAMERA) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+  {
+    if (GPU_material_has_shader_info_shadow_classification(gpumat)) {
+      if (GPU_backend_get_type() == GPU_BACKEND_VULKAN && pipeline_type != MAT_PIPE_FORWARD &&
+          ob->type == OB_MESH && draw_state.depth_write &&
+          !GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) &&
+          !GPU_material_has_depth_offset_output(gpumat))
+      {
+        has_hardware_shadow_classification = true;
+      }
+      else {
+        require_native_shadows("a material needs unsupported shadow classification");
+      }
+    }
+    if (pipeline_type == MAT_PIPE_FORWARD && forward_material_needs_lighting(gpumat) &&
+        !forward_material_has_hardware_shadow(gpumat))
+    {
+      require_native_shadows("a forward material uses lighting");
+    }
+    else if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
+             (ob->type != OB_MESH || GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT)))
+    {
+      require_native_shadows("Shader Info is used on a transparent or non-mesh surface");
+    }
+    else if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADOW_OFFSET | GPU_MATFLAG_LIGHTING |
+                                             GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
+             GPU_material_has_depth_offset_output(gpumat) ||
+             (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW))
+    {
+      require_native_shadows("a material uses shadow offsets, light accumulation, or shadow thickness");
+    }
+    else if (GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS) &&
+             !GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
+             !GPU_material_principled_npr_v2_has(gpumat))
+    {
+      require_native_shadows("a material uses legacy NPR or custom light sampling");
+    }
+  }
+
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST)) {
     has_raycast = true;
   }
@@ -3219,6 +3342,22 @@ bool DeferredPipeline::use_scene_final_hardware_specular() const
          std::getenv("BLENDER_EEVEE_HWRT_LAYER_SPECULAR") == nullptr;
 }
 
+bool DeferredPipeline::uses_hardware_shadow_prepass() const
+{
+  if (!inst_.raytracing.use_hardware_shadows()) {
+    return false;
+  }
+  if (opaque_layer_.has_hardware_shadow_surface_) {
+    return true;
+  }
+  for (const auto &entry : refraction_layers_) {
+    if (entry.second->has_hardware_shadow_surface_) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void DeferredLayer::render_dlss_guides(View &view, Framebuffer &framebuffer)
 {
   if (is_empty()) {
@@ -3250,6 +3389,7 @@ void DeferredLayer::render_gbuffer_only(View &render_view,
                                         Framebuffer &prepass_fb,
                                         Framebuffer &gbuffer_fb)
 {
+  shader_info_hardware_shadow_layers_ = 0;
   render_prepass_only(render_view, prepass_fb);
   if (closure_count_ == 0) {
     return;

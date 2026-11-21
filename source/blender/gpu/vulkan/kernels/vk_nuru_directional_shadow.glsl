@@ -28,6 +28,7 @@ layout(scalar, binding = 0) uniform NuruUniforms {
   vec4 shadow_params;
   ivec4 world_sun_slot_pad;
   vec4 sampling_rand;
+  uvec4 shadow_options;
 } uniforms;
 
 layout(binding = 1) uniform accelerationStructureEXT scene;
@@ -40,6 +41,8 @@ layout(scalar, binding = 6) readonly buffer B6 { TriangleNormalRange triangle_no
 layout(binding = 16) uniform sampler2D depth_tx;
 layout(binding = 17) uniform usampler2DArray gbuf_header_tx;
 layout(binding = 18) uniform sampler2DArray gbuf_normal_tx;
+layout(binding = 19) uniform sampler2D prepass_normal_tx;
+layout(binding = 20) uniform usampler2D receiver_id_tx;
 layout(binding = 43) uniform writeonly image2DArray shadow_visibility_img;
 
 #include "vk_nuru_shadow_terminator_lib.glsl"
@@ -239,7 +242,7 @@ vec3 opaque_shadow_visibility(accelerationStructureEXT scene_as,
   float current_tmin = t_min;
   for (int b = 0; b < 8; b++) {
     rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, 0xFFu, origin, current_tmin, dir, t_max);
+    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, HWRT_SHADOW_CASTER_MASK, origin, current_tmin, dir, t_max);
     int proceed_guard_rq = 4096;
     while (rayQueryProceedEXT(rq) && (proceed_guard_rq-- > 0)) {
     }
@@ -252,7 +255,7 @@ vec3 opaque_shadow_visibility(accelerationStructureEXT scene_as,
     if ((proxy_flags & HWRT_PROXY_FLAG_THIN_GLASS) == 0u) {
       return vec3(0.0f);
     }
-    current_tmin = rayQueryGetIntersectionTEXT(rq, true) + 1.0e-4f;
+    current_tmin = shadow_ray_after_hit(rayQueryGetIntersectionTEXT(rq, true));
     if (current_tmin >= t_max) {
       return vec3(1.0f);
     }
@@ -289,7 +292,7 @@ vec3 transparent_shadow_caustic_only(accelerationStructureEXT scene_as,
   bool ray_was_bent = false;
   for (int b = 0; b < max_transparent_bounces; b++) {
     rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, 0xFFu, origin, current_tmin, dir, current_tmax);
+    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, HWRT_SHADOW_CASTER_MASK, origin, current_tmin, dir, current_tmax);
     int proceed_guard_rq = 4096;
     while (rayQueryProceedEXT(rq) && (proceed_guard_rq-- > 0)) {
     }
@@ -315,7 +318,7 @@ vec3 transparent_shadow_caustic_only(accelerationStructureEXT scene_as,
     const HardwareMaterialProxy proxy = material_proxies[user_id];
     const uint proxy_flags = uint(proxy.ior_closure_type.w);
     if ((proxy_flags & HWRT_PROXY_FLAG_THIN_GLASS) != 0u) {
-      current_tmin = hit_distance + 1.0e-4f;
+      current_tmin = shadow_ray_after_hit(hit_distance);
       if (current_tmin >= current_tmax) {
         return ray_was_bent ? throughput : vec3(0.0f);
       }
@@ -385,7 +388,7 @@ vec3 transparent_shadow_caustic_only(accelerationStructureEXT scene_as,
       ray_was_bent = true;
     }
     else {
-      current_tmin = hit_distance + 1.0e-4f;
+      current_tmin = shadow_ray_after_hit(hit_distance);
       if (current_tmin >= current_tmax) {
         if (!ray_was_bent) {
           return vec3(0.0f);
@@ -432,7 +435,7 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene_as,
   const float vis_scale = min(t, 1.0f);
   for (int b = 0; b < max_transparent_bounces; b++) {
     rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, 0xFFu, origin, current_tmin, dir, t_max);
+    rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, HWRT_SHADOW_CASTER_MASK, origin, current_tmin, dir, t_max);
     int proceed_guard_rq = 4096;
     while (rayQueryProceedEXT(rq) && (proceed_guard_rq-- > 0)) {
     }
@@ -460,7 +463,7 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene_as,
        * walk). It must not flag `any_hit`, otherwise a pure thin-glass path gets multiplied by
        * `vis_scale` and the shadow jumps from fully lit (transparency 0) to nearly black at
        * transparency 0.001. */
-      current_tmin = hit_distance + 1.0e-4f;
+      current_tmin = shadow_ray_after_hit(hit_distance);
       if (current_tmin >= t_max) {
         return any_hit ? hardware_shadow_apply_color_transmission(throughput, color_intensity) *
                              vis_scale :
@@ -486,7 +489,7 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene_as,
     if (max_through < 1.0e-3f) {
       return vec3(0.0f);
     }
-    current_tmin = hit_distance + 1.0e-4f;
+    current_tmin = shadow_ray_after_hit(hit_distance);
     if (current_tmin >= t_max) {
       const vec3 tinted = hardware_shadow_apply_color_transmission(throughput, color_intensity);
       vec3 visibility = tinted * vis_scale;
@@ -502,6 +505,8 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene_as,
   }
   return vec3(0.0f);
 }
+
+#include "vk_nuru_shadow_visibility_lib.glsl"
 
 void main()
 {
@@ -519,8 +524,10 @@ void main()
     return;
   }
   const vec3 P = point_screen_to_world(ivec2(tid), depth);
+  const int receiver_source = uniforms.resolution_layer.w;
   vec3 N = vec3(0.0f);
-  if (!load_gbuffer_receiver_normal(ivec2(tid), gbuf_header_tx, gbuf_normal_tx, N)) {
+  if (receiver_source != 0 ||
+      !load_gbuffer_receiver_normal(ivec2(tid), gbuf_header_tx, gbuf_normal_tx, N)) {
     N = estimate_world_normal(ivec2(tid), depth, depth_tx);
   }
   if (dot(N, N) < 1.0e-10f) {
@@ -529,51 +536,57 @@ void main()
   const vec3 camera_position = uniforms.viewinv[3].xyz;
   const vec3 to_receiver = P - camera_position;
   const float receiver_distance = max(length(to_receiver), 1.0e-6f);
-  const vec3 view_dir = to_receiver / receiver_distance;
-  N = dot(N, view_dir) < 0.0f ? N : -N;
+  const bool is_orthographic = uniforms.wininv[2].w == 0.0f;
+  const vec3 toward_camera = is_orthographic ?
+                                 normalize(uniforms.viewinv[2].xyz) :
+                                 -to_receiver / receiver_distance;
+  N = dot(N, toward_camera) >= 0.0f ? N : -N;
   const float position_scale = max(max(abs(P.x), abs(P.y)), abs(P.z));
   /* Keep the launch on the visible side at every scene scale. A fixed 5mm offset and
    * distance cutoff can cross an entire small wall or skip its neighboring face. */
   const float normal_bias = max(max(position_scale, receiver_distance) * 1.25e-6f, 1.0e-7f);
   const float ray_tmin = 0.0f;
-  /* The reverse-depth conversion and unprojection can put P just below its surface.
-   * Move toward the camera by four representable depth steps to cover rounding, in addition
-   * to the world-space arithmetic bias below. Neighbor depth differences are NOT error bounds:
-   * at a silhouette they can move the launch past its occluder and create a bright rim.
-   * Unlike a pixel-footprint pull, this correction does not grow across geometry edges. */
-  /* Cover the stored reverse-Z precision too: near an orthographic camera the
-   * subtraction loses bits, so forward-depth ULPs alone miss raster rounding. */
-  const float reverse_front = uintBitsToFloat(min(floatBitsToUint(reverse_depth) + 4u,
-                                                floatBitsToUint(1.0f)));
-  const float depth_front = min(1.0f - reverse_front,
-      uintBitsToFloat(max(floatBitsToUint(depth), 4u) - 4u));
-  const vec3 P_corrected = point_screen_to_world(ivec2(tid), depth_front);
+  const vec3 P_corrected = point_screen_to_world(
+      ivec2(tid), shadow_receiver_front_depth(reverse_depth, is_orthographic));
+  const vec3 unshifted_origin = P_corrected + N * normal_bias;
   const float max_cutoff = uintBitsToFloat(uint(uniforms.world_sun_slot_pad.z));
-  const vec3 smooth_N = normal_unpack(texelFetch(gbuf_normal_tx, ivec3(tid, 0), 0).xy);
+  const vec3 smooth_N = receiver_source == 0 ?
+      normal_unpack(texelFetch(gbuf_normal_tx, ivec3(tid, 0), 0).xy) :
+      prepass_shadow_smooth_normal(prepass_normal_tx, ivec2(tid), receiver_source, N);
   TerminatorReceiver receiver = terminator_none();
   /* Include an angular margin for the G-buffer geometric-normal quantization. */
   if (max_cutoff > 0.0 &&
       min(dot(N, uniforms.light_direction_bias.xyz),
           dot(smooth_N, uniforms.light_direction_bias.xyz)) <
           max_cutoff + 0.25 + 2.0 * sin(0.5 * uniforms.shadow_params.x)) {
-    const vec3 toward_camera = normalize(point_screen_to_world(ivec2(tid), 0.0) - P);
     const float recovery_distance = max(normal_bias * 16.0, length(P_corrected - P) * 2.0);
-    receiver = terminator_raster_receiver(P, toward_camera, smooth_N, recovery_distance);
+    receiver = terminator_raster_receiver(P, toward_camera, recovery_distance);
   }
   const int sample_count = (uniforms.shadow_params.x > 1.0e-6f) ? max(int(uniforms.shadow_params.y), 1) : 1;
   const bool enable_caustics = (uniforms.world_sun_slot_pad.y != 0);
   const float color_intensity = clamp(uniforms.shadow_params.z, 0.0f, 1.0f);
   const float photons_intensity = max(uniforms.shadow_params.w, 0.0f);
   const float transparent_shadows = uintBitsToFloat(uint(uniforms.world_sun_slot_pad.w));
-  vec3 visibility = vec3(0.0f);
+  vec4 visibility = vec4(0.0f);
+  const bool detailed = shadow_needs_hit_details();
+  const uint receiver_id = uniforms.shadow_options.z != 0u ?
+                               texelFetch(receiver_id_tx, ivec2(tid), 0).r :
+                               SHADOW_UNKNOWN_RECEIVER_ID;
   for (int sample_index = 0; sample_index < sample_count; sample_index++) {
     const vec3 sample_dir = sample_directional_shadow_direction(tid, sample_index);
-    const vec3 offset = terminator_shadow_offset(receiver, P_corrected, sample_dir, normal_bias);
-    const vec3 origin = P_corrected + N * normal_bias + offset;
-    visibility += hardware_shadow_visibility(scene, origin, sample_dir, ray_tmin, 100000.0f, transparent_shadows, enable_caustics, true, sample_dir, color_intensity, photons_intensity);
+    const vec3 offset = terminator_shadow_offset(receiver, unshifted_origin, sample_dir, normal_bias);
+    const vec3 origin = unshifted_origin + offset;
+    if (detailed) {
+      visibility += hardware_shadow_detailed_visibility(scene, origin, sample_dir, ray_tmin,
+                                                         100000.0f, transparent_shadows,
+                                                         color_intensity, receiver_id);
+    }
+    else {
+      visibility.rgb += hardware_shadow_visibility(scene, origin, sample_dir, ray_tmin, 100000.0f, transparent_shadows, enable_caustics, true, sample_dir, color_intensity, photons_intensity);
+    }
   }
   visibility /= float(sample_count);
   imageStore(shadow_visibility_img,
              ivec3(ivec2(tid), int(uint(uniforms.resolution_layer.z))),
-             vec4(visibility, 1.0f));
+             visibility);
 }

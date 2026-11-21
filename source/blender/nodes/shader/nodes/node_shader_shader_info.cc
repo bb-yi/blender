@@ -128,6 +128,14 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
   const bool cache_eligible = default_surface && shadow_outputs &&
                               node->custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED;
   const float cache_eligible_value = cache_eligible ? 1.0f : 0.0f;
+  const float native_shadow = 0.0f;
+  GPUNodeLink *hardware_shadow = nullptr;
+  if (default_surface && shadow_outputs) {
+    GPU_link(mat, "node_shader_info_hardware_shadow", &hardware_shadow);
+  }
+  else {
+    hardware_shadow = GPU_constant(&native_shadow);
+  }
 
   /* Shader Info evaluates the same per-light custom color/attenuation cache used by GLSL
    * Function's GLSLLight helpers. Keep the existing light-access create-info path enabled so
@@ -137,6 +145,9 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                             GPU_MATFLAG_GLSL_LIGHT_ACCESS);
   if (out[5].hasoutput || out[6].hasoutput) {
     GPU_material_shader_info_shadow_classification_set(mat);
+  }
+  if (shadow_outputs && !default_surface) {
+    GPU_material_flag_set(mat, GPU_MATFLAG_SHADOW_OFFSET);
   }
   if (shadow_outputs && node->custom1 >= SHD_SHADER_INFO_SHADOW_HARD) {
     GPU_material_flag_set(mat, GPU_MATFLAG_SHADOW_FILTER_METHODS);
@@ -162,6 +173,7 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                         GPU_constant(&stable_shadow_samples),
                         GPU_constant(&lightgroup_id_value),
                         GPU_constant(&cache_eligible_value),
+                        hardware_shadow,
                         GPU_kernel_globals(),
                         GPU_shading_data());
 }
