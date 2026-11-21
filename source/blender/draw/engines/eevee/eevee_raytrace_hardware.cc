@@ -464,13 +464,11 @@ GPUHardwareRaytraceScene *RayTraceModule::acquire_hardware_rt_scene(
     Vector<GPUHardwareRaytraceSceneEntry> rt_scene_entries = build_hardware_rt_scene_entries(
         sorted_scene_entries);
     GPUHardwareRaytraceSceneUpdateParams update_params;
-    /* A selective BLAS rebuild moves geometry: the TLAS, the packed world-geometry streams, and
-     * the emissive bounding spheres all reference it and must refresh together. */
-    update_params.update_tlas = animation_changed || blas_rebuild_requested;
-    update_params.update_emissive_data = emissive_changed || animation_changed ||
-                                         blas_rebuild_requested;
+    /* The backend checks what actually changed before updating geometry-dependent resources. */
+    update_params.update_tlas = animation_changed;
+    update_params.update_emissive_data = emissive_changed;
     update_params.update_material_data = material_changed;
-    update_params.update_world_geometry_data = animation_changed || blas_rebuild_requested;
+    update_params.update_world_geometry_data = transform_changed;
     update_params.rebuild_blas_indices = blas_rebuild_indices;
     if (GPU_hardware_raytrace_scene_update(
             hardware_rt_scene_cache_,

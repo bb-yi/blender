@@ -380,11 +380,10 @@ struct GPUHardwareRaytraceSceneUpdateParams {
   bool update_tlas = true;
   bool update_emissive_data = true;
   bool update_material_data = true;
+  /** Instance transforms changed. Refresh world-space geometry and emissive bounds as needed. */
   bool update_world_geometry_data = true;
-  /* Entry indices whose geometry changed: their BLAS is rebuilt from the entry's current batch
-   * and the per-entry triangle data refreshed, while every other BLAS is reused. Editing one
-   * object then costs one BLAS build plus a TLAS rebuild instead of a full scene rebuild.
-   * Implies TLAS and world-geometry refreshes (the caller must keep those flags enabled). */
+  /** Entries whose geometry may have changed. The backend compares the current batch with
+   * the cache and refreshes the BLAS, TLAS and shading data when their inputs change. */
   Span<int> rebuild_blas_indices;
 };
 

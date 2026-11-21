@@ -43,6 +43,7 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_path_utils.hh"
+#include "BLI_task.hh"
 #include "BLI_time.hh"
 #include "DNA_image_types.h"
 #include "IMB_imbuf_types.hh"
@@ -55,6 +56,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -92,6 +95,40 @@ struct RTBuffer {
   gpu::VKResourceWithHandle<VkBuffer> graphics_resource;
 };
 
+struct VertexAttributeSnapshot {
+  std::shared_ptr<const std::vector<uint8_t>> data;
+  size_t offset = 0;
+  size_t stride = 0;
+  uint vertex_count = 0;
+  gpu::VertAttrType format = gpu::VertAttrType::SFLOAT_32_32_32;
+};
+
+struct BlasUpdateLayout {
+  VkDeviceSize vertex_stride;
+  uint32_t max_vertex;
+  VkIndexType index_type;
+  uint32_t first_vertex;
+
+  bool operator==(const BlasUpdateLayout &) const = default;
+};
+
+struct SceneLocalGeometry {
+  VertexAttributeSnapshot positions;
+  VertexAttributeSnapshot normals;
+  VertexAttributeSnapshot shadow_uvs;
+  std::vector<uint32_t> indices;
+  std::vector<float4> triangle_normals;
+  std::vector<float4> triangle_smooth_normals;
+  std::vector<float4> triangle_positions;
+  std::vector<float2> triangle_shadow_uvs;
+  std::optional<BlasUpdateLayout> blas_update_layout;
+};
+
+struct TriangleNormalRangeRecord {
+  uint32_t offset;
+  uint32_t count;
+};
+
 }  // namespace nuru_vk
 
 struct GPUHardwareRaytraceScene {
@@ -118,14 +155,8 @@ struct GPUHardwareRaytraceScene {
   float shadow_terminator_max_cutoff = 0.0f;
   std::vector<VkAccelerationStructureKHR> bottom_level_acceleration_structures;
   std::vector<nuru_vk::RTBuffer> bottom_level_buffers;
-  /* RT-owned copies of the geometry (positions as tightly packed float3, indices as uint32).
-   * Unlike Metal, the backend does not reference Blender's VBO/IBO at trace time; geometry is
-   * re-uploaded into buffers created with acceleration-structure usage flags. */
-  std::vector<nuru_vk::RTBuffer> geometry_buffers;
-  std::vector<std::vector<float4>> local_triangle_normals;
-  std::vector<std::vector<float4>> local_triangle_smooth_normals;
-  std::vector<std::vector<float4>> local_triangle_positions;
-  std::vector<std::vector<float2>> local_triangle_shadow_uvs;
+  std::vector<nuru_vk::SceneLocalGeometry> local_geometry;
+  std::vector<nuru_vk::TriangleNormalRangeRecord> triangle_normal_ranges;
   /* Translation does not change the packed world normals. Keep the linear transforms that
    * produced them so moving an object need not rebuild these whole-scene buffers. */
   std::vector<float3x3> normal_transforms;
@@ -145,6 +176,10 @@ struct GPUHardwareRaytraceScene {
 namespace blender::gpu::vulkan {
 
 using nuru_vk::RTBuffer;
+using nuru_vk::BlasUpdateLayout;
+using nuru_vk::SceneLocalGeometry;
+using nuru_vk::TriangleNormalRangeRecord;
+using nuru_vk::VertexAttributeSnapshot;
 
 /* -------------------------------------------------------------------- */
 /** \name Small utilities
@@ -234,6 +269,12 @@ static bool rt_buffer_create(RTBuffer &r_buffer,
     r_buffer.device_address = device.functions.vkGetBufferDeviceAddress(device.vk_handle(), &address_info);
   }
   return true;
+}
+
+static bool rt_buffer_flush(const RTBuffer &buffer)
+{
+  VmaAllocator allocator = VKBackend::get().device.mem_allocator_get();
+  return vmaFlushAllocation(allocator, buffer.allocation, 0, VK_WHOLE_SIZE) == VK_SUCCESS;
 }
 
 static void rt_buffer_free(RTBuffer &buffer)
@@ -394,6 +435,9 @@ static int rt_external_buffer_export_fd(const RTBuffer &buffer)
 /* Host-visible storage buffer for shading data (emissive, albedo, proxies, normals). */
 static bool rt_storage_buffer_create(RTBuffer &r_buffer, const size_t size)
 {
+  if (size > GPU_max_storage_buffer_size()) {
+    return false;
+  }
   return rt_buffer_create(r_buffer,
                           size,
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -710,7 +754,10 @@ static bool build_acceleration_structure(
   }
 
   RTBuffer scratch;
-  if (!rt_scratch_buffer_create(scratch, std::max<size_t>(size_info.buildScratchSize, 16))) {
+  const VkDeviceSize scratch_size = build_info.mode == VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR ?
+                                        size_info.updateScratchSize :
+                                        size_info.buildScratchSize;
+  if (!rt_scratch_buffer_create(scratch, scratch_size)) {
     device.functions.vkDestroyAccelerationStructureKHR(
         device.vk_handle(), r_acceleration_structure, nullptr);
     r_acceleration_structure = VK_NULL_HANDLE;
@@ -752,10 +799,6 @@ static void destroy_acceleration_structure(VkAccelerationStructureKHR &accelerat
 struct SceneGeometryBuild {
   VkAccelerationStructureKHR acceleration_structure = VK_NULL_HANDLE;
   RTBuffer acceleration_buffer;
-  RTBuffer vertex_buffer;
-  RTBuffer index_buffer;
-  uint32_t triangle_count = 0;
-  uint32_t vertex_count = 0;
   float4x4 object_to_world = float4x4::identity();
   uint32_t instance_count = 1;
   uint32_t user_id = 0;
@@ -773,13 +816,48 @@ struct SceneGeometryBuild {
   uint32_t closure_type = 1u;
   uint32_t proxy_flags = 0u;
   float shadow_terminator_geometry_offset = 0.1f;
-  std::vector<float4> triangle_normals;
-  std::vector<float4> triangle_smooth_normals;
-  std::vector<float4> triangle_local_positions;
-  std::vector<float2> triangle_shadow_uvs;
+  Span<float4> triangle_normals;
+  Span<float4> triangle_smooth_normals;
+  Span<float4> triangle_local_positions;
+  Span<float2> triangle_shadow_uvs;
   bool has_shadow_alpha = false;
   bool casts_shadow = true;
+  bool blas_uses_draw_buffers = false;
+  bool blas_refitted = false;
+
+  void set_local_geometry(const SceneLocalGeometry &geometry)
+  {
+    triangle_normals = geometry.triangle_normals;
+    triangle_smooth_normals = geometry.triangle_smooth_normals;
+    triangle_local_positions = geometry.triangle_positions;
+    triangle_shadow_uvs = geometry.triangle_shadow_uvs;
+  }
 };
+
+static SceneGeometryBuild scene_geometry_for_entry(const GPUHardwareRaytraceSceneEntry &entry)
+{
+  SceneGeometryBuild geometry;
+  geometry.object_to_world = entry.object_to_world;
+  geometry.instance_count = std::max(entry.instance_count, uint32_t(1));
+  geometry.user_id = entry.user_id;
+  geometry.emissive_radiance = entry.emissive_radiance;
+  geometry.diffuse_albedo = entry.diffuse_albedo;
+  geometry.reflection_color = entry.reflection_color;
+  geometry.reflection_roughness = entry.reflection_roughness;
+  geometry.transmission_color = entry.transmission_color;
+  geometry.transmission_roughness = entry.transmission_roughness;
+  geometry.reflection_ior = entry.reflection_ior;
+  geometry.refraction_ior = entry.refraction_ior;
+  geometry.packed_thickness = entry.packed_thickness;
+  geometry.alpha = entry.alpha;
+  geometry.reflection_layer_coverage = entry.reflection_layer_coverage;
+  geometry.shadow_terminator_geometry_offset = entry.shadow_terminator_geometry_offset;
+  geometry.closure_type = entry.closure_type;
+  geometry.proxy_flags = entry.proxy_flags;
+  geometry.has_shadow_alpha = entry.shadow_alpha.image != nullptr;
+  geometry.casts_shadow = entry.casts_shadow;
+  return geometry;
+}
 
 static float scene_emissive_energy_sum(Span<SceneGeometryBuild> geometry)
 {
@@ -803,6 +881,7 @@ class SceneGeometryReadback {
     size_t offset;
     size_t size;
     std::vector<uint8_t> individual_data;
+    std::shared_ptr<const std::vector<uint8_t>> snapshot;
   };
 
   Map<ResourceHandle, Region> regions_;
@@ -852,7 +931,7 @@ class SceneGeometryReadback {
       return;
     }
     const size_t offset = (size_ + 15) & ~size_t(15);
-    regions_.add_new(source.resource_handle, Region{source, offset, size, {}});
+    regions_.add_new(source.resource_handle, Region{source, offset, size, {}, {}});
     size_ = offset + size;
   }
 
@@ -900,14 +979,44 @@ class SceneGeometryReadback {
     return {static_cast<const uint8_t *>(staging_.mapped_memory_get()) + region->offset,
             int64_t(region->size)};
   }
+
+  std::shared_ptr<const std::vector<uint8_t>> snapshot(const VKResourceWithHandle<VkBuffer> &source)
+  {
+    Region &region = regions_.lookup(source.resource_handle);
+    if (!region.snapshot) {
+      const Span<uint8_t> bytes = data(source);
+      region.snapshot = std::make_shared<const std::vector<uint8_t>>(bytes.begin(), bytes.end());
+    }
+    return region.snapshot;
+  }
 };
 
 struct VertexAttributeInput {
+  const VKVertexBuffer *source = nullptr;
   Span<uint8_t> data;
   size_t offset = 0;
   size_t stride = 0;
   uint vertex_count = 0;
   VertAttrType format = VertAttrType::SFLOAT_32_32_32;
+
+  bool equals(const VertexAttributeSnapshot &other) const
+  {
+    if (!source || !other.data) {
+      return !source && !other.data;
+    }
+    return offset == other.offset && stride == other.stride && vertex_count == other.vertex_count &&
+           format == other.format && size_t(data.size()) == other.data->size() &&
+           std::memcmp(data.data(), other.data->data(), data.size()) == 0;
+  }
+
+  VertexAttributeSnapshot snapshot(SceneGeometryReadback &readback) const
+  {
+    return {source ? readback.snapshot(source->resource()) : nullptr,
+            offset,
+            stride,
+            vertex_count,
+            format};
+  }
 };
 
 static VKVertexBuffer *find_attribute_buffer(Batch &batch,
@@ -975,6 +1084,7 @@ static bool resolve_attribute_input(Batch &batch,
     return false;
   }
   const GPUVertAttr &attr = source->format.attrs[attr_id];
+  r_input.source = source;
   r_input.data = readback.data(source->resource());
   r_input.offset = attr.offset;
   r_input.stride = source->format.stride;
@@ -987,8 +1097,13 @@ static bool resolve_attribute_input(Batch &batch,
   }
   r_input.vertex_count = source->vertex_len;
   r_input.format = attr.type.format;
-  return r_input.offset + size_t(r_input.vertex_count - 1) * r_input.stride +
-             attr.type.size() <= size_t(r_input.data.size());
+  if (r_input.offset + size_t(r_input.vertex_count - 1) * r_input.stride + attr.type.size() >
+      size_t(r_input.data.size()))
+  {
+    r_input = {};
+    return false;
+  }
+  return true;
 }
 
 static float3 read_vertex_position(const VertexAttributeInput &input, const uint vertex_index)
@@ -1069,23 +1184,21 @@ static float3 read_vertex_normal(const VertexAttributeInput &input, const uint v
   }
 }
 
-static std::vector<float4> build_triangle_normal_data(const VertexAttributeInput &positions,
-                                                      const std::vector<uint32_t> &indices,
-                                                      const size_t triangle_count)
+static void unpack_triangle_positions_and_normals(const VertexAttributeInput &positions,
+                                                  const std::vector<uint32_t> &indices,
+                                                  SceneLocalGeometry &r_geometry)
 {
-  std::vector<float4> triangle_normals(triangle_count, float4(0.0f));
-  if (triangle_count == 0 || positions.data.is_empty()) {
-    return triangle_normals;
-  }
-
+  const size_t triangle_count = indices.size() / 3;
+  r_geometry.triangle_normals.resize(triangle_count);
+  r_geometry.triangle_positions.resize(indices.size());
   for (size_t tri = 0; tri < triangle_count; tri++) {
-    const uint i0 = indices[tri * 3 + 0];
-    const uint i1 = indices[tri * 3 + 1];
-    const uint i2 = indices[tri * 3 + 2];
-
-    const float3 p0 = read_vertex_position(positions, i0);
-    const float3 p1 = read_vertex_position(positions, i1);
-    const float3 p2 = read_vertex_position(positions, i2);
+    const size_t corner = tri * 3;
+    const float3 p0 = read_vertex_position(positions, indices[corner]);
+    const float3 p1 = read_vertex_position(positions, indices[corner + 1]);
+    const float3 p2 = read_vertex_position(positions, indices[corner + 2]);
+    r_geometry.triangle_positions[corner] = float4(p0, 0.0f);
+    r_geometry.triangle_positions[corner + 1] = float4(p1, 0.0f);
+    r_geometry.triangle_positions[corner + 2] = float4(p2, 0.0f);
 
     float3 N = math::cross(p1 - p0, p2 - p0);
     const float len_sq = math::length_squared(N);
@@ -1095,10 +1208,8 @@ static std::vector<float4> build_triangle_normal_data(const VertexAttributeInput
     else {
       N = float3(0.0f, 0.0f, 1.0f);
     }
-    triangle_normals[tri] = float4(N, 0.0f);
+    r_geometry.triangle_normals[tri] = float4(N, 0.0f);
   }
-
-  return triangle_normals;
 }
 
 static std::vector<float4> build_triangle_smooth_normal_data(
@@ -1146,29 +1257,6 @@ static std::vector<float4> build_triangle_smooth_normal_data(
   return smooth_normals;
 }
 
-static std::vector<float4> build_triangle_local_position_data(
-    const VertexAttributeInput &positions,
-    const std::vector<uint32_t> &indices,
-    const size_t triangle_count)
-{
-  std::vector<float4> local_positions(triangle_count * 3, float4(0.0f));
-  if (triangle_count == 0 || positions.data.is_empty()) {
-    return local_positions;
-  }
-
-  for (size_t tri = 0; tri < triangle_count; tri++) {
-    const uint i0 = indices[tri * 3 + 0];
-    const uint i1 = indices[tri * 3 + 1];
-    const uint i2 = indices[tri * 3 + 2];
-
-    local_positions[tri * 3 + 0] = float4(read_vertex_position(positions, i0), 0.0f);
-    local_positions[tri * 3 + 1] = float4(read_vertex_position(positions, i1), 0.0f);
-    local_positions[tri * 3 + 2] = float4(read_vertex_position(positions, i2), 0.0f);
-  }
-
-  return local_positions;
-}
-
 /* TEMPORARY DIAGNOSTIC: report why an entry is skipped (BLENDER_EEVEE_HWRT_PERF only).
  * Remove before completion. */
 static bool blas_skip(const GPUHardwareRaytraceSceneEntry &entry, const char *reason, int detail)
@@ -1186,13 +1274,21 @@ static bool blas_skip(const GPUHardwareRaytraceSceneEntry &entry, const char *re
 
 struct SceneGeometryInput {
   VertexAttributeInput positions;
+  VertexAttributeInput normals;
+  VertexAttributeInput shadow_uvs;
+  const VKIndexBuffer *index_buffer = nullptr;
   std::vector<uint32_t> indices;
+
+  bool equals(const SceneLocalGeometry &geometry) const
+  {
+    return indices == geometry.indices && positions.equals(geometry.positions) &&
+           normals.equals(geometry.normals) && shadow_uvs.equals(geometry.shadow_uvs);
+  }
 };
 
 static bool read_entry_geometry(const GPUHardwareRaytraceSceneEntry &entry,
                                 const SceneGeometryReadback &readback,
-                                SceneGeometryInput &r_input,
-                                SceneGeometryBuild &r_geometry)
+                                SceneGeometryInput &r_input)
 {
   if (entry.batch == nullptr) {
     return blas_skip(entry, "null_batch", 0);
@@ -1213,9 +1309,16 @@ static bool read_entry_geometry(const GPUHardwareRaytraceSceneEntry &entry,
       return blas_skip(entry, "pos_format", int(positions.format));
   }
 
-  VertexAttributeInput normals;
-  const bool has_normal_input = resolve_attribute_input(batch, "nor", readback, normals) &&
-                                normals.vertex_count >= positions.vertex_count;
+  resolve_attribute_input(batch, "nor", readback, r_input.normals);
+  if (r_input.normals.vertex_count < positions.vertex_count) {
+    r_input.normals = {};
+  }
+  if (entry.shadow_alpha.image &&
+      resolve_attribute_input(batch, entry.shadow_alpha.uv_attribute, readback, r_input.shadow_uvs) &&
+      r_input.shadow_uvs.format != VertAttrType::SFLOAT_32_32)
+  {
+    r_input.shadow_uvs = {};
+  }
 
   const GPUPrimType final_primitive_type = batch.prim_type;
   size_t triangle_count = 0;
@@ -1223,6 +1326,7 @@ static bool read_entry_geometry(const GPUHardwareRaytraceSceneEntry &entry,
 
   if (batch.elem != nullptr) {
     VKIndexBuffer *index_buf = unwrap(batch.elem);
+    r_input.index_buffer = index_buf;
     const uint index_count = index_buf->index_len_get();
     if (index_count == 0) {
       return blas_skip(entry, "empty_index_buffer", 0);
@@ -1251,9 +1355,12 @@ static bool read_entry_geometry(const GPUHardwareRaytraceSceneEntry &entry,
         indices[i] = uint32_t(src[i]);
       }
     }
-    /* Mirror the Metal path that offsets the vertex buffer by `index_base * stride`. */
+    /* Match the indexed draw's base vertex. Also reject overflow for malformed indices. */
     if (index_base != 0) {
       for (uint32_t &index : indices) {
+        if (index > std::numeric_limits<uint32_t>::max() - index_base) {
+          return blas_skip(entry, "index_base_overflow", int(index_base));
+        }
         index += index_base;
       }
     }
@@ -1280,108 +1387,161 @@ static bool read_entry_geometry(const GPUHardwareRaytraceSceneEntry &entry,
     return blas_skip(entry, "index_outside_vertex_buffer", int(positions.vertex_count));
   }
 
-  r_geometry.triangle_count = uint32_t(triangle_count);
-  r_geometry.vertex_count = positions.vertex_count;
-  r_geometry.object_to_world = entry.object_to_world;
-  r_geometry.instance_count = std::max(entry.instance_count, uint32_t(1));
-  r_geometry.user_id = entry.user_id;
-  r_geometry.emissive_radiance = entry.emissive_radiance;
-  r_geometry.diffuse_albedo = entry.diffuse_albedo;
-  r_geometry.reflection_color = entry.reflection_color;
-  r_geometry.reflection_roughness = entry.reflection_roughness;
-  r_geometry.transmission_color = entry.transmission_color;
-  r_geometry.transmission_roughness = entry.transmission_roughness;
-  r_geometry.reflection_ior = entry.reflection_ior;
-  r_geometry.refraction_ior = entry.refraction_ior;
-  r_geometry.packed_thickness = entry.packed_thickness;
-  r_geometry.alpha = entry.alpha;
-  r_geometry.reflection_layer_coverage = entry.reflection_layer_coverage;
-  r_geometry.shadow_terminator_geometry_offset = entry.shadow_terminator_geometry_offset;
-  r_geometry.closure_type = entry.closure_type;
-  r_geometry.proxy_flags = entry.proxy_flags;
-  r_geometry.triangle_normals = build_triangle_normal_data(positions, indices, triangle_count);
-  r_geometry.triangle_smooth_normals = build_triangle_smooth_normal_data(
-      normals, has_normal_input, indices, triangle_count, r_geometry.triangle_normals);
-  r_geometry.triangle_local_positions = build_triangle_local_position_data(
-      positions, indices, triangle_count);
-  r_geometry.has_shadow_alpha = entry.shadow_alpha.image != nullptr;
-  r_geometry.casts_shadow = entry.casts_shadow;
-  if (r_geometry.has_shadow_alpha) {
-    r_geometry.triangle_shadow_uvs.resize(indices.size(), float2(0.0f));
-    VertexAttributeInput uv;
-    if (resolve_attribute_input(batch, entry.shadow_alpha.uv_attribute, readback, uv) &&
-        uv.format == VertAttrType::SFLOAT_32_32)
-    {
+  return true;
+}
+
+static SceneLocalGeometry unpack_local_geometry(const SceneGeometryInput &input,
+                                                const bool has_shadow_alpha)
+{
+  SceneLocalGeometry geometry;
+  const std::vector<uint32_t> &indices = input.indices;
+  const size_t triangle_count = indices.size() / 3;
+  unpack_triangle_positions_and_normals(input.positions, indices, geometry);
+  geometry.triangle_smooth_normals = build_triangle_smooth_normal_data(
+      input.normals, input.normals.source != nullptr, indices, triangle_count, geometry.triangle_normals);
+  if (has_shadow_alpha) {
+    geometry.triangle_shadow_uvs.resize(indices.size(), float2(0.0f));
+    const VertexAttributeInput &uv = input.shadow_uvs;
+    if (uv.source) {
       for (const size_t corner : IndexRange(indices.size())) {
         if (indices[corner] < uv.vertex_count) {
           const size_t offset = uv.offset + size_t(indices[corner]) * uv.stride;
-          memcpy(&r_geometry.triangle_shadow_uvs[corner], uv.data.data() + offset, sizeof(float2));
+          memcpy(&geometry.triangle_shadow_uvs[corner], uv.data.data() + offset, sizeof(float2));
         }
       }
     }
   }
+  return geometry;
+}
+
+static void cache_geometry_input(SceneGeometryInput &input,
+                                 SceneGeometryReadback &readback,
+                                 SceneLocalGeometry &r_geometry)
+{
+  r_geometry.positions = input.positions.snapshot(readback);
+  r_geometry.normals = input.normals.snapshot(readback);
+  r_geometry.shadow_uvs = input.shadow_uvs.snapshot(readback);
+  r_geometry.indices = std::move(input.indices);
+}
+
+static bool set_draw_buffer_blas_input(const SceneGeometryInput &input,
+                                       VkAccelerationStructureGeometryTrianglesDataKHR &r_triangles,
+                                       VkAccelerationStructureBuildRangeInfoKHR &r_range)
+{
+  const VertexAttributeInput &positions = input.positions;
+  const VKIndexBuffer *indices = input.index_buffer;
+  if (!ELEM(positions.format, VertAttrType::SFLOAT_32_32_32, VertAttrType::SFLOAT_32_32_32_32) ||
+      positions.offset % sizeof(float) != 0 || positions.stride % sizeof(float) != 0 ||
+      !positions.source->has_device_address() || (indices && !indices->has_device_address()))
+  {
+    return false;
+  }
+  r_triangles.vertexData.deviceAddress = positions.source->device_address_get() + positions.offset;
+  r_triangles.vertexStride = positions.stride;
+  r_triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
+  if (indices) {
+    const VkDeviceSize index_size = indices->is_32bit() ? sizeof(uint32_t) : sizeof(uint16_t);
+    r_triangles.indexType = indices->vk_index_type();
+    r_triangles.indexData.deviceAddress = indices->device_address_get() +
+                                          indices->index_start_get() * index_size;
+    r_range.firstVertex = indices->index_base_get();
+  }
+  return true;
+}
+
+static bool upload_packed_blas_input(const SceneGeometryInput &input,
+                                     RTBuffer &r_vertices,
+                                     RTBuffer &r_indices,
+                                     VkAccelerationStructureGeometryTrianglesDataKHR &r_triangles)
+{
+  const VkBufferUsageFlags geometry_usage =
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  const uint32_t vertex_count = input.positions.vertex_count;
+  const size_t index_bytes = input.indices.size() * sizeof(uint32_t);
+  if (!rt_buffer_create(r_vertices, size_t(vertex_count) * 3 * sizeof(float), geometry_usage, true) ||
+      !rt_buffer_create(r_indices, index_bytes, geometry_usage, true))
+  {
+    return false;
+  }
+  auto *positions = static_cast<float *>(r_vertices.mapped);
+  for (uint v = 0; v < vertex_count; v++) {
+    const float3 co = read_vertex_position(input.positions, v);
+    positions[size_t(v) * 3 + 0] = co.x;
+    positions[size_t(v) * 3 + 1] = co.y;
+    positions[size_t(v) * 3 + 2] = co.z;
+  }
+  std::memcpy(r_indices.mapped, input.indices.data(), index_bytes);
+  if (!rt_buffer_flush(r_vertices) || !rt_buffer_flush(r_indices)) {
+    return false;
+  }
+  r_triangles.vertexData.deviceAddress = r_vertices.device_address;
+  r_triangles.vertexStride = 3 * sizeof(float);
+  r_triangles.indexType = VK_INDEX_TYPE_UINT32;
+  r_triangles.indexData.deviceAddress = r_indices.device_address;
   return true;
 }
 
 static bool build_entry_blas(const SceneGeometryInput &input,
                              SceneGeometryBuild &r_geometry,
-                             AccelerationStructureBuildBatch &build_batch)
+                             AccelerationStructureBuildBatch &build_batch,
+                             SceneLocalGeometry *local = nullptr,
+                             const SceneLocalGeometry *previous = nullptr)
 {
-  const VertexAttributeInput &positions = input.positions;
-  const std::vector<uint32_t> &indices = input.indices;
-  /* Upload tightly packed float3 positions + uint32 indices into RT-owned buffers with
-   * acceleration-structure build usage. */
-  const uint32_t vertex_count = positions.vertex_count;
-  std::vector<float> packed_positions(size_t(vertex_count) * 3, 0.0f);
-  for (uint v = 0; v < vertex_count; v++) {
-    const float3 co = read_vertex_position(positions, v);
-    packed_positions[size_t(v) * 3 + 0] = co.x;
-    packed_positions[size_t(v) * 3 + 1] = co.y;
-    packed_positions[size_t(v) * 3 + 2] = co.z;
-  }
-
-  const VkBufferUsageFlags geometry_usage =
-      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-
-  RTBuffer vertex_buffer;
-  if (!rt_buffer_create(
-          vertex_buffer, packed_positions.size() * sizeof(float), geometry_usage, true))
-  {
-    return false;
-  }
-  std::memcpy(vertex_buffer.mapped, packed_positions.data(), packed_positions.size() * sizeof(float));
-
-  RTBuffer index_buffer;
-  if (!rt_buffer_create(index_buffer, indices.size() * sizeof(uint32_t), geometry_usage, true)) {
-    rt_buffer_free(vertex_buffer);
-    return false;
-  }
-  std::memcpy(index_buffer.mapped, indices.data(), indices.size() * sizeof(uint32_t));
-
   VkAccelerationStructureGeometryKHR geometry = {};
   geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
   geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
   geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-  geometry.geometry.triangles.sType =
-      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-  geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-  geometry.geometry.triangles.vertexData.deviceAddress = vertex_buffer.device_address;
-  geometry.geometry.triangles.vertexStride = sizeof(float) * 3;
-  geometry.geometry.triangles.maxVertex = vertex_count - 1;
-  geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
-  geometry.geometry.triangles.indexData.deviceAddress = index_buffer.device_address;
+  VkAccelerationStructureGeometryTrianglesDataKHR &triangles = geometry.geometry.triangles;
+  triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+  triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+  triangles.maxVertex = input.positions.vertex_count - 1;
+  VkAccelerationStructureBuildRangeInfoKHR range_info = {};
+  range_info.primitiveCount = uint32_t(input.indices.size() / 3);
+
+  /* Readback completed the uploads and GPU writes to the input buffers. The draw cache keeps
+   * them alive through this synchronous build; the BLAS holds no buffer references. */
+  const bool use_draw_buffers = set_draw_buffer_blas_input(input, triangles, range_info);
+  RTBuffer vertex_buffer;
+  RTBuffer index_buffer;
+  if (!use_draw_buffers && !upload_packed_blas_input(input, vertex_buffer, index_buffer, triangles))
+  {
+    rt_buffer_free(vertex_buffer);
+    rt_buffer_free(index_buffer);
+    return false;
+  }
+
+  const BlasUpdateLayout layout = {
+      triangles.vertexStride, triangles.maxVertex, triangles.indexType, range_info.firstVertex};
+  /* Promote a mesh after its first geometry change to avoid the updateable BLAS cost for
+   * static meshes. Non-finite positions can change the active set and require a build. */
+  const bool allow_update = local && std::all_of(local->triangle_positions.begin(),
+                                                 local->triangle_positions.end(),
+                                                 [](const float4 &v) {
+                                                   return std::isfinite(v.x) &&
+                                                          std::isfinite(v.y) &&
+                                                          std::isfinite(v.z);
+                                                 });
+  /* With the same base vertex and index type, matching decoded indices proves the actual
+   * index values consumed by Vulkan are unchanged, including for material subranges. */
+  const bool refit = allow_update && previous && previous->blas_update_layout == layout &&
+                     input.indices == previous->indices &&
+                     r_geometry.acceleration_structure != VK_NULL_HANDLE;
 
   VkAccelerationStructureBuildGeometryInfoKHR build_info = {};
   build_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
   build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
   build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-  build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+  if (allow_update) {
+    build_info.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+  }
+  /* Update into a replacement; a later TLAS or buffer allocation failure must leave the
+   * previous scene intact. */
+  build_info.mode = refit ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR :
+                            VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+  build_info.srcAccelerationStructure = refit ? r_geometry.acceleration_structure : VK_NULL_HANDLE;
   build_info.geometryCount = 1;
   build_info.pGeometries = &geometry;
-
-  VkAccelerationStructureBuildRangeInfoKHR range_info = {};
-  range_info.primitiveCount = r_geometry.triangle_count;
 
   VkAccelerationStructureKHR acceleration_structure = VK_NULL_HANDLE;
   RTBuffer acceleration_buffer;
@@ -1399,8 +1559,15 @@ static bool build_entry_blas(const SceneGeometryInput &input,
 
   r_geometry.acceleration_structure = acceleration_structure;
   r_geometry.acceleration_buffer = acceleration_buffer;
-  r_geometry.vertex_buffer = vertex_buffer;
-  r_geometry.index_buffer = index_buffer;
+  r_geometry.blas_uses_draw_buffers = use_draw_buffers;
+  r_geometry.blas_refitted = refit;
+  if (allow_update) {
+    local->blas_update_layout = layout;
+  }
+  if (!use_draw_buffers) {
+    build_batch.transient_buffers.push_back(vertex_buffer);
+    build_batch.transient_buffers.push_back(index_buffer);
+  }
   return true;
 }
 
@@ -1471,6 +1638,10 @@ static bool build_top_level_acceleration_structure(
       instance.accelerationStructureReference = blas_address;
     }
   }
+  if (!rt_buffer_flush(instance_buffer)) {
+    rt_buffer_free(instance_buffer);
+    return false;
+  }
 
   VkAccelerationStructureGeometryKHR geometry_info = {};
   geometry_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -1537,11 +1708,6 @@ struct HardwareMaterialProxyRecord {
   float4 packed_thickness;
 };
 
-struct TriangleNormalRangeRecord {
-  uint32_t offset;
-  uint32_t count;
-};
-
 static bool build_emissive_radiance_buffer(const std::vector<SceneGeometryBuild> &geometry,
                                            RTBuffer &r_buffer)
 {
@@ -1562,12 +1728,12 @@ static bool build_emissive_radiance_buffer(const std::vector<SceneGeometryBuild>
   for (const SceneGeometryBuild &entry : geometry) {
     emissive_radiance[entry.user_id] = float4(entry.emissive_radiance, 0.0f);
   }
-  return true;
+  return rt_buffer_flush(r_buffer);
 }
 
 static float4 compute_world_bounding_sphere(const SceneGeometryBuild &entry)
 {
-  if (entry.triangle_local_positions.empty()) {
+  if (entry.triangle_local_positions.is_empty()) {
     return float4(entry.object_to_world.location(), 1.0f);
   }
 
@@ -1619,7 +1785,7 @@ static bool build_emissive_light_buffer(const std::vector<SceneGeometryBuild> &g
   for (size_t i = 0; i < emissive_lights.size(); i++) {
     lights[i] = emissive_lights[i];
   }
-  return true;
+  return rt_buffer_flush(r_buffer);
 }
 
 static bool build_diffuse_albedo_buffer(const std::vector<SceneGeometryBuild> &geometry,
@@ -1645,7 +1811,7 @@ static bool build_diffuse_albedo_buffer(const std::vector<SceneGeometryBuild> &g
   for (const SceneGeometryBuild &entry : geometry) {
     diffuse_albedo[entry.user_id] = float4(entry.diffuse_albedo, 0.0f);
   }
-  return true;
+  return rt_buffer_flush(r_buffer);
 }
 
 static bool build_material_proxy_buffer(const std::vector<SceneGeometryBuild> &geometry,
@@ -1684,7 +1850,7 @@ static bool build_material_proxy_buffer(const std::vector<SceneGeometryBuild> &g
         entry.packed_thickness, entry.alpha, entry.reflection_layer_coverage,
         std::clamp(entry.shadow_terminator_geometry_offset, 0.0f, 1.0f));
   }
-  return true;
+  return rt_buffer_flush(r_buffer);
 }
 
 struct ShadowCasterRecord {
@@ -1744,7 +1910,7 @@ static bool build_shadow_caster_buffers(Span<GPUHardwareRaytraceSceneEntry> entr
     const GPUHardwareRaytraceShadowAlpha &alpha = entry.shadow_alpha;
     ShadowCasterRecord &caster = casters[entry.user_id];
     caster.identity = uint4(entry.shadow_caster_id, entry.shadow_blocker_set, 0, 0);
-    if (!alpha.image || geometry[i].triangle_shadow_uvs.empty()) {
+    if (!alpha.image || geometry[i].triangle_shadow_uvs.is_empty()) {
       continue;
     }
     const auto image_offset = std::find_if(image_offsets.begin(), image_offsets.end(),
@@ -1778,7 +1944,7 @@ static bool build_shadow_caster_buffers(Span<GPUHardwareRaytraceSceneEntry> entr
   memcpy(r_uv.mapped, uvs.data(), uvs.size() * sizeof(float2));
   memcpy(r_alpha.mapped, alpha_data.data(), alpha_data.size() * sizeof(uint32_t));
   r_has_alpha = !image_offsets.empty();
-  return true;
+  return rt_buffer_flush(r_casters) && rt_buffer_flush(r_uv) && rt_buffer_flush(r_alpha);
 }
 
 static bool build_shadow_object_transform_buffer(const std::vector<SceneGeometryBuild> &geometry,
@@ -1798,12 +1964,47 @@ static bool build_shadow_object_transform_buffer(const std::vector<SceneGeometry
   for (const SceneGeometryBuild &entry : geometry) {
     matrices[entry.user_id] = entry.object_to_world;
   }
-  return true;
+  return rt_buffer_flush(r_buffer);
 }
 
-static bool build_triangle_normal_buffer(const std::vector<SceneGeometryBuild> &geometry,
-                                         RTBuffer &r_buffer,
-                                         std::vector<TriangleNormalRangeRecord> &r_ranges)
+static void write_world_normals(const Span<float4> normals,
+                                const float4x4 &object_to_world,
+                                float4 *out)
+{
+  for (const float4 &normal_local : normals) {
+    float3 normal_world = math::transform_direction(
+        object_to_world, float3(normal_local.x, normal_local.y, normal_local.z));
+    const float len_sq = math::length_squared(normal_world);
+    if (len_sq > 1.0e-20f) {
+      normal_world /= std::sqrt(len_sq);
+    }
+    else {
+      normal_world = float3(0.0f, 0.0f, 1.0f);
+    }
+    *out++ = float4(normal_world, 0.0f);
+  }
+}
+
+static void write_entry_world_normals(const SceneGeometryBuild &entry,
+                                      const TriangleNormalRangeRecord &range,
+                                      RTBuffer &flat,
+                                      RTBuffer &smooth)
+{
+  if (range.count == 0) {
+    return;
+  }
+  write_world_normals(entry.triangle_normals,
+                      entry.object_to_world,
+                      static_cast<float4 *>(flat.mapped) + range.offset);
+  write_world_normals(entry.triangle_smooth_normals,
+                      entry.object_to_world,
+                      static_cast<float4 *>(smooth.mapped) + size_t(range.offset) * 3);
+}
+
+static bool build_triangle_normal_buffers(const std::vector<SceneGeometryBuild> &geometry,
+                                          RTBuffer &r_flat,
+                                          RTBuffer &r_smooth,
+                                          std::vector<TriangleNormalRangeRecord> &r_ranges)
 {
   uint32_t max_user_id = 0;
   for (const SceneGeometryBuild &entry : geometry) {
@@ -1811,103 +2012,52 @@ static bool build_triangle_normal_buffer(const std::vector<SceneGeometryBuild> &
   }
 
   r_ranges.assign(geometry.empty() ? 1 : max_user_id + 1, {0u, 0u});
-  std::vector<float4> triangle_normals;
+  size_t normal_count = 0;
   for (const SceneGeometryBuild &entry : geometry) {
-    TriangleNormalRangeRecord range = {};
-    range.offset = uint32_t(triangle_normals.size());
-    range.count = uint32_t(entry.triangle_normals.size());
-    if (range.count > 0) {
-      for (const float4 &normal_local : entry.triangle_normals) {
-        float3 normal_world = math::transform_direction(
-            entry.object_to_world, float3(normal_local.x, normal_local.y, normal_local.z));
-        const float len_sq = math::length_squared(normal_world);
-        if (len_sq > 1.0e-20f) {
-          normal_world /= std::sqrt(len_sq);
-        }
-        else {
-          normal_world = float3(0.0f, 0.0f, 1.0f);
-        }
-        triangle_normals.emplace_back(normal_world, 0.0f);
-      }
+    const size_t count = entry.triangle_normals.size();
+    /* Shaders use uint offsets and index three corners per triangle. */
+    if (normal_count + count > std::numeric_limits<uint32_t>::max() / 3) {
+      return false;
     }
-    r_ranges[entry.user_id] = range;
+    r_ranges[entry.user_id] = {uint32_t(normal_count), uint32_t(count)};
+    normal_count += count;
   }
-
-  const size_t normal_count = triangle_normals.empty() ? 1 : triangle_normals.size();
-  if (!rt_storage_buffer_create(r_buffer, normal_count * sizeof(float4))) {
+  if (!rt_storage_buffer_create(r_flat, std::max<size_t>(1, normal_count) * sizeof(float4)) ||
+      !rt_storage_buffer_create(r_smooth, std::max<size_t>(1, normal_count * 3) * sizeof(float4)))
+  {
     return false;
   }
-
-  auto *out_normals = static_cast<float4 *>(r_buffer.mapped);
-  out_normals[0] = float4(0.0f);
-  for (size_t i = 0; i < triangle_normals.size(); i++) {
-    out_normals[i] = triangle_normals[i];
+  if (normal_count == 0) {
+    static_cast<float4 *>(r_flat.mapped)[0] = float4(0);
+    static_cast<float4 *>(r_smooth.mapped)[0] = float4(0);
   }
-  return true;
-}
-
-static bool build_triangle_smooth_normal_buffer(const std::vector<SceneGeometryBuild> &geometry,
-                                                RTBuffer &r_buffer)
-{
-  std::vector<float4> triangle_smooth_normals;
   for (const SceneGeometryBuild &entry : geometry) {
-    if (entry.triangle_smooth_normals.empty()) {
-      continue;
-    }
-    for (const float4 &normal_local : entry.triangle_smooth_normals) {
-      float3 normal_world = math::transform_direction(
-          entry.object_to_world, float3(normal_local.x, normal_local.y, normal_local.z));
-      const float len_sq = math::length_squared(normal_world);
-      if (len_sq > 1.0e-20f) {
-        normal_world /= std::sqrt(len_sq);
-      }
-      else {
-        normal_world = float3(0.0f, 0.0f, 1.0f);
-      }
-      triangle_smooth_normals.emplace_back(normal_world, 0.0f);
-    }
+    write_entry_world_normals(entry, r_ranges[entry.user_id], r_flat, r_smooth);
   }
-
-  const size_t normal_count = triangle_smooth_normals.empty() ? 1 :
-                                                                triangle_smooth_normals.size();
-  if (!rt_storage_buffer_create(r_buffer, normal_count * sizeof(float4))) {
-    return false;
-  }
-
-  auto *out_normals = static_cast<float4 *>(r_buffer.mapped);
-  out_normals[0] = float4(0.0f);
-  for (size_t i = 0; i < triangle_smooth_normals.size(); i++) {
-    out_normals[i] = triangle_smooth_normals[i];
-  }
-  return true;
+  return rt_buffer_flush(r_flat) && rt_buffer_flush(r_smooth);
 }
 
 static bool build_triangle_local_position_buffer(const std::vector<SceneGeometryBuild> &geometry,
                                                  RTBuffer &r_buffer)
 {
-  std::vector<float4> triangle_local_positions;
+  size_t position_count = 0;
   for (const SceneGeometryBuild &entry : geometry) {
-    if (entry.triangle_local_positions.empty()) {
-      continue;
-    }
-    triangle_local_positions.insert(triangle_local_positions.end(),
-                                    entry.triangle_local_positions.begin(),
-                                    entry.triangle_local_positions.end());
+    position_count += entry.triangle_local_positions.size();
   }
-
-  const size_t position_count = triangle_local_positions.empty() ?
-                                    1 :
-                                    triangle_local_positions.size();
-  if (!rt_storage_buffer_create(r_buffer, position_count * sizeof(float4))) {
+  if (!rt_storage_buffer_create(r_buffer, std::max<size_t>(1, position_count) * sizeof(float4))) {
     return false;
   }
 
   auto *out_positions = static_cast<float4 *>(r_buffer.mapped);
   out_positions[0] = float4(0.0f);
-  for (size_t i = 0; i < triangle_local_positions.size(); i++) {
-    out_positions[i] = triangle_local_positions[i];
+  for (const SceneGeometryBuild &entry : geometry) {
+    const Span<float4> positions = entry.triangle_local_positions;
+    if (!positions.is_empty()) {
+      std::memcpy(out_positions, positions.data(), positions.size() * sizeof(float4));
+      out_positions += positions.size();
+    }
   }
-  return true;
+  return rt_buffer_flush(r_buffer);
 }
 
 static bool build_triangle_normal_range_buffer(
@@ -1923,7 +2073,7 @@ static bool build_triangle_normal_range_buffer(
   for (size_t i = 0; i < ranges.size(); i++) {
     out_ranges[i] = ranges[i];
   }
-  return true;
+  return rt_buffer_flush(r_buffer);
 }
 
 /** \} */
@@ -3300,35 +3450,35 @@ GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntr
   }
 
   GPUHardwareRaytraceScene *scene = new GPUHardwareRaytraceScene();
+  scene->local_geometry.reserve(entries.size());
+  int draw_buffer_blas_count = 0;
   for (const GPUHardwareRaytraceSceneEntry &entry : entries) {
-    SceneGeometryBuild geometry;
+    SceneGeometryBuild geometry = scene_geometry_for_entry(entry);
     SceneGeometryInput input;
-    const bool built = read_entry_geometry(entry, readback, input, geometry) &&
+    const bool built = read_entry_geometry(entry, readback, input) &&
                        build_entry_blas(input, geometry, blas_build_batch);
-    if (!built) {
+    if (built) {
+      SceneLocalGeometry local = unpack_local_geometry(input, geometry.has_shadow_alpha);
+      cache_geometry_input(input, readback, local);
+      geometry.set_local_geometry(scene->local_geometry.emplace_back(std::move(local)));
+      draw_buffer_blas_count += geometry.blas_uses_draw_buffers;
+      scene->geometry_count++;
+      scene->instance_count += int(geometry.instance_count);
+    }
+    else {
       /* Keep a 1:1 placeholder slot. `raytrace_scene_update()` requires per-entry arrays so
        * object transforms can refresh the TLAS instead of triggering a full scene rebuild
        * every frame (interactive transforms were ~400 ms/frame without this). Null AS slots
        * are skipped by the TLAS instance fill. */
-      geometry = {};
-      geometry.user_id = entry.user_id;
       geometry.instance_count = 0;
+      geometry.emissive_radiance = float3(0);
+      scene->local_geometry.emplace_back();
     }
 
     scene->bottom_level_acceleration_structures.push_back(geometry.acceleration_structure);
     scene->bottom_level_buffers.push_back(geometry.acceleration_buffer);
-    scene->local_triangle_normals.push_back(geometry.triangle_normals);
-    scene->local_triangle_smooth_normals.push_back(geometry.triangle_smooth_normals);
-    scene->local_triangle_positions.push_back(geometry.triangle_local_positions);
-    scene->local_triangle_shadow_uvs.push_back(geometry.triangle_shadow_uvs);
     scene->normal_transforms.emplace_back(entry.object_to_world);
-    scene->geometry_buffers.push_back(geometry.vertex_buffer);
-    scene->geometry_buffers.push_back(geometry.index_buffer);
-    if (built) {
-      scene->geometry_count++;
-      scene->instance_count += int(geometry.instance_count);
-    }
-    built_geometry.push_back(std::move(geometry));
+    built_geometry.push_back(geometry);
   }
   if (!commit_acceleration_structure_build_batch(blas_build_batch)) {
     delete scene;
@@ -3354,7 +3504,6 @@ GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntr
     return nullptr;
   }
 
-  std::vector<TriangleNormalRangeRecord> triangle_normal_ranges;
   for (const SceneGeometryBuild &entry : built_geometry) {
     scene->shadow_terminator_max_cutoff = std::max(
         scene->shadow_terminator_max_cutoff, entry.shadow_terminator_geometry_offset);
@@ -3371,12 +3520,13 @@ GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntr
                                    scene->shadow_uv_buffer,
                                    scene->shadow_alpha_buffer,
                                    scene->has_shadow_alpha) ||
-      !build_triangle_normal_buffer(
-          built_geometry, scene->triangle_normal_buffer, triangle_normal_ranges) ||
-      !build_triangle_smooth_normal_buffer(built_geometry, scene->triangle_smooth_normal_buffer) ||
+      !build_triangle_normal_buffers(built_geometry,
+                                     scene->triangle_normal_buffer,
+                                     scene->triangle_smooth_normal_buffer,
+                                     scene->triangle_normal_ranges) ||
       !build_triangle_local_position_buffer(built_geometry,
                                             scene->triangle_local_position_buffer) ||
-      !build_triangle_normal_range_buffer(triangle_normal_ranges,
+      !build_triangle_normal_range_buffer(scene->triangle_normal_ranges,
                                           scene->triangle_normal_range_buffer))
   {
     delete scene;
@@ -3392,12 +3542,13 @@ GPUHardwareRaytraceScene *raytrace_scene_build(Span<GPUHardwareRaytraceSceneEntr
     const double elapsed_ms = (BLI_time_now_seconds() - build_start_time) * 1000.0;
     std::fprintf(stderr,
                  "EEVEE HWRT perf rt_scene_build geometries=%d instances=%d built_blas=%d "
-                 "emissive_lights=%d elapsed_ms=%.2f\n",
+                 "emissive_lights=%d elapsed_ms=%.2f draw_buffer_blas=%d\n",
                  scene->geometry_count,
                  scene->instance_count,
-                 int(scene->bottom_level_acceleration_structures.size()),
+                 scene->geometry_count,
                  scene->emissive_light_count,
-                 elapsed_ms);
+                 elapsed_ms,
+                 draw_buffer_blas_count);
   }
   return scene;
 }
@@ -3411,11 +3562,7 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     *r_stats = {};
   }
   if (scene == nullptr || scene->bottom_level_acceleration_structures.size() != entries.size() ||
-      scene->local_triangle_normals.size() != entries.size() ||
-      scene->local_triangle_smooth_normals.size() != entries.size() ||
-      scene->local_triangle_positions.size() != entries.size() ||
-      scene->local_triangle_shadow_uvs.size() != entries.size() ||
-      scene->normal_transforms.size() != entries.size())
+      scene->local_geometry.size() != entries.size())
   {
     return false;
   }
@@ -3431,35 +3578,45 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
   const bool perf_logging_enabled = vulkan_raytrace_perf_logging_enabled();
   const double update_start_time = perf_logging_enabled ? BLI_time_now_seconds() : 0.0;
 
-  if (!update_params.update_tlas && !update_params.update_emissive_data &&
-      !update_params.update_material_data && !update_params.update_world_geometry_data &&
-      update_params.rebuild_blas_indices.is_empty())
-  {
-    if (r_stats != nullptr) {
-      r_stats->geometry_count = scene->geometry_count;
-      r_stats->instance_count = scene->instance_count;
-      r_stats->built_blas_count = 0;
-      r_stats->emissive_light_count = scene->emissive_light_count;
-      r_stats->built_scene = true;
-    }
-    return true;
+  std::vector<SceneGeometryBuild> updated_geometry;
+  updated_geometry.reserve(entries.size());
+  for (const int i : entries.index_range()) {
+    SceneGeometryBuild geometry = scene_geometry_for_entry(entries[i]);
+    geometry.acceleration_structure = scene->bottom_level_acceleration_structures[i];
+    geometry.set_local_geometry(scene->local_geometry[i]);
+    updated_geometry.push_back(geometry);
   }
 
-  /* Selective BLAS rebuild: build replacement BLAS for the flagged entries first; old GPU
-   * objects are only destroyed in the success-path swap below so a failed build leaves the
-   * scene untouched. */
-  std::vector<std::pair<int, SceneGeometryBuild>> rebuilt_blas;
+  /* The existing scene stays valid until replacement structures and buffers are ready. */
+  struct LocalGeometryChange {
+    int index;
+    SceneLocalGeometry geometry;
+    bool replace_blas;
+    bool positions_changed;
+  };
+  std::vector<LocalGeometryChange> changes;
+  changes.reserve(update_params.rebuild_blas_indices.size());
+  std::vector<int> dirty_normals;
+  bool blas_changed = false;
+  bool blas_availability_changed = false;
+  bool triangle_layout_changed = false;
+  bool positions_changed = false;
+  bool shadow_uvs_changed = false;
   auto free_replacements = [&]() {
-    for (auto &pair : rebuilt_blas) {
-      destroy_acceleration_structure(pair.second.acceleration_structure,
-                                     pair.second.acceleration_buffer);
-      rt_buffer_free(pair.second.vertex_buffer);
-      rt_buffer_free(pair.second.index_buffer);
+    for (const LocalGeometryChange &change : changes) {
+      if (change.replace_blas) {
+        SceneGeometryBuild &geometry = updated_geometry[change.index];
+        destroy_acceleration_structure(geometry.acceleration_structure, geometry.acceleration_buffer);
+      }
     }
   };
   double readback_ms = 0.0;
+  double geometry_prepare_ms = 0.0;
+  double blas_submit_ms = 0.0;
   int reused_blas_count = 0;
   int built_blas_count = 0;
+  int refit_blas_count = 0;
+  int draw_buffer_blas_count = 0;
   if (!update_params.rebuild_blas_indices.is_empty()) {
     const double readback_start = perf_logging_enabled ? BLI_time_now_seconds() : 0.0;
     SceneGeometryReadback readback;
@@ -3475,43 +3632,110 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
       readback_ms = (BLI_time_now_seconds() - readback_start) * 1000.0;
     }
 
+    const double prepare_start = perf_logging_enabled ? BLI_time_now_seconds() : 0.0;
+    struct PreparedGeometry {
+      SceneGeometryInput input;
+      SceneLocalGeometry local;
+      bool valid = false;
+      bool unchanged = false;
+    };
+    const Span<int> dirty_entries = update_params.rebuild_blas_indices;
+    std::vector<PreparedGeometry> prepared(dirty_entries.size());
+    /* After the readback, triangle extraction only reads CPU staging data. Keep cache writes
+     * and Vulkan command recording on the draw thread. */
+    threading::parallel_for(dirty_entries.index_range(), 1, [&](const IndexRange range) {
+      for (const int i : range) {
+        const int index = dirty_entries[i];
+        if (!entries.index_range().contains(index)) {
+          continue;
+        }
+        PreparedGeometry &entry = prepared[i];
+        entry.valid = read_entry_geometry(entries[index], readback, entry.input);
+        if (!entry.valid) {
+          continue;
+        }
+        /* Armature dependencies can mark unchanged geometry dirty. Compare the actual input
+         * bytes before expanding positions, normals and UVs into per-triangle streams. */
+        entry.unchanged = updated_geometry[index].acceleration_structure != VK_NULL_HANDLE &&
+                          entry.input.equals(scene->local_geometry[index]);
+        if (!entry.unchanged) {
+          entry.local = unpack_local_geometry(entry.input, updated_geometry[index].has_shadow_alpha);
+        }
+      }
+    });
+
     AccelerationStructureBuildBatch blas_build_batch;
-    for (const int index : update_params.rebuild_blas_indices) {
+    for (const int i : dirty_entries.index_range()) {
+      const int index = dirty_entries[i];
       if (!entries.index_range().contains(index)) {
         continue;
       }
-      SceneGeometryBuild geometry;
-      SceneGeometryInput input;
-      if (read_entry_geometry(entries[index], readback, input, geometry)) {
-        /* Armature dependencies can mark a rigidly moved object as deformed. Reuse only if
-         * the local positions, shading normals, and Alpha UVs still match in BLAS order. */
-        if (scene->bottom_level_acceleration_structures[index] != VK_NULL_HANDLE &&
-            geometry.triangle_local_positions == scene->local_triangle_positions[index] &&
-            geometry.triangle_smooth_normals == scene->local_triangle_smooth_normals[index] &&
-            geometry.triangle_shadow_uvs == scene->local_triangle_shadow_uvs[index])
-        {
-          reused_blas_count++;
-          continue;
-        }
+      SceneGeometryBuild &geometry = updated_geometry[index];
+      SceneLocalGeometry &cached = scene->local_geometry[index];
+      const bool had_blas = geometry.acceleration_structure != VK_NULL_HANDLE;
+      PreparedGeometry &entry = prepared[i];
+      const bool valid = entry.valid;
+      if (!valid && !had_blas) {
+        continue;
+      }
+      if (entry.unchanged) {
+        reused_blas_count++;
+        continue;
+      }
+      SceneGeometryInput &input = entry.input;
+      SceneLocalGeometry &local = entry.local;
+      const bool entry_positions_changed = local.triangle_positions != cached.triangle_positions;
+      const bool entry_normals_changed = local.triangle_normals != cached.triangle_normals ||
+                                         local.triangle_smooth_normals != cached.triangle_smooth_normals;
+      const bool entry_uvs_changed = local.triangle_shadow_uvs != cached.triangle_shadow_uvs;
+      const bool replace_blas = valid != had_blas || entry_positions_changed ||
+                                input.indices != cached.indices;
+      if (replace_blas && valid) {
         if (blas_build_batch.command_buffer == VK_NULL_HANDLE &&
             !begin_acceleration_structure_build_batch(blas_build_batch))
         {
           free_replacements();
           return false;
         }
-        if (!build_entry_blas(input, geometry, blas_build_batch)) {
+        if (!build_entry_blas(input, geometry, blas_build_batch, &local, &cached)) {
           commit_acceleration_structure_build_batch(blas_build_batch);
           free_replacements();
           return false;
         }
-        built_blas_count++;
+        draw_buffer_blas_count += geometry.blas_uses_draw_buffers;
+        refit_blas_count += geometry.blas_refitted;
+        built_blas_count += !geometry.blas_refitted;
       }
-      else {
-        /* Keep a placeholder slot like `raytrace_scene_build` does. */
-        geometry.user_id = uint32_t(index);
-        geometry.instance_count = 0;
+      if (!valid) {
+        geometry.acceleration_structure = VK_NULL_HANDLE;
       }
-      rebuilt_blas.emplace_back(index, std::move(geometry));
+      if (!replace_blas) {
+        reused_blas_count++;
+        if (!entry_normals_changed && !entry_uvs_changed) {
+          /* Several material slots can share one VBO. Retain the current shared input data
+           * even when an edit elsewhere in that VBO left this slot's triangle data intact. */
+          cache_geometry_input(input, readback, cached);
+          continue;
+        }
+        local.blas_update_layout = cached.blas_update_layout;
+      }
+      blas_changed |= replace_blas;
+      blas_availability_changed |= valid != had_blas;
+      triangle_layout_changed |= local.triangle_normals.size() != cached.triangle_normals.size();
+      positions_changed |= entry_positions_changed;
+      shadow_uvs_changed |= entry_uvs_changed;
+      if (entry_normals_changed) {
+        dirty_normals.push_back(index);
+      }
+      if (valid) {
+        cache_geometry_input(input, readback, local);
+      }
+      changes.push_back({index, std::move(local), replace_blas, entry_positions_changed});
+      geometry.set_local_geometry(changes.back().geometry);
+    }
+    const double submit_start = perf_logging_enabled ? BLI_time_now_seconds() : 0.0;
+    if (perf_logging_enabled) {
+      geometry_prepare_ms = (submit_start - prepare_start) * 1000.0;
     }
     if (blas_build_batch.command_buffer != VK_NULL_HANDLE &&
         !commit_acceleration_structure_build_batch(blas_build_batch))
@@ -3519,69 +3743,58 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
       free_replacements();
       return false;
     }
-  }
-  auto rebuilt_blas_for_index = [&rebuilt_blas](const int index) -> SceneGeometryBuild * {
-    for (auto &pair : rebuilt_blas) {
-      if (pair.first == index) {
-        return &pair.second;
-      }
+    if (perf_logging_enabled && (built_blas_count + refit_blas_count) > 0) {
+      blas_submit_ms = (BLI_time_now_seconds() - submit_start) * 1000.0;
     }
-    return nullptr;
-  };
-
-  std::vector<SceneGeometryBuild> updated_geometry;
-  updated_geometry.reserve(entries.size());
-  int instance_count = 0;
-  for (const int i : entries.index_range()) {
-    const GPUHardwareRaytraceSceneEntry &entry = entries[i];
-    const SceneGeometryBuild *rebuilt = rebuilt_blas_for_index(i);
-    SceneGeometryBuild geometry;
-    geometry.acceleration_structure = rebuilt ? rebuilt->acceleration_structure :
-                                                scene->bottom_level_acceleration_structures[i];
-    geometry.object_to_world = entry.object_to_world;
-    geometry.instance_count = std::max(entry.instance_count, uint32_t(1));
-    geometry.user_id = uint32_t(i);
-    geometry.emissive_radiance = entry.emissive_radiance;
-    geometry.diffuse_albedo = entry.diffuse_albedo;
-    geometry.reflection_color = entry.reflection_color;
-    geometry.reflection_roughness = entry.reflection_roughness;
-    geometry.transmission_color = entry.transmission_color;
-    geometry.transmission_roughness = entry.transmission_roughness;
-    geometry.reflection_ior = entry.reflection_ior;
-    geometry.refraction_ior = entry.refraction_ior;
-    geometry.packed_thickness = entry.packed_thickness;
-    geometry.alpha = entry.alpha;
-    geometry.reflection_layer_coverage = entry.reflection_layer_coverage;
-    geometry.shadow_terminator_geometry_offset = entry.shadow_terminator_geometry_offset;
-    geometry.closure_type = entry.closure_type;
-    geometry.proxy_flags = entry.proxy_flags;
-    geometry.triangle_normals = rebuilt ? rebuilt->triangle_normals :
-                                          scene->local_triangle_normals[i];
-    geometry.triangle_smooth_normals = rebuilt ? rebuilt->triangle_smooth_normals :
-                                                 scene->local_triangle_smooth_normals[i];
-    geometry.triangle_local_positions = rebuilt ? rebuilt->triangle_local_positions :
-                                                  scene->local_triangle_positions[i];
-    geometry.has_shadow_alpha = entry.shadow_alpha.image != nullptr;
-    geometry.casts_shadow = entry.casts_shadow;
-    geometry.triangle_shadow_uvs = rebuilt ? rebuilt->triangle_shadow_uvs :
-                                             scene->local_triangle_shadow_uvs[i];
-    updated_geometry.push_back(std::move(geometry));
-    instance_count += int(updated_geometry.back().instance_count);
   }
 
-  if (updated_geometry.empty() || instance_count == 0) {
+  int geometry_count = 0;
+  int instance_count = 0;
+  for (SceneGeometryBuild &geometry : updated_geometry) {
+    if (geometry.acceleration_structure == VK_NULL_HANDLE) {
+      geometry.instance_count = 0;
+      geometry.emissive_radiance = float3(0);
+    }
+    else {
+      geometry_count++;
+      instance_count += int(geometry.instance_count);
+    }
+  }
+
+  if (instance_count == 0) {
     free_replacements();
     return false;
   }
 
+  const bool update_tlas = update_params.update_tlas || blas_changed;
+  const bool update_emission = update_params.update_emissive_data || blas_availability_changed;
+  const bool update_emissive_bounds =
+      update_emission ||
+      (scene->emissive_light_count > 0 && (update_params.update_world_geometry_data || positions_changed));
+  const bool update_shadow_casters = update_params.update_material_data || shadow_uvs_changed;
+  const bool update_transforms = update_params.update_world_geometry_data;
+  if (update_transforms && !triangle_layout_changed) {
+    for (const int i : entries.index_range()) {
+      if (scene->normal_transforms[i] != float3x3(entries[i].object_to_world)) {
+        dirty_normals.push_back(i);
+      }
+    }
+    std::sort(dirty_normals.begin(), dirty_normals.end());
+    dirty_normals.erase(std::unique(dirty_normals.begin(), dirty_normals.end()), dirty_normals.end());
+  }
+
+  const double tlas_start = perf_logging_enabled ? BLI_time_now_seconds() : 0.0;
   VkAccelerationStructureKHR new_tlas = VK_NULL_HANDLE;
   RTBuffer new_tlas_buffer;
-  if (update_params.update_tlas) {
+  if (update_tlas) {
     if (!build_top_level_acceleration_structure(updated_geometry, new_tlas, new_tlas_buffer)) {
       free_replacements();
       return false;
     }
   }
+  const double tlas_ms = perf_logging_enabled && update_tlas ?
+                             (BLI_time_now_seconds() - tlas_start) * 1000.0 :
+                             0.0;
 
   int new_emissive_light_count = scene->emissive_light_count;
   RTBuffer new_emissive;
@@ -3614,14 +3827,15 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     free_replacements();
   };
 
-  if (update_params.update_emissive_data) {
-    if (!build_emissive_radiance_buffer(updated_geometry, new_emissive) ||
-        !build_emissive_light_buffer(
-            updated_geometry, new_emissive_lights, new_emissive_light_count))
-    {
-      cleanup_news();
-      return false;
-    }
+  if (update_emission && !build_emissive_radiance_buffer(updated_geometry, new_emissive)) {
+    cleanup_news();
+    return false;
+  }
+  if (update_emissive_bounds &&
+      !build_emissive_light_buffer(updated_geometry, new_emissive_lights, new_emissive_light_count))
+  {
+    cleanup_news();
+    return false;
   }
   if (update_params.update_material_data) {
     if (!build_diffuse_albedo_buffer(updated_geometry, new_diffuse) ||
@@ -3631,8 +3845,6 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
       return false;
     }
   }
-  const bool update_shadow_casters = update_params.update_material_data ||
-                                     (scene->has_shadow_alpha && !rebuilt_blas.empty());
   if (update_shadow_casters &&
       !build_shadow_caster_buffers(entries,
                                    updated_geometry,
@@ -3644,85 +3856,94 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     cleanup_news();
     return false;
   }
-  if (update_params.update_tlas &&
+  if (update_transforms &&
       !build_shadow_object_transform_buffer(updated_geometry, new_shadow_object_transforms))
   {
     cleanup_news();
     return false;
   }
-  bool update_world_normals = !rebuilt_blas.empty();
-  if (update_params.update_world_geometry_data) {
-    for (const int i : entries.index_range()) {
-      update_world_normals |= scene->normal_transforms[i] != float3x3(entries[i].object_to_world);
-    }
+  std::vector<TriangleNormalRangeRecord> new_ranges;
+  if (triangle_layout_changed &&
+      (!build_triangle_normal_buffers(
+           updated_geometry, new_triangle_normals, new_triangle_smooth_normals, new_ranges) ||
+       !build_triangle_local_position_buffer(updated_geometry, new_triangle_local_positions) ||
+       !build_triangle_normal_range_buffer(new_ranges, new_triangle_normal_ranges)))
+  {
+    cleanup_news();
+    return false;
   }
-  update_world_normals &= update_params.update_world_geometry_data;
-  if (update_world_normals) {
-    std::vector<TriangleNormalRangeRecord> triangle_normal_ranges;
-    if (!build_triangle_normal_buffer(
-            updated_geometry, new_triangle_normals, triangle_normal_ranges) ||
-        !build_triangle_smooth_normal_buffer(updated_geometry, new_triangle_smooth_normals))
-    {
+
+  if (update_tlas || update_emission || update_emissive_bounds || update_params.update_material_data ||
+      update_shadow_casters || update_transforms || triangle_layout_changed ||
+      !dirty_normals.empty() || positions_changed)
+  {
+    /* Wait before releasing buffers or overwriting ranges that pending draws can still read. */
+    collect_finished_submissions(true);
+    if (scene->forward_tlas) {
+      GPU_finish();
+    }
+    if (VKBackend::get().device.submission_failed()) {
       cleanup_news();
       return false;
     }
-    if (!rebuilt_blas.empty()) {
-      /* Rebuilt BLAS can change per-entry triangle counts, shifting the packed range table and
-       * the local position stream; refresh both alongside the normals. */
-      if (!build_triangle_local_position_buffer(updated_geometry, new_triangle_local_positions) ||
-          !build_triangle_normal_range_buffer(triangle_normal_ranges, new_triangle_normal_ranges))
-      {
-        cleanup_news();
-        return false;
+  }
+
+  if (!triangle_layout_changed) {
+    threading::parallel_for(IndexRange(dirty_normals.size()), 1, [&](const IndexRange range) {
+      for (const int i : range) {
+        const SceneGeometryBuild &geometry = updated_geometry[dirty_normals[i]];
+        write_entry_world_normals(geometry,
+                                  scene->triangle_normal_ranges[geometry.user_id],
+                                  scene->triangle_normal_buffer,
+                                  scene->triangle_smooth_normal_buffer);
+      }
+    });
+    for (const LocalGeometryChange &change : changes) {
+      if (change.positions_changed) {
+        const SceneGeometryBuild &geometry = updated_geometry[change.index];
+        const Span<float4> positions = geometry.triangle_local_positions;
+        const size_t offset = size_t(scene->triangle_normal_ranges[geometry.user_id].offset) * 3;
+        auto *out = static_cast<float4 *>(scene->triangle_local_position_buffer.mapped);
+        std::memcpy(out + offset, positions.data(), positions.size() * sizeof(float4));
       }
     }
-  }
-
-  /* Old GPU objects may still be referenced by in-flight submissions; drain them first. */
-  collect_finished_submissions(true);
-  if (scene->forward_tlas) {
-    /* The forward draw borrows this TLAS, including its referenced BLAS allocations. */
-    GPU_finish();
-  }
-
-  if (!rebuilt_blas.empty()) {
-    for (auto &pair : rebuilt_blas) {
-      const int i = pair.first;
-      SceneGeometryBuild &geometry = pair.second;
-      destroy_acceleration_structure(scene->bottom_level_acceleration_structures[i],
-                                     scene->bottom_level_buffers[i]);
-      rt_buffer_free(scene->geometry_buffers[2 * i]);
-      rt_buffer_free(scene->geometry_buffers[2 * i + 1]);
-      scene->bottom_level_acceleration_structures[i] = geometry.acceleration_structure;
-      scene->bottom_level_buffers[i] = geometry.acceleration_buffer;
-      scene->geometry_buffers[2 * i] = geometry.vertex_buffer;
-      scene->geometry_buffers[2 * i + 1] = geometry.index_buffer;
-      scene->local_triangle_normals[i] = std::move(geometry.triangle_normals);
-      scene->local_triangle_smooth_normals[i] = std::move(geometry.triangle_smooth_normals);
-      scene->local_triangle_positions[i] = std::move(geometry.triangle_local_positions);
-      scene->local_triangle_shadow_uvs[i] = std::move(geometry.triangle_shadow_uvs);
+    if ((!dirty_normals.empty() && (!rt_buffer_flush(scene->triangle_normal_buffer) ||
+                                    !rt_buffer_flush(scene->triangle_smooth_normal_buffer))) ||
+        (positions_changed && !rt_buffer_flush(scene->triangle_local_position_buffer)))
+    {
+      /* Eevee discards the scene cache after an update failure, including these ranges. */
+      cleanup_news();
+      return false;
     }
-    /* Ownership transferred into the scene; do not free in any later cleanup. */
-    rebuilt_blas.clear();
-    int built_count = 0;
-    for (const VkAccelerationStructureKHR blas : scene->bottom_level_acceleration_structures) {
-      built_count += (blas != VK_NULL_HANDLE) ? 1 : 0;
-    }
-    scene->geometry_count = built_count;
   }
 
-  if (update_params.update_tlas) {
-    destroy_acceleration_structure(scene->top_level_acceleration_structure,
-                                   scene->top_level_buffer);
+  if (update_tlas) {
+    destroy_acceleration_structure(scene->top_level_acceleration_structure, scene->top_level_buffer);
     scene->top_level_acceleration_structure = new_tlas;
     scene->top_level_buffer = new_tlas_buffer;
+  }
+
+  for (LocalGeometryChange &change : changes) {
+    const int i = change.index;
+    if (change.replace_blas) {
+      const SceneGeometryBuild &geometry = updated_geometry[i];
+      destroy_acceleration_structure(scene->bottom_level_acceleration_structures[i],
+                                     scene->bottom_level_buffers[i]);
+      scene->bottom_level_acceleration_structures[i] = geometry.acceleration_structure;
+      scene->bottom_level_buffers[i] = geometry.acceleration_buffer;
+    }
+  }
+
+  if (update_transforms) {
     rt_buffer_free(scene->shadow_object_transform_buffer);
     scene->shadow_object_transform_buffer = new_shadow_object_transforms;
   }
-  if (update_params.update_emissive_data) {
+  if (update_emission) {
     rt_buffer_free(scene->emissive_radiance_buffer);
-    rt_buffer_free(scene->emissive_light_buffer);
     scene->emissive_radiance_buffer = new_emissive;
+  }
+  if (update_emissive_bounds) {
+    rt_buffer_free(scene->emissive_light_buffer);
     scene->emissive_light_buffer = new_emissive_lights;
     scene->emissive_light_count = new_emissive_light_count;
   }
@@ -3746,24 +3967,26 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     scene->shadow_alpha_buffer = new_shadow_alpha;
     scene->has_shadow_alpha = has_shadow_alpha;
   }
-  if (update_world_normals) {
+  if (triangle_layout_changed) {
     rt_buffer_free(scene->triangle_normal_buffer);
     rt_buffer_free(scene->triangle_smooth_normal_buffer);
+    rt_buffer_free(scene->triangle_local_position_buffer);
+    rt_buffer_free(scene->triangle_normal_range_buffer);
     scene->triangle_normal_buffer = new_triangle_normals;
     scene->triangle_smooth_normal_buffer = new_triangle_smooth_normals;
+    scene->triangle_local_position_buffer = new_triangle_local_positions;
+    scene->triangle_normal_range_buffer = new_triangle_normal_ranges;
+    scene->triangle_normal_ranges = std::move(new_ranges);
+  }
+  if (update_transforms) {
     for (const int i : entries.index_range()) {
       scene->normal_transforms[i] = float3x3(entries[i].object_to_world);
     }
-    if (new_triangle_local_positions.buffer != VK_NULL_HANDLE) {
-      rt_buffer_free(scene->triangle_local_position_buffer);
-      scene->triangle_local_position_buffer = new_triangle_local_positions;
-    }
-    if (new_triangle_normal_ranges.buffer != VK_NULL_HANDLE) {
-      rt_buffer_free(scene->triangle_normal_range_buffer);
-      scene->triangle_normal_range_buffer = new_triangle_normal_ranges;
-    }
   }
-  scene->geometry_count = int(updated_geometry.size());
+  for (LocalGeometryChange &change : changes) {
+    scene->local_geometry[change.index] = std::move(change.geometry);
+  }
+  scene->geometry_count = geometry_count;
   scene->instance_count = instance_count;
 
   if (r_stats != nullptr) {
@@ -3779,9 +4002,10 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
     std::fprintf(stderr,
                  "EEVEE HWRT perf rt_scene_update tlas=%d emissive=%d material=%d world_geom=%d "
                  "geometries=%d instances=%d elapsed_ms=%.2f readback_ms=%.2f "
-                 "rebuilt_blas=%d reused_blas=%d\n",
-                 update_params.update_tlas ? 1 : 0,
-                 update_params.update_emissive_data ? 1 : 0,
+                 "rebuilt_blas=%d reused_blas=%d prepare_ms=%.2f blas_submit_ms=%.2f tlas_ms=%.2f "
+                 "updated_normals=%d shadow_casters=%d refit_blas=%d draw_buffer_blas=%d\n",
+                 update_tlas ? 1 : 0,
+                 update_emissive_bounds ? 1 : 0,
                  update_params.update_material_data ? 1 : 0,
                  update_params.update_world_geometry_data ? 1 : 0,
                  scene->geometry_count,
@@ -3789,7 +4013,14 @@ bool raytrace_scene_update(GPUHardwareRaytraceScene *scene,
                  elapsed_ms,
                  readback_ms,
                  built_blas_count,
-                 reused_blas_count);
+                 reused_blas_count,
+                 geometry_prepare_ms,
+                 blas_submit_ms,
+                 tlas_ms,
+                 triangle_layout_changed ? scene->geometry_count : int(dirty_normals.size()),
+                 update_shadow_casters ? 1 : 0,
+                 refit_blas_count,
+                 draw_buffer_blas_count);
   }
   return true;
 }
@@ -5264,9 +5495,6 @@ GPUHardwareRaytraceScene::~GPUHardwareRaytraceScene()
   for (size_t i = 0; i < bottom_level_acceleration_structures.size(); i++) {
     RTBuffer &buffer = bottom_level_buffers[i];
     destroy_acceleration_structure(bottom_level_acceleration_structures[i], buffer);
-  }
-  for (nuru_vk::RTBuffer &geometry_buffer : geometry_buffers) {
-    gpu::vulkan::rt_buffer_free(geometry_buffer);
   }
 }
 

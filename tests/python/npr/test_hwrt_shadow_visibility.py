@@ -173,6 +173,52 @@ try:
     opaque.data.update()
     capture("vertex_edit_back")
 
+    # A concave quad can choose the other diagonal while keeping its vertex and triangle counts.
+    # The resulting index stream must be rebuilt even though its Vulkan layout still matches.
+    opaque.data.calc_loop_triangles()
+    original_triangles = tuple(tuple(tri.loops) for tri in opaque.data.loop_triangles)
+    corner = opaque.data.vertices[1].co.copy()
+    opaque.data.vertices[1].co = (-0.28, 0.24, 0)
+    opaque.data.update()
+    opaque.data.calc_loop_triangles()
+    new_triangles = tuple(tuple(tri.loops) for tri in opaque.data.loop_triangles)
+    assert len(new_triangles) == len(original_triangles)
+    assert new_triangles != original_triangles
+    capture("same_count_topology_away")
+    opaque.data.vertices[1].co = corner
+    opaque.data.update()
+    capture("same_count_topology_back")
+
+    # A new triangle layout must replace the refittable BLAS and its primitive ranges.
+    original_mesh = opaque.data
+    edited_mesh = bpy.data.meshes.new("Topology edit")
+    edited_mesh.from_pydata([(2, -0.5, 0), (3, -0.5, 0), (2, 0.5, 0)], [], [(0, 1, 2)])
+    edited_mesh.materials.append(original_mesh.materials[0])
+    opaque.data = edited_mesh
+    capture("topology_edit_away")
+    opaque.data = original_mesh
+    capture("topology_edit_back")
+
+    # A small mesh uses 16-bit indices. Only its second material's subrange covers the receiver.
+    material_mesh = bpy.data.meshes.new("Shared index buffer")
+    quad = [(-0.5, -0.5, 0), (0.5, -0.5, 0), (0.5, 0.5, 0), (-0.5, 0.5, 0)]
+    material_mesh.from_pydata([(x + 2, y, z) for x, y, z in quad] + quad, [],
+                              [(0, 1, 2, 3), (4, 5, 6, 7)])
+    material_mesh.materials.append(original_mesh.materials[0])
+    material_mesh.materials.append(mat("Second material", 1.0))
+    material_mesh.polygons[1].material_index = 1
+    opaque.data = material_mesh
+    capture("material_subrange")
+    for vertex in material_mesh.vertices[4:]:
+        vertex.co.x += 3.0
+    material_mesh.update()
+    capture("material_subrange_away")
+    for vertex in material_mesh.vertices[4:]:
+        vertex.co.x -= 3.0
+    material_mesh.update()
+    capture("material_subrange_refit")
+    opaque.data = original_mesh
+
     blended = mat("Blended receiver", .6)
     blended.surface_render_method = "BLENDED"
     receiver.data.materials[0] = blended
@@ -193,11 +239,18 @@ for name in (
     "point_close_contact",
     "unchanged_geometry_update",
     "vertex_edit_back",
+    "same_count_topology_back",
+    "topology_edit_back",
+    "material_subrange",
+    "material_subrange_refit",
     "blended_close_contact",
 ):
     assert values[name] < .05, (name, values)
 assert values["self_shadow_only"] > .95, values
 assert values["vertex_edit_away"] > .95, values
+assert values["same_count_topology_away"] > .95, values
+assert values["topology_edit_away"] > .95, values
+assert values["material_subrange_away"] > .95, values
 assert values["caster_reference"] > .1, values
 assert abs(values["caster_disabled"] - values["caster_reference"]) < .02, values
 assert .47 < values["translucent_only"] < .53, values
