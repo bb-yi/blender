@@ -18,6 +18,7 @@ struct VKCopyBufferData {
   VKResourceWithHandle<VkBuffer> src_buffer;
   VKResourceWithHandle<VkBuffer> dst_buffer;
   VkBufferCopy region;
+  bool dst_host_read = false;
 };
 
 class VKCopyBufferNode : public VKNodeInfo<VKNodeType::COPY_BUFFER,
@@ -63,6 +64,28 @@ class VKCopyBufferNode : public VKNodeInfo<VKNodeType::COPY_BUFFER,
   {
     command_buffer.copy_buffer(
         data.src_buffer.vk_handle, data.dst_buffer.vk_handle, 1, &data.region);
+    if (data.dst_host_read) {
+      /* Make the copy available to the host before the submission timeline is signaled. Keep
+       * the barrier in this node so it follows the copy even if the graph moves the node. */
+      const VkBufferMemoryBarrier barrier = {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                                            nullptr,
+                                            VK_ACCESS_TRANSFER_WRITE_BIT,
+                                            VK_ACCESS_HOST_READ_BIT,
+                                            VK_QUEUE_FAMILY_IGNORED,
+                                            VK_QUEUE_FAMILY_IGNORED,
+                                            data.dst_buffer.vk_handle,
+                                            data.region.dstOffset,
+                                            data.region.size};
+      command_buffer.pipeline_barrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                      VK_PIPELINE_STAGE_HOST_BIT,
+                                      0,
+                                      0,
+                                      nullptr,
+                                      1,
+                                      &barrier,
+                                      0,
+                                      nullptr);
+    }
   }
 };
 }  // namespace blender::gpu::render_graph

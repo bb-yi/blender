@@ -139,6 +139,47 @@ class Manager {
   uint resource_len_ = 0;
   /** Number of object attribute recorded. */
   uint attribute_len_ = 0;
+  bool instance_buffer_reuse_enabled_ = false;
+  bool compact_instances_enabled_ = false;
+  StorageArrayBuffer<float4, 1, true> cluster_bounds_ = {"InstanceClusterBounds"};
+  bool use_cluster_bounds_ = false;
+  uint64_t compact_instance_count_ = 0;
+  uint64_t instance_device_fallbacks_ = 0;
+  uint64_t instance_material_fallbacks_ = 0;
+  uint64_t gpu_reused_instance_count_ = 0;
+  uint64_t gpu_resource_upload_bytes_ = 0;
+
+  struct CachedInstanceRange {
+    IndexRange indices;
+    uint64_t version;
+    ObjectBounds bounds;
+    ObjectInfos info;
+    float shadow_normal_offset;
+    bool eligible = true;
+    int attribute_offset = -1;
+    uint attributes_per_instance = 0;
+
+    bool matches(const CachedInstanceRange &previous) const;
+  };
+
+  /** Match against the last contents of each GPU resource swap-chain slot. */
+  struct InstanceBufferSlot {
+    Vector<CachedInstanceRange> ranges;
+    int64_t capacity = 0;
+  };
+  std::array<InstanceBufferSlot, 2> instance_buffer_slots_;
+  int instance_buffer_slot_ = 0;
+  Vector<CachedInstanceRange> instance_ranges_;
+  Vector<ObjectAttribute> previous_attributes_;
+  int64_t previous_attribute_capacity_ = 0;
+
+  void invalidate_instance_range(ResourceHandleRange handle);
+  void record_instance_attribute_layout(ResourceHandleRange handle);
+  bool extract_shared_instance_attributes(ResourceHandleRange handle,
+                                          const ObjectRef &ref,
+                                          Span<const GPUUniformAttr *> attributes);
+  void upload_attributes();
+  Vector<IndexRange> upload_resources();
 
   /** Unique referenced objects requested by all materials in this manager. */
   Map<uint32_t, GPUReferencedObject> referenced_objects_;
@@ -151,6 +192,9 @@ class Manager {
  public:
   Manager() {};
   ~Manager();
+
+  void instance_cache_stats(InstanceCacheStats &stats) const;
+  ResourceHandleRange instance_material_fallback(ResourceHandleRange handle);
 
   /**
    * Create a unique resource handle for the given object.
@@ -193,7 +237,7 @@ class Manager {
   ResourceHandle resource_handle_for_psys(const ObjectRef &ref, const float4x4 &model_matrix);
 
   /** Update the bounds of an already created handle. */
-  void update_handle_bounds(ResourceHandle handle,
+  void update_handle_bounds(ResourceHandleRange handle,
                             const ObjectRef &ref,
                             float inflate_bounds = 0.0f);
 
@@ -401,31 +445,68 @@ inline ResourceHandleRange Manager::resource_handle(const ObjectRef &ref, float 
                              (DRW_object_is_in_edit_mode(object_active) ||
                               ELEM(object_active->mode, OB_MODE_TEXTURE_PAINT, OB_MODE_SCULPT)) &&
                              ref.object->mode == object_active->mode;
-  if (ref.duplis_) {
-    uint start = resource_len_;
+  if (ref.is_range()) {
+    const uint start = resource_len_;
+    const uint count = ref.instances_count();
+    const InstanceBatch *batch = ref.instance_batch();
+    /* Keep handles dense: EEVEE and Workbench still write 16-bit object IDs. */
+    resource_len_ += count;
 
-    ObjectBounds proto_bounds;
+    ObjectBounds proto_bounds{};
     proto_bounds.sync(*ref.object, inflate_bounds);
 
-    ObjectInfos proto_info;
+    ObjectInfos proto_info{};
     proto_info.sync(ref, is_active_object, is_active_edit_mode);
 
-    for (const DupliObject *dupli : *ref.duplis_) {
-      const float4x4 dupli_mat(dupli->mat);
-      matrix_buf.current().get_or_resize(resource_len_).sync(dupli_mat);
-      bounds_buf.current().get_or_resize(resource_len_) = proto_bounds;
-
-      ObjectInfos &info = infos_buf.current().get_or_resize(resource_len_);
-      info = proto_info;
-      info.random = dupli->random_id * (1.0f / float(0xFFFFFFFF));
-      /* Normal offset is scaled by world transform, so it must be computed per instance. */
-      info.shadow_terminator_normal_offset = shadow_terminator_normal_offset_get(*ref.object,
-                                                                                 dupli_mat);
-
-      resource_len_++;
+    matrix_buf.current().get_or_resize(resource_len_ - 1);
+    bounds_buf.current().get_or_resize(resource_len_ - 1);
+    infos_buf.current().get_or_resize(resource_len_ - 1);
+    MutableSpan<ObjectMatrices> matrices = matrix_buf.current().as_span().slice(start, count);
+    MutableSpan<ObjectInfos> infos = infos_buf.current().as_span().slice(start, count);
+    const auto &duplis = batch ? batch->instances : *ref.duplis_;
+    const bool can_cache = batch && count >= DRW_COMMAND_GROUP_SIZE;
+    const bool reuse_buffers = can_cache && instance_buffer_reuse_enabled_;
+    const bool compact = can_cache && compact_instances_enabled_;
+    compact_instance_count_ += compact ? count : 0;
+    instance_device_fallbacks_ += (can_cache && !reuse_buffers);
+    MutableSpan<ObjectBounds> bounds = bounds_buf.current().as_span().slice(start, count);
+    for (const int c : IndexRange((count + InstanceBatch::chunk_size - 1) / InstanceBatch::chunk_size)) {
+      const IndexRange part = IndexRange(count).drop_front(c * InstanceBatch::chunk_size)
+                                  .take_front(InstanceBatch::chunk_size);
+      if (reuse_buffers) {
+        CachedInstanceRange range{part.shift(start), batch->chunk_versions[c], proto_bounds,
+                                  proto_info, ref.object->shadow_terminator_normal_offset};
+        instance_ranges_.append(range);
+#ifdef NDEBUG
+        /* This swap-chain slot retains both the CPU staging data and the GPU resources. */
+        const InstanceBufferSlot &slot = instance_buffer_slots_[instance_buffer_slot_];
+        if (slot.capacity == matrix_buf.current().size()) {
+          const auto prev = std::ranges::lower_bound(slot.ranges, range.indices.start(), {},
+              [](const CachedInstanceRange &item) { return item.indices.start(); });
+          if (prev != slot.ranges.end() && range.matches(*prev)) {
+            continue;
+          }
+        }
+#endif
+      }
+      bounds.slice(part).fill(proto_bounds);
+      if (batch) {
+        matrices.slice(part).copy_from(batch->matrices.as_span().slice(part));
+      }
+      for (const int i : part) {
+        const DupliObject *dupli = duplis[i];
+        const float4x4 model(dupli->mat);
+        if (!batch) {
+          matrices[i].sync(model);
+        }
+        ObjectInfos &info = infos[i];
+        info = proto_info;
+        info.random = dupli->random_id * (1.0f / float(0xFFFFFFFF));
+        info.shadow_terminator_normal_offset = shadow_terminator_normal_offset_get(*ref.object, model);
+      }
     }
-    return ResourceHandleRange(ResourceHandle(start, (ref.object->transflag & OB_NEG_SCALE) != 0),
-                               resource_len_ - start);
+    return ResourceHandleRange(
+        ResourceHandle(start, (ref.object->transflag & OB_NEG_SCALE) != 0), count, compact);
   }
   else {
     matrix_buf.current().get_or_resize(resource_len_).sync(*ref.object);
@@ -442,7 +523,7 @@ inline ResourceHandleRange Manager::resource_handle(const ObjectRef &ref,
                                                     const float3 *bounds_center,
                                                     const float3 *bounds_half_extent)
 {
-  BLI_assert(!ref.duplis_);
+  BLI_assert(!ref.is_range());
   bool is_active_object = ref.is_active(object_active);
   bool is_active_edit_mode = object_active &&
                              (DRW_object_is_in_edit_mode(object_active) ||
@@ -487,7 +568,7 @@ inline ResourceHandle Manager::resource_handle(const float4x4 &model_matrix,
 inline ResourceHandle Manager::resource_handle_for_psys(const ObjectRef &ref,
                                                         const float4x4 &model_matrix)
 {
-  BLI_assert(!ref.duplis_);
+  BLI_assert(!ref.is_range());
   bool is_active_object = ref.is_active(object_active);
   bool is_active_edit_mode = object_active &&
                              (DRW_object_is_in_edit_mode(object_active) ||
@@ -501,11 +582,19 @@ inline ResourceHandle Manager::resource_handle_for_psys(const ObjectRef &ref,
   return ResourceHandle(resource_len_++, (ref.object->transflag & OB_NEG_SCALE) != 0);
 }
 
-inline void Manager::update_handle_bounds(ResourceHandle handle,
+inline void Manager::update_handle_bounds(ResourceHandleRange handle,
                                           const ObjectRef &ref,
                                           float inflate_bounds)
 {
-  bounds_buf.current()[handle.index()].sync(*ref.object, inflate_bounds);
+  ObjectBounds bounds{};
+  bounds.sync(*ref.object, inflate_bounds);
+  bounds_buf.current()
+      .as_span()
+      .slice(ResourceID(handle.id_range().start()).index(), handle.id_range().size())
+      .fill(bounds);
+  if (ref.instance_batch()) {
+    invalidate_instance_range(handle);
+  }
 }
 
 inline void Manager::extract_object_attributes(ResourceHandleRange handle,
@@ -528,6 +617,9 @@ inline void Manager::extract_object_attributes(ResourceHandleRange handle,
       }
     }
     instance_index++;
+  }
+  if (ref.instance_batch() && attr_list && !attr_list->list.is_empty()) {
+    record_instance_attribute_layout(handle);
   }
 }
 
@@ -554,28 +646,12 @@ inline void Manager::extract_object_attributes(ResourceHandleRange handle,
   extract_object_attributes(handle, ref, requests.as_span());
 }
 
-inline void Manager::extract_object_attributes(ResourceHandleRange handle,
-                                               const ObjectRef &ref,
-                                               Span<const GPUUniformAttr *> attributes)
-{
-  int instance_index = 0;
-  for (ResourceID resource_id : handle.id_range()) {
-    ObjectInfos &infos = infos_buf.current().get_or_resize(resource_id.index());
-    infos.object_attrs_offset = attribute_len_;
-    infos.object_attrs_len = 0;
-    for (const GPUUniformAttr *attr : attributes) {
-      if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *attr, instance_index)) {
-        infos.object_attrs_len++;
-        attribute_len_++;
-      }
-    }
-    instance_index++;
-  }
-}
-
 inline void Manager::extract_all_object_attributes(ResourceHandleRange handle,
                                                    const ObjectRef &ref)
 {
+  if (ref.instance_batch()) {
+    invalidate_instance_range(handle);
+  }
   /* TODO: Make find_property_rgba public and call it directly. */
   Vector<const char *, 8> attrs;
 

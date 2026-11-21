@@ -6,6 +6,8 @@
  * \ingroup modifiers
  */
 
+#include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <fmt/format.h>
 #include <sstream>
@@ -63,6 +65,8 @@
 #include "UI_resources.hh"
 
 #include "BLT_translation.hh"
+
+#include "CLG_log.h"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -1727,6 +1731,7 @@ static void modifyGeometry(ModifierData *md,
                            bke::GeometrySet &geometry_set)
 {
   NodesModifierData *nmd = reinterpret_cast<NodesModifierData *>(md);
+  nmd->runtime->time_independent_instances = false;
   if (nmd->node_group == nullptr) {
     return;
   }
@@ -1782,6 +1787,20 @@ static void modifyGeometry(ModifierData *md,
   nodes::GeoNodesModifierData modifier_eval_data{};
   modifier_eval_data.depsgraph = ctx->depsgraph;
   modifier_eval_data.self_object = ctx->object;
+  static const bool reuse_enabled = [] {
+    const char *value = std::getenv("BLENDER_GN_STATIC_REUSE");
+    return value == nullptr || !STREQ(value, "0");
+  }();
+  const nodes::EvalDependencies *deps = nmd_orig->node_group->runtime->eval_dependencies.get();
+  const bool watch_time = reuse_enabled && nmd != nmd_orig && DEG_is_active(ctx->depsgraph) &&
+                          DEG_get_mode(ctx->depsgraph) == DAG_EVAL_VIEWPORT &&
+                          ctx->object->mode == OB_MODE_OBJECT &&
+                          !(ctx->flag & (MOD_APPLY_ORCO | MOD_APPLY_TO_ORIGINAL)) &&
+                          deps && deps->time_dependent && !deps->has_untracked_time_dependency;
+  std::atomic<bool> scene_time_used{false};
+  if (watch_time) {
+    modifier_eval_data.scene_time_used = &scene_time_used;
+  }
   auto eval_log = std::make_unique<nodes::eval_log::NodesEvalLog>();
   call_data.modifier_data = &modifier_eval_data;
 
@@ -1811,6 +1830,49 @@ static void modifyGeometry(ModifierData *md,
 
   geometry_set = nodes::execute_geometry_nodes_on_geometry(
       tree, properties_ptr, modifier_compute_context, call_data, std::move(geometry_set));
+
+  if (watch_time && geometry_set.has_instances()) {
+    const bool reads_time = scene_time_used.load(std::memory_order_relaxed);
+    const bool uses_simulation = !simulation_params.data_by_zone_id.is_empty();
+    bool uses_animated_bake = std::ranges::any_of(
+        Span(nmd->bakes, nmd->bakes_num), [](const NodesModifierBake &bake) {
+          return bake.bake_mode == NODES_MODIFIER_BAKE_MODE_ANIMATION;
+        });
+    const bool side_effects = !side_effect_nodes.nodes_by_context.is_empty();
+    bool simulation_history = false;
+    if (const auto &cache = nmd->runtime->cache) {
+      std::lock_guard lock{cache->mutex};
+      simulation_history = !cache->simulation_cache_by_id.is_empty() ||
+                           !cache->requested_bakes.is_empty();
+      /* With no cached frames, Bake passes its inputs through. With a single frame the same
+       * state is selected at every time. Keep updating for older or mismatched multi-frame
+       * caches, even when the modifier shows the node in Still mode. */
+      for (const int id : bake_params.data_by_node_id.keys()) {
+        const NodesModifierBake *settings = nmd->find_bake(id);
+        const bake::BakeNodeCache *node_cache = cache->get_bake_node_cache(id);
+        if (!settings || settings->bake_mode != NODES_MODIFIER_BAKE_MODE_STILL || !node_cache ||
+            node_cache->bake.frames.size() > 1)
+        {
+          uses_animated_bake = true;
+          break;
+        }
+      }
+    }
+    nmd->runtime->time_independent_instances = !reads_time && !uses_simulation &&
+                                               !uses_animated_bake && !side_effects &&
+                                               !simulation_history;
+    static CLG_LogRef log = {"geometry_nodes.time_dependency"};
+    CLOG_INFO(&log,
+              "%s / %s: reusable=%d time=%d simulation=%d animated_bake=%d side_effects=%d history=%d",
+              ctx->object->id.name + 2,
+              md->name,
+              int(nmd->runtime->time_independent_instances),
+              int(reads_time),
+              int(uses_simulation),
+              int(uses_animated_bake),
+              int(side_effects),
+              int(simulation_history));
+  }
 
   if (logging_enabled(ctx)) {
     nmd_orig->runtime->eval_log = std::move(eval_log);

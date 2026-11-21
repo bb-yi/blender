@@ -30,6 +30,9 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_exec(GeoNodeExecParams params)
 {
+  if (const GeoNodesModifierData *modifier = params.user_data()->call_data->modifier_data) {
+    modifier->mark_scene_time_used();
+  }
   const Scene *scene = DEG_get_input_scene(params.depsgraph());
   const float frame = scene ? BKE_scene_frame_get(scene) : 0.0f;
   const float frame_start = scene ? float(scene->r.sfra) : 0.0f;

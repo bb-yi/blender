@@ -6,22 +6,36 @@
  * \ingroup bke
  */
 
+#include <algorithm>
+#include <cstdlib>
+
 #include "BLI_array_utils.hh"
 #include "BLI_generic_array.hh"
+#include "BLI_hash_mm3.hh"
 #include "BLI_implicit_sharing_ptr.hh"
+#include "BLI_memory_cache.hh"
+#include "BLI_memory_counter.hh"
+#include "BLI_mutex.hh"
+#include "BLI_timeit.hh"
+#include "BLI_unique_hash.hh"
 
 #include "BKE_attribute.hh"
+#include "BKE_attribute_storage.hh"
 #include "BKE_curves.hh"
 #include "BKE_geometry_fields.hh"
 #include "BKE_geometry_set.hh"
 #include "BKE_grease_pencil.hh"
 #include "BKE_instances.hh"
 #include "BKE_mesh.hh"
+#include "BKE_mesh_types.hh"
+
+#include "FN_multi_function_registry.hh"
 
 #include "DNA_mesh_types.h"
 #include "DNA_pointcloud_types.h"
 
 #include "BLT_translation.hh"
+#include "CLG_log.h"
 
 #include <fmt/format.h>
 
@@ -770,6 +784,271 @@ EvaluateOnDomainInput::EvaluateOnDomainInput(fn::GField field, AttrDomain domain
 {
 }
 
+static CLG_LogRef DOMAIN_FIELD_LOG = {"nodes.scatter_field_cache"};
+
+/* A pure numeric field can be shared between modifiers evaluating the same mesh arrays.
+ * Retain only the versioned sharing header. The results own their data, and the mesh should still
+ * be able to edit its own arrays without copying them for the cache. */
+struct DomainFieldKey : GenericKey {
+  struct Input {
+    WeakImplicitSharingPtr owner;
+    const void *data = nullptr;
+    const CPPType *type = nullptr;
+    int64_t size = 0;
+    int64_t version = 0;
+    AttrDomain domain = AttrDomain::Point;
+    Vector<std::byte, 64> single_value;
+
+    void set_shared(const ImplicitSharingInfo &sharing_info,
+                    const void *data,
+                    const int64_t size)
+    {
+      sharing_info.add_weak_user();
+      this->owner = WeakImplicitSharingPtr(&sharing_info);
+      this->data = data;
+      this->size = size;
+      this->version = sharing_info.version();
+    }
+
+    friend bool operator==(const Input &, const Input &) = default;
+  };
+  Vector<Input> inputs;
+  Vector<std::byte, 256> expression;
+  AttrDomain domain = AttrDomain::Point;
+  int4 sizes;
+  uint32_t expression_hash = 0;
+
+  uint64_t hash() const override
+  {
+    uint64_t hash = get_default_hash(expression_hash, int(domain), sizes);
+    for (const Input &input : inputs) {
+      const uint32_t value_hash = input.single_value.is_empty() ?
+                                      0 :
+                                      BLI_hash_mm3(reinterpret_cast<const unsigned char *>(
+                                                       input.single_value.data()),
+                                                   input.single_value.size(),
+                                                   0);
+      const uint64_t storage_hash = get_default_hash(
+          input.owner.get(), input.data, input.size, input.version);
+      hash = get_default_hash(hash, storage_hash, int(input.domain), input.type, value_hash);
+    }
+    return hash;
+  }
+  bool equal_to(const GenericKey &key) const override
+  {
+    const auto *other = dynamic_cast<const DomainFieldKey *>(&key);
+    return other && expression_hash == other->expression_hash && domain == other->domain &&
+           sizes == other->sizes && expression == other->expression && inputs == other->inputs;
+  }
+  std::unique_ptr<GenericKey> to_storable() const override
+  {
+    return std::make_unique<DomainFieldKey>(*this);
+  }
+};
+
+static bool is_cacheable_numeric_type(const CPPType &type)
+{
+  return type.is<bool>() || type.is<int>() || type.is<float>() || type.is<float2>() ||
+         type.is<float3>() || type.is<float4>() || type.is<float4x4>();
+}
+
+struct DomainFieldExpression {
+  enum class Token : uint8_t { Constant, Operation, Attribute, Domain, Index };
+  static constexpr int max_nodes = 512;
+  static constexpr int max_depth = 32;
+  static constexpr int max_parameter_bytes = 512;
+
+  UniqueHashBytes shape;
+  Vector<std::byte, 64> parameters;
+  VectorSet<StringRefNull> names;
+  int nodes = 0;
+
+  bool append(const fn::GFieldRef field, const int depth = 0)
+  {
+    if (++nodes > max_nodes || depth > max_depth || !is_cacheable_numeric_type(field.cpp_type())) {
+      return false;
+    }
+    if (const auto *value = std::get_if<fn::GFieldRef::Value>(&field.variant())) {
+      shape.add(Token::Constant);
+      shape.add(value->type);
+      if (parameters.size() + value->type->size > max_parameter_bytes) {
+        return false;
+      }
+      parameters.extend(static_cast<const std::byte *>(value->value), value->type->size);
+      return true;
+    }
+    if (const auto *op = std::get_if<fn::GFieldRef::MultiFn>(&field.variant())) {
+      const mf::MultiFunction &function = op->node->multi_function();
+      if (!mf::registry::contains(function)) {
+        CLOG_TRACE(&DOMAIN_FIELD_LOG, "Unsupported operation: %s", function.name().c_str());
+        return false;
+      }
+      shape.add(Token::Operation);
+      shape.add(&function);
+      shape.add(op->output_i);
+      const Span<fn::GField> children = op->node->inputs();
+      shape.add(children.size());
+      return std::ranges::all_of(children, [&](const fn::GField &child) {
+        return append(child, depth + 1);
+      });
+    }
+    const fn::FieldInput &input = *std::get<fn::GFieldRef::Input>(field.variant()).node;
+    if (const auto *attribute = dynamic_cast<const AttributeFieldInput *>(&input)) {
+      shape.add(Token::Attribute);
+      shape.add(&input.cpp_type());
+      const StringRefNull name = attribute->attribute_name();
+      shape.add(name.size());
+      shape.data.extend(reinterpret_cast<const std::byte *>(name.data()), name.size());
+      names.add(name);
+      return true;
+    }
+    if (const auto *domain = dynamic_cast<const EvaluateOnDomainInput *>(&input)) {
+      shape.add(Token::Domain);
+      shape.add(domain->source_domain());
+      bool success = true;
+      domain->foreach_recursive_field([&](const fn::GField &child) {
+        success &= append(child, depth + 1);
+      });
+      return success;
+    }
+    if (dynamic_cast<const fn::IndexFieldInput *>(&input)) {
+      shape.add(Token::Index);
+      return true;
+    }
+    CLOG_STR_TRACE(&DOMAIN_FIELD_LOG, "Unsupported field input");
+    return false;
+  }
+};
+
+struct SharedDomainField : memory_cache::CachedValue {
+  struct Version {
+    Vector<std::byte, 64> parameters;
+    CacheMutex mutex;
+    GVArray values;
+  };
+
+  static constexpr int max_versions = 8;
+  const int64_t input_bytes;
+  const int64_t value_bytes;
+  const int64_t expression_bytes;
+  mutable Mutex versions_mutex;
+  mutable Vector<std::shared_ptr<Version>, max_versions> versions;
+
+  SharedDomainField(const DomainFieldKey &key, const int64_t value_bytes)
+      : input_bytes(key.inputs.size() * sizeof(DomainFieldKey::Input)),
+        value_bytes(value_bytes),
+        expression_bytes(key.expression.size())
+  {
+  }
+
+  std::shared_ptr<Version> lookup(Span<std::byte> parameters) const
+  {
+    std::lock_guard lock{versions_mutex};
+    for (const int i : versions.index_range()) {
+      if (versions[i]->parameters.as_span() == parameters) {
+        std::shared_ptr<Version> match = std::move(versions[i]);
+        versions.remove(i);
+        versions.append(match);
+        return match;
+      }
+    }
+    auto version = std::make_shared<Version>();
+    version->parameters.extend(parameters);
+    if (versions.size() == max_versions) {
+      versions.remove(0);
+    }
+    versions.append(version);
+    return version;
+  }
+
+  void count_memory(MemoryCounter &memory) const override
+  {
+    memory.add(sizeof(*this) + sizeof(DomainFieldKey) + expression_bytes + input_bytes +
+               max_versions *
+                   (sizeof(Version) + DomainFieldExpression::max_parameter_bytes + value_bytes));
+  }
+};
+
+static std::optional<DomainFieldKey> mesh_field_key(const Mesh &mesh, const fn::GField &field,
+                                                    const AttrDomain domain,
+                                                    DomainFieldExpression &expression)
+{
+  static const bool enabled = [] {
+    const char *value = std::getenv("BLENDER_GN_DOMAIN_CACHE");
+    if (!value) {
+      value = std::getenv("BLENDER_GN_SCATTER_CACHE");
+    }
+    return value == nullptr || !STREQ(value, "0");
+  }();
+  if (!enabled || mesh.corners_num < 4096 || !mesh.runtime->face_offsets_sharing_info ||
+      (!field.cpp_type().is<bool>() && !field.cpp_type().is<float>())) {
+    return std::nullopt;
+  }
+  if (!expression.append(fn::GFieldRef(field))) {
+    return std::nullopt;
+  }
+  DomainFieldKey key;
+  /* Domain adaptation uses the actual topology arrays. The attribute accessor can return a
+   * vertex group of the same name ahead of those arrays, so use the raw storage here. */
+  const AttributeStorage &storage = mesh.attribute_storage.wrap();
+  const auto add_topology = [&](const StringRef name) {
+    const Attribute *attribute = storage.lookup(name);
+    const auto *array = attribute ? std::get_if<Attribute::ArrayData>(&attribute->data()) :
+                                    nullptr;
+    if (!array || !array->sharing_info) {
+      return false;
+    }
+    key.inputs.append_as();
+    DomainFieldKey::Input &input = key.inputs.last();
+    input.type = &attribute_type_to_cpp_type(attribute->data_type());
+    input.domain = attribute->domain();
+    input.set_shared(*array->sharing_info, array->data, array->size);
+    return true;
+  };
+  if (!add_topology(".edge_verts") || !add_topology(".corner_vert") ||
+      !add_topology(".corner_edge"))
+  {
+    return std::nullopt;
+  }
+  key.inputs.append_as();
+  DomainFieldKey::Input &offsets = key.inputs.last();
+  offsets.type = &CPPType::get<int>();
+  offsets.domain = AttrDomain::Face;
+  offsets.set_shared(
+      *mesh.runtime->face_offsets_sharing_info, mesh.face_offset_indices, int64_t(mesh.faces_num) + 1);
+
+  const AttributeAccessor attributes = mesh.attributes();
+  for (const StringRefNull name : expression.names) {
+    const GAttributeReader reader = attributes.lookup(name);
+    key.inputs.append_as();
+    DomainFieldKey::Input &input = key.inputs.last();
+    if (!reader) {
+      continue;
+    }
+    input.type = &reader.varray.type();
+    input.domain = reader.domain;
+    if (reader.sharing_info && reader.varray.is_span()) {
+      input.set_shared(
+          *reader.sharing_info, reader.varray.get_internal_span().data(), reader.varray.size());
+    }
+    else if (reader.varray.is_single() && is_cacheable_numeric_type(*input.type)) {
+      BUFFER_FOR_CPP_TYPE_VALUE(*input.type, buffer);
+      reader.varray.get_internal_single_to_uninitialized(buffer);
+      input.single_value.extend(static_cast<const std::byte *>(buffer), input.type->size);
+    }
+    else {
+      CLOG_TRACE(&DOMAIN_FIELD_LOG, "Unsupported attribute storage: %s", name.c_str());
+      return std::nullopt;
+    }
+  }
+  key.expression = std::move(expression.shape.data);
+  key.expression_hash = BLI_hash_mm3(
+      reinterpret_cast<const unsigned char *>(key.expression.data()), key.expression.size(), 0);
+  key.domain = domain;
+  key.sizes = int4(mesh.verts_num, mesh.edges_num, mesh.faces_num, mesh.corners_num);
+  return key;
+}
+
 GVArray EvaluateOnDomainInput::get_varray_for_context(const bke::GeometryFieldContext &context,
                                                       const IndexMask & /*mask*/) const
 {
@@ -805,11 +1084,82 @@ GVArray EvaluateOnDomainInput::get_varray_for_context(const bke::GeometryFieldCo
 
   const bke::GeometryFieldContext other_domain_context{context, src_domain_};
   const int64_t src_domain_size = attributes.domain_size(src_domain_);
-  GArray<> values(cpp_type, src_domain_size);
-  fn::FieldEvaluator value_evaluator{other_domain_context, src_domain_size};
-  value_evaluator.add_with_destination(src_field_, values.as_mutable_span());
-  value_evaluator.evaluate();
-  return attributes.adapt_domain(GVArray::from_garray(std::move(values)), src_domain_, dst_domain);
+  const auto adapt = [&](const GVArray &values) {
+    const bool measure = dst_domain == AttrDomain::Corner &&
+                         ELEM(src_domain_, AttrDomain::Edge, AttrDomain::Face) &&
+                         cpp_type.is<bool>() && dst_domain_size >= 4096 &&
+                         CLOG_CHECK(&DOMAIN_FIELD_LOG, CLG_LEVEL_INFO);
+    const auto start = measure ? timeit::Clock::now() : timeit::TimePoint{};
+    GVArray result = attributes.adapt_domain(values, src_domain_, dst_domain);
+    if (measure) {
+      CLOG_INFO(&DOMAIN_FIELD_LOG,
+                "bool_corner source=%d size=%lld span=%d adapt_ms=%.3f",
+                int(src_domain_),
+                static_cast<long long>(dst_domain_size),
+                int(values.is_span()),
+                std::chrono::duration<double, std::milli>(timeit::Clock::now() - start).count());
+    }
+    return result;
+  };
+  auto evaluate = [&] {
+    GArray<> values(cpp_type, src_domain_size);
+    fn::FieldEvaluator value_evaluator{other_domain_context, src_domain_size};
+    value_evaluator.add_with_destination(src_field_, values.as_mutable_span());
+    value_evaluator.evaluate();
+    return GVArray::from_garray(std::move(values));
+  };
+  if (const Mesh *mesh = context.mesh()) {
+    const bool trace = CLOG_CHECK(&DOMAIN_FIELD_LOG, CLG_LEVEL_INFO);
+    const auto lookup_start = trace ? timeit::Clock::now() : timeit::TimePoint{};
+    DomainFieldExpression expression;
+    if (auto key = mesh_field_key(*mesh, src_field_, src_domain_, expression)) {
+      const auto cached = memory_cache::get<SharedDomainField>(*key, [&] {
+        return std::make_unique<SharedDomainField>(*key, src_domain_size * cpp_type.size);
+      });
+      const auto version = cached->lookup(expression.parameters);
+      const auto lookup_end = trace ? timeit::Clock::now() : timeit::TimePoint{};
+      bool computed = false;
+      double compute_ms = 0.0;
+      version->mutex.ensure([&] {
+        const auto compute_start = trace ? timeit::Clock::now() : timeit::TimePoint{};
+        version->values = evaluate();
+        computed = true;
+        if (trace) {
+          compute_ms = std::chrono::duration<double, std::milli>(timeit::Clock::now() -
+                                                                compute_start)
+                           .count();
+        }
+      });
+      if (trace) {
+        const double lookup_ms = std::chrono::duration<double, std::milli>(lookup_end -
+                                                                           lookup_start)
+                                     .count();
+        const double ensure_ms = std::chrono::duration<double, std::milli>(timeit::Clock::now() -
+                                                                           lookup_end)
+                                     .count();
+        const uint32_t parameter_hash = expression.parameters.is_empty() ?
+                                            0 :
+                                            BLI_hash_mm3(reinterpret_cast<const unsigned char *>(
+                                                             expression.parameters.data()),
+                                                         expression.parameters.size(),
+                                                         0);
+        CLOG_INFO(&DOMAIN_FIELD_LOG,
+                  "domain=%d size=%lld expression=%08x storage=%llx parameters=%08x "
+                  "computed=%d lookup_ms=%.3f ensure_ms=%.3f compute_ms=%.3f",
+                  int(src_domain_),
+                  static_cast<long long>(src_domain_size),
+                  key->expression_hash,
+                  static_cast<unsigned long long>(key->hash()),
+                  parameter_hash,
+                  int(computed),
+                  lookup_ms,
+                  ensure_ms,
+                  compute_ms);
+      }
+      return adapt(version->values);
+    }
+  }
+  return adapt(evaluate());
 }
 
 void EvaluateOnDomainInput::hash_unique(UniqueHashBytes &hash,

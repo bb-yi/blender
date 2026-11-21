@@ -970,6 +970,8 @@ if(WITH_GPU_RENDER_TESTS)
     eevee_native_light_accumulation_animation
     eevee_probe_shader_compilation
     eevee_deferred_refraction_light_passes
+    instance_motion_history
+    instance_pointcloud_alpha
     shader_info_pcf_radius
     shader_info_shadow_methods
     render_texture_updates
@@ -980,6 +982,9 @@ if(WITH_GPU_RENDER_TESTS)
     outline_visibility
     vulkan_failure_recovery
   )
+  if(WITH_GPU_RENDER_TESTS_HEADED)
+    list(APPEND npr_material_tests instance_viewport_cache)
+  endif()
   foreach(backend IN ITEMS opengl vulkan)
     string(TOUPPER "${backend}" backend_upper)
     if(WITH_${backend_upper}_BACKEND AND (backend STREQUAL "opengl" OR WITH_GPU_RENDER_TESTS_VULKAN))
@@ -1006,12 +1011,20 @@ if(WITH_GPU_RENDER_TESTS)
         if(test STREQUAL "vulkan_failure_recovery")
           list(APPEND test_environment "NPR_FAILURE_TEST_OUT=${test_output}")
         endif()
+        set(test_blender_args ${TEST_BLENDER_EXE_PARAMS})
+        if(test STREQUAL "instance_viewport_cache")
+          list(REMOVE_ITEM test_blender_args --background)
+          list(APPEND test_blender_args --no-window-focus --no-window-frame --window-geometry 0 0 700 550)
+        endif()
         add_blender_test_impl(${test_name} "${test_environment}" "${TEST_BLENDER_EXE}"
-          ${TEST_BLENDER_EXE_PARAMS}
+          ${test_blender_args}
           "${TEST_BLENDER_EXE_PARAMS_NO_THUMB}"
           --gpu-backend ${backend}
           --python ${CMAKE_CURRENT_LIST_DIR}/npr/test_${test}.py
         )
+        if(test STREQUAL "instance_viewport_cache")
+          set_tests_properties(${test_name} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
+        endif()
       endforeach()
     endif()
   endforeach()

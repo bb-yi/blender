@@ -29,6 +29,7 @@ gpu::Shader *DRW_shader_debug_draw_display_get();
 gpu::Shader *DRW_shader_draw_visibility_compute_get();
 gpu::Shader *DRW_shader_draw_view_finalize_get();
 gpu::Shader *DRW_shader_draw_resource_finalize_get();
+gpu::Shader *DRW_shader_draw_resource_cluster_finalize_get();
 gpu::Shader *DRW_shader_draw_command_generate_get();
 
 /** \param element_size: The size of each copied element in bytes: 4, 8, 12, or 16. */

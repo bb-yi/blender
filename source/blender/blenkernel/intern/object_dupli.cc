@@ -29,6 +29,7 @@
 #include "BLI_set.hh"
 #include "BLI_span.hh"
 #include "BLI_string_ref.hh"
+#include "BLI_task.hh"
 #include "BLI_vector_list.hh"
 
 #include "DNA_collection_types.h"
@@ -152,7 +153,7 @@ static void init_context(DupliContext *r_ctx,
                          Set<const Object *> *include_objects,
                          Vector<Object *> &instance_stack,
                          Vector<short> &dupli_gen_type_stack,
-                         DupliList &duplilist)
+                         DupliList *duplilist)
 {
   r_ctx->depsgraph = depsgraph;
   r_ctx->collection = nullptr;
@@ -162,7 +163,7 @@ static void init_context(DupliContext *r_ctx,
   r_ctx->obedit = OBEDIT_FROM_OBACT(ob);
   r_ctx->instance_stack = &instance_stack;
   r_ctx->dupli_gen_type_stack = &dupli_gen_type_stack;
-  r_ctx->duplilist = &duplilist;
+  r_ctx->duplilist = duplilist;
   if (space_mat) {
     copy_m4_m4(r_ctx->space_mat, space_mat);
   }
@@ -243,30 +244,21 @@ static bool copy_dupli_context(DupliContext *r_ctx,
 }
 
 /**
- * Generate a dupli instance.
+ * Fill a zero-initialized dupli instance.
  *
  * \param mat: is transform of the object relative to current context (including
  * #Object.object_to_world).
  */
-static DupliObject *make_dupli(const DupliContext *ctx,
-                               Object *ob,
-                               const ID *object_data,
-                               const float mat[4][4],
-                               int index,
-                               const GeometrySet *geometry = nullptr,
-                               int64_t instance_index = 0)
+static void init_dupli(DupliObject *dob,
+                       const DupliContext *ctx,
+                       Object *ob,
+                       const ID *object_data,
+                       const float mat[4][4],
+                       int index,
+                       const GeometrySet *geometry,
+                       int64_t instance_index)
 {
-  DupliObject *dob;
   int i;
-
-  /* Add a #DupliObject instance to the result container. */
-  if (ctx->duplilist) {
-    ctx->duplilist->append({});
-    dob = &ctx->duplilist->last();
-  }
-  else {
-    return nullptr;
-  }
 
   dob->ob = ob;
   dob->ob_data = const_cast<ID *>(object_data);
@@ -330,7 +322,22 @@ static DupliObject *make_dupli(const DupliContext *ctx,
   if (ctx->root_object != ob) {
     dob->random_id ^= BLI_hash_int(BLI_hash_string(ctx->root_object->id.name + 2));
   }
+}
 
+static DupliObject *make_dupli(const DupliContext *ctx,
+                               Object *ob,
+                               const ID *object_data,
+                               const float mat[4][4],
+                               int index,
+                               const GeometrySet *geometry = nullptr,
+                               int64_t instance_index = 0)
+{
+  if (!ctx->duplilist) {
+    return nullptr;
+  }
+  ctx->duplilist->append({});
+  DupliObject *dob = &ctx->duplilist->last();
+  init_dupli(dob, ctx, ob, object_data, mat, index, geometry, instance_index);
   return dob;
 }
 
@@ -976,6 +983,18 @@ static void make_duplis_geometry_set_impl(const DupliContext *ctx,
   Span<int> reference_handles = instances->reference_handles();
   Span<int> unique_ids = instances->unique_ids();
   Span<InstanceReference> references = instances->references();
+  /* Check evaluated prototypes once. A plain mesh/curve/point cloud cannot generate any
+   * recursive duplis, even if it is referenced hundreds of thousands of times. */
+  Array<bool, 16> recurse(references.size(), true);
+  for (const int handle : references.index_range()) {
+    const InstanceReference &ref = references[handle];
+    if (ref.type() == InstanceReference::Type::Object) {
+      DupliContext child_context = *instances_ctx;
+      child_context.object = &ref.object();
+      child_context.level++;
+      recurse[handle] = get_dupli_generator(&child_context) != nullptr;
+    }
+  }
 
   for (int64_t i : instance_offset_matrices.index_range()) {
     const InstanceReference &reference = references[reference_handles[i]];
@@ -997,6 +1016,9 @@ static void make_duplis_geometry_set_impl(const DupliContext *ctx,
         mul_m4_m4m4(matrix, parent_transform, instance_offset_matrices[i].ptr());
         make_dupli(ctx_for_instance, &object, matrix, id, &geometry_set, i);
 
+        if (!recurse[reference_handles[i]]) {
+          break;
+        }
         float space_matrix[4][4];
         mul_m4_m4m4(
             space_matrix, instance_offset_matrices[i].ptr(), object.world_to_object().ptr());
@@ -1822,10 +1844,70 @@ void object_duplilist(Depsgraph *depsgraph,
                include_objects,
                instance_stack,
                dupli_gen_type_stack,
-               r_duplilist);
+               &r_duplilist);
   if (ctx.gen) {
     ctx.gen->make_duplis(&ctx);
   }
+}
+
+Array<DupliObject, 0> try_object_duplilist_flat_mesh(Depsgraph &depsgraph, Object &ob)
+{
+  constexpr int64_t grain_size = 1024;
+  const GeometrySet *geometry = ob.runtime->geometry_set_eval;
+  const Instances *instances = geometry ? geometry->get_instances() : nullptr;
+  if (ob.type != OB_MESH || !instances || instances->instances_num() < grain_size ||
+      geometry->get_pointcloud() || geometry->get_volume() || geometry->get_curves() ||
+      geometry->get_grease_pencil())
+  {
+    /* Additional components would emit records and introduce another persistent ID level. */
+    return {};
+  }
+
+  DupliContext ctx{};
+  Vector<Object *> instance_stack({&ob});
+  Vector<short> dupli_gen_type_stack({0});
+  init_context(&ctx, &depsgraph, &ob, nullptr, nullptr, instance_stack, dupli_gen_type_stack, nullptr);
+  if (ctx.gen != &gen_dupli_geometry_set) {
+    return {};
+  }
+
+  const Span<InstanceReference> references = instances->references();
+  DupliContext child_context = ctx;
+  child_context.level++;
+  for (const InstanceReference &reference : references) {
+    if (reference.type() != InstanceReference::Type::Object) {
+      return {};
+    }
+    Object &object = reference.object();
+    const ID *data = static_cast<const ID *>(object.data);
+    child_context.object = &object;
+    if (object.type != OB_MESH || !data || data->id_type() != ID_ME ||
+        get_dupli_generator(&child_context))
+    {
+      return {};
+    }
+  }
+
+  const Span<float4x4> transforms = instances->transforms();
+  const Span<int> handles = instances->reference_handles();
+  if (transforms.size() != instances->instances_num() || handles.size() != transforms.size()) {
+    return {};
+  }
+  const Span<int> unique_ids = instances->unique_ids();
+  const float4x4 parent_transform = ob.object_to_world();
+  Array<DupliObject, 0> duplis(transforms.size());
+  threading::parallel_for(duplis.index_range(), grain_size, [&](const IndexRange range) {
+    for (const int64_t i : range) {
+      Object &object = references[handles[i]].object();
+      float matrix[4][4];
+      mul_m4_m4m4(matrix, parent_transform.ptr(), transforms[i].ptr());
+      DupliObject &dupli = duplis[i];
+      dupli = {};
+      init_dupli(&dupli, &ctx, &object, static_cast<const ID *>(object.data), matrix, unique_ids[i],
+                 geometry, i);
+    }
+  });
+  return duplis;
 }
 
 void object_duplilist_preview(Depsgraph *depsgraph,
@@ -1844,7 +1926,7 @@ void object_duplilist_preview(Depsgraph *depsgraph,
                nullptr,
                instance_stack,
                dupli_gen_type_stack,
-               r_duplilist);
+               &r_duplilist);
 
   Object *ob_orig = DEG_get_original(ob_eval);
 
@@ -1879,7 +1961,7 @@ bke::Instances object_duplilist_legacy_instances(Depsgraph &depsgraph, Object &o
   Vector<short> dupli_gen_type_stack({0});
 
   init_context(
-      &ctx, &depsgraph, &ob, nullptr, nullptr, instance_stack, dupli_gen_type_stack, duplilist);
+      &ctx, &depsgraph, &ob, nullptr, nullptr, instance_stack, dupli_gen_type_stack, &duplilist);
   if (ctx.gen == &gen_dupli_geometry_set) {
     /* These are not legacy instances. */
     return {};

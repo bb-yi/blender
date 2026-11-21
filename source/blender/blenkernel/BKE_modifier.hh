@@ -464,6 +464,8 @@ void BKE_modifier_copydata_generic(const ModifierData *md, ModifierData *md_dst,
 void BKE_modifier_copydata(const ModifierData *md, ModifierData *target);
 void BKE_modifier_copydata_ex(const ModifierData *md, ModifierData *target, int flag);
 bool BKE_modifier_depends_ontime(Scene *scene, ModifierData *md);
+/** Runtime result of the last Geometry Nodes evaluation on this evaluated modifier. */
+bool BKE_modifier_has_time_independent_instances(const ModifierData &md);
 bool BKE_modifier_supports_mapping(ModifierData *md);
 bool BKE_modifier_supports_cage(Scene *scene, ModifierData *md);
 bool BKE_modifier_couldbe_cage(Scene *scene, ModifierData *md);

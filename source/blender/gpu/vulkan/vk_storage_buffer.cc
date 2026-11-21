@@ -56,7 +56,7 @@ void VKStorageBuffer::update(const void *data)
   VKStagingBuffer staging_buffer(
       buffer_, VKStagingBuffer::Direction::HostToDevice, 0, usage_size_in_bytes_);
   VKBuffer &buffer = staging_buffer.host_buffer_get();
-  if (buffer.is_allocated()) {
+  if (buffer.is_allocated() && buffer.is_mapped()) {
     buffer.update_immediately(data);
     staging_buffer.copy_to_device(context);
   }
@@ -75,6 +75,27 @@ void VKStorageBuffer::ensure_allocated()
   if (!buffer_.is_allocated()) {
     allocate();
   }
+}
+
+bool VKStorageBuffer::update_sub(size_t offset, size_t size, const void *data)
+{
+  if (usage_ == GPU_USAGE_STREAM) {
+    return false;
+  }
+  ensure_allocated();
+  if (!buffer_.is_allocated()) {
+    return false;
+  }
+  VKStagingBuffer staging_buffer(
+      buffer_, VKStagingBuffer::Direction::HostToDevice, offset, size);
+  VKBuffer &host = staging_buffer.host_buffer_get();
+  if (!host.is_allocated() || !host.is_mapped()) {
+    return false;
+  }
+  host.update_immediately(data);
+  host.flush();
+  staging_buffer.copy_to_device(*VKContext::get());
+  return true;
 }
 
 void VKStorageBuffer::allocate()
@@ -142,7 +163,7 @@ void VKStorageBuffer::async_flush_to_host()
 
   async_read_buffer_ = MEM_new<VKStagingBuffer>(
       __func__, buffer_, VKStagingBuffer::Direction::DeviceToHost);
-  async_read_buffer_->copy_from_device(context);
+  async_read_buffer_->copy_from_device(context, true);
   async_read_buffer_->host_buffer_get().async_flush_to_host(context);
 }
 
@@ -156,6 +177,16 @@ void VKStorageBuffer::read(void *data)
   async_read_buffer_->host_buffer_get().read_async(context, data);
   MEM_delete(async_read_buffer_);
   async_read_buffer_ = nullptr;
+}
+
+bool VKStorageBuffer::try_read(void *data)
+{
+  if (async_read_buffer_ == nullptr || !async_read_buffer_->host_buffer_get().try_read_async(data)) {
+    return false;
+  }
+  MEM_delete(async_read_buffer_);
+  async_read_buffer_ = nullptr;
+  return true;
 }
 
 }  // namespace gpu

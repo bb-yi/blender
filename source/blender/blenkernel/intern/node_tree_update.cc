@@ -976,13 +976,30 @@ class NodeTreeMainUpdater {
 
   void make_node_previews_dirty(bNodeTree &ntree)
   {
-    ntree.runtime->previews_refresh_state++;
-    for (bNode *node : ntree.all_nodes()) {
-      if (!node->is_group()) {
+    /* Refresh shared groups once, regardless of how many paths reach them. */
+    Set<bNodeTree *> visited;
+    Stack<bNodeTree *> remaining;
+    remaining.push(&ntree);
+    while (!remaining.is_empty()) {
+      bNodeTree &tree = *remaining.pop();
+      if (!visited.add(&tree)) {
         continue;
       }
-      if (bNodeTree *nested_tree = reinterpret_cast<bNodeTree *>(node->id)) {
-        this->make_node_previews_dirty(*nested_tree);
+      tree.runtime->previews_refresh_state++;
+      /* Use live nodes when topology was edited. Refreshing previews does not need to rebuild
+       * the topology cache. */
+      Span<bNode *> nodes;
+      if (tree.runtime->topology_cache_mutex.is_cached()) {
+        tree.ensure_topology_cache();
+        nodes = tree.group_nodes();
+      }
+      else {
+        nodes = tree.all_nodes();
+      }
+      for (const bNode *node : nodes) {
+        if (node->is_group() && node->id) {
+          remaining.push(reinterpret_cast<bNodeTree *>(node->id));
+        }
       }
     }
   }

@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "draw_defines.hh"
 #include "draw_shader_shared.hh"
 #include "gpu_shader_math_matrix_transform.bsl.hh"
 #include "gpu_shader_math_vector_reduce.bsl.hh"
@@ -24,15 +25,16 @@ struct ResourceFinalize {
   [[storage(2, read_write)]] ObjectInfos (&infos_buf)[];
 
   [[push_constant]] int resource_len;
+  [[push_constant]] int resource_start;
 };
 
 [[compute, local_size(DRW_VIEW_MAX)]] void resource_finalize_main(
     [[resource_table]] ResourceFinalize &srt, [[global_invocation_id]] const uint3 global_id)
 {
-  uint resource_id = global_id.x;
-  if (resource_id >= uint(srt.resource_len)) {
+  if (global_id.x >= uint(srt.resource_len)) {
     return;
   }
+  uint resource_id = uint(srt.resource_start) + global_id.x;
 
   float4x4 model_mat = srt.matrix_buf[resource_id].model;
   ObjectInfos infos = srt.infos_buf[resource_id];
@@ -93,5 +95,53 @@ struct ResourceFinalize {
 }
 
 PipelineCompute resource_finalize(resource_finalize_main);
+
+struct ResourceClusters {
+  [[storage(0, read)]] const ObjectBounds (&bounds_buf)[];
+  [[storage(1, write)]] float4 (&clusters)[];
+  [[push_constant]] int resource_len;
+  [[shared]] float3 minimum[DRW_VISIBILITY_GROUP_SIZE];
+  [[shared]] float3 maximum[DRW_VISIBILITY_GROUP_SIZE];
+};
+
+[[compute, local_size(DRW_VISIBILITY_GROUP_SIZE)]]
+void cluster_finalize_main([[resource_table]] ResourceClusters &srt,
+                           [[global_invocation_id]] const uint3 gid,
+                           [[local_invocation_id]] const uint3 lid,
+                           [[work_group_id]] const uint3 group)
+{
+  float3 lo = float3(1e30f), hi = float3(-1e30f);
+  if (gid.x < uint(srt.resource_len)) {
+    ObjectBounds box = srt.bounds_buf[gid.x];
+    if (drw_bounds_are_valid(box)) {
+      /* Include both spheres used by the fine test, even under non-uniform scale. */
+      float radius = max(box.bounding_sphere.w, box.inner_sphere_radius());
+      lo = box.bounding_sphere.xyz - radius;
+      hi = box.bounding_sphere.xyz + radius;
+    }
+    else {
+      lo = float3(-1e30f);
+      hi = float3(1e30f);
+    }
+  }
+  srt.minimum[lid.x] = lo;
+  srt.maximum[lid.x] = hi;
+  barrier();
+  for (uint stride = DRW_VISIBILITY_GROUP_SIZE / 2u; stride > 0u; stride >>= 1u) {
+    if (lid.x < stride) {
+      srt.minimum[lid.x] = min(srt.minimum[lid.x], srt.minimum[lid.x+stride]);
+      srt.maximum[lid.x] = max(srt.maximum[lid.x], srt.maximum[lid.x+stride]);
+    }
+    barrier();
+  }
+  if (lid.x == 0u) {
+    float3 center = (srt.minimum[0] + srt.maximum[0]) * 0.5f;
+    float radius = length(srt.maximum[0] - center);
+    /* Include floating-point error for distant world coordinates. */
+    radius += (1.0f + radius + reduce_max(abs(center))) * 1e-5f;
+    srt.clusters[group.x] = float4(center, (radius < 1e20f) ? radius : -1.0f);
+  }
+}
+PipelineCompute resource_cluster_finalize(cluster_finalize_main);
 
 }  // namespace draw

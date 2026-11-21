@@ -29,6 +29,7 @@ namespace blender {
 
 struct DRWViewData;
 struct DRWTextStore;
+struct DupliInstanceCache;
 struct DupliObject;
 struct Object;
 struct Mesh;
@@ -60,6 +61,7 @@ struct DRWData {
   draw::VolumeModule *volume_module;
   draw::PointCloudModule *pointcloud_module;
   draw::GSplatModule *gsplat_module;
+  DupliInstanceCache *dupli_instance_cache;
   /** Default view that feeds every engine. */
   draw::View *default_view;
 

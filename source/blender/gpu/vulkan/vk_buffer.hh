@@ -83,6 +83,9 @@ class VKBuffer : public NonCopyable {
    */
   void read_async(VKContext &context, void *data);
 
+  /** Consume an already completed asynchronous readback. */
+  bool try_read_async(void *data);
+
   /**
    * Free the buffer.
    *

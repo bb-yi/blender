@@ -204,6 +204,25 @@ void VKBuffer::read_async(VKContext &context, void *data)
   memcpy(data, mapped_memory_, size_in_bytes_);
 }
 
+bool VKBuffer::try_read_async(void *data)
+{
+  if (async_timeline_ == 0 || !is_mapped()) {
+    return false;
+  }
+  TimelineValue completed_timeline;
+  VKDevice &device = VKBackend::get().device;
+  if (!device.submission_finished_timeline_get(completed_timeline) ||
+      completed_timeline < async_timeline_)
+  {
+    return false;
+  }
+
+  invalidate_mapped_memory();
+  memcpy(data, mapped_memory_, size_in_bytes_);
+  async_timeline_ = 0;
+  return true;
+}
+
 void VKBuffer::read(VKContext &context, void *data) const
 {
 

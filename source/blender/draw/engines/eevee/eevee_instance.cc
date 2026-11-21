@@ -772,6 +772,9 @@ void Instance::render_sync()
   end_sync();
 
   manager->end_sync();
+  if (telemetry.enabled() && telemetry.frame_active()) {
+    telemetry.instance_cache_stats_set(drw_get().instance_cache_statistics_get());
+  }
 }
 
 void Instance::wait_for_material_passes()

@@ -814,6 +814,7 @@ void ShadowModule::ensure_caster_atlas()
 void ShadowModule::init()
 {
   blender::Scene &scene = *inst_.scene;
+  const int previous_shadow_page_len = shadow_page_len_;
 
   global_lod_bias_ = (1.0f - scene.eevee.shadow_resolution_scale) * SHADOW_TILEMAP_LOD;
 
@@ -963,28 +964,48 @@ void ShadowModule::init()
         shadow_pool_size_allocated_);
   }
 
-  /* Read end of the swap-chain to avoid stall. */
-  if (inst_.is_viewport()) {
-    if (inst_.sampling.finished_viewport()) {
-      /* Swap enough to read the last one. */
-      for (int i = 0; i < statistics_buf_.size(); i++) {
-        statistics_buf_.swap();
+  use_nonblocking_statistics_ = inst_.is_viewport() && !inst_.is_image_render &&
+                                !inst_.is_color_bake &&
+                                GPU_backend_get_type() == GPU_BACKEND_VULKAN;
+  if (use_nonblocking_statistics_) {
+    if (was_enabled != enabled_ || previous_shadow_page_len != shadow_page_len_) {
+      viewport_statistics_ = {};
+      if (statistics_readback_state_ == StatisticsReadbackState::Pending) {
+        statistics_readback_state_ = StatisticsReadbackState::Stale;
       }
     }
-    else {
-      statistics_buf_.swap();
+    /* The statistics only drive viewport warnings. Poll the existing snapshot and let the
+     * GPU finish at its own pace. */
+    ShadowStatistics stats;
+    if (statistics_readback_state_ != StatisticsReadbackState::Idle &&
+        GPU_storagebuf_try_read(statistics_buf_.current(), &stats))
+    {
+      if (statistics_readback_state_ == StatisticsReadbackState::Pending) {
+        viewport_statistics_ = stats;
+      }
+      statistics_readback_state_ = StatisticsReadbackState::Idle;
     }
-    statistics_buf_.current().read();
-    ShadowStatistics stats = statistics_buf_.current();
+  }
 
-    if (stats.page_used_count > shadow_page_len_ && enabled_) {
+  if (inst_.is_viewport() && enabled_) {
+    ShadowStatistics stats = viewport_statistics_;
+    if (!use_nonblocking_statistics_) {
+      /* For interactive sampling, give the asynchronous copy several redraws to complete. */
+      if (!inst_.sampling.finished_viewport()) {
+        statistics_buf_.swap();
+      }
+      statistics_buf_.current().read();
+      stats = statistics_buf_.current();
+    }
+
+    if (stats.page_used_count > shadow_page_len_) {
       inst_.info_append_i18n(
           "Error: Shadow buffer full, may result in missing shadows and lower "
           "performance. ({} / {})",
           stats.page_used_count,
           shadow_page_len_);
     }
-    if (stats.view_needed_count > SHADOW_VIEW_MAX && enabled_) {
+    if (stats.view_needed_count > SHADOW_VIEW_MAX) {
       inst_.info_append_i18n("Error: Too many shadow updates, some shadows might be incorrect.");
     }
   }
@@ -1243,37 +1264,48 @@ void ShadowModule::sync_object(const ObjectHandle &ob_handle,
                               (has_view_dependent_shadows && inst_.camera.view_changed()) ||
                               (has_position_dependent_shadows && inst_.camera.position_changed());
 
-  for (int i : IndexRange(ob_handle.instances_count())) {
-    ShadowObject &shadow_ob = objects_.lookup_or_add_default(ObjectKey(ob_handle, i));
+  auto sync_caster = [&](ShadowObject &shadow_ob, ResourceHandleRange handles) {
     shadow_ob.used = true;
     const bool is_initialized = shadow_ob.resource_handle.is_valid();
     const bool has_jittered_transparency = has_transparent_shadows && data_.use_jitter;
-    ResourceHandle instance_handle = ob_handle.res_handle.sub_handle(i);
     /* Draw resource indices are reassigned at sync. Cached classification pages cannot
      * keep the old index when an unchanged caster receives a different handle. */
     const bool identity_changed = (use_caster_atlas_ || use_caster_atlas_next_) &&
                                   is_initialized &&
-                                  shadow_ob.resource_handle.raw() != instance_handle.raw();
+                                  shadow_ob.resource_handle.id_range() != handles.id_range();
     const bool caster_changed = ob_handle.recalc || !is_initialized || shape_changed ||
                                 identity_changed;
-    if (is_shadow_caster && (caster_changed || has_jittered_transparency)) {
+    if (caster_changed || has_jittered_transparency) {
       viewport_history_invalidated_ |= inst_.is_viewport() && data_.use_jitter && caster_changed;
       if ((ob_handle.recalc || identity_changed) && is_initialized) {
-        past_casters_updated_.append(shadow_ob.resource_handle.raw());
+        for (const uint id : shadow_ob.resource_handle.id_range()) {
+          past_casters_updated_.append(id);
+        }
       }
 
-      if (has_jittered_transparency) {
-        jittered_transparent_casters_.append(instance_handle.raw());
-      }
-      else {
-        curr_casters_updated_.append(instance_handle.raw());
+      auto &updated = has_jittered_transparency ? jittered_transparent_casters_ :
+                                                   curr_casters_updated_;
+      for (const uint id : handles.id_range()) {
+        updated.append(id);
       }
     }
-    shadow_ob.resource_handle = instance_handle;
+    shadow_ob.resource_handle = handles;
 
-    if (is_shadow_caster) {
-      curr_casters_.append(instance_handle.raw());
+    for (const uint id : handles.id_range()) {
+      curr_casters_.append(id);
     }
+  };
+
+  if (const InstanceBatch *batch = ob_handle.instance_batch();
+      batch && ob_handle.res_handle.uses_compaction() && !inst_.is_baking())
+  {
+    /* A cache version represents the same ordered caster identities, matrices and prototype. */
+    sync_caster(instance_batches_.lookup_or_add_default(batch->version), ob_handle.res_handle);
+    return;
+  }
+  for (const int i : IndexRange(ob_handle.instances_count())) {
+    sync_caster(objects_.lookup_or_add_default(ObjectKey(ob_handle, i)),
+                ob_handle.res_handle.sub_handle(i));
   }
 }
 
@@ -1397,21 +1429,23 @@ void ShadowModule::end_sync()
   inst_.lights.update_shadow_light_costs();
 
   /* Search for deleted or updated shadow casters */
-  auto it_end = objects_.items().end();
-  for (auto it = objects_.items().begin(); it != it_end; ++it) {
-    ShadowObject &shadow_ob = (*it).value;
-    /* Do not discard casters in baking mode. See WORKAROUND in `surfels_create`. */
-    if (!shadow_ob.used && !inst_.is_baking()) {
-      /* May not be a caster, but it does not matter, be conservative. */
-      past_casters_updated_.append(shadow_ob.resource_handle.raw());
-      viewport_history_invalidated_ |= inst_.is_viewport() && data_.use_jitter;
-      objects_.remove(it);
-    }
-    else {
-      /* Clear for next sync. */
+  auto discard_unused = [&](auto &casters) {
+    casters.remove_if([&](const auto &item) {
+      ShadowObject &shadow_ob = item.value;
+      /* Do not discard casters in baking mode. See WORKAROUND in `surfels_create`. */
+      if (!shadow_ob.used && !inst_.is_baking()) {
+        for (const uint id : shadow_ob.resource_handle.id_range()) {
+          past_casters_updated_.append(id);
+        }
+        viewport_history_invalidated_ |= inst_.is_viewport() && data_.use_jitter;
+        return true;
+      }
       shadow_ob.used = false;
-    }
-  }
+      return false;
+    });
+  };
+  discard_unused(objects_);
+  discard_unused(instance_batches_);
   past_casters_updated_.push_update();
   curr_casters_updated_.push_update();
   jittered_transparent_casters_.push_update();
@@ -1986,6 +2020,8 @@ void ShadowModule::ShadowView::compute_visibility(ObjectBoundsBuf &bounds,
   if (do_visibility_) {
     gpu::Shader *shader = inst_.shaders.static_shader_get(SHADOW_VIEW_VISIBILITY);
     GPU_shader_bind(shader);
+    GPU_shader_uniform_1b(shader, "use_clusters", use_cluster_bounds_);
+    GPU_storagebuf_bind(cluster_bounds_, GPU_shader_get_ssbo_binding(shader, "clusters"));
     GPU_shader_uniform_1i(shader, "resource_len", resource_len);
     GPU_storagebuf_bind(bounds, GPU_shader_get_ssbo_binding(shader, "bounds_buf"));
     GPU_storagebuf_bind(visibility_buf_, GPU_shader_get_ssbo_binding(shader, "visibility_buf"));
@@ -2100,7 +2136,14 @@ void ShadowModule::render(View &view, int2 extent)
 
         shadow_multi_view_.compute_procedural_bounds();
 
-        statistics_buf_.current().async_flush_to_host();
+        if (!use_nonblocking_statistics_ ||
+            statistics_readback_state_ == StatisticsReadbackState::Idle)
+        {
+          statistics_buf_.current().async_flush_to_host();
+          if (use_nonblocking_statistics_) {
+            statistics_readback_state_ = StatisticsReadbackState::Pending;
+          }
+        }
       }
 
       /* Isolate shadow update into its own command buffer on the heavy Metal tile-copy path. */

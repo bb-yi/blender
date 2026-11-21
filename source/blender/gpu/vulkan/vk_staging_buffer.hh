@@ -61,8 +61,9 @@ class VKStagingBuffer {
 
   /**
    * Copy the content of the device buffer to the host buffer.
+   * Set #dst_host_read to make writes available to the host at submission completion.
    */
-  void copy_from_device(VKContext &context);
+  void copy_from_device(VKContext &context, bool dst_host_read = false);
 
   /**
    * Get the reference to the host buffer to update/load the data.

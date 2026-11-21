@@ -7,6 +7,7 @@
  */
 
 #include "BLI_math_base_safe.hh"
+#include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 
 #include "FN_init.hh"
@@ -306,6 +307,14 @@ static void register_common_functions_impl()
         exec_fast);
   });
   registry::add_new_cb([] {
+    return build::SI2_SO<float, float, bool>(
+        "float < float", [](const float a, const float b) { return a < b; }, exec_fast);
+  });
+  registry::add_new_cb([] {
+    return build::SI2_SO<float, float, bool>(
+        "float > float", [](const float a, const float b) { return a > b; }, exec_fast);
+  });
+  registry::add_new_cb([] {
     return build::SI2_SO<float, float, float>(
         "float % float", [](const float a, const float b) { return safe_modf(a, b); }, exec_fast);
   });
@@ -433,6 +442,21 @@ static void register_common_functions_impl()
         "dot_product(float3, float3)",
         [](const float3 &a, const float3 &b) { return math::dot(a, b); },
         exec_fast);
+  });
+  registry::add_new_cb([] {
+    return build::SI3_SO<float3, float3, float, bool>(
+        "dot_product(float3, float3) > float",
+        [](const float3 a, const float3 b, const float threshold) {
+          return math::dot(a, b) > threshold;
+        },
+        build::exec_presets::SomeSpanOrSingle<0, 1>());
+  });
+  registry::add_new_cb([] {
+    return build::SI2_SO<float3, float4x4, float3>(
+        "transform_point(float3, float4x4)",
+        [](const float3 point, const float4x4 matrix) {
+          return math::transform_point(matrix, point);
+        });
   });
   registry::add_new_cb([] {
     return build::SI2_SO<float3, float3, float>(

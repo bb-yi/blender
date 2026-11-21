@@ -28,6 +28,7 @@ struct GenerateCommand {
   [[storage(DRW_RESOURCE_ID_SLOT, write)]] uint (&resource_id_buf)[];
 
   [[push_constant]] int prototype_len;
+  [[push_constant]] int legacy_groups;
   [[push_constant]] int visibility_word_per_draw;
   [[push_constant]] int view_shift;
   [[push_constant]] int view_len;
@@ -99,12 +100,23 @@ void command_gen([[resource_table]] GenerateCommand &srt,
                  [[local_invocation_id]] const uint3 local_id,
                  [[work_group_id]] const uint3 workgroup_id)
 {
-  int proto_id = int(global_id.x);
-  if (proto_id >= srt.prototype_len) {
-    return;
+  DrawPrototype proto;
+  if (workgroup_id.x < uint(srt.legacy_groups)) {
+    if (global_id.x >= uint(srt.prototype_len)) {
+      return;
+    }
+    proto = srt.prototype_buf[global_id.x];
   }
-
-  DrawPrototype proto = srt.prototype_buf[proto_id];
+  else {
+    /* Each lane expands one cached instance and consumes the visibility for this view. */
+    uint range_index = workgroup_id.x - uint(srt.legacy_groups);
+    proto = srt.prototype_buf[uint(srt.prototype_len) + range_index];
+    if (local_id.x >= proto.instance_len) {
+      return;
+    }
+    proto.res_id += local_id.x;
+    proto.instance_len = 1u;
+  }
   const uint group_id = proto.group_id;
   bool is_inverted = (proto.res_id & 0x80000000u) != 0;
   uint resource_id = (proto.res_id & 0x7FFFFFFFu);

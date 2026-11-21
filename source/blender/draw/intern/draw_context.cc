@@ -6,8 +6,14 @@
  * \ingroup draw
  */
 
+#include <algorithm>
+#include <atomic>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
 #include <optional>
+#include <variant>
 
 #include "CLG_log.h"
 
@@ -21,6 +27,7 @@
 #include "BLI_rect.hh"
 #include "BLI_string.hh"
 #include "BLI_sys_types.hh"
+#include "BLI_task.hh"
 #include "BLI_task_c.hh"
 #include "BLI_threads.hh"
 
@@ -29,18 +36,22 @@
 #include "BLT_translation.hh"
 
 #include "BKE_camera.h"
+#include "BKE_collection.hh"
 #include "BKE_compositor.hh"
 #include "BKE_context.hh"
 #include "BKE_curve.hh"
 #include "BKE_curves.h"
 #include "BKE_duplilist.hh"
 #include "BKE_editmesh.hh"
+#include "BKE_geometry_set_instances.hh"
 #include "BKE_global.hh"
 #include "BKE_grease_pencil.h"
 #include "BKE_idprop.hh"
 #include "BKE_lattice.hh"
 #include "BKE_layer.hh"
+#include "BKE_lib_id.hh"
 #include "BKE_main.hh"
+#include "BKE_material.hh"
 #include "BKE_mball.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_wrapper.hh"
@@ -57,6 +68,7 @@
 #include "BKE_volume.hh"
 
 #include "DNA_camera_types.h"
+#include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
 #include "DNA_userdef_types.h"
 #include "DNA_view3d_types.h"
@@ -90,6 +102,7 @@
 #include "draw_context_private.hh"
 #include "draw_handle.hh"
 #include "draw_manager_text.hh"
+#include "draw_resource.hh"
 #include "draw_shader.hh"
 #include "draw_subdivision.hh"
 #include "draw_view_c.hh"
@@ -265,6 +278,653 @@ struct ExtractionGraph {
   }
 };
 
+/** Evaluated instances kept by a viewport or render's draw data. */
+struct DupliInstanceCache {
+  using FlatRecords = Array<DupliObject, 0>;
+  using Records = std::variant<FlatRecords, DupliList>;
+
+  static int64_t records_num(const Records &records)
+  {
+    return std::visit([](const auto &list) { return list.size(); }, records);
+  }
+
+  static bool same_dupli_metadata(const DupliObject &a, const DupliObject &b)
+  {
+    return a.ob == b.ob && a.ob_data == b.ob_data && a.level == b.level && a.type == b.type &&
+           a.no_draw == b.no_draw && a.random_id == b.random_id &&
+           a.particle_system == b.particle_system && a.preview_base_geometry == b.preview_base_geometry &&
+           a.preview_instance_index == b.preview_instance_index &&
+           std::memcmp(a.orco, b.orco, sizeof(a.orco)) == 0 &&
+           std::memcmp(a.uv, b.uv, sizeof(a.uv)) == 0 &&
+           std::memcmp(a.persistent_id, b.persistent_id, sizeof(a.persistent_id)) == 0;
+  }
+
+  static bool same_dupli_record(const DupliObject &a, const DupliObject &b)
+  {
+    return same_dupli_metadata(a, b) && std::memcmp(a.mat, b.mat, sizeof(a.mat)) == 0;
+  }
+
+  struct Source {
+    const Object *object;
+    const ID *data;
+    uint32_t uid;
+    uint32_t name_hash;
+    uint64_t transform;
+    uint64_t geometry;
+    uint64_t material_slots;
+
+    static uint64_t material_layout(const Material *material)
+    {
+      return material ? get_default_hash(material,
+                                         material->surface_render_method,
+                                         material->blend_flag,
+                                         material->eevee_domain,
+                                         material->outline_shell_transparency_method,
+                                         material->outline_shell_flag) :
+                        0;
+    }
+
+    static Source from_object(const Object &object)
+    {
+      uint64_t slots = get_default_hash(object.totcol);
+      for (const int i : IndexRange(object.totcol)) {
+        slots = get_default_hash(slots,
+                                 material_layout(object.mat ? object.mat[i] : nullptr),
+                                 object.matbits ? object.matbits[i] : 0);
+      }
+      if (object.type == OB_MESH && object.data) {
+        const Mesh &mesh = *reinterpret_cast<const Mesh *>(object.data);
+        for (const int i : IndexRange(mesh.totcol)) {
+          slots = get_default_hash(slots, material_layout(mesh.mat ? mesh.mat[i] : nullptr));
+        }
+      }
+      return {&object,
+              static_cast<const ID *>(object.data),
+              DEG_get_original(&object)->id.session_uid,
+              BLI_hash_string(object.id.name + 2),
+              object.runtime->last_update_transform,
+              object.runtime->last_update_geometry,
+              slots};
+    }
+
+    bool operator==(const Source &) const = default;
+  };
+
+  struct CollectionSignature {
+    const Collection *collection;
+    float3 offset;
+    Vector<const Object *> objects;
+
+    bool operator==(const CollectionSignature &) const = default;
+  };
+
+  struct Entry {
+    const Object *instancer = nullptr;
+    const bke::GeometrySet *geometry = nullptr;
+    const bke::Instances *instances = nullptr;
+    float4x4 world_matrix;
+    uint32_t name_hash = 0;
+    uint64_t transform_update = 0;
+    uint64_t geometry_update = 0;
+    uint64_t depsgraph_update = 0;
+    uint64_t last_used = 0;
+    Vector<CollectionSignature> collections;
+    /* Hold the instance component so that its lists stay valid across depsgraph evaluation.
+     * The dupli attribute lookup also uses this stable GeometrySet address. */
+    bke::GeometrySet attribute_geometry;
+    Vector<Source> sources;
+    Records duplis;
+    Map<int, uint32_t> motion_history_overrides;
+    Vector<draw::InstanceBatch> batches;
+    bool flat = false;
+    bool direct_objects = false;
+  };
+
+  const Depsgraph *graph = nullptr;
+  uint64_t evaluated_update = 0;
+  uint64_t iteration = 0;
+  Map<uint32_t, std::unique_ptr<Entry>> entries;
+  Set<const Object *> evaluated_objects;
+  InstanceCacheStats stats;
+  const bool enabled = [] {
+    const char *value = std::getenv("BLENDER_INSTANCE_CACHE");
+    return value == nullptr || !STREQ(value, "0");
+  }();
+  const bool flat_build_enabled = [] {
+    const char *value = std::getenv("BLENDER_INSTANCE_CACHE_FLAT_BUILD");
+    return value == nullptr || !STREQ(value, "0");
+  }();
+  const bool nested_updates_enabled = [] {
+    const char *value = std::getenv("BLENDER_INSTANCE_CACHE_NESTED_UPDATE");
+    return value == nullptr || !STREQ(value, "0");
+  }();
+
+  void begin_sync()
+  {
+    stats = {};
+  }
+
+  void begin_iteration(const Depsgraph *depsgraph)
+  {
+    iteration++;
+    if (graph != depsgraph) {
+      graph = depsgraph;
+      evaluated_update = 0;
+      entries.clear();
+      evaluated_objects.clear();
+    }
+  }
+
+  void end_iteration()
+  {
+    entries.remove_if([&](const auto &key_value) {
+      return key_value.value->last_used != iteration;
+    });
+  }
+
+  const Set<const Object *> &live_objects()
+  {
+    const uint64_t update = DEG_get_update_count(graph);
+    if (evaluated_update != update || evaluated_objects.is_empty()) {
+      evaluated_update = update;
+      evaluated_objects.clear_and_keep_capacity();
+      DEG_foreach_ID(graph, [&](ID *id) {
+        if (id->id_type() == ID_OB) {
+          evaluated_objects.add(reinterpret_cast<Object *>(DEG_get_evaluated_id(graph, id)));
+        }
+      });
+    }
+    return evaluated_objects;
+  }
+
+  static const bke::Instances *candidate_instances(const Object &instancer)
+  {
+    if (instancer.mode != OB_MODE_OBJECT || (instancer.transflag & OB_DUPLI) ||
+        instancer.runtime->geometry_set_eval == nullptr ||
+        DEG_get_original(&instancer)->id.session_uid == MAIN_ID_SESSION_UID_UNSET)
+    {
+      return nullptr;
+    }
+    return instancer.runtime->geometry_set_eval->get_instances();
+  }
+
+  static bool has_flat_mesh_instances(const Object &instancer, const bke::Instances &instances)
+  {
+    const bke::GeometrySet &geometry = *instancer.runtime->geometry_set_eval;
+    return (!geometry.get_mesh() || instancer.type == OB_MESH) && !geometry.get_pointcloud() &&
+           !geometry.get_curves() && !geometry.get_volume() && !geometry.get_grease_pencil() &&
+           std::ranges::all_of(instances.references(), [](const bke::InstanceReference &ref) {
+             return ELEM(ref.type(),
+                         bke::InstanceReference::Type::Object,
+                         bke::InstanceReference::Type::Collection,
+                         bke::InstanceReference::Type::None);
+           });
+  }
+
+  Vector<CollectionSignature> collection_signatures(const bke::Instances &instances) const
+  {
+    Vector<CollectionSignature> result;
+    const eEvaluationMode mode = DEG_get_mode(graph);
+    Set<const bke::Instances *> seen_instances;
+    Set<const Collection *> seen_collections;
+    Vector<const bke::Instances *> pending = {&instances};
+    while (!pending.is_empty()) {
+      const bke::Instances *current = pending.pop_last();
+      if (!seen_instances.add(current)) {
+        continue;
+      }
+      for (const bke::InstanceReference &ref : current->references()) {
+        if (ref.type() == bke::InstanceReference::Type::GeometrySet) {
+          if (const bke::Instances *nested = ref.geometry_set().get_instances()) {
+            pending.append(nested);
+          }
+        }
+        if (ref.type() != bke::InstanceReference::Type::Collection ||
+            !seen_collections.add(&ref.collection()))
+        {
+          continue;
+        }
+        Collection &collection = ref.collection();
+        CollectionSignature signature{&collection, float3(collection.instance_offset), {}};
+        FOREACH_COLLECTION_VISIBLE_OBJECT_RECURSIVE_BEGIN (&collection, object, mode) {
+          signature.objects.append(object);
+        }
+        FOREACH_COLLECTION_VISIBLE_OBJECT_RECURSIVE_END;
+        result.append(std::move(signature));
+      }
+    }
+    return result;
+  }
+
+  static bool same_flat_members(const bke::Instances &a, const bke::Instances &b)
+  {
+    const Span<int> a_handles = a.reference_handles(), b_handles = b.reference_handles();
+    const Span<bke::InstanceReference> a_refs = a.references(), b_refs = b.references();
+    if (a_handles.size() != b_handles.size()) {
+      return false;
+    }
+    if (a_refs == b_refs && a_handles == b_handles) {
+      return true;
+    }
+
+    /* A rebuilt index table is not a membership change if all instance slots still choose
+     * the same reference. Only flat Object, Collection and None references get here. */
+    for (const int i : a_handles.index_range()) {
+      if (a_refs[a_handles[i]] != b_refs[b_handles[i]]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static bool same_raw_ids(const bke::Instances &a, const bke::Instances &b)
+  {
+    const auto a_ids = a.attributes().lookup<int>("id"), b_ids = b.attributes().lookup<int>("id");
+    if (bool(a_ids) != bool(b_ids)) {
+      return false;
+    }
+    return !a_ids || VArraySpan<int>(a_ids.varray) == VArraySpan<int>(b_ids.varray);
+  }
+
+  static bool same_nested_motion_tree(const bke::Instances &previous,
+                                      const bke::Instances &current,
+                                      const int depth = 0)
+  {
+    const Span<bke::InstanceReference> old_refs = previous.references();
+    const Span<bke::InstanceReference> new_refs = current.references();
+    if (depth == MAX_DUPLI_RECUR || old_refs.size() != new_refs.size() ||
+        previous.reference_handles() != current.reference_handles())
+    {
+      return false;
+    }
+    /* Sanitized duplicates and implicit indices can be reassigned to different instances after
+     * a reevaluation. Require explicit unique IDs throughout the compared hierarchy. */
+    const auto ids = previous.attributes().lookup<int>("id");
+    const auto next_ids = current.attributes().lookup<int>("id");
+    if (!ids || !next_ids) {
+      return false;
+    }
+    const Span<int> unique_ids = previous.unique_ids();
+    if (VArraySpan<int>(ids.varray) != unique_ids || VArraySpan<int>(next_ids.varray) != unique_ids ||
+        std::ranges::find(unique_ids, INT_MAX) != unique_ids.end())
+    {
+      return false;
+    }
+    for (const int i : old_refs.index_range()) {
+      const bke::InstanceReference &a = old_refs[i], &b = new_refs[i];
+      using Type = bke::InstanceReference::Type;
+      if (a.type() != b.type()) {
+        return false;
+      }
+      if (ELEM(a.type(), Type::Object, Type::None)) {
+        if (a != b || (a.type() == Type::Object &&
+                       bke::object_has_geometry_set_instances(a.object())))
+        {
+          return false;
+        }
+        continue;
+      }
+      if (a.type() != Type::GeometrySet) {
+        return false;
+      }
+      const bke::Instances *a_children = a.geometry_set().get_instances();
+      const bke::Instances *b_children = b.geometry_set().get_instances();
+      if (!a_children || !b_children || a.geometry_set().has_realized_data() ||
+          b.geometry_set().has_realized_data() ||
+          !same_nested_motion_tree(*a_children, *b_children, depth + 1))
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static bool can_refresh_prototype(const Entry &entry, const Source &previous, const Source &next)
+  {
+    const Object &object = *next.object;
+    /* Only direct mesh draws from the same object may retain their instance records. A mesh can
+     * gain additional components or child instances when its modifier stack changes. */
+    return entry.flat && object.type == OB_MESH && object.mode == OB_MODE_OBJECT &&
+           next.data != nullptr && next.data->id_type() == ID_ME && next.uid == previous.uid &&
+           next.name_hash == previous.name_hash && next.transform == previous.transform &&
+           next.material_slots == previous.material_slots && !(object.transflag & OB_DUPLI) &&
+           object.particlesystem.is_empty() && !bke::object_has_geometry_set_instances(object);
+  }
+
+  static void refresh_attribute_geometry(Entry &entry, const bke::GeometrySet &geometry)
+  {
+    entry.attribute_geometry = geometry;
+  }
+
+  void update_evaluated_result(Entry &entry, const Object &instancer, const bke::Instances &instances)
+  {
+    const bke::ObjectRuntime &runtime = *instancer.runtime;
+    entry.geometry = runtime.geometry_set_eval;
+    entry.instances = &instances;
+    entry.transform_update = runtime.last_update_transform;
+    entry.geometry_update = runtime.last_update_geometry;
+    entry.depsgraph_update = DEG_get_update_count(graph);
+    refresh_attribute_geometry(entry, *runtime.geometry_set_eval);
+  }
+
+  Entry *lookup(const Object &instancer, const bke::Instances &instances, Entry *&r_verify)
+  {
+    auto *value = entries.lookup_ptr(DEG_get_original(&instancer)->id.session_uid);
+    if (value == nullptr) {
+      stats.cold_builds++;
+      return nullptr;
+    }
+    Entry &entry = **value;
+    const auto &runtime = *instancer.runtime;
+    const uint64_t current_update = DEG_get_update_count(graph);
+    if (entry.instancer != &instancer || entry.name_hash != BLI_hash_string(instancer.id.name + 2))
+    {
+      stats.instancer_rebuilds++;
+      return nullptr;
+    }
+    Vector<CollectionSignature> collections;
+    Set<const Collection *, 4> moved_collections;
+    if (!entry.collections.is_empty() && entry.depsgraph_update != current_update) {
+      collections = collection_signatures(instances);
+      if (entry.collections != collections) {
+        if (!entry.flat || entry.collections.size() != collections.size()) {
+          stats.prototype_rebuilds++;
+          return nullptr;
+        }
+        for (const CollectionSignature &next : collections) {
+          const auto previous = std::ranges::find(
+              entry.collections, next.collection, &CollectionSignature::collection);
+          if (previous == entry.collections.end() || previous->objects != next.objects) {
+            stats.prototype_rebuilds++;
+            return nullptr;
+          }
+          if (previous->offset != next.offset) {
+            moved_collections.add(next.collection);
+          }
+        }
+      }
+    }
+    const auto &live = live_objects();
+    Map<const Object *, Source, 4> refreshed_prototypes;
+    for (const Source &previous : entry.sources) {
+      /* Evaluation can free a prototype even though its instancer still exists. */
+      if (!live.contains(previous.object)) {
+        stats.prototype_rebuilds++;
+        return nullptr;
+      }
+      const Source next = Source::from_object(*previous.object);
+      if (next != previous) {
+        if (!can_refresh_prototype(entry, previous, next)) {
+          stats.prototype_rebuilds++;
+          return nullptr;
+        }
+        refreshed_prototypes.add_new(next.object, next);
+      }
+    }
+    const bool unchanged = entry.geometry == runtime.geometry_set_eval &&
+                           entry.instances == &instances &&
+                           entry.transform_update == runtime.last_update_transform &&
+                           entry.geometry_update == runtime.last_update_geometry;
+    if (!unchanged || !moved_collections.is_empty()) {
+      const bke::Instances *previous = entry.attribute_geometry.get_instances();
+      if (!entry.flat || !previous || !has_flat_mesh_instances(instancer, instances)) {
+        if (moved_collections.is_empty() && refreshed_prototypes.is_empty()) {
+          r_verify = &entry;
+        }
+        stats.instancer_rebuilds++;
+        return nullptr;
+      }
+      if (!same_flat_members(instances, *previous) ||
+          instances.unique_ids() != previous->unique_ids() || !same_raw_ids(instances, *previous))
+      {
+        if (refreshed_prototypes.is_empty()) {
+          r_verify = &entry;
+        }
+        stats.instancer_rebuilds++;
+        return nullptr;
+      }
+      const bool transforms_changed = instances.transforms() != previous->transforms();
+      if (entry.world_matrix != instancer.object_to_world() || transforms_changed ||
+          !moved_collections.is_empty())
+      {
+        if (!update_transforms(entry, instancer, instances, *previous, moved_collections)) {
+          stats.instancer_rebuilds++;
+          return nullptr;
+        }
+      }
+      else {
+        stats.equivalent_outputs++;
+      }
+      update_evaluated_result(entry, instancer, instances);
+      entry.world_matrix = instancer.object_to_world();
+    }
+    if (!refreshed_prototypes.is_empty()) {
+      for (draw::InstanceBatch &batch : entry.batches) {
+        const DupliObject &first = *batch.instances[0];
+        const Source *prototype = refreshed_prototypes.lookup_ptr(first.ob);
+        if (prototype == nullptr) {
+          continue;
+        }
+        if (prototype->data != first.ob_data) {
+          for (DupliObject *dupli : batch.instances) {
+            dupli->ob_data = static_cast<ID *>(dupli->ob->data);
+          }
+        }
+        /* Invalidate the prototype's resource ranges and caster batch. Other prototypes keep
+         * their versions, transforms and GPU ranges. Bounds are read from the new mesh at sync. */
+        batch.version = new_version();
+        batch.chunk_versions.as_mutable_span().fill(batch.version);
+      }
+      for (Source &source : entry.sources) {
+        if (const Source *next = refreshed_prototypes.lookup_ptr(source.object)) {
+          source = *next;
+        }
+      }
+    }
+    if (!collections.is_empty()) {
+      entry.collections = std::move(collections);
+    }
+    entry.depsgraph_update = current_update;
+    return &entry;
+  }
+
+  bool verify_evaluated_duplis(Entry &entry,
+                              const Object &instancer,
+                              const bke::Instances &instances,
+                              const Records &duplis)
+  {
+    static CLG_LogRef log = {"draw.instance_cache"};
+    const bke::Instances *previous_instances = entry.attribute_geometry.get_instances();
+    if (records_num(duplis) != records_num(entry.duplis) || !previous_instances ||
+        !same_raw_ids(instances, *previous_instances))
+    {
+      return false;
+    }
+    const bke::GeometrySet *geometry = instancer.runtime->geometry_set_eval;
+    if (entry.flat && !has_flat_mesh_instances(instancer, instances)) {
+      return false;
+    }
+    auto is_flat_record = [&](const DupliObject &dupli) {
+      if (dupli.instance_data[0] != geometry || dupli.instance_data[1] ||
+          dupli.ob_data != dupli.ob->data)
+      {
+        return false;
+      }
+      const auto type =
+          instances.references()[instances.reference_handles()[dupli.instance_idx[0]]].type();
+      return (dupli.level == 0 && type == bke::InstanceReference::Type::Object) ||
+             (dupli.level == 1 && type == bke::InstanceReference::Type::Collection);
+    };
+    bool matrices_changed = false;
+    auto refresh_records = [&](auto &cached_records, const auto &current_records) {
+      auto cached = cached_records.begin();
+      bool same_attribute_indices = true;
+      for (const DupliObject &current : current_records) {
+        const DupliObject &previous = *cached;
+        if (!can_cache(current, geometry) || (entry.flat && !is_flat_record(current)) ||
+            !same_dupli_metadata(current, previous) ||
+            (entry.flat && current.instance_idx[0] != previous.instance_idx[0]))
+        {
+          return false;
+        }
+        if (nested_updates_enabled && !entry.flat && same_attribute_indices) {
+          same_attribute_indices = std::ranges::equal(current.instance_idx, previous.instance_idx);
+        }
+        if (std::memcmp(current.mat, previous.mat, sizeof(current.mat)) != 0) {
+          if (entry.flat || !nested_updates_enabled || current.ob_data != current.ob->data ||
+              is_negative_m4(current.mat) != is_negative_m4(previous.mat))
+          {
+            return false;
+          }
+          matrices_changed = true;
+        }
+        ++cached;
+      }
+      if (matrices_changed &&
+          (!same_attribute_indices || !same_nested_motion_tree(*previous_instances, instances)))
+      {
+        return false;
+      }
+      /* The ordered draw records keep their slots. Refresh the owners before reading attributes
+       * from the new evaluation. Cached attribute layouts are checked separately by the Manager. */
+      update_evaluated_result(entry, instancer, instances);
+      entry.world_matrix = instancer.object_to_world();
+      entry.collections = collection_signatures(instances);
+      auto current = current_records.begin();
+      for (DupliObject &cached_dupli : cached_records) {
+        const DupliObject &record = *current;
+        if (matrices_changed) {
+          std::memcpy(cached_dupli.mat, record.mat, sizeof(record.mat));
+        }
+        std::ranges::copy(record.instance_idx, cached_dupli.instance_idx);
+        std::ranges::copy(record.instance_data, cached_dupli.instance_data);
+        for (const bke::GeometrySet *&owner : cached_dupli.instance_data) {
+          if (owner == geometry) {
+            owner = &entry.attribute_geometry;
+          }
+        }
+        ++current;
+      }
+      return true;
+    };
+    if (!std::visit(refresh_records, entry.duplis, duplis)) {
+      return false;
+    }
+    if (matrices_changed) {
+      for (draw::InstanceBatch &batch : entry.batches) {
+        threading::parallel_for(batch.chunk_versions.index_range(), 1, [&](IndexRange chunks) {
+          for (const int chunk : chunks) {
+            const IndexRange part = batch.matrices.index_range()
+                                        .drop_front(chunk * draw::InstanceBatch::chunk_size)
+                                        .take_front(draw::InstanceBatch::chunk_size);
+            for (const int i : part) {
+              const DupliObject &dupli = *batch.instances[i];
+              if (std::memcmp(dupli.mat, batch.matrices[i].model.ptr(), sizeof(dupli.mat)) != 0) {
+                batch.matrices[i].sync(float4x4(dupli.mat));
+                batch.chunk_versions[chunk] = 0;
+              }
+            }
+          }
+        });
+        commit_transform_chunks(batch);
+      }
+      CLOG_DEBUG(&log, "Updated verified nested instance transforms for %s", instancer.id.name + 2);
+    }
+    else {
+      stats.equivalent_outputs++;
+    }
+    stats.instancer_rebuilds--;
+    return true;
+  }
+
+  static uint64_t new_version()
+  {
+    static std::atomic<uint64_t> serial = 0;
+    return ++serial;
+  }
+
+  static uint32_t new_motion_history(const uint64_t version)
+  {
+    return uint32_t((version - 1) % UINT32_MAX) + 1;
+  }
+
+  static void commit_transform_chunks(draw::InstanceBatch &batch)
+  {
+    if (std::ranges::find(batch.chunk_versions, 0) == batch.chunk_versions.end()) {
+      return;
+    }
+    batch.version = new_version();
+    for (uint64_t &version : batch.chunk_versions) {
+      if (version == 0) {
+        version = batch.version;
+      }
+    }
+  }
+
+  static bool update_transforms(Entry &entry,
+                                const Object &instancer,
+                                const bke::Instances &instances,
+                                const bke::Instances &previous,
+                                const Set<const Collection *, 4> &moved_collections)
+  {
+    const Span<float4x4> next = instances.transforms(), old = previous.transforms();
+    const Span<int> handles = instances.reference_handles();
+    const Span<bke::InstanceReference> refs = instances.references();
+    const bool parent_changed = entry.world_matrix != instancer.object_to_world();
+    for (draw::InstanceBatch &batch : entry.batches) {
+      std::atomic<bool> handedness_changed = false;
+      threading::parallel_for(batch.chunk_versions.index_range(), 1, [&](const IndexRange chunks) {
+        for (const int c : chunks) {
+          const IndexRange chunk = batch.matrices.index_range()
+                                       .drop_front(c * draw::InstanceBatch::chunk_size)
+                                       .take_front(draw::InstanceBatch::chunk_size);
+          for (const int j : chunk) {
+            DupliObject &dupli = *batch.instances[j];
+            const int i = dupli.instance_idx[0];
+            const Collection *collection = dupli.level == 1 ? &refs[handles[i]].collection() :
+                                                               nullptr;
+            if (!parent_changed && old[i] == next[i] &&
+                (!collection || !moved_collections.contains(collection)))
+            {
+              continue;
+            }
+            if (collection != nullptr) {
+              /* Match the multiplication order in #make_duplis_geometry_set_impl. */
+              float collection_matrix[4][4];
+              unit_m4(collection_matrix);
+              sub_v3_v3(collection_matrix[3], collection->instance_offset);
+              mul_m4_m4_pre(collection_matrix, next[i].ptr());
+              mul_m4_m4_pre(collection_matrix, instancer.object_to_world().ptr());
+              mul_m4_m4m4(dupli.mat, collection_matrix, dupli.ob->object_to_world().ptr());
+            }
+            else {
+              mul_m4_m4m4(dupli.mat, instancer.object_to_world().ptr(), next[i].ptr());
+            }
+            if (is_negative_m4(dupli.mat) != batch.negative_scale) {
+              handedness_changed.store(true, std::memory_order_relaxed);
+            }
+            batch.matrices[j].sync(float4x4(dupli.mat));
+            batch.chunk_versions[c] = 0;
+          }
+        }
+      });
+      if (handedness_changed.load(std::memory_order_relaxed)) {
+        return false;
+      }
+      commit_transform_chunks(batch);
+    }
+    return true;
+  }
+
+  static bool can_cache(const DupliObject &dupli, const bke::GeometrySet *root)
+  {
+    return dupli.ob && dupli.ob->mode == OB_MODE_OBJECT && dupli.ob_data &&
+           ELEM(dupli.ob_data->id_type(), ID_ME, ID_CU_LEGACY, ID_PT, ID_CV) &&
+           !dupli.no_draw && !dupli.particle_system && !dupli.preview_base_geometry &&
+           std::ranges::find(dupli.instance_data, root) != std::end(dupli.instance_data);
+  }
+};
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -389,6 +1049,7 @@ DRWData *DRW_viewport_data_create()
   DRWData *drw_data = MEM_new_zeroed<DRWData>("DRWData");
 
   drw_data->default_view = new draw::View("DrawDefaultView");
+  drw_data->dupli_instance_cache = MEM_new<DupliInstanceCache>("DupliInstanceCache");
 
   for (int i = 0; i < 2; i++) {
     drw_data->view_data[i] = new DRWViewData();
@@ -408,6 +1069,7 @@ void DRWData::modules_init()
 void DRWData::modules_begin_sync()
 {
   using namespace blender::draw;
+  dupli_instance_cache->begin_sync();
   DRW_curves_begin_sync(this);
   DRW_smoke_begin_sync(this);
   DRW_gsplat_begin_sync();
@@ -428,6 +1090,7 @@ void DRW_viewport_data_free(DRWData *drw_data)
   DRW_gsplat_module_free(drw_data->gsplat_module);
   DRW_curves_module_free(drw_data->curves_module);
   delete drw_data->default_view;
+  MEM_delete(drw_data->dupli_instance_cache);
   MEM_delete(drw_data);
 }
 
@@ -668,6 +1331,14 @@ ObjectRef::ObjectRef(Object &ob, Object *dupli_parent, const VectorList<DupliObj
 {
 }
 
+ObjectRef::ObjectRef(Object &ob, Object *dupli_parent, const InstanceBatch &instance_batch)
+    : dupli_object_(instance_batch.instances[0]),
+      dupli_parent_(dupli_parent),
+      instance_batch_(&instance_batch),
+      object(&ob)
+{
+}
+
 }  // namespace draw
 
 /** \} */
@@ -721,10 +1392,12 @@ ObjectRef::ObjectRef(Object &ob, Object *dupli_parent, const VectorList<DupliObj
 
 namespace draw {
 
-static bool supports_handle_ranges(DupliObject *dupli, Object *parent, const DRWContext &draw_ctx)
+static bool supports_handle_ranges(const DupliObject *dupli,
+                                   Object *parent,
+                                   const DRWContext &draw_ctx)
 {
   int ob_type = dupli->ob_data ? BKE_object_obdata_to_type(dupli->ob_data) : OB_EMPTY;
-  if (!ELEM(ob_type, OB_MESH, OB_CURVES_LEGACY, OB_SURF, OB_FONT, OB_POINTCLOUD)) {
+  if (!ELEM(ob_type, OB_MESH, OB_CURVES_LEGACY, OB_SURF, OB_FONT, OB_POINTCLOUD, OB_CURVES)) {
     /* TODO: Add Grease Pencil support. */
     return false;
   }
@@ -818,6 +1491,255 @@ struct InstancesKey {
     return true;
   }
 };
+
+using DuplicateIDBuckets = Map<int, Vector<int, 2>>;
+
+static DuplicateIDBuckets duplicate_id_buckets(const Span<int> raw_ids, const Span<int> unique_ids)
+{
+  DuplicateIDBuckets buckets;
+  for (const int i : raw_ids.index_range()) {
+    if (raw_ids[i] != unique_ids[i]) {
+      buckets.lookup_or_add_default(raw_ids[i]);
+    }
+  }
+  for (const int i : raw_ids.index_range()) {
+    if (Vector<int, 2> *bucket = buckets.lookup_ptr(raw_ids[i])) {
+      bucket->append(i);
+    }
+  }
+  return buckets;
+}
+
+static void update_duplicate_motion_history(DupliInstanceCache::Entry &entry,
+                                             const DupliInstanceCache::Entry *previous,
+                                             const bke::Instances &instances,
+                                             const Span<int> raw_ids)
+{
+  const bke::Instances *old_instances = previous && previous->direct_objects && !previous->motion_history_overrides.is_empty() ?
+                                           previous->attribute_geometry.get_instances() :
+                                           nullptr;
+  const VArraySpan<int> old_raw_ids(old_instances ?
+                                      old_instances->attributes().lookup<int>("id").varray :
+                                      VArray<int>());
+  const Span<int> unique_ids = instances.unique_ids();
+  const Span<int> old_unique_ids = old_instances ? old_instances->unique_ids() : Span<int>();
+  const DuplicateIDBuckets buckets = duplicate_id_buckets(raw_ids, unique_ids);
+  const DuplicateIDBuckets old_buckets = duplicate_id_buckets(old_raw_ids, old_unique_ids);
+  const Span<int> handles = instances.reference_handles();
+  const Span<bke::InstanceReference> refs = instances.references();
+  const uint32_t revision = DupliInstanceCache::new_motion_history(entry.batches[0].version);
+
+  for (const auto [raw_id, members] : buckets.items()) {
+    const Vector<int, 2> *old_members = old_buckets.lookup_ptr(raw_id);
+    bool same_members = old_members && old_members->size() == members.size();
+    if (same_members) {
+      const Span<int> old_handles = old_instances->reference_handles();
+      const Span<bke::InstanceReference> old_refs = old_instances->references();
+      for (const int i : members.index_range()) {
+        const int next = members[i], old = (*old_members)[i];
+        if (next != old || unique_ids[next] != old_unique_ids[old] ||
+            refs[handles[next]] != old_refs[old_handles[old]])
+        {
+          same_members = false;
+          break;
+        }
+      }
+    }
+    /* A change to the bucket can reassign a sanitized ID to a different member. Keep the
+     * revision local to the ambiguous bucket so unique IDs keep their history. */
+    for (const int i : members) {
+      const int id = unique_ids[i];
+      entry.motion_history_overrides.add_new(
+          id, same_members ? previous->motion_history_overrides.lookup(id) : revision);
+    }
+  }
+  for (InstanceBatch &batch : entry.batches) {
+    batch.motion_history_overrides = &entry.motion_history_overrides;
+  }
+}
+
+template<typename RecordList> static DupliInstanceCache::Entry *cache_mesh_instances(
+    DupliInstanceCache &cache,
+    Object &instancer,
+    const bke::Instances &instances,
+    RecordList &duplilist,
+    Map<InstancesKey, VectorList<DupliObject *>> &groups,
+    const DRWContext &draw_ctx)
+{
+  static CLG_LogRef log = {"draw.instance_cache"};
+  if (duplilist.size() < DRW_COMMAND_GROUP_SIZE) {
+    return nullptr;
+  }
+
+  const bke::ObjectRuntime &runtime = *instancer.runtime;
+  const eEvaluationMode eval_mode = DEG_get_mode(draw_ctx.depsgraph);
+  const auto &live = cache.live_objects();
+  auto entry = std::make_unique<DupliInstanceCache::Entry>();
+  Set<const Object *> sources;
+  groups.clear();
+
+  for (DupliObject &dupli : duplilist) {
+    if (!DupliInstanceCache::can_cache(dupli, runtime.geometry_set_eval)) {
+      CLOG_INFO(&log,
+                "Using ordinary instances for %s: non-mesh, nested, or special instance output",
+                instancer.id.name + 2);
+      return nullptr;
+    }
+    if (sources.add(dupli.ob)) {
+      if (!live.contains(dupli.ob) || (dupli.ob->transflag & OB_DUPLI) ||
+          !dupli.ob->particlesystem.is_empty() ||
+          !DEG_iterator_dupli_is_visible(&dupli, eval_mode) ||
+          !supports_handle_ranges(&dupli, &instancer, draw_ctx))
+      {
+        CLOG_INFO(&log,
+                  "Using ordinary instances for %s: unsupported prototype %s",
+                  instancer.id.name + 2,
+                  dupli.ob->id.name + 2);
+        return nullptr;
+      }
+      entry->sources.append(DupliInstanceCache::Source::from_object(*dupli.ob));
+    }
+    const InstancesFlags flags = is_negative_m4(dupli.mat) ? InstancesFlags::IsNegativeScale :
+                                                          InstancesFlags(0);
+    InstancesKey key(dupli.ob, dupli.ob_data, flags, nullptr, dupli.preview_instance_index);
+    groups.lookup_or_add_default(key).append(&dupli);
+  }
+
+  const auto *prior = cache.entries.lookup_ptr(DEG_get_original(&instancer)->id.session_uid);
+  const auto ids = instances.attributes().lookup<int>("id");
+  const VArraySpan<int> raw_ids(ids.varray);
+  const bool unique_ids = ids && raw_ids == instances.unique_ids();
+  bool direct = unique_ids && duplilist.size() == instances.instances_num();
+  if (direct) {
+    for (const DupliObject &d : duplilist) {
+      if (d.level != 0 || d.instance_data[0] != runtime.geometry_set_eval) {
+        direct = false;
+        break;
+      }
+    }
+  }
+  for (auto [key, duplis] : groups.items()) {
+    entry->batches.append_as();
+    InstanceBatch &batch = entry->batches.last();
+    batch.negative_scale = flag_is_set(key.flags, InstancesFlags::IsNegativeScale);
+    batch.version = DupliInstanceCache::new_version();
+    const InstanceBatch *old = nullptr;
+    if (direct && prior && (*prior)->direct_objects) {
+      for (const InstanceBatch &previous : (*prior)->batches) {
+        if (previous.negative_scale == batch.negative_scale &&
+            previous.instances[0]->ob == key.object &&
+            previous.instances[0]->ob_data == key.ob_data)
+        {
+          old = &previous;
+          break;
+        }
+      }
+    }
+    /* Preserve encounter order even for opaque materials: tied depths can expose it. */
+    batch.instances = std::move(duplis);
+    batch.chunk_versions.resize((batch.size() + InstanceBatch::chunk_size - 1) /
+                                    InstanceBatch::chunk_size, batch.version);
+    batch.matrices.resize(batch.instances.size());
+    threading::parallel_for(batch.chunk_versions.index_range(), 1, [&](const IndexRange chunks) {
+      for (const int c : chunks) {
+        const int start = c * InstanceBatch::chunk_size;
+        const IndexRange part = batch.matrices.index_range().drop_front(start).take_front(InstanceBatch::chunk_size);
+        bool same = old && part.one_after_last() <= old->size();
+        for (const int i : part) {
+          const DupliObject &a = *batch.instances[i];
+          if (old && i < old->size()) {
+            const DupliObject &b = *old->instances[i];
+            if (a.persistent_id[0] == b.persistent_id[0] && a.random_id == b.random_id &&
+                std::memcmp(a.mat, b.mat, sizeof(a.mat)) == 0) {
+              batch.matrices[i] = old->matrices[i];
+              continue;
+            }
+          }
+          same = false;
+          batch.matrices[i].sync(float4x4(a.mat));
+        }
+        if (same) {
+          batch.chunk_versions[c] = old->chunk_versions[c];
+        }
+      }
+    });
+  }
+
+  entry->instancer = &instancer;
+  entry->geometry = runtime.geometry_set_eval;
+  entry->instances = &instances;
+  entry->world_matrix = instancer.object_to_world();
+  entry->name_hash = BLI_hash_string(instancer.id.name + 2);
+  entry->transform_update = runtime.last_update_transform;
+  entry->geometry_update = runtime.last_update_geometry;
+  entry->depsgraph_update = DEG_get_update_count(draw_ctx.depsgraph);
+  entry->collections = cache.collection_signatures(instances);
+  entry->flat = DupliInstanceCache::has_flat_mesh_instances(instancer, instances);
+  entry->direct_objects = entry->flat && duplilist.size() == instances.instances_num();
+  DupliInstanceCache::refresh_attribute_geometry(*entry, *runtime.geometry_set_eval);
+  for (DupliObject &dupli : duplilist) {
+    if (entry->flat) {
+      entry->flat = dupli.instance_data[0] == runtime.geometry_set_eval &&
+                    dupli.instance_data[1] == nullptr && dupli.ob_data == dupli.ob->data;
+      if (entry->flat) {
+        const auto type =
+            instances.references()[instances.reference_handles()[dupli.instance_idx[0]]].type();
+        entry->flat = (dupli.level == 0 && type == bke::InstanceReference::Type::Object) ||
+                      (dupli.level == 1 && type == bke::InstanceReference::Type::Collection);
+      }
+    }
+    entry->direct_objects &= entry->flat && dupli.level == 0;
+    for (const bke::GeometrySet *&owner : dupli.instance_data) {
+      if (owner == runtime.geometry_set_eval) {
+        owner = &entry->attribute_geometry;
+      }
+    }
+  }
+  for (InstanceBatch &batch : entry->batches) {
+    batch.shared_attribute_owner = entry->flat;
+  }
+  if (ids && !unique_ids && entry->direct_objects) {
+    update_duplicate_motion_history(*entry, prior ? prior->get() : nullptr, instances, raw_ids);
+  }
+  if (!ids && entry->direct_objects) {
+    /* Ordinal IDs can silently follow another point after membership changes. Invalidate motion
+     * for the affected prototype range when its sequence of IDs or input positions changed. */
+    for (InstanceBatch &batch : entry->batches) {
+      batch.ordinal_motion_history = DupliInstanceCache::new_motion_history(batch.version);
+      if (!prior || !(*prior)->direct_objects) {
+        continue;
+      }
+      const DupliObject &head = *batch.instances[0];
+      for (const InstanceBatch &previous : (*prior)->batches) {
+        if (previous.ordinal_motion_history == 0 || previous.size() != batch.size() ||
+            previous.negative_scale != batch.negative_scale || previous.instances[0]->ob != head.ob ||
+            previous.instances[0]->ob_data != head.ob_data) {
+          continue;
+        }
+        bool same_members = true;
+        auto old_instance = previous.instances.begin();
+        for (const DupliObject *instance : batch.instances) {
+          if (instance->persistent_id[0] != (*old_instance)->persistent_id[0] ||
+              instance->instance_idx[0] != (*old_instance)->instance_idx[0]) {
+            same_members = false;
+            break;
+          }
+          ++old_instance;
+        }
+        if (same_members) {
+          batch.ordinal_motion_history = previous.ordinal_motion_history;
+
+        }
+        break;
+      }
+    }
+  }
+  /* Both containers keep their element addresses when moved. The batches point into them. */
+  entry->duplis.emplace<RecordList>(std::move(duplilist));
+  DupliInstanceCache::Entry *result = entry.get();
+  cache.entries.add_overwrite(DEG_get_original(&instancer)->id.session_uid, std::move(entry));
+  return result;
+}
 
 namespace {
 /**
@@ -985,7 +1907,8 @@ static void foreach_obref_in_scene(
     FunctionRef<DrawFilter(Object &, const DupliObject *dupli)> should_draw_object_cb,
     FunctionRef<void(ObjectRef &)> draw_object_cb)
 {
-  DupliList duplilist;
+  static CLG_LogRef log = {"draw.instance_cache"};
+  DupliInstanceCache::Records duplis;
   Map<InstancesKey, VectorList<DupliObject *>> dupli_map;
 
   Object tmp_object;
@@ -999,60 +1922,45 @@ static void foreach_obref_in_scene(
   deg_iter_settings.depsgraph = depsgraph;
   deg_iter_settings.flags = DEG_ITER_OBJECT_FLAG_LINKED_DIRECTLY |
                             DEG_ITER_OBJECT_FLAG_LINKED_VIA_SET;
-  if (v3d && v3d->flag2 & V3D_SHOW_VIEWER) {
+  if (v3d && (v3d->flag2 & V3D_SHOW_VIEWER) && !v3d->viewer_path.path.is_empty()) {
     deg_iter_settings.viewer_path = &v3d->viewer_path;
   }
 
-  DEG_OBJECT_ITER_BEGIN (&deg_iter_settings, ob) {
+  DupliInstanceCache *cache = draw_ctx.is_select() || draw_ctx.is_depth() ||
+                                      draw_ctx.mode == DRWContext::CUSTOM ||
+                                      deg_iter_settings.viewer_path ?
+                                  nullptr :
+                                  draw_ctx.data->dupli_instance_cache;
+  if (cache) {
+    cache->begin_iteration(depsgraph);
+  }
 
-    if (!DEG_iterator_object_is_visible(eval_mode, ob)) {
-      continue;
-    }
-
-    const int visibility = BKE_object_visibility(ob, eval_mode);
-    const bool ob_visible = visibility & (OB_VISIBLE_SELF | OB_VISIBLE_PARTICLES);
-    const bool instances_visible = (visibility & OB_VISIBLE_INSTANCES) && is_object_instancer(*ob);
-    /* Don't create duplis from temporary preview objects, object_duplilist_preview already takes
-     * care of everything. (See #146194, #146211) */
-    const bool is_preview_dupli = data_.dupli_parent && data_.dupli_object_current;
-    const bool process_duplis = instances_visible && !is_preview_dupli;
-
-    /* Fully hidden non-instancers don't need a predicate call: the iterator has nothing
-     * to do with them. Skip them before invoking the predicate. */
-    if (!ob_visible && !process_duplis) {
-      continue;
-    }
-
-    /* Decide drawability for the top-level object, then fall through to the dupli path. */
-    const DrawFilter parent_filter = should_draw_object_cb(*ob, data_.dupli_object_current);
-
-    if (parent_filter == DrawFilter::Draw && ob_visible) {
-      /* NOTE: object_duplilist_preview is still handled by DEG_OBJECT_ITER,
-       * dupli_parent and dupli_object_current won't be null for these. */
-      ObjectRef ob_ref(ob, data_.dupli_parent, data_.dupli_object_current);
+  auto draw_range = [&](Object *parent,
+                        const VectorList<DupliObject *> &duplis,
+                        bool negative_scale,
+                        const InstanceBatch *batch) {
+    DupliObject *first_dupli = duplis[0];
+    if (evil::DEG_iterator_temp_object_from_dupli(
+            parent, first_dupli, eval_mode, false, &tmp_object, &tmp_runtime) &&
+        should_draw_object_cb(tmp_object, first_dupli) == DrawFilter::Draw)
+    {
+      tmp_object.light_linking = first_dupli->ob->light_linking;
+      SET_FLAG_FROM_TEST(tmp_object.transflag, negative_scale, OB_NEG_SCALE);
+      tmp_runtime.object_to_world = float4x4();
+      tmp_runtime.world_to_object = float4x4();
+#ifndef NDEBUG
+      tmp_runtime.is_draw_dupli_reference_tmp_object = true;
+#endif
+      ObjectRef ob_ref = batch ? ObjectRef(tmp_object, parent, *batch) :
+                                 ObjectRef(tmp_object, parent, duplis);
       draw_object_cb(ob_ref);
     }
+    evil::DEG_iterator_temp_object_free_properties(first_dupli, &tmp_object);
+  };
 
-    if (!process_duplis) {
-      continue;
-    }
-
-    if (parent_filter == DrawFilter::SkipRecursive) {
-      /* Filter rejected this instancer; skip its duplis entirely. */
-      continue;
-    }
-
-    /* Generate and walk this instancer's duplis. */
-    duplilist.clear();
-    object_duplilist(draw_ctx.depsgraph, ob, deg_iter_settings.included_objects, duplilist);
-
-    if (duplilist.is_empty()) {
-      continue;
-    }
-
+  auto draw_uncached = [&](Object *ob, auto &records) {
     dupli_map.clear();
-    for (DupliObject &dupli : duplilist) {
-
+    for (DupliObject &dupli : records) {
       if (!DEG_iterator_dupli_is_visible(&dupli, eval_mode)) {
         continue;
       }
@@ -1102,33 +2010,146 @@ static void foreach_obref_in_scene(
     }
 
     for (const auto &[key, instances] : dupli_map.items()) {
-      DupliObject *first_dupli = instances.first();
-      if (!evil::DEG_iterator_temp_object_from_dupli(
-              ob, first_dupli, eval_mode, false, &tmp_object, &tmp_runtime) ||
-          should_draw_object_cb(tmp_object, first_dupli) != DrawFilter::Draw)
-      {
-        evil::DEG_iterator_temp_object_free_properties(first_dupli, &tmp_object);
+      draw_range(ob, instances, flag_is_set(key.flags, InstancesFlags::IsNegativeScale), nullptr);
+    }
+  };
+
+  DEG_OBJECT_ITER_BEGIN (&deg_iter_settings, ob) {
+
+    if (!DEG_iterator_object_is_visible(eval_mode, ob)) {
+      continue;
+    }
+
+    const int visibility = BKE_object_visibility(ob, eval_mode);
+    const bool ob_visible = visibility & (OB_VISIBLE_SELF | OB_VISIBLE_PARTICLES);
+    const bool instances_visible = (visibility & OB_VISIBLE_INSTANCES) && is_object_instancer(*ob);
+    /* Don't create duplis from temporary preview objects, object_duplilist_preview already takes
+     * care of everything. (See #146194, #146211) */
+    const bool is_preview_dupli = data_.dupli_parent && data_.dupli_object_current;
+    const bool process_duplis = instances_visible && !is_preview_dupli;
+
+    /* Fully hidden non-instancers don't need a predicate call: the iterator has nothing
+     * to do with them. Skip them before invoking the predicate. */
+    if (!ob_visible && !process_duplis) {
+      continue;
+    }
+
+    /* Decide drawability for the top-level object, then fall through to the dupli path. */
+    const DrawFilter parent_filter = should_draw_object_cb(*ob, data_.dupli_object_current);
+
+    if (parent_filter == DrawFilter::Draw && ob_visible) {
+      /* NOTE: object_duplilist_preview is still handled by DEG_OBJECT_ITER,
+       * dupli_parent and dupli_object_current won't be null for these. */
+      ObjectRef ob_ref(ob, data_.dupli_parent, data_.dupli_object_current);
+      draw_object_cb(ob_ref);
+    }
+
+    if (!process_duplis) {
+      continue;
+    }
+
+    if (parent_filter == DrawFilter::SkipRecursive) {
+      /* Filter rejected this instancer; skip its duplis entirely. */
+      continue;
+    }
+
+    const bke::Instances *instances = cache && cache->enabled ?
+                                          DupliInstanceCache::candidate_instances(*ob) :
+                                          nullptr;
+    DupliInstanceCache::Entry *verify_entry = nullptr;
+    DupliInstanceCache::Entry *entry = instances ? cache->lookup(*ob, *instances, verify_entry) :
+                                                 nullptr;
+    if (entry) {
+      cache->stats.hits++;
+    }
+    else {
+      const double start = instances ? BLI_time_now_seconds() : 0.0;
+      DupliInstanceCache::FlatRecords flat;
+      if (instances && cache->flat_build_enabled && !deg_iter_settings.included_objects) {
+        flat = try_object_duplilist_flat_mesh(*depsgraph, *ob);
+      }
+      if (!flat.is_empty() && CLOG_CHECK(&log, CLG_LEVEL_DEBUG)) {
+        DupliList ordinary;
+        object_duplilist(depsgraph, ob, nullptr, ordinary);
+        bool equal = flat.size() == ordinary.size();
+        if (equal) {
+          auto record = flat.begin();
+          for (const DupliObject &reference : ordinary) {
+            if (!DupliInstanceCache::same_dupli_record(*record, reference) ||
+                !std::ranges::equal(record->instance_idx, reference.instance_idx) ||
+                !std::ranges::equal(record->instance_data, reference.instance_data))
+            {
+              equal = false;
+              break;
+            }
+            ++record;
+          }
+        }
+        if (equal) {
+          CLOG_DEBUG(&log, "Flat mesh instance records matched ordinary expansion for %s",
+                     ob->id.name + 2);
+        }
+        else {
+          CLOG_ERROR(&log, "Flat mesh instance records differ from ordinary expansion for %s",
+                     ob->id.name + 2);
+          flat = {};
+        }
+      }
+      if (!flat.is_empty()) {
+        CLOG_INFO(&log, "Built flat mesh instance records for %s", ob->id.name + 2);
+        duplis.emplace<DupliInstanceCache::FlatRecords>(std::move(flat));
+      }
+      else {
+        DupliList *list = std::get_if<DupliList>(&duplis);
+        if (!list) {
+          list = &duplis.emplace<DupliList>();
+        }
+        list->clear();
+        object_duplilist(depsgraph, ob, deg_iter_settings.included_objects, *list);
+      }
+      if (instances && DupliInstanceCache::records_num(duplis) != 0) {
+        if (verify_entry && cache->verify_evaluated_duplis(*verify_entry, *ob, *instances, duplis))
+        {
+          entry = verify_entry;
+          cache->stats.hits++;
+        }
+        else {
+          entry = std::visit(
+              [&](auto &list) {
+                return cache_mesh_instances(*cache, *ob, *instances, list, dupli_map, draw_ctx);
+              },
+              duplis);
+        }
+        cache->stats.build_ms += (BLI_time_now_seconds() - start) * 1000.0;
+        cache->stats.unsupported += (entry == nullptr);
+      }
+    }
+
+    if (entry) {
+      entry->last_used = cache->iteration;
+      /* These predicates depend only on shared prototype state and the cached no_draw bit,
+       * which was checked for every instance when building the range. */
+      const bool can_draw_batches = std::ranges::all_of(entry->batches, [&](const InstanceBatch &batch) {
+        const DupliObject *first = batch.instances[0];
+        return DEG_iterator_dupli_is_visible(first, eval_mode) &&
+               supports_handle_ranges(first, ob, draw_ctx);
+      });
+      if (can_draw_batches) {
+        cache->stats.instances += DupliInstanceCache::records_num(entry->duplis);
+        for (const InstanceBatch &batch : entry->batches) {
+          draw_range(ob, batch.instances, batch.negative_scale, &batch);
+        }
         continue;
       }
-
-      tmp_object.light_linking = first_dupli->ob->light_linking;
-      SET_FLAG_FROM_TEST(tmp_object.transflag,
-                         flag_is_set(key.flags, InstancesFlags::IsNegativeScale),
-                         OB_NEG_SCALE);
-      /* Should use DrawInstances data instead. */
-      tmp_object.runtime->object_to_world = float4x4();
-      tmp_object.runtime->world_to_object = float4x4();
-#ifndef NDEBUG
-      tmp_object.runtime->is_draw_dupli_reference_tmp_object = true;
-#endif
-
-      draw::ObjectRef ob_ref(tmp_object, ob, instances);
-      draw_object_cb(ob_ref);
-
-      evil::DEG_iterator_temp_object_free_properties(first_dupli, &tmp_object);
+      cache->stats.visibility_fallbacks++;
     }
+
+    std::visit([&](auto &list) { draw_uncached(ob, list); }, entry ? entry->duplis : duplis);
   }
   DEG_OBJECT_ITER_END;
+  if (cache) {
+    cache->end_iteration();
+  }
 }
 
 }  // namespace draw
@@ -1304,6 +2325,7 @@ void DRWContext::engines_init_and_sync(iter_callback_t iter_callback)
   if (capture) {
     const double phase_end = BLI_time_now_seconds();
     performance_metrics_.sync_manager_end_ms = (phase_end - phase_start) * 1000.0;
+    performance_metrics_.instance_cache = instance_cache_statistics_get();
   }
 
   last_sync_time_ = float(BLI_time_now_seconds() - start_time);
@@ -1503,6 +2525,13 @@ void DRWContext::performance_capture_enable()
       performance_metrics_.depsgraph_eval_serial = DEG_get_update_count(depsgraph);
     }
   }
+}
+
+InstanceCacheStats DRWContext::instance_cache_statistics_get() const
+{
+  InstanceCacheStats stats = data->dupli_instance_cache->stats;
+  view_data_active->manager->instance_cache_stats(stats);
+  return stats;
 }
 
 void DRWContext::performance_sync_end()

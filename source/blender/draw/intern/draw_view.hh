@@ -65,6 +65,8 @@ class View {
   bool dirty_ = true;
   bool frozen_ = false;
   bool procedural_ = false;
+  gpu::StorageBuf *cluster_bounds_ = nullptr;
+  bool use_cluster_bounds_ = false;
 
  public:
   View(const char *name, int view_len = 1, bool procedural = false)

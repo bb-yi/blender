@@ -27,6 +27,7 @@ class Instance;
 
 namespace blender {
 struct DrawPerformanceMetrics;
+struct InstanceCacheStats;
 namespace bke {
 struct SceneEeveePerformanceSnapshot;
 struct SceneEeveePerformanceSnapshotSet;
@@ -271,6 +272,7 @@ struct TelemetryFrameRecord {
   double draw_sync_ms = 0.0;
   double draw_submission_ms = 0.0;
   double profiler_accounting_ms = 0.0;
+  std::string instance_cache_report;
   bool has_shared_draw_timing = false;
   std::array<TelemetryStageSample, int(TelemetryStageId::Count)> stages = {};
   Vector<TelemetryScopeNode> scope_nodes;
@@ -379,6 +381,7 @@ class TelemetryModule {
   void reset();
   void reset_epoch(bool clear_source_session = false);
   void draw_performance_end(const blender::DrawPerformanceMetrics &metrics);
+  void instance_cache_stats_set(const InstanceCacheStats &stats);
 
   uint64_t source_id();
   uint64_t epoch() const

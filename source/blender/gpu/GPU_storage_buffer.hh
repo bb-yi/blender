@@ -41,6 +41,11 @@ void GPU_storagebuf_free(gpu::StorageBuf *ssbo);
 void GPU_storagebuf_usage_size_set(gpu::StorageBuf *ssbo, size_t size);
 size_t GPU_storagebuf_usage_size_get(const gpu::StorageBuf *ssbo);
 void GPU_storagebuf_update(gpu::StorageBuf *ssbo, const void *data);
+/**
+ * Upload a byte range while retaining the rest of the buffer. Offset and size must be multiples
+ * of four. Returns false if the backend cannot update a region of this buffer.
+ */
+bool GPU_storagebuf_update_sub(gpu::StorageBuf *ssbo, size_t offset, size_t size, const void *data);
 
 void GPU_storagebuf_bind(gpu::StorageBuf *ssbo, int slot);
 void GPU_storagebuf_unbind(gpu::StorageBuf *ssbo);
@@ -77,6 +82,13 @@ void GPU_storagebuf_sync_to_host(gpu::StorageBuf *ssbo);
  * buffer content can be read by the host.
  */
 void GPU_storagebuf_read(gpu::StorageBuf *ssbo, void *data);
+
+/**
+ * Consume a completed readback previously requested with #GPU_storagebuf_sync_to_host.
+ * Return false and leave the output untouched if there is no completed readback or the backend
+ * does not support polling. This does not submit GPU work or wait for it.
+ */
+bool GPU_storagebuf_try_read(gpu::StorageBuf *ssbo, void *data);
 
 /**
  * \brief Copy a part of a vertex buffer to a storage buffer.

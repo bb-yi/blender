@@ -36,7 +36,7 @@
 #define DRW_COMMAND_GROUP_SIZE 64
 #define DRW_FINALIZE_GROUP_SIZE 64
 /* Must be multiple of 32. Set to 32 for shader simplicity. */
-#define DRW_VISIBILITY_GROUP_SIZE 32
+static constexpr int DRW_VISIBILITY_GROUP_SIZE = 32;
 #define DRW_GSPLAT_GROUP_SIZE 128
 #define DRW_MESH_TO_CORNER_GROUP_SIZE 128
 

@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include "draw_defines.hh"
 #include "draw_intersect.bsl.hh"
 
 namespace draw {
@@ -19,6 +20,9 @@ namespace draw {
 struct Visibility {
   [[storage(0, read)]] ObjectBounds (&bounds_buf)[];
   [[storage(1, read_write)]] uint (&visibility_buf)[];
+  [[storage(2, read)]] const float4 (&clusters)[];
+  [[push_constant]] bool use_clusters;
+  [[shared]] uint cluster_visible[DRW_VIEW_MAX];
 
   [[push_constant]] int resource_len;
   [[push_constant]] int view_len;
@@ -46,6 +50,20 @@ void visibility([[resource_table]] Visibility &srt,
                 [[local_invocation_id]] const uint3 local_id,
                 [[work_group_id]] const uint3 workgroup_id)
 {
+  if (srt.use_clusters) {
+    float4 cluster = srt.clusters[workgroup_id.x];
+    for (uint v = local_id.x; v < uint(srt.view_len); v += DRW_VISIBILITY_GROUP_SIZE) {
+      srt.cluster_visible[v] = uint(cluster.w < 0.0f ||
+                                    culling.intersect_view(shape_sphere(cluster.xyz, cluster.w), v));
+    }
+    barrier();
+    if (srt.view_len == 1 && srt.cluster_visible[0] == 0u) {
+      if (local_id.x == 0u) {
+        srt.visibility_buf[workgroup_id.x] = 0u;
+      }
+      return;
+    }
+  }
   if (int(global_id.x) >= srt.resource_len) {
     return;
   }
@@ -62,7 +80,8 @@ void visibility([[resource_table]] Visibility &srt,
                                            bounds.inner_sphere_radius());
 
     for (uint view_id = 0u; view_id < uint(srt.view_len); view_id++) {
-      if (culling.get(view_id).bound_sphere.w == -1.0f) {
+      if ((srt.use_clusters && srt.cluster_visible[view_id] == 0u) ||
+          culling.get(view_id).bound_sphere.w == -1.0f) {
         /* View disabled. */
         srt.mask_visibility_bit(global_id, local_id, workgroup_id, view_id);
       }

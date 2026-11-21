@@ -69,6 +69,23 @@ struct BoundSphere {
   float center[3], radius;
 };
 
+struct InstanceCacheStats {
+  uint64_t hits = 0;
+  uint64_t cold_builds = 0;
+  uint64_t instancer_rebuilds = 0;
+  uint64_t equivalent_outputs = 0;
+  uint64_t prototype_rebuilds = 0;
+  uint64_t unsupported = 0;
+  uint64_t visibility_fallbacks = 0;
+  uint64_t material_fallbacks = 0;
+  uint64_t device_fallbacks = 0;
+  uint64_t compact_instances = 0;
+  uint64_t gpu_reused_instances = 0;
+  uint64_t gpu_upload_bytes = 0;
+  uint64_t instances = 0;
+  double build_ms = 0.0;
+};
+
 struct DrawPerformanceMetrics {
   bool valid = false;
 
@@ -90,6 +107,7 @@ struct DrawPerformanceMetrics {
   double sync_curves_update_ms = 0.0;
   double sync_engine_end_ms = 0.0;
   double sync_manager_end_ms = 0.0;
+  InstanceCacheStats instance_cache;
 
   double submission_total_ms = 0.0;
   double submission_framebuffer_ms = 0.0;
@@ -443,6 +461,7 @@ struct DRWContext {
   void performance_sync_begin(double sync_start_time);
   /** Enable detailed capture after the draw engines have been selected and validated. */
   void performance_capture_enable();
+  InstanceCacheStats instance_cache_statistics_get() const;
   void performance_sync_end();
   void performance_submission_end(double total_ms,
                                   double framebuffer_ms,

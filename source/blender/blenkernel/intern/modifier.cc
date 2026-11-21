@@ -76,6 +76,7 @@
 #include "DEG_depsgraph_query.hh"
 
 #include "MOD_modifiertypes.hh"
+#include "MOD_nodes.hh"
 
 #include "BLO_read_write.hh"
 
@@ -244,6 +245,15 @@ bool BKE_modifier_depends_ontime(Scene *scene, ModifierData *md)
   const ModifierTypeInfo *mti = BKE_modifier_get_info(md->type);
 
   return mti->depends_on_time && mti->depends_on_time(scene, md);
+}
+
+bool BKE_modifier_has_time_independent_instances(const ModifierData &md)
+{
+  if (md.type != eModifierType_Nodes) {
+    return false;
+  }
+  const NodesModifierData &nodes = reinterpret_cast<const NodesModifierData &>(md);
+  return nodes.runtime && nodes.runtime->time_independent_instances;
 }
 
 bool BKE_modifier_supports_mapping(ModifierData *md)

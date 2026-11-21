@@ -9,6 +9,7 @@
 #include "BKE_type_conversions.hh"
 
 #include "FN_multi_function_builder.hh"
+#include "FN_multi_function_registry.hh"
 
 #include "BLI_color.hh"
 #include "BLI_cpp_type.hh"
@@ -34,6 +35,11 @@ static void add_implicit_conversion(DataTypeConversions &conversions)
        * inline the function. */
       [](const From &a) { return ConversionF(a); },
       mf::build::exec_presets::AllSpanOrSingle());
+  if constexpr ((std::is_same_v<From, bool> && std::is_same_v<To, float>) ||
+                (std::is_same_v<From, float> && std::is_same_v<To, bool>))
+  {
+    mf::registry::add_new(multi_function);
+  }
   static auto convert_single_to_initialized = [](const void *src, void *dst) {
     *static_cast<To *>(dst) = ConversionF(*static_cast<const From *>(src));
   };

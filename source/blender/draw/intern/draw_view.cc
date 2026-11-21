@@ -292,6 +292,8 @@ void View::compute_visibility(ObjectBoundsBuf &bounds,
     GPU_shader_uniform_1i(shader, "resource_len", resource_len);
     GPU_shader_uniform_1i(shader, "view_len", view_len_);
     GPU_shader_uniform_1i(shader, "visibility_word_per_draw", word_per_draw);
+    GPU_shader_uniform_1b(shader, "use_clusters", use_cluster_bounds_);
+    GPU_storagebuf_bind(cluster_bounds_, GPU_shader_get_ssbo_binding(shader, "clusters"));
     GPU_storagebuf_bind(bounds, GPU_shader_get_ssbo_binding(shader, "bounds_buf"));
     GPU_storagebuf_bind(visibility_buf_, GPU_shader_get_ssbo_binding(shader, "visibility_buf"));
     GPU_uniformbuf_bind(frozen_ ? data_freeze_ : data_, DRW_VIEW_UBO_SLOT);

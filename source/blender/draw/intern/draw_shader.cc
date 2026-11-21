@@ -116,6 +116,7 @@ class ShaderCache {
   gpu::StaticShader draw_visibility_compute = {"draw_visibility_compute"};
   gpu::StaticShader draw_view_finalize = {"draw_view_finalize"};
   gpu::StaticShader draw_resource_finalize = {"draw_resource_finalize"};
+  gpu::StaticShader draw_resource_cluster_finalize = {"draw_resource_cluster_finalize"};
   gpu::StaticShader draw_command_generate = {"draw_command_generate"};
 
   /* Indexed by the element size in 32-bit words, minus one. */
@@ -229,6 +230,11 @@ gpu::Shader *DRW_shader_draw_view_finalize_get()
 gpu::Shader *DRW_shader_draw_resource_finalize_get()
 {
   return ShaderCache::get().draw_resource_finalize.get();
+}
+
+gpu::Shader *DRW_shader_draw_resource_cluster_finalize_get()
+{
+  return ShaderCache::get().draw_resource_cluster_finalize.get();
 }
 
 gpu::Shader *DRW_shader_draw_command_generate_get()

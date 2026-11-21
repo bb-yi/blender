@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_math_matrix.hh"
+#include "FN_multi_function_registry.hh"
 
 #include "GPU_material.hh"
 
@@ -22,10 +22,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
 {
-  static auto fn = mf::build::SI2_SO<float3, float4x4, float3>(
-      "Transform Point",
-      [](float3 point, float4x4 matrix) { return math::transform_point(matrix, point); });
-  builder.set_matching_fn(fn);
+  builder.set_matching_fn(mf::registry::lookup("transform_point(float3, float4x4)"_ustr));
 }
 
 static int node_gpu_material(GPUMaterial *material,

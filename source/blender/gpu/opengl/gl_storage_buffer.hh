@@ -38,6 +38,7 @@ class GLStorageBuf : public StorageBuf {
   ~GLStorageBuf();
 
   void update(const void *data) override;
+  bool update_sub(size_t offset, size_t size, const void *data) override;
   void bind(int slot) override;
   void unbind() override;
   void clear(uint32_t clear_value) override;

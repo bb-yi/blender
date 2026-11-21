@@ -811,6 +811,7 @@ class LazyFunctionForImplicitSceneFrame : public LazyFunction {
     const Depsgraph *depsgraph = nullptr;
     if (user_data.call_data->modifier_data) {
       depsgraph = user_data.call_data->modifier_data->depsgraph;
+      user_data.call_data->modifier_data->mark_scene_time_used();
     }
     else if (user_data.call_data->operator_data) {
       depsgraph = user_data.call_data->operator_data->depsgraphs->active;

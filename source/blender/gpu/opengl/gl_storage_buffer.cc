@@ -75,13 +75,24 @@ void GLStorageBuf::init()
 
 void GLStorageBuf::update(const void *data)
 {
+  this->update_sub(0, size_in_bytes_, data);
+}
+
+bool GLStorageBuf::update_sub(size_t offset, size_t size, const void *data)
+{
   if (ssbo_id_ == 0) {
     this->init();
   }
 
-  glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_id_);
-  glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, size_in_bytes_, data);
-  glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+  if (GLContext::direct_state_access_support) {
+    glNamedBufferSubData(ssbo_id_, offset, size, data);
+  }
+  else {
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_id_);
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, offset, size, data);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+  }
+  return true;
 }
 
 /** \} */

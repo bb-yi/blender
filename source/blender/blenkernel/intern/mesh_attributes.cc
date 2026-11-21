@@ -6,6 +6,8 @@
  * \ingroup bke
  */
 
+#include <cstdlib>
+
 #include "BLI_generic_virtual_array.hh"
 #include "BLI_math_quaternion.hh"
 #include "BLI_virtual_array.hh"
@@ -306,6 +308,21 @@ static GVArray adapt_mesh_domain_point_to_face(const Mesh &mesh, const GVArray &
   const OffsetIndices faces = mesh.faces();
   const Span<int> corner_verts = mesh.corner_verts();
 
+  if (varray.type().is<float>() && varray.is_span()) {
+    auto sample_face =
+        [corner_verts, faces, values = VArraySpan<float>(varray.typed<float>())](const int face) {
+          /* Match DefaultMixer<float>'s ordered accumulation and finalization. */
+          float total = 0.0f;
+          float weight = 0.0f;
+          for (const int vert : corner_verts.slice(faces[face])) {
+            total += values[vert];
+            weight += 1.0f;
+          }
+          return weight > 0.0f ? total * (1.0f / weight) : 0.0f;
+        };
+    return VArray<float>::from_func(faces.size(), std::move(sample_face));
+  }
+
   GVArray new_varray;
   attribute_math::to_static_type(varray.type(), [&]<typename T>() {
     if constexpr (!std::is_void_v<attribute_math::DefaultMixer<T>>) {
@@ -423,7 +440,32 @@ void adapt_mesh_domain_edge_to_corner_impl(const Mesh &mesh,
 
 static GVArray adapt_mesh_domain_edge_to_corner(const Mesh &mesh, const GVArray &varray)
 {
+  static const bool use_bool_corner_span = [] {
+    const char *value = std::getenv("BLENDER_GN_CORNER_ADAPT");
+    return value == nullptr || !STREQ(value, "0");
+  }();
   GArray<> values(varray.type(), mesh.corners_num);
+  if (use_bool_corner_span && varray.type().is<bool>() && varray.is_span()) {
+    const Span<bool> src = varray.get_internal_span().typed<bool>();
+    const MutableSpan<bool> dst = values.as_mutable_span().typed<bool>();
+    const OffsetIndices faces = mesh.faces();
+    const Span<int> corner_edges = mesh.corner_edges();
+    threading::parallel_for(faces.index_range(), 2048, [&](const IndexRange range) {
+      for (const int face_index : range) {
+        const IndexRange face = faces[face_index];
+        if (face.is_empty()) {
+          continue;
+        }
+        bool previous = src[corner_edges[face.last()]];
+        for (const int corner : face) {
+          const bool current = src[corner_edges[corner]];
+          dst[corner] = previous && current;
+          previous = current;
+        }
+      }
+    });
+    return GVArray::from_garray(std::move(values));
+  }
   attribute_math::to_static_type(varray.type(), [&]<typename T>() {
     if constexpr (!std::is_void_v<attribute_math::DefaultMixer<T>>) {
       adapt_mesh_domain_edge_to_corner_impl<T>(

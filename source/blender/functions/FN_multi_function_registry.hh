@@ -34,4 +34,7 @@ template<typename CreateFn> inline void add_new_cb(CreateFn &&create_fn)
  */
 const MultiFunction &lookup(UString id);
 
+/** True for the shared, immutable numeric operations registered by register_common_functions. */
+bool contains(const MultiFunction &fn);
+
 }  // namespace blender::fn::multi_function::registry

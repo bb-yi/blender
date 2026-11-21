@@ -50,7 +50,7 @@ void VKStagingBuffer::copy_to_device(VKContext &context)
   context.render_graph().add_node(copy_buffer);
 }
 
-void VKStagingBuffer::copy_from_device(VKContext &context)
+void VKStagingBuffer::copy_from_device(VKContext &context, bool dst_host_read)
 {
   BLI_assert(host_buffer_.is_allocated() && host_buffer_.is_mapped());
   render_graph::VKCopyBufferNode::CreateInfo copy_buffer = {};
@@ -58,6 +58,7 @@ void VKStagingBuffer::copy_from_device(VKContext &context)
   copy_buffer.dst_buffer = host_buffer_.resource();
   copy_buffer.region.srcOffset = device_buffer_offset_;
   copy_buffer.region.size = region_size_;
+  copy_buffer.dst_host_read = dst_host_read;
 
   context.render_graph().add_node(copy_buffer);
 }

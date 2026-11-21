@@ -8,6 +8,7 @@
  * \ingroup bke
  */
 
+#include "BLI_array.hh"
 #include "BLI_vector_list.hh"
 
 #include "BKE_geometry_set.hh"
@@ -76,6 +77,11 @@ void object_duplilist(Depsgraph *depsgraph,
                       Object *ob,
                       Set<const Object *> *include_objects,
                       DupliList &r_duplilist);
+/**
+ * Build ordinary geometry set instance records in parallel when a mesh object instances only
+ * mesh objects without recursive duplis. An empty array requests the general expansion path.
+ */
+Array<DupliObject, 0> try_object_duplilist_flat_mesh(Depsgraph &depsgraph, Object &ob);
 /**
  * Fill a Vector of #DupliObject for the preview geometry referenced by the #ViewerPath.
  */

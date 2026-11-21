@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "draw_defines.hh"
 #include "draw_intersect.bsl.hh"
 #include "draw_model.bsl.hh"
 #include "gpu_shader_utildefines.bsl.hh"
@@ -27,6 +28,9 @@ struct ViewVisibility {
   [[storage(0, read)]] const ObjectBounds (&bounds_buf)[];
   [[storage(1, read_write)]] uint (&visibility_buf)[];
   [[storage(2, read)]] const ShadowRenderView (&render_view_buf)[SHADOW_VIEW_MAX];
+  [[storage(3, read)]] const float4 (&clusters)[];
+  [[push_constant]] bool use_clusters;
+  [[shared]] uint cluster_visible[SHADOW_VIEW_MAX];
 
   [[push_constant]] const int resource_len;
 
@@ -61,9 +65,19 @@ struct ViewVisibility {
 
 [[compute, local_size(DRW_VISIBILITY_GROUP_SIZE)]]
 void comp_main([[resource_table]] ViewVisibility &srt,
-               [[global_invocation_id]] const uint3 global_id)
+               [[global_invocation_id]] const uint3 global_id,
+               [[local_invocation_id]] const uint3 local_id,
+               [[work_group_id]] const uint3 workgroup_id)
 {
   draw::ViewCulling &culling = srt.view_culling;
+  if (srt.use_clusters) {
+    float4 cluster = srt.clusters[workgroup_id.x];
+    for (uint v = local_id.x; v < uint(SHADOW_VIEW_MAX); v += DRW_VISIBILITY_GROUP_SIZE) {
+      srt.cluster_visible[v] = uint(cluster.w < 0.0f ||
+                                    culling.intersect_view(shape_sphere(cluster.xyz, cluster.w), v));
+    }
+    barrier();
+  }
 
   if (int(global_id.x) >= srt.resource_len) {
     return;
@@ -81,7 +95,8 @@ void comp_main([[resource_table]] ViewVisibility &srt,
                                            bounds.inner_sphere_radius());
 
     for (uint view_id = 0u; view_id < uint(SHADOW_VIEW_MAX); view_id++) {
-      if (srt.non_culling_tests(view_id, global_id.x)) {
+      if ((srt.use_clusters && srt.cluster_visible[view_id] == 0u) ||
+          srt.non_culling_tests(view_id, global_id.x)) {
         srt.mask_visibility_bit(view_id, global_id);
       }
       else if (culling.get(view_id).bound_sphere.w == -1.0f) {

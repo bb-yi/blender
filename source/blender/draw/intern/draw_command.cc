@@ -609,8 +609,9 @@ std::string DrawMulti::serialize(const std::string &line_prefix) const
 {
   DrawMultiBuf::DrawGroupBuf &groups = multi_draw_buf->group_buf_;
 
-  MutableSpan<DrawPrototype> prototypes(multi_draw_buf->prototype_buf_.data(),
-                                        multi_draw_buf->prototype_count_);
+  Vector<DrawPrototype> prototypes(
+      Span<DrawPrototype>(multi_draw_buf->prototype_buf_.data(), multi_draw_buf->prototype_count_));
+  prototypes.extend(multi_draw_buf->range_prototypes_);
 
   /* This emulates the GPU sorting but without the unstable draw order. */
   std::ranges::sort(prototypes, [](const DrawPrototype &a, const DrawPrototype &b) {
@@ -619,7 +620,7 @@ std::string DrawMulti::serialize(const std::string &line_prefix) const
 
   /* Compute prefix sum to have correct offsets. */
   uint prefix_sum = 0u;
-  for (DrawGroup &group : groups) {
+  for (DrawGroup &group : groups.as_span().take_front(multi_draw_buf->group_count_)) {
     group.start = prefix_sum;
     prefix_sum += group.front_facing_counter + group.back_facing_counter;
   }
@@ -636,7 +637,8 @@ std::string DrawMulti::serialize(const std::string &line_prefix) const
     intptr_t offset = grp.start;
 
     if (grp.back_facing_counter > 0) {
-      for (DrawPrototype &proto : prototypes.slice_safe({offset, grp.back_facing_counter})) {
+      for (const DrawPrototype &proto :
+           prototypes.as_span().slice_safe({offset, grp.back_facing_counter})) {
         BLI_assert(proto.group_id == group_index);
         ResourceID res_id(proto.res_id);
         BLI_assert(res_id.has_inverted_handedness());
@@ -648,7 +650,8 @@ std::string DrawMulti::serialize(const std::string &line_prefix) const
     }
 
     if (grp.front_facing_counter > 0) {
-      for (DrawPrototype &proto : prototypes.slice_safe({offset, grp.front_facing_counter})) {
+      for (const DrawPrototype &proto :
+           prototypes.as_span().slice_safe({offset, grp.front_facing_counter})) {
         BLI_assert(proto.group_id == group_index);
         ResourceID res_id(proto.res_id);
         BLI_assert(!res_id.has_inverted_handedness());
@@ -882,16 +885,37 @@ void DrawMultiBuf::generate_commands(Vector<Header, 0> & /*headers*/,
   }
 
   group_buf_.push_update();
-  prototype_buf_.push_update();
   /* Allocate enough for the expansion pass. */
   resource_id_buf_.get_or_resize(resource_id_count_ * view_len * (use_custom_ids ? 2 : 1));
   /* Two commands per group (inverted and non-inverted scale). */
   command_buf_.get_or_resize(group_count_ * 2);
 
-  if (prototype_count_ > 0) {
+  uint legacy_len = prototype_count_;
+  uint range_len = range_prototypes_.size();
+  uint legacy_groups = divide_ceil_u(legacy_len, DRW_COMMAND_GROUP_SIZE);
+  if (legacy_groups + range_len > uint(GPU_max_work_group_count(0))) {
+    /* Many short ranges can need extra groups due to padding. Fall back to packed workgroups. */
+    for (const DrawPrototype &range : range_prototypes_) {
+      for (uint i = 0; i < range.instance_len; i++) {
+        DrawPrototype &proto = prototype_buf_.get_or_resize(legacy_len++);
+        proto = {range.group_id, range.res_id + i, range.custom_id, 1};
+      }
+    }
+    range_len = 0;
+    legacy_groups = divide_ceil_u(legacy_len, DRW_COMMAND_GROUP_SIZE);
+  }
+  else if (range_len > 0) {
+    prototype_buf_.get_or_resize(legacy_len + range_len - 1);
+    prototype_buf_.as_span().slice(legacy_len, range_len).copy_from(range_prototypes_);
+  }
+
+  if (legacy_len + range_len > 0) {
+    GPU_storagebuf_usage_size_set(prototype_buf_, (legacy_len + range_len) * sizeof(DrawPrototype));
+    prototype_buf_.push_update();
     gpu::Shader *shader = DRW_shader_draw_command_generate_get();
     GPU_shader_bind(shader);
-    GPU_shader_uniform_1i(shader, "prototype_len", prototype_count_);
+    GPU_shader_uniform_1i(shader, "prototype_len", legacy_len);
+    GPU_shader_uniform_1i(shader, "legacy_groups", legacy_groups);
     GPU_shader_uniform_1i(shader, "visibility_word_per_draw", visibility_word_per_draw);
     GPU_shader_uniform_1i(shader, "view_len", view_len);
     GPU_shader_uniform_1i(shader, "view_shift", log2_ceil_u(view_len));
@@ -901,7 +925,7 @@ void DrawMultiBuf::generate_commands(Vector<Header, 0> & /*headers*/,
     GPU_storagebuf_bind(prototype_buf_, GPU_shader_get_ssbo_binding(shader, "prototype_buf"));
     GPU_storagebuf_bind(command_buf_, GPU_shader_get_ssbo_binding(shader, "command_buf"));
     GPU_storagebuf_bind(resource_id_buf_, DRW_RESOURCE_ID_SLOT);
-    GPU_compute_dispatch(shader, divide_ceil_u(prototype_count_, DRW_COMMAND_GROUP_SIZE), 1, 1);
+    GPU_compute_dispatch(shader, legacy_groups + range_len, 1, 1);
     /* TODO(@fclem): Investigate moving the barrier in the bind function. */
     GPU_memory_barrier(GPU_BARRIER_SHADER_STORAGE);
     GPU_storagebuf_sync_as_indirect_buffer(command_buf_);

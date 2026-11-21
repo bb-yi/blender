@@ -29,7 +29,9 @@
 #include "GPU_material.hh"
 
 /* particles_matrix */
+#include "BLI_map.hh"
 #include "BLI_math_matrix.hh"
+#include "BLI_vector.hh"
 #include "DNA_collection_types.h"
 
 /* parent_is_in_edit_paint_mode */
@@ -89,6 +91,8 @@ struct ResourceIDRange {
   ResourceID first = 0;
   /* Number of handles in the range. */
   uint32_t count = 1;
+  /* Each resource in this range refers to one cached mesh instance. */
+  bool compact = false;
 
   ResourceIDRange() = default;
   ResourceIDRange(ResourceID id) : first(id) {}
@@ -163,7 +167,11 @@ class ResourceHandleRange {
 
   ResourceIDRange id_ = {};
 
-  ResourceHandleRange(ResourceHandle first_handle, uint len) : id_(first_handle.id_, len) {}
+  ResourceHandleRange(ResourceHandle first_handle, uint len, bool compact = false)
+      : id_(first_handle.id_, len)
+  {
+    id_.compact = compact;
+  }
 
  public:
   ResourceHandleRange() = default;
@@ -188,6 +196,18 @@ class ResourceHandleRange {
   {
     BLI_assert(is_valid());
     return id_;
+  }
+
+  ResourceHandleRange without_compaction() const
+  {
+    ResourceHandleRange range = *this;
+    range.id_.compact = false;
+    return range;
+  }
+
+  bool uses_compaction() const
+  {
+    return id_.compact;
   }
 
   /* Returns a single handle within this range.
@@ -218,6 +238,34 @@ class ResourceHandleRange {
   }
 };
 
+/** Group of evaluated instances that share one prototype and draw state. */
+struct InstanceBatch {
+  static constexpr int chunk_size = 1024;
+  bool negative_scale = false;
+  /* All records use the same single Geometry Nodes instance attribute layer. */
+  bool shared_attribute_owner = false;
+  /* Nonzero for ordinal IDs. Additional per-instance overrides are keyed by sanitized ID. */
+  uint32_t ordinal_motion_history = 0;
+  const Map<int, uint32_t> *motion_history_overrides = nullptr;
+  uint64_t version = 0;
+  Vector<uint64_t> chunk_versions;
+  VectorList<DupliObject *> instances;
+  Vector<ObjectMatrices> matrices;
+
+  int size() const
+  {
+    return instances.size();
+  }
+
+  uint32_t motion_history(const int instance) const
+  {
+    return motion_history_overrides ?
+               motion_history_overrides->lookup_default(instances[instance]->persistent_id[0],
+                                                        ordinal_motion_history) :
+               ordinal_motion_history;
+  }
+};
+
 /* TODO(fclem): Move to somewhere more appropriated after cleaning up the header dependencies. */
 class ObjectRef {
   friend class Manager;
@@ -232,6 +280,8 @@ class ObjectRef {
 
   /** List of (render-compatible) duplis when rendering a ranges. */
   const VectorList<DupliObject *> *duplis_ = nullptr;
+  /** Persistent grouped instances from the viewport instance cache. */
+  const InstanceBatch *instance_batch_ = nullptr;
 
   /** Unique handle per object ref. */
   ResourceHandleRange handle_ = {};
@@ -247,6 +297,7 @@ class ObjectRef {
                      Object *dupli_parent = nullptr,
                      DupliObject *dupli_object = nullptr);
   explicit ObjectRef(Object &ob, Object *dupli_parent, const VectorList<DupliObject *> &duplis);
+  explicit ObjectRef(Object &ob, Object *dupli_parent, const InstanceBatch &instance_batch);
   explicit ObjectRef(const ObjectRef &ob_ref, uint sub_key) : ObjectRef(ob_ref)
   {
     sub_key_ = sub_key;
@@ -265,12 +316,15 @@ class ObjectRef {
 
   bool is_range() const
   {
-    return duplis_ != nullptr;
+    return duplis_ != nullptr || instance_batch_ != nullptr;
   }
 
   /** Read-only evaluated instance identity for geometry-dependent render modules. */
   const DupliObject *dupli_object(int instance_index = 0) const
   {
+    if (instance_batch_) {
+      return instance_batch_->instances[instance_index];
+    }
     if (duplis_) {
       return (*duplis_)[instance_index];
     }
@@ -285,15 +339,26 @@ class ObjectRef {
 
   int instances_count() const
   {
+    if (instance_batch_) {
+      return instance_batch_->size();
+    }
     if (duplis_) {
       return duplis_->size();
     }
     return 1;
   }
 
+  const InstanceBatch *instance_batch() const
+  {
+    return instance_batch_;
+  }
+
   float4x4 object_to_world(int instance_index) const
   {
-    if (is_range()) {
+    if (instance_batch_) {
+      return instance_batch_->matrices[instance_index].model;
+    }
+    if (duplis_) {
       return float4x4((*duplis_)[instance_index]->mat);
     }
     else {
@@ -312,7 +377,7 @@ class ObjectRef {
   {
     if (instance_index != 0) {
       BLI_assert(is_range());
-      return (*duplis_)[instance_index]->random_id * (1.0f / float(0xFFFFFFFF));
+      return dupli_object(instance_index)->random_id * (1.0f / float(0xFFFFFFFF));
     }
 
     if (dupli_parent_ == nullptr) {
@@ -333,7 +398,7 @@ class ObjectRef {
       if (use_dupli) {
         /* If requesting instance data, check the parent particle system and object. */
         return BKE_object_dupli_find_rgba_attribute(
-            object, (*duplis_)[instance_index], dupli_parent_, name, r_value);
+            object, dupli_object(instance_index), dupli_parent_, name, r_value);
       }
     }
 
@@ -525,18 +590,19 @@ class ObjectKey {
   int id_[MAX_DUPLI_RECUR];
   /** Used for particle system hair. */
   int sub_key_ = 0;
+  /** Only used by consumers of temporal history. */
+  uint32_t motion_history_ = 0;
 
  public:
   ObjectKey() = default;
 
-  ObjectKey(const ObjectRef &ob_ref, int instance_index)
+  ObjectKey(const ObjectRef &ob_ref, int instance_index, uint32_t motion_history = 0)
+      : motion_history_(motion_history)
   {
     ob_ = DEG_get_original(ob_ref.object);
     hash_value_ = get_default_hash(ob_);
 
-    if (DupliObject *dupli = instance_index ? (*ob_ref.duplis_)[instance_index] :
-                                              ob_ref.dupli_object_)
-    {
+    if (const DupliObject *dupli = ob_ref.dupli_object(instance_index)) {
       parent_ = ob_ref.dupli_parent_;
       hash_value_ = get_default_hash(hash_value_, get_default_hash(parent_));
       for (int i : IndexRange(MAX_DUPLI_RECUR)) {
@@ -551,6 +617,9 @@ class ObjectKey {
     if (ob_ref.sub_key_ != 0) {
       sub_key_ = ob_ref.sub_key_;
       hash_value_ = get_default_hash(hash_value_, get_default_hash(sub_key_));
+    }
+    if (motion_history_ != 0) {
+      hash_value_ = get_default_hash(hash_value_, motion_history_);
     }
   }
 
@@ -593,7 +662,10 @@ class ObjectKey {
         }
       }
     }
-    return sub_key_ < other.sub_key_;
+    if (sub_key_ != other.sub_key_) {
+      return sub_key_ < other.sub_key_;
+    }
+    return motion_history_ < other.motion_history_;
   }
 
   uint64_t hash() const
@@ -612,7 +684,7 @@ class ObjectKey {
     if (parent_ != k.parent_) {
       return false;
     }
-    if (sub_key_ != k.sub_key_) {
+    if (sub_key_ != k.sub_key_ || motion_history_ != k.motion_history_) {
       return false;
     }
     if (parent_) {

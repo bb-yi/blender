@@ -1029,6 +1029,7 @@ void TelemetryModule::merge_draw_performance(const blender::DrawPerformanceMetri
   current_frame_.draw_sync_ms = metrics.sync_total_ms;
   current_frame_.draw_submission_ms = metrics.submission_total_ms;
   current_frame_.total_cpu_ms = metrics.sync_total_ms + metrics.submission_total_ms;
+  instance_cache_stats_set(metrics.instance_cache);
 
   auto add_flat_sample = [&](const TelemetryStageId stage, const double cpu_ms) {
     if (cpu_ms < 0.0) {
@@ -1143,6 +1144,28 @@ void TelemetryModule::merge_draw_performance(const blender::DrawPerformanceMetri
   for (const int child_index : engine_draw_children) {
     current_frame_.scope_nodes[submission_engine_draw].children.append(child_index);
   }
+}
+
+void TelemetryModule::instance_cache_stats_set(const InstanceCacheStats &cache)
+{
+  current_frame_.instance_cache_report = fmt::format(
+      "Instance Cache: hits={} cold={} instancer_rebuilds={} equivalent_outputs={} prototype_rebuilds={} "
+      "unsupported={} visibility_fallbacks={} material_fallbacks={} device_fallbacks={} "
+      "instances={} compact={} gpu_reused={} upload_bytes={} build_cpu={:.3f} ms\n",
+      cache.hits,
+      cache.cold_builds,
+      cache.instancer_rebuilds,
+      cache.equivalent_outputs,
+      cache.prototype_rebuilds,
+      cache.unsupported,
+      cache.visibility_fallbacks,
+      cache.material_fallbacks,
+      cache.device_fallbacks,
+      cache.instances,
+      cache.compact_instances,
+      cache.gpu_reused_instances,
+      cache.gpu_upload_bytes,
+      cache.build_ms);
 }
 
 void TelemetryModule::draw_performance_end(const blender::DrawPerformanceMetrics &metrics)
@@ -1960,6 +1983,7 @@ std::string TelemetryModule::viewport_report() const
       "Capture Sequence: {}\n"
       "Sample Progress: {}\n"
       "Sampling: {}\n"
+      "{}"
       "Features: AO={} DOF={} MB={} Volume={} Raytrace={} Filters={} RenderTextures={} Lights={} Probes={} NPR Mats={} Raycast Mats={} GLSL Mats={}\n",
       record->total_cpu_ms,
       record->average_total_cpu_ms,
@@ -1973,6 +1997,7 @@ std::string TelemetryModule::viewport_report() const
       record->capture_seq,
       sample_progress_string(*record),
       sample_status_string(*record),
+      record->instance_cache_report,
       record->features.has_ao ? "On" : "Off",
       record->features.has_dof ? "On" : "Off",
       record->features.has_motion_blur ? "On" : "Off",
@@ -2053,6 +2078,7 @@ std::string TelemetryModule::render_report() const
       record->features.raycast_material_count,
       record->features.glsl_function_material_count);
 
+  result += record->instance_cache_report;
   for (const int stage_index : sorted_stage_indices(*record)) {
     const TelemetryStageSample &stage = record->stages[stage_index];
     const double value = stage.cpu_ms;

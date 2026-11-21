@@ -19,6 +19,7 @@
 #include "GPU_platform.hh"
 #include "GPU_shader.hh"
 
+#include "draw_defines.hh"
 #include "gpu_shader_create_info.hh"
 #include "gpu_shader_create_info_private.hh"
 #include "gpu_shader_dependency_private.hh"

@@ -41,6 +41,12 @@
 
 namespace blender::eevee {
 
+static ObjectKey velocity_object_key(const ObjectRef &object, int instance)
+{
+  const draw::InstanceBatch *batch = object.instance_batch();
+  return ObjectKey(object, instance, batch ? batch->motion_history(instance) : 0);
+}
+
 /* Keep allocation decisions local to velocity. In particular, a snapshot buffer must not shrink
  * on every small topology change, and its history must never be discarded before consumption. */
 static int64_t velocity_buffer_capacity(const int64_t used,
@@ -209,7 +215,8 @@ void VelocityModule::step_sync(eVelocityStep step, float time)
         for (int instance : IndexRange(ob_ref.instances_count())) {
           GeometryLineStep data = mesh_step;
           data.object_to_world = ob_ref.object_to_world(instance);
-          geometry_line_steps_[step].add_overwrite(ObjectKey(ob_ref, instance), std::move(data));
+          geometry_line_steps_[step].add_overwrite(velocity_object_key(ob_ref, instance),
+                                                   std::move(data));
         }
       });
 
@@ -284,7 +291,7 @@ bool VelocityModule::step_object_sync(const ObjectHandle &ob_handle,
      * callback. In this case, we cannot correctly match objects between updates.
      * What this means is that there will be incorrect motion vectors for these objects.
      * We live with that until we have a correct way of identifying new objects. */
-    VelocityObjectData &vel = velocity_map.lookup_or_add_default(ObjectKey(ob_handle, i));
+    VelocityObjectData &vel = velocity_map.lookup_or_add_default(velocity_object_key(ob_handle, i));
     vel.obj.ofs[step_] = object_steps_usage[step_]++;
     if (ob_handle.res_handle.is_valid()) {
       vel.obj.resource_index = ob_handle.res_handle.sub_handle(i).index();
@@ -527,7 +534,8 @@ uint64_t VelocityModule::geometry_line_topology_hash(const Mesh &mesh)
 const VelocityModule::GeometryLineStep *VelocityModule::geometry_line_step_get(
     const ObjectRef &object, int instance, eVelocityStep step, uint64_t topology, int vertex_count) const
 {
-  const GeometryLineStep *data = geometry_line_steps_[step].lookup_ptr(ObjectKey(object, instance));
+  const GeometryLineStep *data = geometry_line_steps_[step].lookup_ptr(
+      velocity_object_key(object, instance));
   if (data == nullptr || data->topology != topology || data->positions->size() != vertex_count) {
     return nullptr;
   }

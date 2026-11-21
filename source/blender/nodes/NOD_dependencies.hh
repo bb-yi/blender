@@ -50,6 +50,11 @@ struct EvalDependencies {
   bool needs_active_camera = false;
   bool needs_scene_render_params = false;
   bool time_dependent = false;
+  /**
+   * Time dependence that cannot be determined by watching Scene Time, implicit frame inputs,
+   * simulations and bake requests during a Geometry Nodes modifier evaluation.
+   */
+  bool has_untracked_time_dependency = false;
 
   /**
    * Adds a generic data-block dependency. Note that this does not add a dependency to e.g. the

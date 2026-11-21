@@ -506,11 +506,9 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
     return;
   }
 
-  ObjectHandle ob_handle = sync_object(ob_ref, inst_.manager->unique_handle(ob_ref));
-
-  bool has_motion = inst_.velocity.step_object_sync(ob_handle);
-
-  MaterialArray &material_array = inst_.materials.material_array_get(ob_handle, has_motion);
+  const ObjectHandle synced_handle = sync_object(ob_ref, inst_.manager->unique_handle(ob_ref));
+  const bool has_motion = inst_.velocity.step_object_sync(synced_handle);
+  MaterialArray &material_array = inst_.materials.material_array_get(synced_handle, has_motion);
 
   VectorSet<GPUMaterial *> attribute_materials;
   for (const Span<GPUMaterial *> pass_materials :
@@ -532,6 +530,19 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
       attribute_materials.add(material.outline_freestyle.gpumat);
     }
   }
+  ResourceHandleRange surface_range = synced_handle.res_handle;
+  if (surface_range.uses_compaction()) {
+    const bool per_instance_passes = std::ranges::any_of(
+        material_array.materials, [](const Material &material) {
+          return material.has_volume || material.is_alpha_blend_transparent ||
+                 material.is_outline_shell_blended || material.uses_shell_self_occlusion;
+        });
+    /* Each compacted command lane retains its own resource ID and attribute offset. */
+    if (per_instance_passes) {
+      surface_range = inst_.manager->instance_material_fallback(surface_range);
+    }
+  }
+  const ObjectHandle ob_handle(ob_ref, surface_range, synced_handle.recalc);
   Span<gpu::Batch *> mat_geom = DRW_cache_object_surface_material_get(
       ob_handle.object, attribute_materials.as_span());
   mesh_attribute_requests_++;
@@ -723,26 +734,28 @@ void SyncModule::sync_pointcloud(const ObjectRef &ob_ref)
   Material material = inst_.materials.material_get(
       ob_handle, has_motion, material_slot - 1, mat_geom_type);
 
-  auto drawcall_add = [&](const MaterialPass &matpass, bool dual_sided = false) {
+  auto drawcall_add = [&](const MaterialPass &matpass,
+                          ResourceHandleRange draw_handle,
+                          bool dual_sided = false) {
     if (matpass.sub_pass == nullptr) {
       return;
     }
 
     PassMain::Sub &object_pass = matpass.sub_pass->sub("Point Cloud Sub Pass");
     gpu::Batch *geometry = pointcloud_sub_pass_setup(
-        object_pass, ob_ref, ob_handle.res_handle, matpass.gpumat);
+        object_pass, ob_ref, draw_handle, matpass.gpumat);
 
     if (dual_sided) {
       /* WORKAROUND: Hack to generate backfaces. Should also be baked into the Index Buf too at
        * some point in the future. */
       object_pass.push_constant("ptcloud_backface", false);
-      object_pass.draw(geometry, ob_handle.res_handle);
+      object_pass.draw(geometry, draw_handle);
       object_pass.push_constant("ptcloud_backface", true);
-      object_pass.draw(geometry, ob_handle.res_handle);
+      object_pass.draw(geometry, draw_handle);
     }
     else {
       object_pass.push_constant("ptcloud_backface", false);
-      object_pass.draw(geometry, ob_handle.res_handle);
+      object_pass.draw(geometry, draw_handle);
     }
   };
 
@@ -757,13 +770,23 @@ void SyncModule::sync_pointcloud(const ObjectRef &ob_ref)
     }
   }
 
-  sync_common_passes(material, [&](const MaterialPass &pass) { drawcall_add(pass); });
+  sync_common_passes(material, [&](const MaterialPass &pass) {
+    drawcall_add(pass, ob_handle.res_handle);
+  });
 
-  sync_outline_occlusion_passes(
-      ob_handle, material, [&](const MaterialPass &pass) { drawcall_add(pass); });
+  sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass) {
+    drawcall_add(pass, ob_handle.res_handle);
+  });
 
-  sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int /*instance*/) {
-    drawcall_add(pass);
+  sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int instance) {
+    if (mat_geom_type == MAT_GEOM_GSPLAT) {
+      drawcall_add(pass, ob_handle.res_handle);
+      return;
+    }
+    /* Submit only the instance at this sorting position. The overlap-mask pass uses the
+     * selected shading material, which can come from a view layer override. */
+    GPUMaterial *gpumat = pass.gpumat ? pass.gpumat : material.shading.gpumat;
+    drawcall_add({gpumat, pass.sub_pass}, ob_handle.res_handle.sub_handle(instance));
   });
 
   sync_common(ob_handle, {&material}, {material.shading.gpumat});
@@ -860,7 +883,7 @@ void SyncModule::sync_curves(const ObjectRef &ob_ref, HairParticleInfo const *ha
   Material material = inst_.materials.material_get(
       ob_handle, has_motion, mat_nr - 1, MAT_GEOM_CURVES);
 
-  auto drawcall_add = [&](const MaterialPass &matpass) {
+  auto drawcall_add = [&](const MaterialPass &matpass, const ResourceHandleRange draw_handle) {
     if (matpass.sub_pass == nullptr) {
       return;
     }
@@ -868,7 +891,7 @@ void SyncModule::sync_curves(const ObjectRef &ob_ref, HairParticleInfo const *ha
       PassMain::Sub &sub_pass = matpass.sub_pass->sub("Hair SubPass");
       gpu::Batch *geometry = hair_sub_pass_setup(
           sub_pass, inst_.scene, ob_ref, &hair_particle->psys, &hair_particle->md, matpass.gpumat);
-      sub_pass.draw(geometry, ob_handle.res_handle);
+      sub_pass.draw(geometry, draw_handle);
     }
     else {
       PassMain::Sub &sub_pass = matpass.sub_pass->sub("Curves SubPass");
@@ -878,7 +901,7 @@ void SyncModule::sync_curves(const ObjectRef &ob_ref, HairParticleInfo const *ha
       if (error) {
         inst_.info_append(error);
       }
-      sub_pass.draw(geometry, ob_handle.res_handle);
+      sub_pass.draw(geometry, draw_handle);
     }
   };
 
@@ -891,13 +914,16 @@ void SyncModule::sync_curves(const ObjectRef &ob_ref, HairParticleInfo const *ha
     }
   }
 
-  sync_common_passes(material, [&](const MaterialPass &pass) { drawcall_add(pass); });
+  sync_common_passes(
+      material, [&](const MaterialPass &pass) { drawcall_add(pass, ob_handle.res_handle); });
 
-  sync_outline_occlusion_passes(
-      ob_handle, material, [&](const MaterialPass &pass) { drawcall_add(pass); });
+  sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass) {
+    drawcall_add(pass, ob_handle.res_handle);
+  });
 
-  sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int /*instance*/) {
-    drawcall_add(pass);
+  sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int instance) {
+    GPUMaterial *gpumat = pass.gpumat ? pass.gpumat : material.shading.gpumat;
+    drawcall_add({gpumat, pass.sub_pass}, ob_handle.res_handle.sub_handle(instance));
   });
 
   sync_common(ob_handle, {&material}, {material.shading.gpumat});

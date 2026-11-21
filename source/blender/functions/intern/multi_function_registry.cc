@@ -56,4 +56,10 @@ const MultiFunction &lookup(UString id)
   return *accessor->second;
 }
 
+bool contains(const MultiFunction &fn)
+{
+  RegistryMap::ConstAccessor accessor;
+  return get_registry().map.lookup(accessor, UString(fn.name())) && accessor->second == &fn;
+}
+
 }  // namespace blender::fn::multi_function::registry

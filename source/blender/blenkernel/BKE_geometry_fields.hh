@@ -507,6 +507,11 @@ class EvaluateOnDomainInput final : public bke::GeometryFieldInput {
  public:
   EvaluateOnDomainInput(fn::GField field, AttrDomain domain);
 
+  AttrDomain source_domain() const
+  {
+    return src_domain_;
+  }
+
   GVArray get_varray_for_context(const bke::GeometryFieldContext &context,
                                  const IndexMask & /*mask*/) const final;
   void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep &deep_hash_cache) const override;

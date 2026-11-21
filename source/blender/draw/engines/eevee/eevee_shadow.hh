@@ -214,6 +214,7 @@ class ShadowModule {
 
   /** Map of shadow casters to track deletion & update of intersected shadows. */
   Map<ObjectKey, ShadowObject> objects_;
+  Map<uint64_t, ShadowObject> instance_batches_;
 
   /* Used to call caster_update_ps_ only once per sync (Initialized on begin_sync). */
   bool update_casters_ = false;
@@ -275,6 +276,11 @@ class ShadowModule {
 
   /* Statistics that are read back to CPU after a few frame (to avoid stall). */
   SwapChain<ShadowStatisticsBuf, 5> statistics_buf_;
+  /** The Vulkan viewport keeps one readback in flight and displays the last completed result. */
+  enum class StatisticsReadbackState { Idle, Pending, Stale };
+  StatisticsReadbackState statistics_readback_state_ = StatisticsReadbackState::Idle;
+  ShadowStatistics viewport_statistics_ = {};
+  bool use_nonblocking_statistics_ = false;
 
   /** \} */
 

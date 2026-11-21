@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <atomic>
+
 /**
  * For evaluation, geometry node groups are converted to a lazy-function graph. The generated graph
  * is cached per node group, so it only has to be generated once after a change.
@@ -163,6 +165,15 @@ struct GeoNodesModifierData {
   const Object *self_object = nullptr;
   /** Depsgraph that is evaluating the modifier. */
   Depsgraph *depsgraph = nullptr;
+  /** A local flag owned by the caller, written by lazy functions that read scene time. */
+  std::atomic<bool> *scene_time_used = nullptr;
+
+  void mark_scene_time_used() const
+  {
+    if (scene_time_used) {
+      scene_time_used->store(true, std::memory_order_relaxed);
+    }
+  }
 };
 
 struct GeoNodesOperatorDepsgraphs {

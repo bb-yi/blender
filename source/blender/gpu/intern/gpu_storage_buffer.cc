@@ -96,6 +96,13 @@ void GPU_storagebuf_update(gpu::StorageBuf *ssbo, const void *data)
   ssbo->update(data);
 }
 
+bool GPU_storagebuf_update_sub(gpu::StorageBuf *ssbo, size_t offset, size_t size, const void *data)
+{
+  BLI_assert(data && size && offset % 4 == 0 && size % 4 == 0);
+  BLI_assert(offset + size <= ssbo->usage_size_get());
+  return ssbo->update_sub(offset, size, data);
+}
+
 void GPU_storagebuf_bind(gpu::StorageBuf *ssbo, int slot)
 {
   ssbo->bind(slot);
@@ -135,6 +142,11 @@ void GPU_storagebuf_sync_to_host(gpu::StorageBuf *ssbo)
 void GPU_storagebuf_read(gpu::StorageBuf *ssbo, void *data)
 {
   ssbo->read(data);
+}
+
+bool GPU_storagebuf_try_read(gpu::StorageBuf *ssbo, void *data)
+{
+  return ssbo->try_read(data);
 }
 
 void GPU_storagebuf_sync_as_indirect_buffer(gpu::StorageBuf *ssbo)

@@ -95,6 +95,7 @@ std::shared_ptr<CachedValue> get_base(const GenericKey &key,
   BLI_assert(result);
 
   {
+    std::lock_guard lock{cache.global_mutex};
     CacheMap::MutableAccessor accessor;
     const bool newly_inserted = cache.map.add(accessor, std::ref(key));
     if (!newly_inserted) {
@@ -114,14 +115,10 @@ std::shared_ptr<CachedValue> get_base(const GenericKey &key,
     /* Set initial logical time for the new cached entry. */
     set_new_logical_time(accessor->second, new_time);
 
-    {
-      /* Update global data of the cache. */
-      std::lock_guard lock{cache.global_mutex};
-      memory_counter::MemoryCounter memory_counter{cache.memory};
-      accessor->second.value->count_memory(memory_counter);
-      cache.keys.append(&accessor->first.get());
-      cache.size_in_bytes = cache.memory.total_bytes;
-    }
+    memory_counter::MemoryCounter memory_counter{cache.memory};
+    accessor->second.value->count_memory(memory_counter);
+    cache.keys.append(&accessor->first.get());
+    cache.size_in_bytes = cache.memory.total_bytes;
   }
   /* Potentially free elements from the cache. Note, even if this would free the value we just
    * added, it would still work correctly, because we already have a shared_ptr to it. */

@@ -49,6 +49,8 @@ class NodesModifierUsageInferenceCache {
 };
 
 struct NodesModifierRuntime {
+  /** The evaluated viewport output can be kept when only the time source changes. */
+  bool time_independent_instances = false;
   /**
    * Contains logged information from the last evaluation.
    * This can be used to help the user to debug a node tree.

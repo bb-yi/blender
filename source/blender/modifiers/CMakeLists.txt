@@ -141,6 +141,7 @@ set(LIB
   PRIVATE bf::functions
   PRIVATE bf::geometry
   PRIVATE bf::imbuf
+  PRIVATE bf::intern::clog
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::extern::xxhash
   PRIVATE bf::nodes

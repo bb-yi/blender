@@ -32,11 +32,13 @@ class VKStorageBuffer : public StorageBuf {
   ~VKStorageBuffer();
 
   void update(const void *data) override;
+  bool update_sub(size_t offset, size_t size, const void *data) override;
   void bind(int slot) override;
   void unbind() override;
   void clear(uint32_t clear_value) override;
   void copy_sub(VertBuf *src, uint dst_offset, uint src_offset, uint copy_size) override;
   void read(void *data) override;
+  bool try_read(void *data) override;
   void async_flush_to_host() override;
   void sync_as_indirect_buffer() override { /* No-Op. */ };
 

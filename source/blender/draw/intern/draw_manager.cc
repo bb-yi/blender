@@ -8,6 +8,7 @@
 
 #include "DNA_light_types.h"
 #include <climits>
+#include <cstdlib>
 #include "DNA_object_types.h"
 #include "DNA_userdef_types.h"
 
@@ -16,6 +17,7 @@
 #include "DEG_depsgraph_query.hh"
 
 #include "BLI_hash_c.hh"
+#include "BLI_color_types.hh"
 #include "BKE_image.hh"
 #include "BKE_image_gpu.hh"
 #include "BKE_paint.hh"
@@ -30,6 +32,7 @@
 #include "BLI_task.hh"
 
 #include "GPU_compute.hh"
+#include "GPU_context.hh"
 #include "GPU_shader.hh"
 #include "GPU_texture.hh"
 
@@ -138,6 +141,24 @@ void Manager::begin_sync(Object *object_active)
   /* Add 2 to always have a non-null number even in case of overflow. */
   sync_counter_ = (global_sync_counter_ += 2);
 
+  static const bool gpu_cache_enabled = [] {
+    const char *value = std::getenv("BLENDER_INSTANCE_CACHE_GPU");
+    return value == nullptr || !STREQ(value, "0");
+  }();
+  instance_buffer_reuse_enabled_ = gpu_cache_enabled &&
+                                   ELEM(GPU_backend_get_type(),
+                                        GPU_BACKEND_OPENGL,
+                                        GPU_BACKEND_VULKAN) &&
+                                   GPU_max_work_group_size(0) >= DRW_COMMAND_GROUP_SIZE;
+  /* Preserve the original per-instance command path for final image and pass rendering.
+   * Compaction can change tie-breaking for overlapping surfaces in Cryptomatte. */
+  compact_instances_enabled_ = instance_buffer_reuse_enabled_ &&
+                               !(DRWContext::is_active() && drw_get().is_image_render());
+  compact_instance_count_ = instance_device_fallbacks_ = instance_material_fallbacks_ = 0;
+  gpu_reused_instance_count_ = gpu_resource_upload_bytes_ = 0;
+  instance_buffer_slot_ ^= 1;
+  instance_ranges_.clear();
+
   matrix_buf.swap();
   bounds_buf.swap();
   infos_buf.swap();
@@ -145,7 +166,15 @@ void Manager::begin_sync(Object *object_active)
   matrix_buf.current().trim_to_next_power_of_2(resource_len_);
   bounds_buf.current().trim_to_next_power_of_2(resource_len_);
   infos_buf.current().trim_to_next_power_of_2(resource_len_);
+  InstanceBufferSlot &instance_slot = instance_buffer_slots_[instance_buffer_slot_];
+  if (instance_slot.capacity != matrix_buf.current().size()) {
+    instance_slot.ranges.clear();
+  }
   attributes_buf.trim_to_next_power_of_2(attribute_len_);
+  if (previous_attribute_capacity_ != attributes_buf.size()) {
+    /* A subsequent allocation may grow back to the old size with an uninitialized GPU buffer. */
+    previous_attribute_capacity_ = 0;
+  }
 
   /* TODO: This means the reference is kept until further redraw or manager tear-down. Instead,
    * they should be released after each draw loop. But for now, mimics old DRW behavior. */
@@ -187,6 +216,336 @@ void Manager::begin_sync(Object *object_active)
 
   /* Init the 0 resource. */
   resource_handle(float4x4::identity());
+}
+
+void Manager::instance_cache_stats(InstanceCacheStats &stats) const
+{
+  stats.device_fallbacks = instance_device_fallbacks_;
+  stats.material_fallbacks = instance_material_fallbacks_;
+  stats.compact_instances = compact_instance_count_;
+  stats.gpu_reused_instances = gpu_reused_instance_count_;
+  stats.gpu_upload_bytes = gpu_resource_upload_bytes_;
+}
+
+ResourceHandleRange Manager::instance_material_fallback(ResourceHandleRange handle)
+{
+  if (handle.uses_compaction()) {
+    instance_material_fallbacks_++;
+    compact_instance_count_ -= handle.id_range().size();
+    invalidate_instance_range(handle);
+  }
+  return handle.without_compaction();
+}
+
+void Manager::invalidate_instance_range(ResourceHandleRange handle)
+{
+  const int64_t start = ResourceID(handle.id_range().start()).index();
+  auto found = std::ranges::lower_bound(
+      instance_ranges_, start, {}, [](const CachedInstanceRange &range) {
+        return range.indices.start();
+      });
+  const int64_t end = start + handle.id_range().size();
+  for (; found != instance_ranges_.end() && found->indices.start() < end; ++found) {
+    found->eligible = false;
+  }
+}
+
+bool Manager::CachedInstanceRange::matches(const CachedInstanceRange &previous) const
+{
+  if (!eligible || !previous.eligible || version != previous.version ||
+      indices != previous.indices || shadow_normal_offset != previous.shadow_normal_offset ||
+      attribute_offset != previous.attribute_offset ||
+      attributes_per_instance != previous.attributes_per_instance)
+  {
+    return false;
+  }
+  if (info.orco_add != previous.info.orco_add || info.orco_mul != previous.info.orco_mul ||
+      info.ob_color != previous.info.ob_color || info.index != previous.info.index ||
+      info.flag != previous.info.flag ||
+      info.light_and_shadow_set_membership != previous.info.light_and_shadow_set_membership ||
+      info.shadow_terminator_geometry_offset != previous.info.shadow_terminator_geometry_offset ||
+      bounds.bounding_sphere.w != previous.bounds.bounding_sphere.w)
+  {
+    return false;
+  }
+  if (drw_bounds_corners_are_valid(bounds)) {
+    for (const int i : IndexRange(4)) {
+      if (bounds.bounding_corners[i] != previous.bounds.bounding_corners[i]) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+void Manager::record_instance_attribute_layout(ResourceHandleRange handle)
+{
+  const int64_t start = ResourceID(handle.id_range().start()).index();
+  auto it = std::ranges::lower_bound(instance_ranges_, start, {},
+      [](const CachedInstanceRange &range) { return range.indices.start(); });
+  const int64_t end = start + handle.id_range().size();
+  for (; it != instance_ranges_.end() && it->indices.start() < end; ++it) {
+    const Span<ObjectInfos> infos = infos_buf.current().as_span().slice(it->indices);
+    const uint len = infos.first().object_attrs_len;
+    const uint base = infos.first().object_attrs_offset;
+    it->attribute_offset = len ? int(base) : -1;
+    it->attributes_per_instance = len;
+    for (const int i : infos.index_range()) {
+      if (infos[i].object_attrs_len != len || (len && infos[i].object_attrs_offset != base + i * len)) {
+        it->eligible = false;
+        break;
+      }
+    }
+  }
+}
+
+bool Manager::extract_shared_instance_attributes(ResourceHandleRange handle,
+                                                 const ObjectRef &ref,
+                                                 Span<const GPUUniformAttr *> attributes)
+{
+  const InstanceBatch &batch = *ref.instance_batch();
+  if (!batch.shared_attribute_owner || batch.size() != handle.id_range().size()) {
+    return false;
+  }
+
+  const bke::AttributeAccessor instance_attributes =
+      batch.instances[0]->instance_data[0]->get_instances()->attributes();
+  struct Source {
+    ObjectAttribute value;
+    VArray<ColorGeometry4f> array;
+    Span<ColorGeometry4f> span;
+  };
+  Vector<Source, 8> sources;
+  for (const GPUUniformAttr *attribute : attributes) {
+    if (attribute->use_dupli) {
+      VArray<ColorGeometry4f> array = *instance_attributes.lookup<ColorGeometry4f>(attribute->name);
+      if (array) {
+        const Span<ColorGeometry4f> span = array.is_span() ? array.get_internal_span() :
+                                                            Span<ColorGeometry4f>();
+        sources.append({ObjectAttribute{0, 0, 0, 0, attribute->hash_code}, std::move(array), span});
+        continue;
+      }
+    }
+    /* With one attribute layer and no particle system, the remaining lookup uses the same
+     * parent, object and data-block for the whole batch. */
+    ObjectAttribute shared{};
+    if (shared.sync(ref, *attribute, 0)) {
+      sources.append({shared, {}, {}});
+    }
+  }
+
+  const int64_t attr_count = sources.size();
+  const uint64_t next_len = uint64_t(attribute_len_) + uint64_t(batch.size()) * attr_count;
+  if (next_len > INT_MAX || (next_len > uint64_t(attributes_buf.size()) &&
+                            power_of_2_max_u(uint(next_len)) >
+                                GPU_max_storage_buffer_size() / sizeof(ObjectAttribute)))
+  {
+    return false;
+  }
+  if (attr_count != 0) {
+    attributes_buf.get_or_resize(int64_t(next_len) - 1);
+  }
+  const int64_t start = ResourceID(handle.id_range().start()).index();
+  const MutableSpan<ObjectInfos> infos = infos_buf.current().as_span().slice(start, batch.size());
+  threading::parallel_for(infos.index_range(), 2048, [&](const IndexRange range) {
+    for (const int instance : range) {
+      const int point = batch.instances[instance]->instance_idx[0];
+      const int64_t offset = attribute_len_ + instance * attr_count;
+      infos[instance].object_attrs_offset = uint(offset);
+      infos[instance].object_attrs_len = uint(attr_count);
+      for (const int i : sources.index_range()) {
+        const Source &source = sources[i];
+        ObjectAttribute value = source.value;
+        if (source.array) {
+          const ColorGeometry4f color = !source.span.is_empty() ? source.span[point] :
+                                                                 source.array[point];
+          value.data_x = color.r;
+          value.data_y = color.g;
+          value.data_z = color.b;
+          value.data_w = color.a;
+        }
+        attributes_buf[offset + i] = value;
+      }
+    }
+  });
+  attribute_len_ = uint(next_len);
+  return true;
+}
+
+void Manager::extract_object_attributes(ResourceHandleRange handle,
+                                        const ObjectRef &ref,
+                                        Span<const GPUUniformAttr *> attributes)
+{
+  const InstanceBatch *batch = ref.instance_batch();
+  if (batch && attributes.is_empty()) {
+    return;
+  }
+  if (!batch || !extract_shared_instance_attributes(handle, ref, attributes)) {
+    int instance_index = 0;
+    for (ResourceID resource_id : handle.id_range()) {
+      ObjectInfos &infos = infos_buf.current().get_or_resize(resource_id.index());
+      infos.object_attrs_offset = attribute_len_;
+      infos.object_attrs_len = 0;
+      for (const GPUUniformAttr *attr : attributes) {
+        if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *attr, instance_index)) {
+          infos.object_attrs_len++;
+          attribute_len_++;
+        }
+      }
+      instance_index++;
+    }
+  }
+  if (batch) {
+    record_instance_attribute_layout(handle);
+  }
+}
+
+void Manager::upload_attributes()
+{
+  const Span<ObjectAttribute> current = attributes_buf.as_span().take_front(attribute_len_);
+  if (!instance_buffer_reuse_enabled_ || current.size() < 1024) {
+    attributes_buf.push_update();
+    previous_attributes_.clear_and_shrink();
+    previous_attribute_capacity_ = 0;
+    return;
+  }
+  Vector<IndexRange> dirty;
+  const bool reusable = previous_attribute_capacity_ == attributes_buf.size();
+  if (reusable) {
+    for (int start = 0; start < current.size(); start += 512) {
+      const IndexRange range = current.index_range().drop_front(start).take_front(512);
+      if (range.one_after_last() <= previous_attributes_.size() &&
+          std::memcmp(current.data() + start, previous_attributes_.data() + start,
+                      range.size() * sizeof(ObjectAttribute)) == 0) {
+        continue;
+      }
+      if (!dirty.is_empty() && dirty.last().one_after_last() == start) {
+        dirty.last() = IndexRange(dirty.last().start(), dirty.last().size() + range.size());
+      }
+      else {
+        dirty.append(range);
+      }
+    }
+  }
+  bool partial = reusable && dirty.size() <= 64;
+  if (partial) {
+    for (const IndexRange range : dirty) {
+      if (!GPU_storagebuf_update_sub(attributes_buf, range.start() * sizeof(ObjectAttribute),
+                                     range.size() * sizeof(ObjectAttribute), current.data() + range.start())) {
+        partial = false;
+        break;
+      }
+    }
+  }
+  const bool uploaded = partial ||
+                        GPU_storagebuf_update_sub(
+                            attributes_buf, 0, current.size_in_bytes(), current.data());
+  if (!uploaded) {
+    attributes_buf.push_update();
+    /* The legacy upload may clear its destination on an allocation failure. Retry next sync. */
+    previous_attribute_capacity_ = 0;
+    return;
+  }
+  previous_attributes_.resize(current.size());
+  if (!partial) {
+    previous_attributes_.as_mutable_span().copy_from(current);
+  }
+  else {
+    for (const IndexRange range : dirty) {
+      previous_attributes_.as_mutable_span().slice(range).copy_from(current.slice(range));
+    }
+  }
+  previous_attribute_capacity_ = attributes_buf.size();
+}
+
+Vector<IndexRange> Manager::upload_resources()
+{
+  Vector<IndexRange> dirty;
+  InstanceBufferSlot &slot = instance_buffer_slots_[instance_buffer_slot_];
+  /* Test only. Reproduce the zero-filled fallback without exhausting the workstation's VRAM. */
+  const bool simulate_failure = instance_buffer_reuse_enabled_ && !instance_ranges_.is_empty() &&
+                                std::getenv("BLENDER_DRAW_TEST_INSTANCE_UPLOAD_FAILURE");
+  const auto upload = [simulate_failure](auto &buffer, IndexRange range) {
+    const size_t stride = sizeof(*buffer.data());
+    return !simulate_failure && GPU_storagebuf_update_sub(
+        buffer, range.start() * stride, range.size() * stride, buffer.data() + range.start());
+  };
+
+  int64_t reused = 0;
+  int64_t start = 0;
+  if (instance_buffer_reuse_enabled_ && slot.capacity == matrix_buf.current().size()) {
+    auto previous = slot.ranges.begin();
+    for (const CachedInstanceRange &range : instance_ranges_) {
+      while (previous != slot.ranges.end() && previous->indices.start() < range.indices.start()) {
+        previous++;
+      }
+      if (previous == slot.ranges.end() || !range.matches(*previous)) {
+        continue;
+      }
+      if (start < range.indices.start()) {
+        dirty.append(IndexRange(start, range.indices.start() - start));
+      }
+      start = range.indices.one_after_last();
+      reused += range.indices.size();
+    }
+  }
+  if (start < resource_len_) {
+    dirty.append(IndexRange(start, resource_len_ - start));
+  }
+
+  /* If there are many small gaps, one transfer is cheaper than many staging allocations. */
+  bool partial = reused > 0 && dirty.size() <= 64;
+  if (partial) {
+    for (const IndexRange range : dirty) {
+      if (!upload(matrix_buf.current(), range) || !upload(bounds_buf.current(), range) ||
+          !upload(infos_buf.current(), range))
+      {
+        partial = false;
+        break;
+      }
+    }
+  }
+  constexpr size_t resource_stride = sizeof(ObjectMatrices) + sizeof(ObjectBounds) +
+                                     sizeof(ObjectInfos);
+  bool upload_confirmed = partial;
+  if (partial) {
+    gpu_reused_instance_count_ = reused;
+    gpu_resource_upload_bytes_ = (resource_len_ - reused) * resource_stride;
+  }
+  else {
+    const IndexRange used(resource_len_);
+    /* Use a checked transfer even when the live range fills the allocation. */
+    upload_confirmed = instance_buffer_reuse_enabled_ && !instance_ranges_.is_empty() &&
+                       upload(matrix_buf.current(), used) && upload(bounds_buf.current(), used) &&
+                       upload(infos_buf.current(), used);
+    if (upload_confirmed) {
+      gpu_resource_upload_bytes_ = used.size() * resource_stride;
+    }
+    else {
+      if (simulate_failure) {
+        matrix_buf.current().clear_to_zero();
+        bounds_buf.current().clear_to_zero();
+        infos_buf.current().clear_to_zero();
+      }
+      else {
+        matrix_buf.current().push_update();
+        bounds_buf.current().push_update();
+        infos_buf.current().push_update();
+      }
+      gpu_resource_upload_bytes_ = matrix_buf.current().size() * resource_stride;
+    }
+    dirty.clear();
+    dirty.append(used);
+  }
+  slot.capacity = matrix_buf.current().size();
+  if (upload_confirmed) {
+    slot.ranges = std::move(instance_ranges_);
+  }
+  else {
+    slot.ranges.clear();
+    instance_ranges_.clear();
+  }
+  return dirty;
 }
 
 void Manager::sync_layer_attributes()
@@ -518,10 +877,8 @@ void Manager::end_sync()
   sync_referenced_objects();
   sync_light_shader_parameters();
 
-  matrix_buf.current().push_update();
-  bounds_buf.current().push_update();
-  infos_buf.current().push_update();
-  attributes_buf.push_update();
+  const Vector<IndexRange> dirty_resources = upload_resources();
+  upload_attributes();
   layer_attributes_buf.push_update();
 
   /* Useful for debugging the following resource finalize. But will trigger the drawing of the GPU
@@ -531,15 +888,29 @@ void Manager::end_sync()
   DRW_submission_start();
 
   /* Dispatch compute to finalize the resources on GPU. Save a bit of CPU time. */
-  uint thread_groups = divide_ceil_u(resource_len_, DRW_FINALIZE_GROUP_SIZE);
   gpu::Shader *shader = DRW_shader_draw_resource_finalize_get();
   GPU_shader_bind(shader);
-  GPU_shader_uniform_1i(shader, "resource_len", resource_len_);
   GPU_storagebuf_bind(matrix_buf.current(), GPU_shader_get_ssbo_binding(shader, "matrix_buf"));
   GPU_storagebuf_bind(bounds_buf.current(), GPU_shader_get_ssbo_binding(shader, "bounds_buf"));
   GPU_storagebuf_bind(infos_buf.current(), GPU_shader_get_ssbo_binding(shader, "infos_buf"));
-  GPU_compute_dispatch(shader, thread_groups, 1, 1);
+  for (const IndexRange range : dirty_resources) {
+    GPU_shader_uniform_1i(shader, "resource_start", range.start());
+    GPU_shader_uniform_1i(shader, "resource_len", range.size());
+    GPU_compute_dispatch(shader, divide_ceil_u(range.size(), DRW_FINALIZE_GROUP_SIZE), 1, 1);
+  }
   GPU_memory_barrier(GPU_BARRIER_SHADER_STORAGE);
+  use_cluster_bounds_ = compact_instances_enabled_ && compact_instance_count_ >= 4096;
+  if (use_cluster_bounds_) {
+    const uint count = divide_ceil_u(resource_len_, DRW_VISIBILITY_GROUP_SIZE);
+    cluster_bounds_.resize(count);
+    gpu::Shader *cluster_shader = DRW_shader_draw_resource_cluster_finalize_get();
+    GPU_shader_bind(cluster_shader);
+    GPU_shader_uniform_1i(cluster_shader, "resource_len", resource_len_);
+    GPU_storagebuf_bind(bounds_buf.current(), GPU_shader_get_ssbo_binding(cluster_shader, "bounds_buf"));
+    GPU_storagebuf_bind(cluster_bounds_, GPU_shader_get_ssbo_binding(cluster_shader, "clusters"));
+    GPU_compute_dispatch(cluster_shader, count, 1, 1);
+    GPU_memory_barrier(GPU_BARRIER_SHADER_STORAGE);
+  }
 
   DRW_submission_end();
 
@@ -599,6 +970,8 @@ void Manager::compute_visibility(View &view)
   view.manager_fingerprint_ = this->fingerprint_get();
 
   view.bind();
+  view.cluster_bounds_ = cluster_bounds_;
+  view.use_cluster_bounds_ = use_cluster_bounds_;
   view.compute_visibility(
       bounds_buf.current(), infos_buf.current(), resource_len_, freeze_culling);
 }

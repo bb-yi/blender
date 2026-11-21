@@ -70,6 +70,7 @@ void EvalDependencies::merge(const EvalDependencies &other)
   this->needs_active_camera |= other.needs_active_camera;
   this->needs_scene_render_params |= other.needs_scene_render_params;
   this->time_dependent |= other.time_dependent;
+  this->has_untracked_time_dependency |= other.has_untracked_time_dependency;
 }
 
 static bool is_used_default_input(const bNodeSocket &socket, const NodeDefaultInputType type)
@@ -130,6 +131,7 @@ static void add_eval_dependencies_from_socket(const bNodeSocket &socket, EvalDep
     case SOCK_IMAGE: {
       if (Image *image = static_cast<bNodeSocketValueImage *>(socket.default_value)->value) {
         deps.add_generic_id(reinterpret_cast<ID *>(image));
+      deps.has_untracked_time_dependency |= BKE_image_is_animated(image);
       }
       break;
     }
@@ -198,6 +200,7 @@ static void add_eval_dependencies_from_node_data(const bNodeTree &tree, EvalDepe
     else if (id_type == ID_IM) {
       if (BKE_image_is_animated(reinterpret_cast<Image *>(node->id))) {
         deps.time_dependent = true;
+        deps.has_untracked_time_dependency = true;
       }
       deps.add_generic_id(node->id);
     }
@@ -268,13 +271,13 @@ static void gather_geometry_nodes_eval_dependencies(
   ntree.ensure_topology_cache();
   for (const bNodeSocket *socket : ntree.all_sockets()) {
     add_eval_dependencies_from_socket(*socket, deps);
+    /* A closure can carry computation supplied by a different caller. */
+    deps.has_untracked_time_dependency |= socket->type == SOCK_CLOSURE;
   }
   deps.needs_active_camera |= has_enabled_nodes_of_type(ntree,
                                                         "GeometryNodeInputActiveCamera"_ustr);
   deps.needs_scene_render_params |= needs_scene_render_params(ntree);
-  deps.time_dependent |= BKE_animdata_id_is_animated(&ntree.id) ||
-                         has_enabled_nodes_of_type(ntree, "GeometryNodeSimulationInput"_ustr) ||
-                         has_enabled_nodes_of_type(ntree, "GeometryNodeInputSceneTime"_ustr) ||
+  const bool untracked_time = BKE_animdata_id_is_animated(&ntree.id) ||
                          has_enabled_nodes_of_type(ntree, "CompositorNodeSceneTime"_ustr) ||
                          has_enabled_nodes_of_type(ntree, "CompositorNodeTime"_ustr) ||
                          has_enabled_nodes_of_type(ntree, "CompositorNodeTrackPos"_ustr) ||
@@ -283,6 +286,10 @@ static void gather_geometry_nodes_eval_dependencies(
                          has_enabled_nodes_of_type(ntree, "CompositorNodeMovieDistortion"_ustr) ||
                          has_enabled_nodes_of_type(ntree, "CompositorNodeMovieClip"_ustr) ||
                          has_enabled_nodes_of_type(ntree, "CompositorNodeKeyingScreen"_ustr);
+  deps.time_dependent |= untracked_time ||
+                         has_enabled_nodes_of_type(ntree, "GeometryNodeSimulationInput"_ustr) ||
+                         has_enabled_nodes_of_type(ntree, "GeometryNodeInputSceneTime"_ustr);
+  deps.has_untracked_time_dependency |= untracked_time;
 
   add_eval_dependencies_from_node_data(ntree, deps);
   add_own_transform_dependencies(ntree, deps);

@@ -2,19 +2,32 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <atomic>
+#include <cstdlib>
+#include <cstring>
+
+#include "BLI_hash_mm3.hh"
+#include "BLI_implicit_sharing_ptr.hh"
 #include "BLI_kdtree_new.hh"
 #include "BLI_math_geom_c.hh"
 #include "BLI_math_quaternion.hh"
 #include "BLI_math_rotation_c.hh"
+#include "BLI_memory_cache.hh"
+#include "BLI_memory_counter.hh"
 #include "BLI_noise.hh"
 #include "BLI_rand.hh"
+#include "BLI_shared_cache.hh"
 #include "BLI_task.hh"
+#include "BLI_timeit.hh"
+
+#include "CLG_log.h"
 
 #include "DNA_pointcloud_types.h"
 
 #include "BKE_attribute_math.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_sample.hh"
+#include "BKE_mesh_types.hh"
 #include "BKE_pointcloud.hh"
 
 #include "FN_multi_function_registry.hh"
@@ -28,6 +41,8 @@
 #include "node_geometry_util.hh"
 
 namespace blender::nodes::node_geo_distribute_points_on_faces_cc {
+
+static CLG_LogRef CACHE_LOG = {"nodes.scatter_cache"};
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
@@ -504,6 +519,268 @@ static Array<float> calc_full_density_factors_with_selection(const Mesh &mesh,
   return densities;
 }
 
+/* Sampling only depends on these mesh arrays. Holding references forces subsequent writes
+ * to detach them, including when an evaluated mesh is replaced between frames. Normals and
+ * arbitrary propagated attributes are always read from the current evaluation below. */
+struct SampleKey : GenericKey {
+  ImplicitSharingPtr<> positions_owner, corners_owner;
+  SharedCache<Array<int3>> triangulation;
+  Span<float3> positions;
+  Span<int> corners;
+  Span<int3> tris;
+  int seed;
+  /* Nonnegative values are block offsets. Whole-surface modes also differ in their key. */
+  static constexpr int uniform_random = -2;
+  int first = -1;
+  float density_max = 0.0f, distance = 0.0f;
+  Vector<float> densities;
+  uint32_t density_hash = 0;
+
+  SampleKey(const Mesh &mesh, const Span<int3> tris, const int seed)
+      : triangulation(mesh.runtime->corner_tris_cache.data),
+        positions(mesh.vert_positions()),
+        corners(mesh.corner_verts()),
+        tris(tris),
+        seed(seed)
+  {
+    const auto retain = [](const bke::GAttributeReader &attr,
+                           const void *data) -> ImplicitSharingPtr<> {
+      if (!attr || !attr.sharing_info || !attr.varray.is_span() ||
+          attr.varray.get_internal_span().data() != data)
+      {
+        return {};
+      }
+      attr.sharing_info->add_user();
+      return ImplicitSharingPtr<>(attr.sharing_info);
+    };
+    const bke::AttributeAccessor attributes = mesh.attributes();
+    positions_owner = retain(attributes.lookup("position"), positions.data());
+    corners_owner = retain(attributes.lookup(".corner_vert"), corners.data());
+  }
+
+  uint64_t hash() const override
+  {
+    return get_default_hash(get_default_hash(positions.data(), corners.data(), tris.data(), seed),
+                            tris.size(),
+                            first,
+                            density_max,
+                            distance,
+                            density_hash);
+  }
+  bool equal_to(const GenericKey &key) const override
+  {
+    const auto *other = dynamic_cast<const SampleKey *>(&key);
+    return other && positions.data() == other->positions.data() &&
+           corners.data() == other->corners.data() && tris.data() == other->tris.data() &&
+           tris.size() == other->tris.size() && seed == other->seed && first == other->first &&
+           density_max == other->density_max && distance == other->distance &&
+           densities.size() == other->densities.size() &&
+           (densities.is_empty() ||
+            std::memcmp(densities.data(), other->densities.data(), densities.size() * sizeof(float)) == 0);
+  }
+  std::unique_ptr<GenericKey> to_storable() const override
+  {
+    return std::make_unique<SampleKey>(*this);
+  }
+};
+
+struct Samples : memory_cache::CachedValue {
+  Vector<float3> positions, bary_coords;
+  Vector<int> tris;
+  Array<bool> eliminated;
+  int64_t input_bytes = 0;
+
+  void count_memory(MemoryCounter &memory) const override
+  {
+    memory.add(input_bytes + (positions.capacity() + bary_coords.capacity()) * sizeof(float3) +
+               tris.capacity() * sizeof(int) + eliminated.size());
+  }
+};
+
+struct UniformRandomSamples : memory_cache::CachedValue {
+  ImplicitSharingPtr<ImplicitSharedValue<Vector<float3>>> positions;
+  Vector<float3> bary_coords;
+  Vector<int> tris;
+  SharedCache<bke::bvh::Tree> bvh_cache;
+  int64_t input_bytes = 0;
+
+  void count_memory(MemoryCounter &memory) const override
+  {
+    const int64_t position_capacity = positions ? positions->data.capacity() : 0;
+    /* Reserve budget for the lazily created BVH, including external allocations. */
+    const int64_t bvh_bytes = tris.size() * int64_t(256);
+    memory.add(sizeof(*this) + input_bytes + bvh_bytes +
+               (position_capacity + bary_coords.capacity()) * sizeof(float3) +
+               tris.capacity() * sizeof(int));
+  }
+};
+
+static bool use_uniform_scatter_cache()
+{
+  static const bool enabled = [] {
+    const char *value = std::getenv("BLENDER_GN_UNIFORM_SCATTER_CACHE");
+    return value == nullptr || !STREQ(value, "0");
+  }();
+  return enabled;
+}
+
+static bool use_sample_cache(const Mesh &mesh)
+{
+  static const bool enabled = [] {
+    const char *value = std::getenv("BLENDER_GN_SCATTER_CACHE");
+    return value == nullptr || !STREQ(value, "0");
+  }();
+  return enabled && mesh.corners_num >= 4096;
+}
+
+static void sample_random_cached_blocks(const SampleKey &surface,
+                                        const Span<float> densities,
+                                        const float uniform_density,
+                                        Vector<float3> &positions,
+                                        Vector<float3> &bary_coords,
+                                        Vector<int> &tri_indices)
+{
+  const Span<int3> triangles = surface.tris;
+  const int seed = surface.seed;
+  constexpr int block_size = 1024;
+  const bool log = CLOG_CHECK(&CACHE_LOG, CLG_LEVEL_INFO);
+  std::atomic<int> built_blocks = 0;
+  Array<std::shared_ptr<const Samples>> blocks((triangles.size() + block_size - 1) / block_size);
+  threading::parallel_for(blocks.index_range(), 1, [&](IndexRange range) {
+    for (const int block_index : range) {
+      const int first = block_index * block_size;
+      const Span<int3> block = triangles.drop_front(first).take_front(block_size);
+      SampleKey key = surface;
+      key.first = first;
+      key.density_max = uniform_density;
+      if (!densities.is_empty()) {
+        key.densities.resize(block.size());
+        bool all_zero = true;
+        for (const int triangle_index : block.index_range()) {
+          const int3 tri = block[triangle_index];
+          const float density = (densities[tri.x] + densities[tri.y] + densities[tri.z]) / 3.0f;
+          key.densities[triangle_index] = density;
+          all_zero &= density == 0.0f;
+        }
+        if (all_zero) {
+          continue;
+        }
+        key.density_hash = BLI_hash_mm3(reinterpret_cast<const unsigned char *>(key.densities.data()),
+                                        key.densities.size() * sizeof(float), 0);
+      }
+      blocks[block_index] = memory_cache::get<Samples>(key, [&] {
+        if (log) {
+          built_blocks.fetch_add(1, std::memory_order_relaxed);
+        }
+        auto result = std::make_unique<Samples>();
+        result->input_bytes = sizeof(key) + key.densities.size() * sizeof(float) +
+                              block.size() * (sizeof(int3) + 3 * (sizeof(int) + sizeof(float3)));
+        for (const int triangle_index : block.index_range()) {
+          const int3 tri = block[triangle_index];
+          const float density = key.densities.is_empty() ? uniform_density :
+                                                         key.densities[triangle_index];
+          if (density == 0.0f) {
+            continue;
+          }
+          const float3 &v0 = surface.positions[surface.corners[tri.x]];
+          const float3 &v1 = surface.positions[surface.corners[tri.y]];
+          const float3 &v2 = surface.positions[surface.corners[tri.z]];
+          const float area = area_tri_v3(v0, v1, v2);
+          RandomNumberGenerator rng(noise::hash(first + triangle_index, seed));
+          const int count = rng.round_probabilistic(area * density);
+          /* round_probabilistic consumes the legacy skip(1) before barycentric sampling. */
+          for ([[maybe_unused]] const int point : IndexRange(count)) {
+            const float3 bary = rng.get_barycentric_coordinates();
+            result->bary_coords.append(bary);
+            result->positions.append(bke::attribute_math::mix3(bary, v0, v1, v2));
+            result->tris.append(first + triangle_index);
+          }
+        }
+        return result;
+      });
+    }
+  });
+  Array<int> offsets(blocks.size() + 1);
+  int empty_blocks = 0;
+  for (const int i : blocks.index_range()) {
+    offsets[i] = blocks[i] ? int(blocks[i]->tris.size()) : 0;
+    empty_blocks += !blocks[i];
+  }
+  CLOG_INFO(&CACHE_LOG,
+            "Random triangles=%lld blocks=%lld empty=%d computed=%d",
+            static_cast<long long>(triangles.size()),
+            static_cast<long long>(blocks.size()),
+            empty_blocks,
+            built_blocks.load(std::memory_order_relaxed));
+  const OffsetIndices points = offset_indices::accumulate_counts_to_offsets(offsets);
+  positions.resize(points.total_size());
+  bary_coords.resize(points.total_size());
+  tri_indices.resize(points.total_size());
+  threading::parallel_for(blocks.index_range(), 8, [&](IndexRange range) {
+    for (const int i : range) {
+      if (points[i].is_empty()) {
+        continue;
+      }
+      positions.as_mutable_span().slice(points[i]).copy_from(blocks[i]->positions);
+      bary_coords.as_mutable_span().slice(points[i]).copy_from(blocks[i]->bary_coords);
+      tri_indices.as_mutable_span().slice(points[i]).copy_from(blocks[i]->tris);
+    }
+  });
+}
+
+static bool sample_random_cached(const Mesh &mesh,
+                                 const int seed,
+                                 const Span<float> densities,
+                                 const float uniform_density,
+                                 Vector<float3> &positions,
+                                 Vector<float3> &bary_coords,
+                                 Vector<int> &tri_indices,
+                                 std::shared_ptr<const UniformRandomSamples> &r_uniform_samples)
+{
+  SampleKey surface(mesh, mesh.corner_tris(), seed);
+  if (!surface.positions_owner || !surface.corners_owner) {
+    return false;
+  }
+  if (densities.is_empty() && use_uniform_scatter_cache()) {
+    SampleKey key = surface;
+    key.first = SampleKey::uniform_random;
+    key.density_max = uniform_density;
+    bool assembled = false;
+    const auto samples = memory_cache::get<UniformRandomSamples>(key, [&] {
+      auto result = std::make_unique<UniformRandomSamples>();
+      result->input_bytes = sizeof(SampleKey) + key.positions.size_in_bytes() +
+                            key.corners.size_in_bytes() + key.tris.size_in_bytes();
+      sample_random_cached_blocks(
+          surface, densities, uniform_density, positions, bary_coords, tri_indices);
+      assembled = true;
+      if (positions.size() <= 128 * 1024) {
+        result->positions = ImplicitSharingPtr(
+            new ImplicitSharedValue<Vector<float3>>(std::move(positions)));
+        result->bary_coords = std::move(bary_coords);
+        result->tris = std::move(tri_indices);
+      }
+      return result;
+    });
+    CLOG_INFO(&CACHE_LOG,
+              "Random uniform points=%lld reused=%d layout=%d",
+              static_cast<long long>(samples->positions ? samples->tris.size() : positions.size()),
+              int(!assembled),
+              int(bool(samples->positions)));
+    if (samples->positions) {
+      r_uniform_samples = samples;
+      return true;
+    }
+    if (assembled) {
+      /* An oversized layout was already assembled for this evaluation. Keep just its blocks in
+       * the cache, so another evaluation can cheaply determine that it must assemble them. */
+      return true;
+    }
+  }
+  sample_random_cached_blocks(
+      surface, densities, uniform_density, positions, bary_coords, tri_indices);
+  return true;
+}
+
 static PointCloud *create_points_random(const Mesh &mesh,
                                         const Field<bool> &selection_field,
                                         const Field<float> &density_field,
@@ -512,41 +789,80 @@ static PointCloud *create_points_random(const Mesh &mesh,
                                         const bke::AttributeFilter &attribute_filter,
                                         const bool use_legacy_normal)
 {
-  Array<int> count_data;
-  OffsetIndices<int> points_by_tri;
+  const bool log = CLOG_CHECK(&CACHE_LOG, CLG_LEVEL_INFO);
+  const auto start = log ? timeit::Clock::now() : timeit::TimePoint();
+  Array<float> densities;
+  float uniform_density = 0.0f;
   if (selection_field.depends_on_input() || density_field.depends_on_input()) {
-    const Array<float> densities = calc_full_density_factors_with_selection(
+    densities = calc_full_density_factors_with_selection(
         mesh, density_field, selection_field);
-    points_by_tri = calc_tri_point_offsets(mesh, densities, seed, count_data);
   }
   else {
-    const float density = fn::evaluate_constant_field<float>(density_field);
-    points_by_tri = calc_tri_point_offsets(mesh, density, seed, count_data);
-  }
-  if (points_by_tri.total_size() == 0) {
-    return nullptr;
+    uniform_density = fn::evaluate_constant_field<float>(density_field);
+    if (uniform_density == 0.0f) {
+      return nullptr;
+    }
   }
 
+  const auto after_field = log ? timeit::Clock::now() : timeit::TimePoint();
   Vector<float3> positions;
   Vector<float3> bary_coords;
   Vector<int> tri_indices;
-  sample_bary_coords(mesh, seed, points_by_tri, positions, bary_coords, tri_indices);
+  std::shared_ptr<const UniformRandomSamples> uniform_samples;
+  const bool cached = use_sample_cache(mesh) && sample_random_cached(mesh,
+                                                                     seed,
+                                                                     densities,
+                                                                     uniform_density,
+                                                                     positions,
+                                                                     bary_coords,
+                                                                     tri_indices,
+                                                                     uniform_samples);
+  if (!cached) {
+    Array<int> count_data;
+    const OffsetIndices points_by_tri = densities.is_empty() ?
+                                            calc_tri_point_offsets(mesh, uniform_density, seed, count_data) :
+                                            calc_tri_point_offsets(mesh, densities, seed, count_data);
+    sample_bary_coords(mesh, seed, points_by_tri, positions, bary_coords, tri_indices);
+  }
+  const int64_t points_num = uniform_samples ? uniform_samples->tris.size() : positions.size();
+  CLOG_INFO(&CACHE_LOG,
+            "Random field_ms=%.3f sample_ms=%.3f points=%lld cache_path=%d",
+            std::chrono::duration<double, std::milli>(after_field - start).count(),
+            std::chrono::duration<double, std::milli>(timeit::Clock::now() - after_field).count(),
+            static_cast<long long>(points_num),
+            int(cached));
+  if (points_num == 0) {
+    return nullptr;
+  }
 
-  PointCloud *pointcloud = bke::pointcloud_new_no_attributes(PointCloudType::Points,
-                                                             positions.size());
+  PointCloud *pointcloud = bke::pointcloud_new_no_attributes(PointCloudType::Points, points_num);
   bke::MutableAttributeAccessor point_attributes = pointcloud->attributes_for_write();
-  VectorData<float3, GuardedAllocator> positions_data = positions.release();
-  const auto *attr_data = implicit_sharing::info_for_mem_free(positions_data.data);
-  point_attributes.add<float3>("position",
-                               bke::AttrDomain::Point,
-                               bke::AttributeInitShared(positions_data.data, *attr_data));
-  attr_data->remove_user_and_delete_if_last();
+  if (uniform_samples) {
+    const auto &shared_positions = *uniform_samples->positions;
+    point_attributes.add<float3>("position",
+                                 bke::AttrDomain::Point,
+                                 bke::AttributeInitShared(shared_positions.data.data(),
+                                                          shared_positions));
+    /* The BVH references those exact positions. Position edits detach both through Blender's
+     * existing attribute and runtime cache invalidation. */
+    pointcloud->runtime->bvh_cache = uniform_samples->bvh_cache;
+  }
+  else {
+    VectorData<float3, GuardedAllocator> positions_data = positions.release();
+    const auto *attr_data = implicit_sharing::info_for_mem_free(positions_data.data);
+    point_attributes.add<float3>("position",
+                                 bke::AttrDomain::Point,
+                                 bke::AttributeInitShared(positions_data.data, *attr_data));
+    attr_data->remove_user_and_delete_if_last();
+  }
   point_attributes.add<float>("radius", bke::AttrDomain::Point, bke::AttributeInitValue(0.05f));
 
-  propagate_attributes(mesh, attribute_filter, *pointcloud, bary_coords, tri_indices);
+  const Span<float3> sampled_bary = uniform_samples ? uniform_samples->bary_coords : bary_coords;
+  const Span<int> sampled_tris = uniform_samples ? uniform_samples->tris : tri_indices;
+  propagate_attributes(mesh, attribute_filter, *pointcloud, sampled_bary, sampled_tris);
 
   compute_attribute_outputs(
-      mesh, *pointcloud, bary_coords, tri_indices, attribute_outputs, use_legacy_normal);
+      mesh, *pointcloud, sampled_bary, sampled_tris, attribute_outputs, use_legacy_normal);
 
   geometry::debug_randomize_point_order(pointcloud);
 
@@ -566,20 +882,44 @@ static PointCloud *create_points_poisson_disk(const Mesh &mesh,
   if (density_max <= 0.0f) {
     return nullptr;
   }
-  Array<int> count_data;
-  const OffsetIndices<int> points_by_tri = calc_tri_point_offsets(
-      mesh, density_max, seed, count_data);
-  if (points_by_tri.total_size() == 0) {
+  bool computed = false;
+  auto prepare = [&] {
+    computed = true;
+    auto s = std::make_unique<Samples>();
+    Array<int> counts;
+    const OffsetIndices points_by_tri = calc_tri_point_offsets(mesh, density_max, seed, counts);
+    sample_bary_coords(mesh, seed, points_by_tri, s->positions, s->bary_coords, s->tris);
+    s->eliminated = Array<bool>(s->positions.size(), false);
+    if (!s->positions.is_empty()) {
+      update_elimination_mask_for_close_points(s->positions, minimum_distance, s->eliminated);
+    }
+    s->input_bytes = mesh.verts_num*sizeof(float3) + mesh.corners_num*sizeof(int) +
+                     mesh.corner_tris().size_in_bytes();
+    return s;
+  };
+  Samples working;
+  if (use_sample_cache(mesh)) {
+    SampleKey key(mesh, mesh.corner_tris(), seed);
+    key.distance = minimum_distance;
+    key.density_max = density_max;
+    if (key.positions_owner && key.corners_owner) {
+      working = *memory_cache::get<Samples>(key, prepare);
+    }
+    else {
+      working = std::move(*prepare());
+    }
+  }
+  else {
+    working = std::move(*prepare());
+  }
+  auto &positions = working.positions;
+  auto &bary_coords = working.bary_coords;
+  auto &tri_indices = working.tris;
+  auto &elimination_mask = working.eliminated;
+  CLOG_INFO(&CACHE_LOG, "Poisson candidates=%lld computed=%d", static_cast<long long>(positions.size()), int(computed));
+  if (positions.is_empty()) {
     return nullptr;
   }
-
-  Vector<float3> positions;
-  Vector<float3> bary_coords;
-  Vector<int> tri_indices;
-  sample_bary_coords(mesh, seed, points_by_tri, positions, bary_coords, tri_indices);
-
-  Array<bool> elimination_mask(positions.size(), false);
-  update_elimination_mask_for_close_points(positions, minimum_distance, elimination_mask);
 
   const Array<float> density_factors = calc_full_density_factors_with_selection(
       mesh, density_factor_field, selection_field);

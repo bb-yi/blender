@@ -19,6 +19,8 @@
 
 #include "DEG_depsgraph_query.hh"
 
+#include "FN_multi_function_registry.hh"
+
 #include "node_function_util.hh"
 #include "node_shader_util.hh"
 
@@ -310,21 +312,15 @@ static const mf::MultiFunction *get_multi_function(const bNode &node)
   switch (data_type) {
     case SOCK_FLOAT:
       switch (data->operation) {
-        case NODE_COMPARE_LESS_THAN: {
-          static auto fn = mf::build::SI2_SO<float, float, bool>(
-              "Less Than", [](float a, float b) { return a < b; }, exec_preset_all);
-          return &fn;
-        }
+        case NODE_COMPARE_LESS_THAN:
+          return &mf::registry::lookup("float < float"_ustr);
         case NODE_COMPARE_LESS_EQUAL: {
           static auto fn = mf::build::SI2_SO<float, float, bool>(
               "Less Equal", [](float a, float b) { return a <= b; }, exec_preset_all);
           return &fn;
         }
-        case NODE_COMPARE_GREATER_THAN: {
-          static auto fn = mf::build::SI2_SO<float, float, bool>(
-              "Greater Than", [](float a, float b) { return a > b; }, exec_preset_all);
-          return &fn;
-        }
+        case NODE_COMPARE_GREATER_THAN:
+          return &mf::registry::lookup("float > float"_ustr);
         case NODE_COMPARE_GREATER_EQUAL: {
           static auto fn = mf::build::SI2_SO<float, float, bool>(
               "Greater Equal", [](float a, float b) { return a >= b; }, exec_preset_all);
@@ -475,13 +471,8 @@ static const mf::MultiFunction *get_multi_function(const bNode &node)
                   exec_preset_all);
               return &fn;
             }
-            case NODE_COMPARE_MODE_DOT_PRODUCT: {
-              static auto fn = mf::build::SI3_SO<float3, float3, float, bool>(
-                  "Greater Than - Dot Product",
-                  [](float3 a, float3 b, float comp) { return math::dot(a, b) > comp; },
-                  exec_preset_first_two);
-              return &fn;
-            }
+            case NODE_COMPARE_MODE_DOT_PRODUCT:
+              return &mf::registry::lookup("dot_product(float3, float3) > float"_ustr);
             case NODE_COMPARE_MODE_DIRECTION: {
               static auto fn = mf::build::SI3_SO<float3, float3, float, bool>(
                   "Greater Than - Direction",
