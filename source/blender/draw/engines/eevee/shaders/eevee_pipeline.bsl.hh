@@ -29,6 +29,7 @@ struct PipelineConstants {
   [[compilation_constant]] bool use_sss;
   [[compilation_constant]] bool use_aov_output;
   [[compilation_constant]] bool use_raycast;
+  [[compilation_constant]] bool use_hardware_raycast;
   [[compilation_constant]] bool use_additional_data;
   [[compilation_constant]] bool is_volume_pipe;
   [[compilation_constant]] bool is_shadow_pipe;

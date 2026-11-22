@@ -28,6 +28,7 @@
 #include "BLI_set.hh"
 
 #include "GPU_capabilities.hh"
+#include "GPU_context.hh"
 
 namespace blender::eevee {
 
@@ -509,10 +510,7 @@ void Light::sync(ShadowModule &shadows,
   }
 
   if (la->mode & LA_SHADOW) {
-    shadow_ensure(shadows);
-  }
-  else {
-    shadow_discard_safe(shadows);
+    this->flags = LightFlag(this->flags | LIGHT_CAST_SHADOW);
   }
 
   this->light_set_membership = uint64_to_uint2(light_set_membership);
@@ -545,8 +543,10 @@ void Light::shadow_discard_safe(ShadowModule &shadows)
 
 void Light::shadow_ensure(ShadowModule &shadows)
 {
-  if (is_sun_light(this->type) && this->directional == nullptr) {
-    this->directional = &shadows.directional_pool.construct(shadows);
+  if (is_sun_light(this->type)) {
+    if (this->directional == nullptr) {
+      this->directional = &shadows.directional_pool.construct(shadows);
+    }
   }
   else if (this->punctual == nullptr) {
     this->punctual = &shadows.punctual_pool.construct(shadows);
@@ -601,9 +601,12 @@ void Light::shape_parameters_set(const blender::Light *la,
                                 la->shadow_jitter_overblur / 100.0f :
                                 1.0f;
 
+  /* VSM jitter moves the shadow map. Hardware rays sample the full light directly. */
+  this->hwrt_shadow_size = 0.0f;
   if (is_sun_light(this->type)) {
     LightSunData &l_sun = this->sun;
     float sun_half_angle = min_ff(la->sun_angle, DEG2RADF(179.9f)) / 2.0f;
+    this->hwrt_shadow_size = sun_half_angle;
     /* Use non-clamped radius for soft shadows. Avoid having a minimum blur. */
     l_sun.shadow_angle = sun_half_angle * trace_scaling_fac;
     /* Clamp to a minimum to distinguish between point lights and area light shadow. */
@@ -618,20 +621,22 @@ void Light::shape_parameters_set(const blender::Light *la,
   else if (is_area_light(this->type)) {
     LightAreaData &l_area = this->area;
     const bool is_irregular = ELEM(la->area_shape, LA_AREA_RECT, LA_AREA_ELLIPSE);
-    l_area.size = float2(la->area_size, is_irregular ? la->area_sizey : la->area_size);
-    /* Scale and clamp to minimum value before float imprecision artifacts appear. */
-    l_area.size *= scale.xy() / 2.0f;
+    l_area.hwrt_shadow_half_size =
+        float2(la->area_size, is_irregular ? la->area_sizey : la->area_size) * scale.xy() / 2.0f;
+    this->hwrt_shadow_size = length(l_area.hwrt_shadow_half_size);
     l_area.shadow_scale = trace_scaling_fac;
-    l_area.local.shadow_radius = length(l_area.size) * trace_scaling_fac;
+    l_area.local.shadow_radius = this->hwrt_shadow_size * trace_scaling_fac;
     /* Set to default position. */
     l_area.local.shadow_position = float3(0.0f);
-    /* Do not render lights that have no area. */
-    if (l_area.size.x * l_area.size.y < 0.00001f) {
-      /* Forces light to be culled. */
+    /* A normalized light keeps its power in the zero-area limit. Cull zero-area lights whose
+     * power is specified per unit area. */
+    if ((la->mode & LA_UNNORMALIZED) &&
+        (l_area.hwrt_shadow_half_size.x == 0.0f || l_area.hwrt_shadow_half_size.y == 0.0f))
+    {
       l_area.local.influence_radius_max = 0.0f;
     }
-    /* Clamp to minimum value before float imprecision artifacts appear. */
-    l_area.size = max(float2(0.003f), l_area.size);
+    /* Keep the LTC shape numerically stable as the hardware shadow rays approach a point. */
+    l_area.size = max(float2(0.003f), l_area.hwrt_shadow_half_size);
     /* For volume point lighting. */
     l_area.local.shape_radius = max(0.001f, length(l_area.size) / 2.0f);
   }
@@ -656,7 +661,8 @@ void Light::shape_parameters_set(const blender::Light *la,
       l_spot.spot_tan = 0.0f;
     }
     /* Use unclamped radius for soft shadows. Avoid having a minimum blur. */
-    l_local.local.shadow_radius = max(0.0f, la->radius) * trace_scaling_fac;
+    this->hwrt_shadow_size = max(0.0f, la->radius);
+    l_local.local.shadow_radius = this->hwrt_shadow_size * trace_scaling_fac;
     /* Clamp to a minimum to distinguish between point lights and area light shadow. */
     l_local.local.shadow_radius = (la->radius > 0.0f) ? max_ff(1e-8f, local.local.shadow_radius) :
                                                         0.0f;
@@ -1068,6 +1074,25 @@ void LightModule::update_shadow_light_costs()
             });
 }
 
+const char *LightModule::hardware_shadow_unsupported_reason() const
+{
+  int caster_lights = 0;
+  for (const Light &light : light_map_.values()) {
+    if (!light.used || light.color.x < 0.0f || !(light.flags & LIGHT_CAST_SHADOW)) {
+      continue;
+    }
+    if (GPU_backend_get_type() != GPU_BACKEND_VULKAN &&
+        light.shadow_set_membership != uint64_to_uint2(draw::LIGHT_LINK_MASK_ALL))
+    {
+      return "a light uses shadow linking";
+    }
+    caster_lights++;
+  }
+  const int layers = inst_.raytracing.use_hardware_tracing_method() ?
+                         sun_lights_len_ + local_lights_len_ : caster_lights;
+  return layers > GPU_max_texture_layers() ? "too many shadow visibility layers" : nullptr;
+}
+
 void LightModule::end_sync()
 {
   /* IMPORTANT: We cannot add new lights here since the shadow module already executed its
@@ -1086,6 +1111,9 @@ void LightModule::end_sync()
   /* Indices inside GPU data array. */
   int sun_lights_idx = 0;
   int local_lights_idx = sun_lights_len_;
+  const bool hardware_shadows = inst_.raytracing.use_hardware_shadows();
+  const bool screen_shadows = hardware_shadows &&
+                              !inst_.raytracing.use_hardware_tracing_method();
 
   /* Fill GPU data with scene data. */
   auto it_end = light_map_.items().end();
@@ -1101,6 +1129,11 @@ void LightModule::end_sync()
     int dst_idx = is_sun_light(light.type) ? sun_lights_idx++ : local_lights_idx++;
     /* Put all light data into global data SSBO. */
     light_buf_[dst_idx] = light;
+    /* The GPU-extracted world sun has no camera hardware visibility layer. */
+    const bool trace_shadow = hardware_shadows && light.color.x >= 0.0f &&
+                              (light.flags & LIGHT_CAST_SHADOW);
+    light_buf_[dst_idx].hwrt_shadow_layer = trace_shadow ? dst_idx : -1;
+    light_buf_[dst_idx].hwrt_cluster_id = 0;
     const int uniform_encoded_index = (light.uniform_light_shader_index >= 0) ?
                                           -light.uniform_light_shader_index - 2 :
                                           -1;
@@ -1139,6 +1172,18 @@ void LightModule::end_sync()
     inst_.info_append_i18n("Error: Too many lights in the scene.");
   }
   lights_len_ = sun_lights_len_ + local_lights_len_;
+  hardware_shadow_layers_ = lights_len_;
+  if (screen_shadows) {
+    /* The visibility texture needs one full-resolution layer per participating light. */
+    hardware_shadow_layers_ = 0;
+    const int max_layers = GPU_max_texture_layers();
+    for (const int i : IndexRange(lights_len_)) {
+      int &layer = light_buf_[i].hwrt_shadow_layer;
+      if (layer >= 0) {
+        layer = hardware_shadow_layers_ < max_layers ? hardware_shadow_layers_++ : -1;
+      }
+    }
+  }
   if (too_many_lights) {
     light_shader_index_buf_ensure_no_shader(light_shader_src_index_buf_, lights_len_);
     light_shader_index_buf_ensure_no_shader(front_light_shader_src_index_buf_, lights_len_);
@@ -1147,6 +1192,23 @@ void LightModule::end_sync()
   }
 
   /* This scene data buffer is then immutable after this point. */
+  /* Nuru's spatial buckets must travel with each light through the GPU culling sort. */
+  if (local_lights_len_ > 0) {
+    float3 bounds_min(FLT_MAX), bounds_max(-FLT_MAX);
+    for (int i = sun_lights_len_; i < lights_len_; i++) {
+      bounds_min = math::min(bounds_min, light_buf_[i].position());
+      bounds_max = math::max(bounds_max, light_buf_[i].position());
+    }
+    const float3 extent = math::max(bounds_max - bounds_min, float3(1.0e-3f));
+    for (int i = sun_lights_len_; i < lights_len_; i++) {
+      const float3 ndc = (light_buf_[i].position() - bounds_min) / extent;
+      const uint qx = math::min(uint(ndc.x * 4.0f), 3u);
+      const uint qy = math::min(uint(ndc.y * 4.0f), 3u);
+      const uint qz = math::min(uint(ndc.z * 4.0f), 3u);
+      light_buf_[i].hwrt_cluster_id = int((qx | (qy << 2u) | (qz << 4u)) %
+                                         HWRT_LIGHT_CLUSTER_COUNT);
+    }
+  }
   light_buf_.push_update();
   light_shader_src_index_buf_.push_update();
   front_light_shader_src_index_buf_.push_update();

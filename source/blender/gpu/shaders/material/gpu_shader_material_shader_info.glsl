@@ -147,6 +147,19 @@ float4 shader_info_cached_shadow(uint light_index, float cache_eligible, int qua
   return float4(-1.0f);
 }
 
+[[node]]
+void node_shader_info_hardware_shadow(float primary_receiver, out float use_hardware_shadow)
+{
+#if defined(MAT_SHADER_INFO_FORWARD_HARDWARE_SHADOW) && defined(GPU_FRAGMENT_SHADER)
+  use_hardware_shadow = 1.0f;
+#elif defined(MAT_SHADER_INFO_HARDWARE_SHADOW) && defined(GPU_FRAGMENT_SHADER)
+  use_hardware_shadow = (primary_receiver > 0.5f && shader_info_hardware_shadow_layers > 0) ?
+                            1.0f : 0.0f;
+#else
+  use_hardware_shadow = 0.0f;
+#endif
+}
+
 void shader_info_eval_light(KernelGlobals &kg, ShadingData &sd, uint l_idx,
                             bool is_local,
                             float3 position,
@@ -163,6 +176,7 @@ void shader_info_eval_light(KernelGlobals &kg, ShadingData &sd, uint l_idx,
                             float pcf_radius,
                             float max_penumbra,
                             float cache_eligible,
+                            float use_hardware_shadow,
                             float3 &diffuse_shading_sum,
                             float &visibility_sum,
                             float &self_shadow_sum,
@@ -240,6 +254,44 @@ void shader_info_eval_light(KernelGlobals &kg, ShadingData &sd, uint l_idx,
   if (diffuse_power >= LIGHT_ATTENUATION_THRESHOLD &&
       surface_attenuation > LIGHT_ATTENUATION_THRESHOLD)
   {
+#if defined(MAT_SHADER_INFO_FORWARD_HARDWARE_SHADOW) && defined(GPU_FRAGMENT_SHADER)
+    float3 hardware_shadow = float3(-1.0f);
+    if (use_hardware_shadow > 0.5f && light.hwrt_shadow_layer >= 0) {
+      [[resource_table]] const eevee::LightEvalData &light_eval = resource_table_get(eevee::LightEvalData);
+#  if defined(SHADOW_CASTER_CLASSIFY)
+      const uint receiver_id = kg.resource_id_get(sd);
+#  else
+      const uint receiver_id = SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID;
+#  endif
+      /* A blended fragment owns its position, including when another depth is stored at
+       * the same screen pixel. Sample its shadow directly rather than using the prepass. */
+      float4 result = eevee::forward_shadow_classified(
+          light_eval, light, lv, is_directional, position, geometry_normal, receiver_id);
+      if (result.x >= 0.0f) {
+#  if defined(MAT_FORWARD_HWRT_SHADOW_REUSE)
+        const float3 origin = eevee::forward_shadow_origin(position, geometry_normal);
+        const float3 lighting_origin = eevee::forward_shadow_origin(sd.forward_lighting_P, sd.Ng);
+        if (all(equal(origin, lighting_origin))) {
+          eevee::forward_shadow_cache_store(light.hwrt_shadow_layer, result.rgb);
+        }
+#  endif
+        hardware_shadow = shader_info_decode_hardware_shadow(result);
+      }
+    }
+#else
+    float3 hardware_shadow = use_hardware_shadow > 0.5f ?
+                                 shader_info_hardware_shadow_sample(light, sd.frag_co.xy) :
+                                 float3(-1.0f);
+#endif
+    if (hardware_shadow.x >= 0.0f) {
+      visibility_sum += hardware_shadow.x * diffuse_weight;
+      shadow_weight_sum += diffuse_weight;
+#if defined(SHADOW_CASTER_CLASSIFY)
+      self_shadow_sum += hardware_shadow.y * surface_attenuation * diffuse_weight;
+      cast_shadow_sum += hardware_shadow.z * surface_attenuation * diffuse_weight;
+#endif
+      return;
+    }
     float4 shadow_sample = shader_info_cached_shadow(l_idx, cache_eligible, int(stable_shadow_samples));
 #if defined(SHADOW_CASTER_CLASSIFY)
     const bool classify = true;
@@ -331,7 +383,9 @@ void node_shader_info(float3 position,
                       float shadow_mode,
                       float stable_shadow_samples,
                       float lightgroup_id_value,
-                      float cache_eligible, [[resource_table]] KernelGlobals &kg, ShadingData &sd,
+                      float cache_eligible,
+                      float use_hardware_shadow,
+                      [[resource_table]] KernelGlobals &kg, ShadingData &sd,
                       out float4 diffuse_shading,
                       out float shadow,
                       out float4 ambient_lighting,
@@ -386,6 +440,7 @@ void node_shader_info(float3 position,
                            pcf_radius,
                            max_penumbra,
                            cache_eligible,
+                           use_hardware_shadow,
                            diffuse_shading_sum,
                            visibility_sum,
                            self_shadow_sum,
@@ -411,6 +466,7 @@ void node_shader_info(float3 position,
                            pcf_radius,
                            max_penumbra,
                            cache_eligible,
+                           use_hardware_shadow,
                            diffuse_shading_sum,
                            visibility_sum,
                            self_shadow_sum,
@@ -471,6 +527,7 @@ void node_shader_info(float3 position,
                    shadow_mode,
                    stable_shadow_samples,
                    lightgroup_id_value,
+                   0.0f,
                    0.0f,
                    kg,
                    sd,

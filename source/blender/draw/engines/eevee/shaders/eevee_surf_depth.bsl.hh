@@ -41,12 +41,14 @@ template<bool with_velocity> struct SurfaceDepthFragOut {};
 template<> struct SurfaceDepthFragOut<false> {
   [[frag_color(PREPASS_FRAG_OUT_NORMAL)]] float4 normal;
   [[frag_color(PREPASS_FRAG_OUT_OB_ID)]] uint object_id;
+  [[frag_color(PREPASS_FRAG_OUT_HWRT_RECEIVER_ID)]] uint hwrt_receiver_id;
 };
 
 template<> struct SurfaceDepthFragOut<true> {
   [[frag_color(PREPASS_FRAG_OUT_NORMAL)]] float4 normal;
   [[frag_color(PREPASS_FRAG_OUT_OB_ID)]] uint object_id;
   [[frag_color(PREPASS_FRAG_OUT_VELOCITY)]] float4 velocity;
+  [[frag_color(PREPASS_FRAG_OUT_HWRT_RECEIVER_ID)]] uint hwrt_receiver_id;
 };
 
 
@@ -172,6 +174,7 @@ void surf_depth([[resource_table]] KernelGlobals &kg,
 #ifdef MAT_NODE_SHADOW_CACHE_RECEIVER
   frag_out.normal.a = 1.0f;
 #endif
+  frag_out.hwrt_receiver_id = interp.resource_id_raw & 0x7FFFFFFFu;
   frag_out.object_id = interp.resource_id_raw & 0xFFFFu;
   if (pipe.is_stencil_writer_surface) [[static_branch]] {
     frag_out.object_id = uint(stencil_writer.stencil_writer_reference) & 15u;
@@ -291,6 +294,7 @@ void surf_depth_offset([[resource_table]] KernelGlobals &kg,
 
   /* Always written, but may be optimized out by frame-buffer/subpass setup. */
   frag_out.normal = float4(normalize(interp.N) * 0.5f + 0.5f, 0.0f);
+  frag_out.hwrt_receiver_id = interp.resource_id_raw & 0x7FFFFFFFu;
   frag_out.object_id = interp.resource_id_raw & 0xFFFFu;
   if (pipe.is_stencil_writer_surface) [[static_branch]] {
     frag_out.object_id = uint(stencil_writer.stencil_writer_reference) & 15u;

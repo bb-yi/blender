@@ -814,7 +814,6 @@ void ShadowModule::ensure_caster_atlas()
 void ShadowModule::init()
 {
   blender::Scene &scene = *inst_.scene;
-  const int previous_shadow_page_len = shadow_page_len_;
 
   global_lod_bias_ = (1.0f - scene.eevee.shadow_resolution_scale) * SHADOW_TILEMAP_LOD;
 
@@ -827,19 +826,15 @@ void ShadowModule::init()
                     (inst_.is_image_render ||
                      (!inst_.is_navigating && !inst_.is_transforming && !inst_.is_playback &&
                       (scene.eevee.flag & SCE_EEVEE_SHADOW_JITTERED_VIEWPORT)));
-  const bool was_enabled = enabled_;
   const bool was_jittered = data_.use_jitter;
   const bool jitter_was_disabled_by_transform = viewport_jitter_disabled_by_transform_;
   viewport_jitter_disabled_by_transform_ = inst_.is_viewport() && enable_shadow &&
                                            inst_.is_transforming &&
                                            (scene.eevee.flag &
                                             SCE_EEVEE_SHADOW_JITTERED_VIEWPORT);
-  update_lights |= assign_if_different(enabled_, enable_shadow);
   update_lights |= assign_if_different(data_.use_jitter, bool32_t(use_jitter));
   viewport_history_invalidated_ =
-      inst_.is_viewport() &&
-      ((was_enabled != enabled_) ||
-       (!was_jittered && data_.use_jitter && jitter_was_disabled_by_transform));
+      inst_.is_viewport() && !was_jittered && data_.use_jitter && jitter_was_disabled_by_transform;
   if (update_lights) {
     /* Force light reset. */
     for (Light &light : inst_.lights.light_map_.values()) {
@@ -847,7 +842,7 @@ void ShadowModule::init()
     }
   }
 
-  if (enabled_) {
+  if (enable_shadow) {
     data_.ray_count = clamp_i(scene.eevee.shadow_ray_count, 1, SHADOW_MAX_RAY);
     data_.step_count = clamp_i(scene.eevee.shadow_step_count, 1, SHADOW_MAX_STEP);
   }
@@ -855,7 +850,12 @@ void ShadowModule::init()
     data_.ray_count = 1;
     data_.step_count = 1;
   }
+}
 
+void ShadowModule::ensure_shadow_atlas(bool enabled_changed)
+{
+  const SceneEEVEE &eevee = inst_.scene->eevee;
+  const int previous_shadow_page_len = shadow_page_len_;
   const int2 atlas_extent = shadow_page_size_ * int2(SHADOW_PAGE_PER_ROW, SHADOW_PAGE_PER_COL);
 
   eGPUTextureUsage tex_usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
@@ -864,7 +864,7 @@ void ShadowModule::init()
   }
 
   const int previous_pool_size_requested = shadow_pool_size_requested_;
-  shadow_pool_size_requested_ = enabled_ ? max_ii(scene.eevee.shadow_pool_size, 16) : 0;
+  shadow_pool_size_requested_ = enabled_ ? max_ii(eevee.shadow_pool_size, 16) : 0;
   const bool is_same_pool_request = previous_pool_size_requested == shadow_pool_size_requested_;
   const bool has_limited_pool = enabled_ && atlas_tx_.is_valid() &&
                                 (shadow_pool_size_allocated_ < shadow_pool_size_requested_);
@@ -968,7 +968,7 @@ void ShadowModule::init()
                                 !inst_.is_color_bake &&
                                 GPU_backend_get_type() == GPU_BACKEND_VULKAN;
   if (use_nonblocking_statistics_) {
-    if (was_enabled != enabled_ || previous_shadow_page_len != shadow_page_len_) {
+    if (enabled_changed || previous_shadow_page_len != shadow_page_len_) {
       viewport_statistics_ = {};
       if (statistics_readback_state_ == StatisticsReadbackState::Pending) {
         statistics_readback_state_ = StatisticsReadbackState::Stale;
@@ -1320,13 +1320,21 @@ void ShadowModule::sync_bake_receiver_bounds(const ResourceHandleRange &resource
 
 void ShadowModule::end_sync()
 {
+  const bool use_maps = (inst_.scene->eevee.flag & SCE_EEVEE_SHADOW_ENABLED) &&
+                        !inst_.raytracing.use_hardware_shadows();
+  const bool enabled_changed = assign_if_different(enabled_, use_maps);
+  if (enabled_changed) {
+    do_full_update_ = true;
+    viewport_history_invalidated_ |= inst_.is_viewport();
+  }
+  ensure_shadow_atlas(enabled_changed);
   /* Offline sync also begins a new motion-blur time step. Do not mix visibility
    * from a previous scene state even when its receiver IDs happen to be unchanged. */
   if (!inst_.is_viewport() || inst_.sampling.is_reset()) {
     node_cache_history_sample_ = 0;
   }
   node_soft_shadow_enabled_ = int(node_soft_shadow_next_);
-  node_cache_needed_ = node_cache_needed_next_ && data_.use_jitter;
+  node_cache_needed_ = enabled_ && node_cache_needed_next_ && data_.use_jitter;
   node_cache_quality_ = std::max(1, node_cache_quality_next_);
   invalidate_node_cache();
   if (!node_cache_needed_) {
@@ -1384,10 +1392,12 @@ void ShadowModule::end_sync()
   /* Delete unused shadows first to release tile-maps that could be reused for new lights. */
   for (Light &light : inst_.lights.light_map_.values()) {
     /* Do not discard lights in baking mode. See WORKAROUND in `surfels_create`. */
-    if ((!light.used || !enabled_) && !inst_.is_baking()) {
+    if (!enabled_ || !(light.flags & LIGHT_CAST_SHADOW) || (!light.used && !inst_.is_baking())) {
       light.shadow_discard_safe(*this);
+      continue;
     }
-    else if (light.directional != nullptr) {
+    light.shadow_ensure(*this);
+    if (light.directional != nullptr) {
       needs_scaled_directional_focus |= light.shadow_map_scale > 1.0f;
       light.directional->release_excess_tilemaps(light, inst_.camera);
     }

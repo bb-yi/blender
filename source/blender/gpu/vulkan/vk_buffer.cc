@@ -171,6 +171,13 @@ void VKBuffer::flush() const
   vmaFlushAllocation(allocator, allocation_, 0, max_ulul(size_in_bytes(), 1));
 }
 
+bool VKBuffer::invalidate() const
+{
+  BLI_assert(is_mapped());
+  VmaAllocator allocator = VKBackend::get().device.mem_allocator_get();
+  return vmaInvalidateAllocation(allocator, allocation_, 0, size_in_bytes_) == VK_SUCCESS;
+}
+
 void VKBuffer::clear(VKContext &context, uint32_t clear_value)
 {
   render_graph::VKFillBufferNode::CreateInfo fill_buffer = {};
@@ -289,6 +296,14 @@ void VKBuffer::invalidate_mapped_memory()
   vmaInvalidateAllocation(allocator, allocation_, 0, size_in_bytes_);
 }
 
+void VKBuffer::borrow(const VKResourceWithHandle<VkBuffer> &resource, size_t size)
+{
+  BLI_assert(borrowed_ || !is_allocated());
+  resource_ = resource;
+  size_in_bytes_ = alloc_size_in_bytes_ = size;
+  borrowed_ = true;
+}
+
 bool VKBuffer::free()
 {
   if (is_mapped()) {
@@ -296,12 +311,13 @@ bool VKBuffer::free()
   }
 
   /* Release the owner reference; at zero ref count the buffer becomes discardable. */
-  if (resource_.vk_handle != VK_NULL_HANDLE) {
+  if (!borrowed_ && resource_.vk_handle != VK_NULL_HANDLE) {
     VKDevice &device = VKBackend::get().device;
     device.resources.deref_resource(resource_.resource_handle);
   }
   allocation_ = VK_NULL_HANDLE;
   resource_ = {};
+  borrowed_ = false;
 
   return true;
 }

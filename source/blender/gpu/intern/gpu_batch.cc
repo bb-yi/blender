@@ -213,6 +213,9 @@ static const ShaderInput *attribute_ssbo_input_get(const ShaderInterface *interf
                                                    const char *name)
 {
   const ShaderInput *input = interface->ssbo_get(name);
+  if (input == nullptr && STREQ(name, "a")) {
+    input = interface->ssbo_get("eevee_default_uv_attr");
+  }
   if (input == nullptr) {
     /* Storage buffers can be prefixed to avoid name collisions with shader variables that hold
      * the loaded attribute value. */
@@ -251,7 +254,7 @@ static uint32_t bind_attribute_as_ssbo(const ShaderInterface *interface,
     for (uint n_idx = 0; n_idx < a->name_len; n_idx++) {
       const char *name = GPU_vertformat_attr_name_get(format, a, n_idx);
       const ShaderInput *input = attribute_ssbo_input_get(interface, name);
-      if (input == nullptr || input->location == -1) {
+      if (input == nullptr || input->location == -1 || (bound_attr & (1u << input->location))) {
         continue;
       }
       GPU_vertbuf_bind_as_ssbo(vbo, input->location);

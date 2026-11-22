@@ -265,7 +265,7 @@ class Prepass {
                      bool hide_from_raycast,
                      bool force_write_id = false);
 
-  void end_sync();
+  void end_sync(bool needs_receiver_normals = false, bool write_hwrt_receiver_id = false);
 
   void render(View &view, gpu::Texture *fb_depth_tx, bool can_raycast);
 };
@@ -366,6 +366,11 @@ class ForwardLayer {
 
   bool use_colored_transparency() const;
   bool has_outline_occluders() const;
+  bool has_surface_draws() const
+  {
+    return has_opaque_ || has_transparent_ || has_no_depth_ || has_stencil_ ||
+           has_outline_occluders_;
+  }
   void render_outline_occlusion(View &view, Framebuffer &outline_occlusion_fb);
   void render_dlss_guides(View &view, Framebuffer &framebuffer);
 
@@ -500,6 +505,11 @@ class ForwardPipeline {
   bool has_outline_occluders() const
   {
     return final_.has_outline_occluders();
+  }
+  bool has_surface_draws() const
+  {
+    /* Layered forward surfaces can alter the depth/radiance used by the specular resolve. */
+    return layered_active_ || final_.has_surface_draws();
   }
   void render_outline_occlusion(View &view, Framebuffer &fb)
   {
@@ -675,6 +685,9 @@ class DeferredLayer : DeferredLayerBase {
   gpu::Texture *npr_background_depth_tx_ = nullptr;
   bool32_t npr_background_resolved_ = false;
   gpu::Texture *npr_radiance_input_tx_ = nullptr;
+  int shader_info_hardware_shadow_layers_ = 0;
+  bool has_hardware_shadow_surface_ = false;
+  bool bind_shader_info_hardware_shadow(PassMain::Sub &pass, gpu::Shader *shader);
 
   /**
    * Tile texture containing several bool per tile indicating presence of feature.
@@ -683,6 +696,7 @@ class DeferredLayer : DeferredLayerBase {
   Texture tile_mask_tx_ = {"tile_mask_tx_"};
 
   RayTraceResult indirect_result_;
+  gpu::Texture *shared_indirect_tx_ = nullptr;
 
   bool use_split_radiance_ = true;
   /* Output radiance from the combine shader instead of copy. Allow passing unclamped result. */
@@ -759,7 +773,8 @@ class DeferredLayer : DeferredLayerBase {
                        RayTraceBuffer &rt_buffer,
                        gpu::Texture *radiance_behind_tx,
                        bool &volume_compute_done,
-                       bool early_stencil_stage = false);
+                       bool early_stencil_stage = false,
+                       bool scene_final_hardware_specular = false);
 };
 
 class DeferredPipeline {
@@ -796,6 +811,7 @@ class DeferredPipeline {
 
   void begin_sync();
   void end_sync();
+  bool uses_hardware_shadow_prepass() const;
 
   PassMain::Sub *early_stencil_add(blender::Material *material, GPUMaterial *gpumat);
   PassMain::Sub *stencil_surface_add(blender::Material *material, GPUMaterial *gpumat);
@@ -827,7 +843,11 @@ class DeferredPipeline {
               int2 extent,
               RayTraceBuffer &rt_buffer_opaque_layer,
               RayTraceBuffer &rt_buffer_refract_layer,
-              bool &volume_compute_done);
+              bool &volume_compute_done,
+              bool scene_final_hardware_specular = false);
+
+  /** Whether the main view can retain this GBuffer for Nuru's whole-frame specular phase. */
+  bool use_scene_final_hardware_specular() const;
 
   void render_prepass_only(View &render_view, Framebuffer &prepass_fb);
   void render_gbuffer_only(View &render_view, Framebuffer &prepass_fb, Framebuffer &gbuffer_fb);
@@ -1243,6 +1263,8 @@ class PipelineModule {
 
   bool has_raycast = false;
   bool needs_npr_emission = false;
+  bool has_hardware_shadow_classification = false;
+  const char *native_shadow_requirement = nullptr;
 
   PipelineModule(Instance &inst, PipelineInfoData &data)
       : inst_(inst),
@@ -1261,6 +1283,7 @@ class PipelineModule {
 
   void begin_sync()
   {
+    native_shadow_requirement = nullptr;
     data.ray_type = RAY_TYPE_CAMERA;
     data.can_raycast = true;
     probe.begin_sync();
@@ -1274,6 +1297,16 @@ class PipelineModule {
 
     has_raycast = false;
     needs_npr_emission = false;
+    has_hardware_shadow_classification = false;
+  }
+
+  bool hardware_shadow_classifies_receivers() const;
+
+  void require_native_shadows(const char *reason)
+  {
+    if (native_shadow_requirement == nullptr) {
+      native_shadow_requirement = reason;
+    }
   }
 
   void end_sync()

@@ -23,6 +23,7 @@
 
 /* Avoid too much overhead caused by resizing the light buffers too many time. */
 #define LIGHT_CHUNK 256
+#define HWRT_LIGHT_CLUSTER_COUNT 32
 
 [[maybe_unused]] static constexpr int CULLING_SELECT_GROUP_SIZE = 256;
 [[maybe_unused]] static constexpr int CULLING_SORT_GROUP_SIZE = 256;
@@ -237,6 +238,7 @@
 #define PREPASS_FRAG_OUT_NORMAL 0
 #define PREPASS_FRAG_OUT_OB_ID 1
 #define PREPASS_FRAG_OUT_VELOCITY 2
+#define PREPASS_FRAG_OUT_HWRT_RECEIVER_ID 3
 
 /* Resource bindings. */
 
@@ -267,6 +269,7 @@
 #define NPR_RADIANCE_TEX_SLOT 20
 #define LIGHT_SHADER_TEX_SLOT 20
 #define DIRECT_RADIANCE_NPR_TX_SLOT_1 21
+#define HWRT_DIRECT_CLOSURES_TEX_SLOT 22
 #define INDIRECT_RADIANCE_NPR_TX_SLOT_1 24
 #define BACK_HIZ_TX_SLOT 27
 #define BACK_RADIANCE_TX_SLOT 28

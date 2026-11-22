@@ -9,6 +9,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <thread>
 
 #include "BLI_threads.hh"
@@ -122,6 +123,8 @@ struct VKExtensions {
    * Device supports `shaderClipDistance` feature.
    */
   bool shader_clip_distance = false;
+  bool hardware_raytracing = false;
+  bool diagnostic_checkpoints = false;
 
   /** Log enabled features and extensions. */
   void log() const;
@@ -216,6 +219,9 @@ class VKDevice : public NonCopyable {
    * Must be externally synced by orphaned_data.mutex_get()
    */
   TimelineValue timeline_value_ = 0;
+  std::atomic<TimelineValue> queue_submitted_timeline_ = 0;
+  std::mutex queue_submitted_mutex_;
+  std::condition_variable queue_submitted_condition_;
   /** First submission/synchronization failure. A failed device requires a restart. */
   std::atomic<VkResult> submission_error_{VK_SUCCESS};
 
@@ -438,6 +444,27 @@ class VKDevice : public NonCopyable {
                                     uint64_t signal_semaphore_value);
   bool wait_for_timeline(TimelineValue timeline);
   bool wait_queue_idle();
+
+  bool wait_for_submission_timeline(TimelineValue timeline);
+  TimelineValue external_timeline_chain_acquire(TimelineValue *r_wait_value);
+  void external_timeline_chain_submitted(TimelineValue value);
+  void diagnostic_checkpoints_dump();
+  VkQueue queue_get() const
+  {
+    return vk_queue_;
+  }
+  std::mutex &queue_mutex_get()
+  {
+    return *queue_mutex_;
+  }
+  VkSemaphore timeline_semaphore_get() const
+  {
+    return vk_timeline_semaphore_;
+  }
+  TimelineValue queue_submitted_timeline_value() const
+  {
+    return queue_submitted_timeline_.load(std::memory_order_acquire);
+  }
 
   VkResult submission_error_get() const
   {

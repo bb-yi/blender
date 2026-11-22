@@ -81,9 +81,6 @@ struct Light : public LightData, NonCopyable {
   ShadowDirectional *directional = nullptr;
   ShadowPunctual *punctual = nullptr;
 
-  /** Used by shadow sync. */
-  uint2 shadow_set_membership = uint2(0);
-
   Light()
   {
     /* Avoid valgrind warning. */
@@ -193,6 +190,7 @@ class LightModule {
   int local_lights_len_ = 0;
   /** Sun plus local lights count for convenience. */
   int lights_len_ = 0;
+  int hardware_shadow_layers_ = 0;
   Map<ObjectKey, std::string> light_names_;
   Vector<TelemetryShadowLightCost> shadow_light_costs_;
 
@@ -299,6 +297,32 @@ class LightModule {
   int light_count() const
   {
     return lights_len_;
+  }
+
+  int hardware_shadow_layer_count() const
+  {
+    return hardware_shadow_layers_;
+  }
+
+  const char *hardware_shadow_unsupported_reason() const;
+
+  const LightData &sync_light(int index) const
+  {
+    return light_buf_[index];
+  }
+
+  const LightCullingData &culling_data() const
+  {
+    return culling_data_buf_;
+  }
+
+  template<typename PassType> void bind_hardware_hit_lighting(PassType &pass)
+  {
+    /* Secondary hits can lie outside the view. Never use the camera-compacted light list. */
+    pass.bind_ssbo("hardware_light_buf", &light_buf_);
+    pass.bind_ubo(WORLD_SUNLIGHT_BUF_SLOT, world_sunlight_ubo());
+    pass.push_constant("hardware_local_lights_len", local_lights_len_);
+    pass.push_constant("hardware_lights_len", lights_len_);
   }
 
   int64_t node_tree_info_count() const

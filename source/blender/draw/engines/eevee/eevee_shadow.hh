@@ -503,6 +503,7 @@ class ShadowModule {
     return &caster_atlas_ref_;
   }
 
+  void ensure_shadow_atlas(bool enabled_changed);
   void ensure_caster_atlas();
 
   template<typename PassType> void bind_resources(PassType &pass)

@@ -344,6 +344,8 @@ void Instance::init(const int2 &output_res,
   SET_FLAG_FROM_TEST(shader_request, motion_blur.postfx_enabled(), MOTION_BLUR_SHADERS);
   SET_FLAG_FROM_TEST(shader_request, raytracing.use_fast_gi(), FAST_GI_SHADERS);
   SET_FLAG_FROM_TEST(shader_request, raytracing.use_raytracing(), RAYTRACING_SHADERS);
+  SET_FLAG_FROM_TEST(
+      shader_request, raytracing.use_hardware_tracing(), HARDWARE_RAYTRACING_SHADERS);
   SET_FLAG_FROM_TEST(shader_request, scene->eevee.filter_graph != nullptr, FILTER_GRAPH_SHADERS);
 
   loaded_shaders = ShaderGroups::NONE;
@@ -651,6 +653,11 @@ void Instance::object_sync(ObjectRef &ob_ref, Manager & /*manager*/)
         break;
       case OB_LIGHTPROBE:
         light_probes.sync_probe(ob_ref);
+        if (DRW_object_get_data_for_drawing<const blender::LightProbe>(*ob).type !=
+            LIGHTPROBE_TYPE_VOLUME)
+        {
+          pipelines.require_native_shadows("the scene captures sphere or planar reflection probes");
+        }
         break;
       default:
         break;
@@ -697,6 +704,9 @@ void Instance::end_sync()
     ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndVolumeShadowsLights);
     render_textures.end_sync();
     volume.end_sync();  /* Needs to be before shadows. */
+    raytracing.resolve_hardware_material_demand();
+    raytracing.resolve_shadow_backend();
+    sync.finalize_hardware_raytrace_scene_entries();
     shadows.end_sync(); /* Needs to be before lights. */
     lights.end_sync();
   }
@@ -867,6 +877,7 @@ void Instance::render_sample()
     film.update_sample_table();
     uniform_data.push_update();
 
+    raytracing.prepare_hardware_material_scene();
     planar_probes.invalidate();
     capture_view.render_world();
     lookdev.rotate_world();

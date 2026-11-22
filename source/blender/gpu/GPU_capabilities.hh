@@ -67,6 +67,8 @@ bool GPU_geometry_shader_support();
 bool GPU_hdr_support();
 bool GPU_multi_viewport_support();
 bool GPU_stencil_export_support();
+bool GPU_hardware_raytracing_support();
+bool GPU_viewport_hardware_raytracing_support();
 bool GPU_ray_query_support();
 bool GPU_vertex_pipeline_stores_and_atomics_support();
 

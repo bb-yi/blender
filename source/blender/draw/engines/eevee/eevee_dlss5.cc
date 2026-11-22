@@ -517,6 +517,7 @@ void Dlss5Module::render_final()
   DRW_submission_start();
   guide->sampling.step();
   guide->uniform_data.push_update();
+  guide->raytracing.prepare_hardware_material_scene();
   guide->render_textures.render();
   guide->main_view.render_dlss_guides(inst_.film);
   DRW_submission_end();

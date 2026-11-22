@@ -57,6 +57,10 @@ class VKIndexBuffer : public IndexBuf {
   {
     return buffer_get().allocated_size_in_bytes();
   }
+  size_t size_in_bytes_get() const
+  {
+    return buffer_get().size_in_bytes();
+  }
 
   void ensure_updated();
 

@@ -73,6 +73,8 @@ PipelineGraphic aov_clear(fullscreen_vert,
  * \{ */
 
 struct LightEval {
+  [[specialization_constant(false)]] bool use_hardware_rt_direct;
+  [[sampler(HWRT_DIRECT_CLOSURES_TEX_SLOT)]] sampler2DArray hardware_direct_closures_tx;
   [[specialization_constant(true)]] bool use_split_indirect;
   [[specialization_constant(true)]] bool use_lightprobe_eval;
   [[specialization_constant(false)]] bool use_transmission;
@@ -179,6 +181,22 @@ void light_eval_frag([[resource_table]] LightEval &srt,
   /* TODO(fclem): If transmission (no SSS) is present, we could reduce LIGHT_CLOSURE_EVAL_COUNT
    * by 1 for this evaluation and skip evaluating the transmission closure twice. */
   lights.eval_reflection(ctx, vPz);
+
+  /* Nuru's primary estimator replaces only supported reflected direct closures. Keep native
+   * transmission/SSS backlighting, NPR multipliers and the shadow render pass below unchanged. */
+  if (srt.use_hardware_rt_direct) {
+    for (uint i = 0u; i < 3; i++) [[unroll]] {
+      if (lrt.constants.light_closure_eval_count_reflect > i) [[static_branch]] {
+        float4 direct = texelFetch(srt.hardware_direct_closures_tx,
+                                  int3(texel, int(i)), 0);
+        if (i < closure_count && direct.a > 0.0f) {
+          ctx.stack.cl[i].light_shadowed = direct.rgb;
+          ctx.stack.cl[i].light_unshadowed = texelFetch(
+              srt.hardware_direct_closures_tx, int3(texel, int(i) + 3), 0).rgb;
+        }
+      }
+    }
+  }
 
   float3 npr_sss_backlight = float3(0.0f);
   if (srt.use_transmission) {
@@ -709,6 +727,7 @@ PipelineGraphic light_single(fullscreen_vert,
                              LightEvalConstants{
                                  .use_light_shader_texture_eval = true,
                                  .use_npr_light_policy = true,
+                                 .use_hardware_shadow_data = true,
                                  .light_closure_eval_count_reflect = 1,
                                  .light_closure_eval_count_transmit = 1,
                                  .light_closure_count_reflect = 1,
@@ -723,6 +742,7 @@ PipelineGraphic light_double(fullscreen_vert,
                              LightEvalConstants{
                                  .use_light_shader_texture_eval = true,
                                  .use_npr_light_policy = true,
+                                 .use_hardware_shadow_data = true,
                                  .light_closure_eval_count_reflect = 2,
                                  .light_closure_eval_count_transmit = 1,
                                  .light_closure_count_reflect = 2,
@@ -737,6 +757,7 @@ PipelineGraphic light_triple(fullscreen_vert,
                              LightEvalConstants{
                                  .use_light_shader_texture_eval = true,
                                  .use_npr_light_policy = true,
+                                 .use_hardware_shadow_data = true,
                                  .light_closure_eval_count_reflect = 3,
                                  .light_closure_eval_count_transmit = 1,
                                  .light_closure_count_reflect = 3,

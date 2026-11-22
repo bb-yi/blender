@@ -239,6 +239,9 @@ class VKResourceStateTracker {
    */
   void update_image_layout(ResourceHandle image_handle, VkImageLayout vk_image_layout);
 
+  /** Last tracked whole-image layout used by the external HWRT dispatch. */
+  VkImageLayout image_layout_get(ResourceHandle image_handle);
+
   /**
    * A resource that reached zero ref count, including its registered views. The caller owns
    * destruction (e.g. via a discard pool); the resource stays registered until then.

@@ -56,6 +56,7 @@ PassMain::Sub *OutlineShellModule::material_add(ResourceHandle handle, GPUMateri
   pass.state_set(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                  inst_.film.depth.test_state | cull_state);
   pass.material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
+  inst_.raytracing.bind_hardware_material_scene(pass, gpumat);
   return &pass;
 }
 

@@ -31,12 +31,14 @@ struct Combine {
   [[specialization_constant(false)]] bool use_albedo_roughness_weighting;
   [[specialization_constant(false)]] bool use_radiance_feedback;
   [[specialization_constant(true)]] bool use_split_radiance;
+  [[specialization_constant(false)]] bool use_shared_indirect;
 
   /* Inputs. */
   [[sampler(2)]] usampler2DArray direct_radiance_txs;
   [[sampler(4)]] sampler2D indirect_radiance_1_tx;
   [[sampler(5)]] sampler2D indirect_radiance_2_tx;
   [[sampler(6)]] sampler2D indirect_radiance_3_tx;
+  [[sampler(9)]] sampler2D shared_indirect_tx;
 
   [[image(5, read_write, SFLOAT_16_16_16_16)]] image2D radiance_feedback_img;
 
@@ -237,6 +239,13 @@ void combine_frag([[resource_table]] Combine &srt,
   }
 
   /* Rim is an art-directed surface contribution, neither emission nor scattered illumination. */
+  if (srt.use_shared_indirect) {
+    /* Already colored in Nuru's ray-grid accumulation pass. Do not apply closure color twice.
+     * Per-closure textures remain available to existing light-pass and NPR consumers. */
+    out_indirect = world_environment_disabled ? float3(0.0f) :
+                      texelFetch(srt.shared_indirect_tx, texel, 0).rgb;
+  }
+
   out_direct += reader.read_npr_rim(gbuf.header, texel);
 
   if (srt.use_radiance_feedback) {

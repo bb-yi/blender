@@ -200,12 +200,16 @@ void ShadingView::render()
 
   const bool with_raycast = inst_.pipelines.has_raycast;
   const bool with_prepass_normal = with_raycast || inst_.outline.enabled() ||
-                                   inst_.lights.needs_front_light_shader();
+                                   inst_.lights.needs_front_light_shader() ||
+                                   inst_.pipelines.deferred.uses_hardware_shadow_prepass();
   prepass_fb_.ensure(
       GPU_ATTACHMENT_TEXTURE(rbufs.depth_tx),
       with_prepass_normal ? GPU_ATTACHMENT_TEXTURE(rbufs.prepass_normal_tx) : GPU_ATTACHMENT_NONE,
       with_raycast ? GPU_ATTACHMENT_TEXTURE(rbufs.object_id_tx) : GPU_ATTACHMENT_NONE,
-      GPU_ATTACHMENT_TEXTURE(rbufs.vector_tx));
+      GPU_ATTACHMENT_TEXTURE(rbufs.vector_tx),
+      inst_.pipelines.hardware_shadow_classifies_receivers() ?
+          GPU_ATTACHMENT_TEXTURE(rbufs.hwrt_receiver_id_tx) :
+          GPU_ATTACHMENT_NONE);
 
   GBuffer &gbuf = inst_.gbuffer;
   {
@@ -262,6 +266,8 @@ void ShadingView::render()
     inst_.pipelines.background.render(render_view_, combined_fb_);
   }
 
+  const bool scene_final_hardware_specular =
+      inst_.pipelines.deferred.use_scene_final_hardware_specular();
   /* TODO(Miguel Pozo): Deferred and forward prepass should happen before the GBuffer pass. */
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferred);
@@ -273,14 +279,15 @@ void ShadingView::render()
                                     extent_,
                                     rt_buffer_opaque_,
                                     rt_buffer_refract_,
-                                    volume_compute_done);
+                                    volume_compute_done,
+                                    scene_final_hardware_specular);
   }
 
   /* NPR: the outline detect pass reads the deferred GBuffer (surface normals for raytrace
    * transmission, see d55d73358c0b). Keep the GBuffer alive until after the outline pass when
    * outline is enabled; otherwise release it right away to free the pool textures early. */
-  const bool defer_gbuffer_release_for_outline = inst_.outline.enabled();
-  if (!defer_gbuffer_release_for_outline) {
+  const bool defer_gbuffer_release = inst_.outline.enabled() || scene_final_hardware_specular;
+  if (!defer_gbuffer_release) {
     inst_.gbuffer.release();
   }
 
@@ -332,13 +339,25 @@ void ShadingView::render()
   }
   inst_.outline_shell.release();
 
+  if (scene_final_hardware_specular && rt_buffer_opaque_.scene_final_specular) {
+    TextureFromPool scene_radiance("Hardware Whole Frame Specular Scene");
+    scene_radiance.acquire_2d(extent_, RenderBuffers::color_format);
+    GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+    GPU_texture_copy(scene_radiance, rbufs.combined_tx);
+    inst_.raytracing.render_scene_final_specular(*rt_buffer_opaque_.scene_final_specular,
+                                                scene_radiance,
+                                                inst_.pipelines.deferred.closure_bits_get(),
+                                                render_view_);
+    scene_radiance.release();
+  }
+
   if (inst_.outline.enabled()) {
     ScopedTelemetrySample scope(inst_.telemetry, TelemetryStageId::ScreenOutline);
     inst_.outline.render(render_view_, extent_);
   }
 
   /* NPR: release the GBuffer that was kept alive for the outline detect pass (see above). */
-  if (defer_gbuffer_release_for_outline) {
+  if (defer_gbuffer_release) {
     inst_.gbuffer.release();
   }
 
@@ -665,7 +684,8 @@ void CaptureView::render_probes()
     rbufs.acquire(extent);
 
     const bool with_raycast = inst_.pipelines.has_raycast;
-    const bool with_prepass_normal = with_raycast || inst_.lights.needs_front_light_shader();
+    const bool with_prepass_normal = with_raycast || inst_.lights.needs_front_light_shader() ||
+                                     inst_.pipelines.deferred.uses_hardware_shadow_prepass();
     prepass_fb.ensure(GPU_ATTACHMENT_TEXTURE(rbufs.depth_tx),
                       with_prepass_normal ? GPU_ATTACHMENT_TEXTURE(rbufs.prepass_normal_tx) :
                                             GPU_ATTACHMENT_NONE,

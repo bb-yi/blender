@@ -47,13 +47,24 @@ VKTopLevelAS::VKTopLevelAS(const char *name) : TopLevelAS(name), max_primitive_c
 VKTopLevelAS::~VKTopLevelAS()
 {
   VKDiscardPool &discard_pool = VKDiscardPool::discard_pool_get();
-  if (vk_acceleration_structure_) {
+  if (vk_acceleration_structure_ && !borrowed_) {
     discard_pool.discard_acceleration_structure(vk_acceleration_structure_);
     vk_acceleration_structure_ = VK_NULL_HANDLE;
   }
   if (buffer_.is_allocated()) {
     buffer_.free();
   }
+}
+
+void VKTopLevelAS::borrow(VkAccelerationStructureKHR handle,
+                          const VKResourceWithHandle<VkBuffer> &backing,
+                          size_t size)
+{
+  BLI_assert(borrowed_ || vk_acceleration_structure_ == VK_NULL_HANDLE);
+  vk_acceleration_structure_ = handle;
+  buffer_.borrow(backing, size);
+  borrowed_ = true;
+  is_dirty_ = false;
 }
 
 InstanceID VKTopLevelAS::add_instance(const BottomLevelAS &blas_,

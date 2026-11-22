@@ -130,6 +130,7 @@ set(SRC
   engines/eevee/eevee_pipeline.cc
   engines/eevee/eevee_precompute.cc
   engines/eevee/eevee_raytrace.cc
+  engines/eevee/eevee_raytrace_hardware.cc
   engines/eevee/eevee_render_texture.cc
   engines/eevee/eevee_renderbuffers.cc
   engines/eevee/eevee_sampling.cc
@@ -137,6 +138,7 @@ set(SRC
   engines/eevee/eevee_shadow.cc
   engines/eevee/eevee_subsurface.cc
   engines/eevee/eevee_sync.cc
+  engines/eevee/eevee_sync_hardware.cc
   engines/eevee/eevee_telemetry.cc
   engines/eevee/eevee_velocity.cc
   engines/eevee/eevee_view.cc
@@ -422,6 +424,10 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/infos/eevee_shadow_filter_infos.hh
   engines/eevee/shaders/infos/eevee_shadow_infos.hh
   engines/eevee/shaders/infos/eevee_surf_bake_infos.hh
+  engines/eevee/shaders/infos/eevee_surf_hit_eval_infos.hh
+  engines/eevee/shaders/infos/eevee_ray_hardware_lighting_infos.hh
+  engines/eevee/shaders/infos/eevee_nuru_direct_light_infos.hh
+  engines/eevee/shaders/infos/eevee_ray_shared_indirect_infos.hh
   engines/eevee/shaders/infos/eevee_surf_deferred_infos.hh
   engines/eevee/shaders/infos/eevee_uniform_infos.hh
   engines/eevee/shaders/eevee_attributes_curves_lib.bsl.hh
@@ -467,6 +473,7 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/eevee_filter_material_frag.glsl
   engines/eevee/shaders/eevee_filter_material.bsl.hh
   engines/eevee/shaders/eevee_forward_lib.bsl.hh
+  engines/eevee/shaders/eevee_forward_hwrt_shadow.bsl.hh
   engines/eevee/shaders/eevee_forward_lib.glsl
   engines/eevee/shaders/eevee_forward_resolve.bsl.hh
   engines/eevee/shaders/eevee_gbuffer_read.bsl.hh
@@ -478,6 +485,24 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/eevee_geom_bake_mesh_basic_vert.glsl
   engines/eevee/shaders/eevee_geom_bake_mesh.bsl.hh
   engines/eevee/shaders/eevee_geom_gsplat.bsl.hh
+  engines/eevee/shaders/eevee_hit_attr_lib.glsl
+  engines/eevee/shaders/eevee_ray_hardware_lighting_comp.glsl
+  engines/eevee/shaders/eevee_nuru_direct_light_lib.glsl
+  engines/eevee/shaders/eevee_nuru_direct_light_importance_lib.glsl
+  engines/eevee/shaders/eevee_nuru_nis_mlp_lib.glsl
+  engines/eevee/shaders/eevee_nuru_nis_train_comp.glsl
+  engines/eevee/shaders/eevee_nuru_nis_train_feedback_comp.glsl
+  engines/eevee/shaders/eevee_nuru_nis_adam_comp.glsl
+  engines/eevee/shaders/eevee_nuru_ray_hardware_direct_light_tile_compact_comp.glsl
+  engines/eevee/shaders/eevee_nuru_ray_hardware_direct_light_visibility_comp.glsl
+  engines/eevee/shaders/eevee_nuru_ray_hardware_direct_light_accum_comp.glsl
+  engines/eevee/shaders/eevee_nuru_ray_hardware_direct_light_denoise_comp.glsl
+  engines/eevee/shaders/eevee_ray_shared_indirect_accum_comp.glsl
+  engines/eevee/shaders/eevee_ray_shared_indirect_reconstruct_comp.glsl
+  engines/eevee/shaders/eevee_ray_merge_specular_comp.glsl
+  engines/eevee/shaders/eevee_ray_scene_final_specular_comp.glsl
+  engines/eevee/shaders/eevee_ray_hardware_lighting_lib.glsl
+  engines/eevee/shaders/eevee_ray_hardware_environment_lib.glsl
   engines/eevee/shaders/eevee_geom_mesh.bsl.hh
   engines/eevee/shaders/eevee_geom_mesh_tess.bsl.hh
   engines/eevee/shaders/eevee_geom_mesh_tess_lib.glsl
@@ -553,6 +578,7 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/eevee_ray_denoise.bsl.hh
   engines/eevee/shaders/eevee_ray_generate.bsl.hh
   engines/eevee/shaders/eevee_ray_tile.bsl.hh
+  engines/eevee/shaders/eevee_ray_hit_eval.bsl.hh
   engines/eevee/shaders/eevee_ray_trace.bsl.hh
   engines/eevee/shaders/eevee_ray_trace_screen_lib.bsl.hh
   engines/eevee/shaders/eevee_ray_types_lib.bsl.hh
@@ -594,6 +620,8 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/eevee_subsurface.bsl.hh
   engines/eevee/shaders/eevee_surf_bake_color_frag.glsl
   engines/eevee/shaders/eevee_surf_bake_color.bsl.hh
+  engines/eevee/shaders/eevee_surf_hit_eval.bsl.hh
+  engines/eevee/shaders/eevee_surf_hit_eval_frag.glsl
   engines/eevee/shaders/eevee_surf_lib.glsl
   engines/eevee/shaders/eevee_surf_capture.bsl.hh
   engines/eevee/shaders/eevee_surf_common.bsl.hh

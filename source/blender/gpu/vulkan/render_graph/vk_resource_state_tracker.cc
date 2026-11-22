@@ -140,6 +140,16 @@ void VKResourceStateTracker::update_image_layout(ResourceHandle image_handle,
   std::scoped_lock lock(mutex);
   Resource &resource = get_image_resource(image_handle);
   resource.barrier_state.image_layout = vk_image_layout;
+  /* External RT can read and write the image outside the render graph. The next graph barrier
+   * must include that access, not only the narrower scope of the last graph node. */
+  resource.barrier_state.vk_access = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+  resource.barrier_state.vk_pipeline_stages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+}
+
+VkImageLayout VKResourceStateTracker::image_layout_get(ResourceHandle image_handle)
+{
+  std::scoped_lock lock(mutex);
+  return get_image_resource(image_handle).barrier_state.image_layout;
 }
 
 /** \} */

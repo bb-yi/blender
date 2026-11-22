@@ -108982,6 +108982,38 @@ msgid "Screen-Trace"
 msgstr "屏幕追踪"
 
 
+msgid "Hardware Shadows"
+msgstr "硬件阴影"
+
+
+msgid "Replace shadow maps with hardware ray-traced shadows when the scene and GPU support it. Shader Info follows this scene setting"
+msgstr "在场景和显卡支持时，用硬件光追阴影替换阴影贴图。着色器信息节点跟随场景设置"
+
+
+msgid "Using shadow maps for the whole scene: {}"
+msgstr "全场景使用阴影贴图：{}"
+
+
+msgid "Hardware shadows require NVIDIA RTX and Vulkan"
+msgstr "硬件阴影需要 NVIDIA RTX 和 Vulkan"
+
+
+msgid "Using shadow maps for curves, point clouds or tessellated casters"
+msgstr "场景中有曲线、点云或曲面细分投影物体，已使用阴影贴图"
+
+
+msgid "Insufficient memory for hardware shadows; using shadow maps"
+msgstr "硬件阴影显存不足，已使用阴影贴图"
+
+
+msgid "Shadow Rays"
+msgstr "阴影光线数"
+
+
+msgid "Shadow Transparency"
+msgstr "阴影透明度"
+
+
 msgid "Raytrace against the depth buffer. Fallback to light probes for invalid rays."
 msgstr "对深度缓冲进行光线追踪。无效光线回退到光照探头。"
 
@@ -171953,3 +171985,24 @@ msgstr "GPU 未测（不是零耗时）"
 
 msgid "Time Not Available"
 msgstr "整帧计时未完成"
+
+msgid "Tracing Mode"
+msgstr "追踪模式"
+
+msgid "Scene Geometry (Hardware)"
+msgstr "场景几何（硬件）"
+
+msgid "Geometry source used by EEVEE Raycast"
+msgstr "EEVEE 光线投射查询的几何来源"
+
+msgid "Trace against visible depth in EEVEE"
+msgstr "使用 EEVEE 的可见深度进行追踪"
+
+msgid "Trace against scene geometry in EEVEE, including surfaces outside the view"
+msgstr "查询 EEVEE 的场景几何，包括视图外的表面"
+
+msgid "Using Screen Space"
+msgstr "正在使用屏幕空间"
+
+msgid "Hardware Raycast requires a Vulkan device supporting ray queries"
+msgstr "硬件光线投射需要支持光线查询的 Vulkan 设备"

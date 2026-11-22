@@ -2604,6 +2604,7 @@ struct SceneDisplay {
 enum RaytraceEEVEE_Flag : int {
   RAYTRACE_EEVEE_USE_DENOISE = (1 << 0),
   RAYTRACE_EEVEE_USE_BACKFACE = (1 << 1),
+  RAYTRACE_EEVEE_SCREEN_HARDWARE_SHADOWS = (1 << 2),
 };
 ENUM_OPERATORS(RaytraceEEVEE_Flag)
 
@@ -2618,8 +2619,22 @@ enum RaytraceEEVEE_Method : int {
   /* NOTE: Each method contains the previous one. */
   RAYTRACE_EEVEE_METHOD_PROBE = 0,
   RAYTRACE_EEVEE_METHOD_SCREEN = 1,
-  /* TODO(fclem): Hardware ray-tracing. */
-  // RAYTRACE_EEVEE_METHOD_HARDWARE = 2,
+  RAYTRACE_EEVEE_METHOD_HARDWARE = 2,
+};
+
+enum RaytraceEEVEE_HardwareFeature : int {
+  RAYTRACE_EEVEE_HARDWARE_GI = (1 << 0),
+  RAYTRACE_EEVEE_HARDWARE_SHADOWS = (1 << 1),
+  RAYTRACE_EEVEE_HARDWARE_REFLECTIONS = (1 << 2),
+  RAYTRACE_EEVEE_HARDWARE_REFRACTIONS = (1 << 3),
+  RAYTRACE_EEVEE_HARDWARE_SECONDARY_GI = (1 << 4),
+};
+ENUM_OPERATORS(RaytraceEEVEE_HardwareFeature)
+
+enum RaytraceEEVEE_GISpatialSamples : int {
+  RAYTRACE_EEVEE_GI_SPATIAL_8 = 8,
+  RAYTRACE_EEVEE_GI_SPATIAL_16 = 16,
+  RAYTRACE_EEVEE_GI_SPATIAL_32 = 32,
 };
 
 /**
@@ -2641,7 +2656,8 @@ struct RaytraceEEVEE {
   /** Allow to scale radiance contribution for backface hits. */
   float backface_radiance_scale = 0.25f;
 
-  char _pad[4] = {};
+  /** Diffuse hardware GI rays per low-resolution gather point. */
+  int gi_spatial_samples = RAYTRACE_EEVEE_GI_SPATIAL_16;
 };
 
 /** #SceneEEVEE::flag */
@@ -2837,6 +2853,20 @@ struct SceneEEVEE {
   float indirect_light_intensity = 1.0f;
 
   RaytraceEEVEE_Method ray_tracing_method = RAYTRACE_EEVEE_METHOD_SCREEN;
+
+  /** Explicit opt-in through ray_tracing_method; never enabled when loading older files. */
+  int hardware_raytracing_features = RAYTRACE_EEVEE_HARDWARE_GI |
+                                    RAYTRACE_EEVEE_HARDWARE_SHADOWS |
+                                    RAYTRACE_EEVEE_HARDWARE_REFLECTIONS |
+                                    RAYTRACE_EEVEE_HARDWARE_REFRACTIONS;
+  int ray_tracing_reflection_bounces = 3;
+  int ray_tracing_refraction_bounces = 3;
+  int hardware_raytracing_shadow_samples = 2;
+  /** Independent diffuse ray budget for surfaces seen in reflections/refractions. Opt-in. */
+  int hardware_raytracing_secondary_gi_samples = 8;
+  char _pad_hwrt[4] = {};
+  float hardware_raytracing_shadow_color_intensity = 0.5f;
+  float hardware_raytracing_shadow_transparency = 0.5f;
 
   struct RaytraceEEVEE ray_tracing_options;
 

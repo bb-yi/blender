@@ -47,6 +47,7 @@ struct GPUCapabilities {
   bool hdr_viewport_support = false;
   bool multi_viewport_support = false;
   bool stencil_export_support = false;
+  bool hardware_raytracing_support = false;
   bool ray_query_support = false;
   bool vertex_pipeline_stores_and_atomics_support = false;
 

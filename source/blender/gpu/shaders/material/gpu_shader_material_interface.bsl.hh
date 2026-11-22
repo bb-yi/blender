@@ -506,6 +506,20 @@ void raycast_eval([[resource_table]] KernelGlobals & /*kg*/,
 {
 }
 
+void hardware_raycast_eval([[resource_table]] KernelGlobals & /*kg*/,
+                           const ShadingData & /*sd*/,
+                           float3 /*position*/,
+                           float3 /*direction*/,
+                           float /*max_distance*/,
+                           bool /*self_only*/,
+                           bool & /*is_hit*/,
+                           bool & /*self_hit*/,
+                           float & /*hit_distance*/,
+                           float3 & /*hit_position*/,
+                           float3 & /*hit_normal*/)
+{
+}
+
 /* Image Texture Node. */
 
 float texture_lod_bias_get([[resource_table]] KernelGlobals & /*kg*/)

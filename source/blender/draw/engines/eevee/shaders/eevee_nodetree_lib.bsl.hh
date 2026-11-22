@@ -115,6 +115,7 @@ struct ShadingData {
   /** Ray properties (approximation). */
   float ray_depth;
   float ray_length;
+  packed_float3 hit_view_origin;
   uchar ray_type;
   /** Is hair. */
   bool is_strand;
@@ -210,6 +211,7 @@ struct KernelGlobals {
 
   [[resource_table]] [[condition(use_raycast)]] eevee::Raycast raycast;
   [[resource_table]] [[condition(use_raycast)]] draw::ViewCulling view_culling;
+  [[resource_table]] [[condition(use_hardware_raycast)]] eevee::HardwareRaycast hardware_raycast;
 
   [[resource_table]] [[condition(use_forward_lighting)]] eevee::LightEvalIterator light_eval;
   [[resource_table]] [[condition(use_forward_lighting || use_lightprobe_data)]]
@@ -314,16 +316,19 @@ float2 render_info_samples()
 #endif
 }
 
-float3 coordinate_incoming(KernelGlobals &kg, ShadingData &sd, float3 P)
+float3 coordinate_incoming(KernelGlobals &kg, const ShadingData &sd, float3 P)
 {
+#ifdef MAT_HIT_EVAL
+  return safe_normalize(sd.hit_view_origin - P);
+#else
   return kg.view_matrices_get(sd).world_incident_vector(P);
+#endif
 }
 
 float3 lightprobe_world_sample(KernelGlobals &kg, ShadingData &sd, float3 L, float lod)
 {
   if (kg.pipe.use_forward_lighting || kg.pipe.use_lightprobe_data) [[static_branch]] {
-    const ViewMatrices view = kg.view_matrices_get(sd);
-    float3 V = view.world_incident_vector(sd.P);
+    float3 V = coordinate_incoming(kg, sd, sd.P);
     eevee::LightProbeSample probe_sample = kg.lightprobes.load(sd.frag_co.xy, sd.P, sd.Ng, V);
     return kg.lightprobes.spheres.spherical_sample_normalized_with_parallax(probe_sample, sd.P, L, lod);
   }
@@ -1084,6 +1089,45 @@ void raycast_eval(KernelGlobals &kg,
   }
 }
 
+void hardware_raycast_eval(KernelGlobals &kg,
+                           const ShadingData &sd,
+                           float3 position,
+                           float3 direction,
+                           float max_distance,
+                           bool self_only,
+                           bool &is_hit,
+                           bool &self_hit,
+                           float &hit_distance,
+                           float3 &hit_position,
+                           float3 &hit_normal)
+{
+  if (kg.pipe.use_hardware_raycast) [[static_branch]] {
+    kg.hardware_raycast.trace(position,
+                              direction,
+                              max_distance,
+                              kg.resource_id_get(sd),
+                              self_only,
+                              is_hit,
+                              self_hit,
+                              hit_distance,
+                              hit_position,
+                              hit_normal);
+  }
+  else {
+    raycast_eval(kg,
+                 sd,
+                 position,
+                 direction,
+                 max_distance,
+                 self_only,
+                 is_hit,
+                 self_hit,
+                 hit_distance,
+                 hit_position,
+                 hit_normal);
+  }
+}
+
 float3 nodetree_displacement(KernelGlobals &kg, ShadingData &sd);
 float nodetree_depth_offset(KernelGlobals &kg, ShadingData &sd);
 float4 nodetree_npr(KernelGlobals &kg, ShadingData &sd);
@@ -1466,8 +1510,8 @@ Coordinates coordinate_impl(KernelGlobals &kg, const ShadingData &sd, float3 P, 
     coords.incoming = -P;
   }
   else {
-    coords.reflect = -reflect(view.world_incident_vector(P), N);
-    coords.incoming = view.world_incident_vector(P);
+    coords.incoming = coordinate_incoming(kg, sd, P);
+    coords.reflect = -reflect(coords.incoming, N);
   }
   return coords;
 }

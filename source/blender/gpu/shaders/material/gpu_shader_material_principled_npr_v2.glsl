@@ -71,9 +71,15 @@ float npr_v2_visibility(KernelGlobals &kg, ShadingData &sd, uint index,
   LightData light;
   LightVector vector;
   bool directional;
-  if (!glsl_light_lookup(kg, sd, index, is_local, light, vector, directional) ||
-      light.tilemap_index == LIGHT_NO_SHADOW)
-  {
+  if (!glsl_light_lookup(kg, sd, index, is_local, light, vector, directional)) {
+    return 1.0f;
+  }
+  const float hardware_visibility = shader_info_hardware_visibility(light, sd.frag_co.xy);
+  if (hardware_visibility >= 0.0f) {
+    casts_shadow = true;
+    return hardware_visibility;
+  }
+  if (light.tilemap_index == LIGHT_NO_SHADOW) {
     return 1.0f;
   }
   casts_shadow = true;

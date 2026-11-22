@@ -595,7 +595,27 @@ struct GHOST_InstanceVK {
       device.extensions.disable(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
     }
 
+    VkPhysicalDeviceScalarBlockLayoutFeatures scalar_layout = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES};
+    bool use_hardware_raytracing = false;
 #ifdef _WIN32
+    if (device.properties.properties.vendorID == 0x10de &&
+        device.extensions.is_enabled(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+        device.extensions.is_enabled(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+        device.extensions.is_enabled(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME))
+    {
+      VkPhysicalDeviceFeatures2 hwrt_features = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+      hwrt_features.pNext = &scalar_layout;
+      volk::vkGetPhysicalDeviceFeatures2(device.vk_physical_device, &hwrt_features);
+      use_hardware_raytracing = scalar_layout.scalarBlockLayout &&
+                                device.features.features.shaderInt64 &&
+                                device.features.features.shaderStorageImageReadWithoutFormat &&
+                                device.features.features.shaderStorageImageWriteWithoutFormat;
+    }
+    if (!use_hardware_raytracing) {
+      device.extensions.disable(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME);
+    }
+
     /* Intel 7th to 10th Gen Processor iGPUs show a black screen at application startup when using
      * VK_EXT_vertex_input_dynamic_state. The used driver version for these iGPUs is 101.2xxx or
      * older.
@@ -643,6 +663,11 @@ struct GHOST_InstanceVK {
     device_features.drawIndirectFirstInstance = VK_TRUE;
     device_features.samplerAnisotropy = device.features.features.samplerAnisotropy;
     device_features.wideLines = device.features.features.wideLines;
+    if (use_hardware_raytracing) {
+      device_features.shaderInt64 = VK_TRUE;
+      device_features.shaderStorageImageReadWithoutFormat = VK_TRUE;
+      device_features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+    }
 
     VkDeviceCreateInfo device_create_info = {};
     device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -667,6 +692,9 @@ struct GHOST_InstanceVK {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
     buffer_device_address_features.bufferDeviceAddress = VK_TRUE;
     feature_struct_ptr.push_back(&buffer_device_address_features);
+    if (use_hardware_raytracing) {
+      feature_struct_ptr.push_back(&scalar_layout);
+    }
 
     /* Enable separate depth stencil layouts. */
     VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures separate_depth_stencil_layouts_features =
@@ -1960,6 +1988,10 @@ GHOST_TSuccess GHOST_ContextVK::initializeDrawingContext()
     optional_device_extensions.append(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
     optional_device_extensions.append(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME);
     optional_device_extensions.append(VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME);
+#ifdef _WIN32
+    optional_device_extensions.append(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME);
+    optional_device_extensions.append(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+#endif
     /* Disabled as the extension is available, but without any features set. */
 #ifndef __APPLE__
     optional_device_extensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);

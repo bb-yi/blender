@@ -17,6 +17,7 @@
 #include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
 #include "DRW_render.hh"
+#include "GPU_nuru_hardware_raytrace.hh"
 
 #include "draw_handle.hh"
 #include "draw_pass.hh"
@@ -51,9 +52,50 @@ struct WorldHandle : public BaseHandle {};
 struct Material;
 struct MaterialPass;
 
+struct HardwareRaytraceSceneEntry {
+  ObjectKey object_key;
+  /* Replay-safe evaluated object used for sparse hit-eval material replay. */
+  Object *hit_eval_object = nullptr;
+  blender::gpu::Batch *batch = nullptr;
+  int recalc = 0;
+  ResourceHandleRange resource_handle = {};
+  float4x4 object_to_world = float4x4::identity();
+  uint32_t instance_count = 1;
+  int material_slot = -1;
+  bool is_sculpt = false;
+  float3 emissive_radiance = float3(0.0f);
+  float3 diffuse_albedo = float3(0.8f);
+  float3 reflection_color = float3(0.8f);
+  float reflection_roughness = 1.0f;
+  float3 transmission_color = float3(0.8f);
+  float transmission_roughness = 1.0f;
+  float reflection_ior = 1.45f;
+  float refraction_ior = 1.45f;
+  float packed_thickness = 0.0f;
+  float alpha = 1.0f;
+  float reflection_layer_coverage = 0.0f;
+  uint32_t closure_type = 1u;
+  uint32_t proxy_flags = 0u;
+  uint64_t material_runtime_hash = 0;
+  /* Compiled during sync, so sparse draws never re-enter material sync with a stale ObjectRef. */
+  GPUMaterial *hit_eval_material = nullptr;
+  float shadow_terminator_geometry_offset = 0.1f;
+  uint32_t shadow_blocker_set = 0;
+  bool casts_shadow = true;
+  bool visible_raycast = false;
+  bool raycast_only_alpha = false;
+  GPUHardwareRaytraceShadowAlpha shadow_alpha;
+  GPUMaterial *shadow_tint_material = nullptr;
+  const blender::Material *raycast_alpha_material = nullptr;
+};
+
 class SyncModule {
  private:
   Instance &inst_;
+  Vector<HardwareRaytraceSceneEntry> hardware_raytrace_scene_entries_;
+  uint64_t hardware_raytrace_scene_signature_ = 0;
+  uint64_t hardware_raytrace_sync_generation_ = 0;
+  bool has_untraced_shadow_caster_ = false;
   /* Keep draws sharing a material and expansion budget batched together. */
   Map<std::pair<PassMain::Sub *, int>, PassMain::Sub *> tessellation_passes_;
   /* Cache only the request schema. Object/instance attribute values are read on every sync. */
@@ -65,12 +107,23 @@ class SyncModule {
   SyncModule(Instance &inst) : inst_(inst) {};
   ~SyncModule() {};
 
-  void begin_sync()
+  void begin_sync();
+  void finalize_hardware_raytrace_scene_entries();
+  uint64_t hardware_raytrace_sync_generation() const
   {
-    tessellation_passes_.clear();
-    object_attribute_requests_.clear();
-    object_attribute_request_hits_ = 0;
-    mesh_attribute_requests_ = 0;
+    return hardware_raytrace_sync_generation_;
+  }
+  const Vector<HardwareRaytraceSceneEntry> &hardware_raytrace_scene_entries() const
+  {
+    return hardware_raytrace_scene_entries_;
+  }
+  uint64_t hardware_raytrace_scene_signature() const
+  {
+    return hardware_raytrace_scene_signature_;
+  }
+  bool has_untraced_shadow_caster() const
+  {
+    return has_untraced_shadow_caster_;
   }
 
   int64_t object_attribute_request_count() const
@@ -98,6 +151,13 @@ class SyncModule {
                    struct HairParticleInfo const *hair_particle = nullptr);
 
  private:
+  void capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_handle,
+                                              uint32_t shadow_blocker_set,
+                                             const Material &material,
+                                             gpu::Batch *geom,
+                                             int material_slot,
+                                             bool is_sculpt);
+
   void geometry_call(PassMain::Sub *sub_pass,
                      gpu::Batch *geom,
                      ResourceHandleRange resource_handle,

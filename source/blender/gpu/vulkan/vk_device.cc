@@ -15,6 +15,7 @@
 #include "vk_backend.hh"
 #include "vk_context.hh"
 #include "vk_device.hh"
+#include "vk_nuru_raytrace_acceleration.hh"
 #include "vk_state_manager.hh"
 #include "vk_storage_buffer.hh"
 #include "vk_texture.hh"
@@ -109,6 +110,9 @@ void VKDevice::deinit()
   }
 
   deinit_submission_thread();
+  /* Release HWRT command buffers, pipelines and denoiser resources while the device and
+   * allocator are still valid. The submission thread has finished using their outputs. */
+  vulkan::raytrace_device_free();
 
   dummy_buffer.free();
   samplers_.free();
@@ -190,6 +194,8 @@ void VKDevice::init(GHOST_IContext *ghost_context)
 
   resources.use_dynamic_rendering_local_read = extensions_.dynamic_rendering_local_read;
   orphaned_data.timeline_ = 0;
+  timeline_value_ = 0;
+  queue_submitted_timeline_.store(0, std::memory_order_relaxed);
 
   init_submission_thread();
   is_initialized_ = true;

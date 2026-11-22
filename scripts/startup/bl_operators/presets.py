@@ -637,6 +637,10 @@ class AddPresetEEVEERaytracing(AddPresetBase, Operator):
 
     preset_values = [
         "eevee.ray_tracing_method",
+        "options.use_hardware_shadows",
+        "eevee.hardware_raytracing_shadow_samples",
+        "eevee.hardware_raytracing_shadow_color_intensity",
+        "eevee.hardware_raytracing_shadow_transparency",
         "options.resolution_scale",
         "options.trace_max_roughness",
         "options.screen_trace_quality",

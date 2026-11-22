@@ -57,6 +57,8 @@ enum eMaterialPipeline {
   MAT_PIPE_OUTLINE_FREESTYLE,
   /* Undithered body coverage for the optional outline shell self-occlusion test. */
   MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH,
+  MAT_PIPE_HIT_EVAL,
+  MAT_PIPE_SHADOW_TINT,
 };
 
 /**

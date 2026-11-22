@@ -18,6 +18,13 @@ LightAreaData light_area_data_get(LightData light) { return light.area; }
 LightLocalData light_local_data_get(LightData light) { return light.local; }
 LightSunData light_sun_data_get(LightData light) { return light.sun; }
 
+void light_sun_direction_set(LightData &light, float3 direction)
+{
+  LightSunData sun = light.sun;
+  sun.direction = direction;
+  light.sun = sun;
+}
+
 /* ---------------------------------------------------------------------- */
 /** \name Light Functions
  * \{ */

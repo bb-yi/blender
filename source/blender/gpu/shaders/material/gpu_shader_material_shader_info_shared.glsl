@@ -4,6 +4,31 @@
 
 #pragma once
 
+float3 shader_info_decode_hardware_shadow(float4 result)
+{
+  float visibility = saturate(dot(result.rgb, float3(0.2126f, 0.7152f, 0.0722f)));
+  float self_shadow = clamp(result.a, 0.0f, 1.0f - visibility);
+  return float3(visibility, self_shadow, 1.0f - visibility - self_shadow);
+}
+
+float3 shader_info_hardware_shadow_sample(LightData light, float2 frag_co)
+{
+#if defined(MAT_SHADER_INFO_HARDWARE_SHADOW) && defined(GPU_FRAGMENT_SHADER)
+  if (light.hwrt_shadow_layer >= 0 && light.hwrt_shadow_layer < shader_info_hardware_shadow_layers) {
+    float4 result = texelFetch(shader_info_hardware_visibility_tx,
+                               int3(int2(frag_co), light.hwrt_shadow_layer),
+                               0);
+    return shader_info_decode_hardware_shadow(result);
+  }
+#endif
+  return float3(-1.0f);
+}
+
+float shader_info_hardware_visibility(LightData light, float2 frag_co)
+{
+  return shader_info_hardware_shadow_sample(light, frag_co).x;
+}
+
 bool shader_info_is_zero(float3 value)
 {
   return all(lessThanEqual(abs(value), float3(1e-8f)));

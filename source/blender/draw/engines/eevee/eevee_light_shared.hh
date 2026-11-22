@@ -55,6 +55,8 @@ enum [[host_shared]] LightFlag : uint32_t {
   LIGHT_CAMERA_HIDDEN = 1u << 0u,
   /* True if the light uses jittered soft shadows. */
   LIGHT_USE_SHADOW_JITTER = 1u << 1u,
+  /* User-controlled shadow casting, independent of the selected shadow backend. */
+  LIGHT_CAST_SHADOW = 1u << 2u,
 };
 
 static inline bool is_area_light(eLightType type)
@@ -146,8 +148,8 @@ struct [[host_shared]] LightAreaData {
   /** Number of allocated tilemap for this local light. */
   int tilemaps_count; /* Leaked from LightLocalCommon because of alignment. */
   float _pad0;
-  float _pad1;
-  float _pad2;
+  /** Physical half-extents for hardware shadow rays, before the shading clamp. */
+  float2 hwrt_shadow_half_size;
 
   /** Shape size. */
   float2 size;
@@ -206,7 +208,7 @@ struct [[host_shared]] LightData {
   /** Near clip distances. Float stored as orderedIntBitsToFloat for atomic operations. */
   int clip_near;
   int clip_far;
-  /** Index of the first tile-map. Set to LIGHT_NO_SHADOW if light is not casting shadow. */
+  /** Index of the first native shadow tilemap, or LIGHT_NO_SHADOW without one. */
   int tilemap_index;
   /* Radius in pixels for shadow filtering. */
   float filter_radius;
@@ -221,11 +223,13 @@ struct [[host_shared]] LightData {
   uint2 light_set_membership;
 
   float shadow_map_scale;
-  float _pad7;
-  float _pad8;
-  float _pad9;
-  float _pad10;
-  float _pad11;
+  /** Stable source-light layer, independent of view-dependent light culling/sorting. */
+  int hwrt_shadow_layer;
+  int hwrt_cluster_id;
+  /** Physical source radius for hardware shadows (angular radius for a sun). */
+  float hwrt_shadow_size;
+  /** One bit for each EEVEE shadow blocker set. */
+  uint2 shadow_set_membership;
 
   union {
     LightLocalData local;

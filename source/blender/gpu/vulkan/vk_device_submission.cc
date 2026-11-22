@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <thread>
@@ -51,6 +52,10 @@ void VKDevice::submission_error_set(VkResult result, const char *operation, Time
   }
   VkResult expected = VK_SUCCESS;
   if (submission_error_.compare_exchange_strong(expected, result)) {
+    {
+      std::scoped_lock lock(queue_submitted_mutex_);
+      queue_submitted_condition_.notify_all();
+    }
     CLOG_ERROR(&LOG,
                "Vulkan GPU failure: %s [%s], timeline=%llu. Submissions stopped; restart Blender.",
                operation,
@@ -127,6 +132,58 @@ TimelineValue VKDevice::render_graph_submit(render_graph::VKRenderGraph *render_
     return 0;
   }
   return timeline;
+}
+
+bool VKDevice::wait_for_submission_timeline(TimelineValue timeline)
+{
+  std::unique_lock lock(queue_submitted_mutex_);
+  queue_submitted_condition_.wait(lock, [&] {
+    return queue_submitted_timeline_value() >= timeline || submission_failed();
+  });
+  return !submission_failed();
+}
+
+TimelineValue VKDevice::external_timeline_chain_acquire(TimelineValue *r_wait_value)
+{
+  std::scoped_lock lock(orphaned_data.mutex_get());
+  *r_wait_value = timeline_value_;
+  const TimelineValue signal_value = ++timeline_value_;
+  orphaned_data.timeline_ = signal_value;
+  return signal_value;
+}
+
+void VKDevice::external_timeline_chain_submitted(TimelineValue value)
+{
+  std::scoped_lock lock(queue_submitted_mutex_);
+  if (value > queue_submitted_timeline_value()) {
+    queue_submitted_timeline_.store(value, std::memory_order_release);
+  }
+  queue_submitted_condition_.notify_all();
+}
+
+void VKDevice::diagnostic_checkpoints_dump()
+{
+  if (!extensions_.diagnostic_checkpoints || functions.vkGetQueueCheckpointDataNV == nullptr) {
+    return;
+  }
+  static std::atomic<bool> dumped = false;
+  if (dumped.exchange(true)) {
+    return;
+  }
+  uint32_t count = 0;
+  functions.vkGetQueueCheckpointDataNV(vk_queue_, &count, nullptr);
+  Array<VkCheckpointDataNV> checkpoints(count);
+  for (VkCheckpointDataNV &data : checkpoints) {
+    data = {VK_STRUCTURE_TYPE_CHECKPOINT_DATA_NV};
+  }
+  functions.vkGetQueueCheckpointDataNV(vk_queue_, &count, checkpoints.data());
+  fprintf(stderr, "[NURU_VK_CHECKPOINTS] %u queue checkpoints\n", count);
+  for (const VkCheckpointDataNV &data : checkpoints.as_span().take_front(count)) {
+    fprintf(stderr,
+            "[NURU_VK_CHECKPOINTS] stage=0x%08x marker=%s\n",
+            uint32_t(data.stage),
+            data.pCheckpointMarker ? static_cast<const char *>(data.pCheckpointMarker) : "(none)");
+  }
 }
 
 bool VKDevice::wait_for_timeline(TimelineValue timeline)
@@ -362,6 +419,9 @@ void VKDevice::submission_runner(VKDevice *device)
       CLOG_TRACE(&LOG, "Submitting %u render graph nodes to device.", uint32_t(num_nodes));
       num_nodes = 0;
 
+      if (!device->wait_for_submission_timeline(submit_task->timeline - 1)) {
+        continue;
+      }
       {
         std::scoped_lock lock_queue(*device->queue_mutex_);
         if (device->submission_failed()) {
@@ -385,6 +445,7 @@ void VKDevice::submission_runner(VKDevice *device)
           continue;
         }
       }
+      device->external_timeline_chain_submitted(submit_task->timeline);
       command_buffers_in_use.append_timeline(submit_task->timeline, vk_command_buffer);
       vk_command_buffer = VK_NULL_HANDLE;
       command_buffer.reset();
