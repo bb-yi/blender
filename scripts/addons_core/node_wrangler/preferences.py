@@ -336,7 +336,7 @@ kmi_defs = (
     # DETACH OUTPUTS (Alt Shift D)
     Hotkey("node.nw_detach_outputs", n_("Detach Outputs"), key='D', shift=True, alt=True),
     # NPR previews; the poll leaves other editors to Blender's preview.
-    Hotkey("node.nw_preview", n_("Preview Filter Graph / Light Node"),
+    Hotkey("node.nw_preview", n_("Preview NPR Node"),
            key='LEFTMOUSE', ctrl=True, shift=True),
     # LINK TO OUTPUT NODE (O)
     Hotkey("node.nw_link_out", n_("Link to Output Node"), key='O'),

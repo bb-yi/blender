@@ -210,6 +210,57 @@ def run():
         assert not bpy.ops.node.nw_preview.poll()
         checked('standard_material_output_and_preview_fallback')
 
+        bpy.context.scene.render.engine = 'BLENDER_EEVEE'
+        cycles_output = tree.get_output_node('CYCLES')
+        cycles_output.target = 'CYCLES'
+        closure = tree.nodes.new('ShaderNodeImageToClosure')
+        closure.image = bpy.data.images.new('NW Preview Image', 2, 2)
+        authored = tree.nodes.new('NodeEvaluateClosure')
+        authored.input_items.new('VECTOR', 'UV')
+        authored.output_items.new('RGBA', 'Color')
+        authored.inputs['UV'].default_value = (0.25, 0.75, 0.0)
+        tree.links.new(closure.outputs['Closure'], authored.inputs['Closure'])
+        select(tree, closure)
+        finished(bpy.ops.node.nw_preview)
+        output = tree.get_output_node('EEVEE')
+        assert output.target == 'EEVEE' and output != cycles_output
+        assert cycles_output.inputs['Surface'].links[0].from_node == shader
+        evaluate = output.inputs['Surface'].links[0].from_node
+        assert evaluate.bl_idname == 'NodeEvaluateClosure' and evaluate != authored
+        assert evaluate.inputs['Closure'].links[0].from_node == closure
+        uv = evaluate.inputs['UV'].links[0].from_socket
+        assert uv.node.bl_idname == 'ShaderNodeTexCoord' and uv.identifier == 'UV'
+        assert output.inputs['Surface'].links[0].from_socket == evaluate.outputs['Color']
+        assert not authored.inputs['UV'].is_linked
+        assert tuple(authored.inputs['UV'].default_value) == (0.25, 0.75, 0.0)
+        assert tree.nodes.active == closure and closure.select
+        for socket_name in ('Alpha', 'Color'):
+            finished(bpy.ops.node.nw_preview)
+            assert output.inputs['Surface'].links[0].from_socket == evaluate.outputs[socket_name]
+            assert evaluate.inputs['UV'].links[0].from_socket == uv
+        assert len([n for n in tree.nodes if n.bl_idname == 'NodeEvaluateClosure']) == 2
+        assert len([n for n in tree.nodes if n.bl_idname == 'ShaderNodeTexCoord']) == 1
+        checked('image_closure_previews_color_and_alpha_with_uv_and_reuses_helpers')
+
+        child = bpy.data.node_groups.new('NW Image Closure Child', 'ShaderNodeTree')
+        child_closure = child.nodes.new(closure.bl_idname)
+        child_closure.image = closure.image
+        group = tree.nodes.new('ShaderNodeGroup')
+        group.node_tree = child
+        production = child.interface.new_socket(name='Production', in_out='OUTPUT', socket_type='NodeSocketClosure')
+        group_output = child.nodes.new('NodeGroupOutput')
+        child.links.new(child_closure.outputs['Closure'], group_output.inputs[production.identifier])
+        select(tree, group)
+        space.path.append(child, node=group)
+        select(child, child_closure)
+        finished(bpy.ops.node.nw_preview)
+        viewer = next(item for item in child.interface.items_tree if item.is_inspect_output)
+        assert output.inputs['Surface'].links[0].from_socket == group.outputs[viewer.identifier]
+        assert group_output.inputs[viewer.identifier].links[0].from_node.bl_idname == 'NodeEvaluateClosure'
+        assert group_output.inputs[production.identifier].links[0].from_node == child_closure
+        checked('nested_image_closure_preview_preserves_production_output')
+        space.path.pop()
+
     print('NODE_WRANGLER_NPR_RESULT=' + json.dumps({'passed': len(checks), 'checks': checks, 'skipped': skipped}))
 
 

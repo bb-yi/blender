@@ -47,12 +47,19 @@ def get_output_type(context, socket, tree):
             'GeometryNodeTree': 'NodeGroupOutput'}[tree.bl_idname]
 
 
-def find_output(tree, node_type, source):
-    candidates = [n for n in tree.nodes if n.bl_idname == node_type
-                  and getattr(n, 'is_active_output', True)]
+def find_output(tree, node_type, source, *, preview=False):
+    material_preview = preview and node_type == 'ShaderNodeOutputMaterial'
+    if material_preview:
+        output = tree.get_output_node('EEVEE')
+        if output is not None:
+            return output
+        candidates = []
+    else:
+        candidates = [n for n in tree.nodes if n.bl_idname == node_type
+                      and getattr(n, 'is_active_output', True)]
     # Each Filter Graph execution stage has its own active output. Prefer the
     # stage already used by this branch, including connections via reroutes.
-    pending = [source.node]
+    pending = [source.node] if candidates else []
     visited = set()
     while pending:
         node = pending.pop(0)
@@ -66,6 +73,8 @@ def find_output(tree, node_type, source):
         return next((n for n in candidates if getattr(n, 'execution_stage', '') == 'BEFORE_POSTFX'),
                     candidates[0])
     node = tree.nodes.new(node_type)
+    if material_preview:
+        node.target = 'EEVEE'
     node.location = source.node.location.x + source.node.width + 80, source.node.location.y
     node.select = False
     return node
@@ -73,7 +82,7 @@ def find_output(tree, node_type, source):
 
 def connect_output(context, source, tree, *, preview=False):
     node_type = get_output_type(context, source, tree)
-    output = find_output(tree, node_type, source)
+    output = find_output(tree, node_type, source, preview=preview)
     inputs = [s for s in output.inputs if is_visible_socket(s)]
     if node_type == 'NodeGroupOutput':
         target = next((s for s in inputs if s.type == source.type
@@ -89,6 +98,10 @@ def connect_output(context, source, tree, *, preview=False):
         target = next((s for s in inputs if s.name == name and s.type == source.type), None)
         if target is None:
             target = next((s for s in inputs if s.type == source.type), inputs[0])
+    elif preview and node_type == 'ShaderNodeOutputMaterial':
+        target = output.inputs['Surface']
+    elif preview and node_type == 'ShaderNodeOutputFilter':
+        target = output.inputs['Color']
     else:
         target = next((s for s in inputs if s.name == source.name), inputs[0])
     connect_sockets(source, target)
@@ -177,17 +190,52 @@ class NODE_OT_link_to_output(Operator):
 _preview_sockets = {}
 
 
+def ensure_image_closure_preview(tree, image_node, filter_material):
+    closure = image_node.outputs['Closure']
+    evaluate = next((link.to_node for link in closure.links if not link.is_muted
+                     and link.to_node.bl_idname == 'NodeEvaluateClosure'
+                     and link.to_socket.identifier == 'Closure'
+                     and link.to_node.get('nw_image_closure_preview')
+                     and 'UV' in link.to_node.inputs
+                     and 'Color' in link.to_node.outputs and 'Alpha' in link.to_node.outputs), None)
+    if evaluate is None:
+        evaluate = tree.nodes.new('NodeEvaluateClosure')
+        evaluate['nw_image_closure_preview'] = True
+        evaluate.parent = image_node.parent
+        evaluate.location = image_node.location.x + image_node.width + 80, image_node.location.y
+        evaluate.select = False
+        evaluate.input_items.new('VECTOR', 'UV')
+        evaluate.output_items.new('RGBA', 'Color')
+        evaluate.output_items.new('FLOAT', 'Alpha')
+        tree.links.new(closure, evaluate.inputs['Closure'])
+    if not evaluate.inputs['UV'].is_linked:
+        node_type = 'ShaderNodeRenderInfo' if filter_material else 'ShaderNodeTexCoord'
+        socket_name = 'Frag Coord' if filter_material else 'UV'
+        coordinates = tree.nodes.new(node_type)
+        coordinates.parent = image_node.parent
+        coordinates.location = image_node.location.x - coordinates.width - 80, image_node.location.y
+        coordinates.select = False
+        tree.links.new(coordinates.outputs[socket_name], evaluate.inputs['UV'])
+    return evaluate
+
+
 class NODE_OT_nw_preview(Operator):
-    """Preview a Filter Graph image or light shader output; click again to cycle sockets"""
+    """Preview a Filter Graph image, light shader output, or image closure; click again to cycle sockets"""
     bl_idname = 'node.nw_preview'
-    bl_label = 'Preview Filter Graph / Light Node'
+    bl_label = 'Preview NPR Node'
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
     def poll(cls, context):
-        return (nw_check(cls, context)
-                and (context.space_data.tree_type == 'EeveeFilterGraphNodeTree'
-                     or (context.space_data.tree_type == 'ShaderNodeTree' and is_light_tree(context))))
+        if not nw_check(cls, context):
+            return False
+        space = context.space_data
+        return (space.tree_type == 'EeveeFilterGraphNodeTree'
+                or (space.tree_type == 'ShaderNodeTree'
+                    and (is_light_tree(context)
+                         or (context.scene.render.engine == 'BLENDER_EEVEE'
+                             and space.shader_type in {'OBJECT', 'FILTER', 'NPR'}
+                             and any(node.bl_idname == 'ShaderNodeImageToClosure' for node in space.edit_tree.nodes)))))
 
     def execute(self, context):
         space = context.space_data
@@ -195,13 +243,23 @@ class NODE_OT_nw_preview(Operator):
         active = tree.nodes.active
         if active is None:
             return {'CANCELLED'}
-        sockets = [s for s in active.outputs if is_visible_socket(s)]
+        key = space.as_pointer()
+        if active.bl_idname == 'ShaderNodeImageToClosure':
+            if active.texture_type != 'IMAGE_2D' or active.image is None:
+                self.report({'WARNING'}, 'Image closure preview requires a 2D image')
+                return {'CANCELLED'}
+            source_node = ensure_image_closure_preview(tree, active, space.shader_type == 'FILTER')
+        elif space.tree_type == 'EeveeFilterGraphNodeTree' or is_light_tree(context):
+            source_node = active
+        else:
+            _preview_sockets.pop(key, None)
+            return {'PASS_THROUGH'}
+        sockets = [s for s in source_node.outputs if is_visible_socket(s)]
         if not sockets:
             return {'CANCELLED'}
         source = sockets[0]
         # Keep this transient per editor: light sockets can stay connected to
         # different output inputs, so links alone cannot identify the last click.
-        key = space.as_pointer()
         previous = _preview_sockets.get(key)
         for i, socket in enumerate(sockets):
             if previous == (tree.as_pointer(), active.as_pointer(), socket.identifier):
@@ -218,7 +276,7 @@ class NODE_OT_nw_preview(Operator):
             if group is None or getattr(group, 'node_tree', None) != group_tree:
                 group = next(n for n in parent_tree.nodes if getattr(n, 'node_tree', None) == group_tree)
             source = group.outputs[target.identifier]
-        connect_output(context, source, space.node_tree)
+        connect_output(context, source, space.node_tree, preview=True)
         _preview_sockets[key] = selected_socket
         tree.nodes.active = active
         active.select = True

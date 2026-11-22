@@ -14,6 +14,10 @@
   numeric outputs connect to Light Shader Output. Named Intensity and Attenuation
   sockets retain their meaning; other scalar outputs use Intensity. Preview also
   works inside light node groups, without replacing their regular group outputs.
+- In EEVEE, `Ctrl+Shift+Left Click` on a 2D Image to Closure node adds an Evaluate
+  Closure for preview. It uses the active UV map, or normalized screen coordinates
+  in Filter Materials. Repeat the shortcut to switch between Color and Alpha
+  without adding more preview nodes.
 - Filter Graphs support the common layout, label, connection, reroute and cleanup
   tools. Cleanup preserves stage and AOV outputs. Image mixing is performed by
   Filter Materials; shader Mix/Math nodes cannot operate on graph image sockets.
