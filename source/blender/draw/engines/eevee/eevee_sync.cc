@@ -22,6 +22,7 @@
 #include "DNA_particle_types.h"
 #include "DNA_pointcloud_types.h"
 #include "DNA_volume_types.h"
+#include "GPU_shader.hh"
 
 #include "NOD_shader.h"
 
@@ -101,10 +102,17 @@ static int material_pass_tessellation_level(const Material &material, GPUMateria
   return GPU_material_has_tessellation_output(gpumat) ? material.tessellation_level : 1;
 }
 
+int SyncModule::raycast_batch_id(gpu::Batch *batch)
+{
+  return raycast_batch_ids_.lookup_or_add_cb(batch, [&]() { return raycast_batch_ids_.size() + 1; });
+}
+
 void SyncModule::geometry_call(PassMain::Sub *sub_pass,
                                gpu::Batch *geom,
                                ResourceHandleRange resource_handle,
-                               int tessellation_level)
+                               int tessellation_level,
+                               GPUMaterial *gpumat,
+                               bool is_sculpt)
 {
   if (sub_pass == nullptr || geom == nullptr) {
     return;
@@ -121,6 +129,17 @@ void SyncModule::geometry_call(PassMain::Sub *sub_pass,
     sub_pass->draw_expand(
         geom, GPU_PRIM_TRIS, tessellation_level * tessellation_level, 1, resource_handle);
     return;
+  }
+  gpu::Shader *shader = gpumat && GPU_material_flag_get(gpumat, GPU_MATFLAG_HARDWARE_RAYCAST) ?
+                            GPU_material_get_shader(gpumat) :
+                            nullptr;
+  if (shader && GPU_shader_get_uniform(shader, "hardware_raycast_source_batch") >= 0) {
+    const int batch_id = is_sculpt ? 0 : raycast_batch_id(geom);
+    sub_pass = raycast_batch_passes_.lookup_or_add_cb({sub_pass, batch_id}, [&]() {
+      PassMain::Sub &batch_pass = sub_pass->sub("Hardware Raycast source batch");
+      batch_pass.push_constant("hardware_raycast_source_batch", batch_id);
+      return &batch_pass;
+    });
   }
   sub_pass->draw(geom, resource_handle);
 }
@@ -569,7 +588,11 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
         const ResourceHandle handle = ob_handle.res_handle.sub_handle(instance);
         const MaterialPass &depth = material.outline_shell_self_depth;
         PassMain::Sub *pass = inst_.outline_shell.material_add(handle, depth.gpumat);
-        geometry_call(pass, geom, handle, material_pass_tessellation_level(material, depth.gpumat));
+        geometry_call(pass,
+                      geom,
+                      handle,
+                      material_pass_tessellation_level(material, depth.gpumat),
+                      depth.gpumat);
       }
     }
     synced_materials.append(&material);
@@ -595,28 +618,32 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
       geometry_call(pass.sub_pass,
                     geom,
                     ob_handle.res_handle,
-                    material_pass_tessellation_level(material, pass.gpumat));
+                    material_pass_tessellation_level(material, pass.gpumat),
+                    pass.gpumat);
     });
 
     capture_hardware_raytrace_scene_entry(
         ob_handle, ob_ref.get_blocker_shadow_set(), material, geom, i, false);
 
-    geometry_call(material.outline_shell_prepass.sub_pass, geom, ob_handle.res_handle);
-    geometry_call(material.outline_shell_shading.sub_pass, geom, ob_handle.res_handle);
+    for (const MaterialPass &pass : {material.outline_shell_prepass, material.outline_shell_shading})
+    {
+      geometry_call(pass.sub_pass, geom, ob_handle.res_handle, 0, pass.gpumat);
+    }
     geometry_call(material.outline_shell_shadow.sub_pass, geom, ob_handle.res_handle);
 
     sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass) {
       geometry_call(pass.sub_pass,
                     geom,
                     ob_handle.res_handle,
-                    material_pass_tessellation_level(material, pass.gpumat));
+                    material_pass_tessellation_level(material, pass.gpumat),
+                    pass.gpumat);
     });
 
     sync_alpha_blended_passes(
         ob_handle,
         material,
         [&](const MaterialPass &pass, int instance) {
-          geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance));
+          geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance), 0, pass.gpumat);
         },
         true);
   }
@@ -636,7 +663,8 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
       geometry_call(pass.sub_pass,
                     geom,
                     ob_handle.res_handle.sub_handle(instance),
-                    material_pass_tessellation_level(material, gpumat));
+                    material_pass_tessellation_level(material, gpumat),
+                    gpumat);
     });
   }
 
@@ -707,15 +735,17 @@ bool SyncModule::sync_sculpt(const ObjectRef &ob_ref)
       const bool use_npr_geom = pass.gpumat == material.npr.gpumat ||
                                 pass.gpumat == material.planar_probe_npr.gpumat ||
                                 pass.gpumat == material.lightprobe_sphere_npr.gpumat;
-      geometry_call(pass.sub_pass, use_npr_geom ? geom_npr : geom, ob_handle.res_handle);
+      geometry_call(
+          pass.sub_pass, use_npr_geom ? geom_npr : geom, ob_handle.res_handle, 0, pass.gpumat, true);
     });
 
     sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass) {
-      geometry_call(pass.sub_pass, geom, ob_handle.res_handle);
+      geometry_call(pass.sub_pass, geom, ob_handle.res_handle, 0, pass.gpumat, true);
     });
 
     sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int instance) {
-      geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance));
+      GPUMaterial *gpumat = pass.gpumat ? pass.gpumat : material.shading.gpumat;
+      geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance), 0, gpumat, true);
     });
   }
 

@@ -87,6 +87,7 @@ struct HardwareRaytraceSceneEntry {
   GPUHardwareRaytraceShadowAlpha shadow_alpha;
   GPUMaterial *shadow_tint_material = nullptr;
   const blender::Material *raycast_alpha_material = nullptr;
+  int raycast_batch_id = 0;
 };
 
 class SyncModule {
@@ -98,6 +99,8 @@ class SyncModule {
   bool has_untraced_shadow_caster_ = false;
   /* Keep draws sharing a material and expansion budget batched together. */
   Map<std::pair<PassMain::Sub *, int>, PassMain::Sub *> tessellation_passes_;
+  Map<gpu::Batch *, int> raycast_batch_ids_;
+  Map<std::pair<PassMain::Sub *, int>, PassMain::Sub *> raycast_batch_passes_;
   /* Cache only the request schema. Object/instance attribute values are read on every sync. */
   Map<Vector<GPUMaterial *>, Vector<const GPUUniformAttr *>> object_attribute_requests_;
   int64_t object_attribute_request_hits_ = 0;
@@ -151,6 +154,7 @@ class SyncModule {
                    struct HairParticleInfo const *hair_particle = nullptr);
 
  private:
+  int raycast_batch_id(gpu::Batch *batch);
   void capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_handle,
                                               uint32_t shadow_blocker_set,
                                              const Material &material,
@@ -161,7 +165,9 @@ class SyncModule {
   void geometry_call(PassMain::Sub *sub_pass,
                      gpu::Batch *geom,
                      ResourceHandleRange resource_handle,
-                     int tessellation_level = 0);
+                     int tessellation_level = 0,
+                     GPUMaterial *gpumat = nullptr,
+                     bool is_sculpt = false);
   void sync_common_passes(const Material &material,
                           FunctionRef<void(const MaterialPass &)> sync_cb);
   void sync_volume_passes(const ObjectHandle &ob_handle,

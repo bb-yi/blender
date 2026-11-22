@@ -84,6 +84,7 @@ struct GPUHardwareRaytraceSceneEntry {
   float shadow_terminator_geometry_offset = 0.1f;
   uint32_t shadow_caster_id = 0xFFFFFFFFu;
   uint32_t shadow_blocker_set = 0;
+  int raycast_batch_id = 0;
   bool casts_shadow = true;
   bool visible_raycast = false;
   bool raycast_only_alpha = false;

@@ -976,6 +976,7 @@ if(WITH_GPU_RENDER_TESTS)
     instance_pointcloud_alpha
     shader_info_pcf_radius
     shader_info_shadow_methods
+    hwrt_raycast_source_triangle
     render_texture_updates
     render_texture_performance
     render_texture_layers
@@ -991,7 +992,8 @@ if(WITH_GPU_RENDER_TESTS)
     string(TOUPPER "${backend}" backend_upper)
     if(WITH_${backend_upper}_BACKEND AND (backend STREQUAL "opengl" OR WITH_GPU_RENDER_TESTS_VULKAN))
       foreach(test IN LISTS npr_material_tests)
-        if(test STREQUAL "vulkan_failure_recovery" AND NOT backend STREQUAL "vulkan")
+        if((test STREQUAL "vulkan_failure_recovery" OR test STREQUAL "hwrt_raycast_source_triangle")
+           AND NOT backend STREQUAL "vulkan")
           continue()
         endif()
         set(test_name "npr_${test}_${backend}")

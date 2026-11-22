@@ -2118,6 +2118,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
   info.compilation_constant(gpu::shader::Type::bool_t, "use_hardware_raycast", use_hardware_raycast);
+  if (use_hardware_raycast && geometry_type == MAT_GEOM_MESH) {
+    info.define("MAT_HARDWARE_RAYCAST_SOURCE_TRIANGLE");
+  }
   if (hardware_raycast_requested &&
       (probe_capture != MAT_PROBE_NONE || pipeline_type == MAT_PIPE_BAKE_COLOR))
   {

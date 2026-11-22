@@ -13,6 +13,7 @@ struct ForwardShadowCaster {
   uint4 identity;
   float4 uv_x;
   float4 uv_y;
+  uint4 raycast_batch;
 };
 
 struct ForwardShadowProxy {
@@ -241,11 +242,15 @@ struct HardwareRaycast {
   [[resource_table]] HardwareTriangleScene scene;
   [[storage(24, read)]] const uint2 (&hardware_raycast_normal_ranges)[];
   [[storage(25, read)]] const float4 (&hardware_raycast_smooth_normals)[];
+#ifdef MAT_HARDWARE_RAYCAST_SOURCE_TRIANGLE
+  [[push_constant]] int hardware_raycast_source_batch;
+#endif
 
   void trace(float3 origin,
              float3 direction,
              float max_distance,
              uint source_id,
+             float3 shading_position,
              bool only_local,
              bool &is_hit,
              bool &self_hit,
@@ -260,24 +265,41 @@ struct HardwareRaycast {
       return;
     }
     direction = normalize(direction / direction_scale);
-    const float tmin = max(reduce_max(abs(origin)) * 4.7683716e-7f, 1.0e-7f);
+    uint source_batch = 0u;
+    uint source_primitive = 0u;
+#if defined(MAT_HARDWARE_RAYCAST_SOURCE_TRIANGLE) && defined(GPU_FRAGMENT_SHADER)
+    source_batch = uint(this->hardware_raycast_source_batch);
+    source_primitive = uint(gl_PrimitiveID);
+#endif
+    const bool surface_origin = all(equal(origin, shading_position));
+    const bool skip_source = surface_origin && source_batch != 0u;
+    const float tmin = source_batch == 0u ?
+                           max(reduce_max(abs(origin)) * 4.7683716e-7f, 1.0e-7f) :
+                           0.0f;
     if (!(max_distance > tmin)) {
       return;
     }
 
-    const uint flags = only_local ? gpu_RayFlagsNoOpaque : gpu_RayFlagsNone;
+    const uint flags = only_local || skip_source ? gpu_RayFlagsNoOpaque : gpu_RayFlagsNone;
     rayQuery query;
     rayQueryInitialize(query, this->scene.hardware_scene_as, flags, 0x02u,
                        origin, tmin, direction, max_distance);
     while (rayQueryProceed(query)) {
       const uint candidate_id = rayQueryGetIntersectionInstanceCustomIndex(query, false);
       const ForwardShadowCaster candidate = this->scene.hardware_scene_instances[candidate_id];
-      if (only_local && candidate.identity.x != source_id) {
+      const bool same_instance = candidate.identity.x == source_id;
+      if (only_local && !same_instance) {
+        continue;
+      }
+      const uint candidate_primitive = rayQueryGetIntersectionPrimitiveIndex(query, false);
+      if (skip_source && same_instance && candidate.raycast_batch.x == source_batch &&
+          candidate_primitive == source_primitive)
+      {
         continue;
       }
       if (candidate.identity.z != 0u &&
           this->scene.opacity(candidate,
-                              rayQueryGetIntersectionPrimitiveIndex(query, false),
+                              candidate_primitive,
                               rayQueryGetIntersectionBarycentrics(query, false)) <= 1.0e-5f)
       {
         continue;

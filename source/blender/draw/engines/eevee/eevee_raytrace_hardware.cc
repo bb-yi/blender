@@ -55,6 +55,9 @@ void RayTraceModule::bind_hardware_material_scene(PassMain::Sub &pass, GPUMateri
   if (uses_raycast) {
     pass.bind_ssbo("hardware_raycast_normal_ranges", &hardware_forward_bindings_.normal_ranges);
     pass.bind_ssbo("hardware_raycast_smooth_normals", &hardware_forward_bindings_.smooth_normals);
+    if (GPU_shader_get_uniform(shader, "hardware_raycast_source_batch") >= 0) {
+      pass.push_constant("hardware_raycast_source_batch", 0);
+    }
   }
   if (uses_shadows) {
     pass.bind_ssbo("forward_shadow_proxies", &hardware_forward_bindings_.proxies);
@@ -130,6 +133,7 @@ static Vector<GPUHardwareRaytraceSceneEntry> build_hardware_rt_scene_entries(
     rt_entry.instance_count = std::max(1u, entry.instance_count);
     rt_entry.user_id = user_id++;
     rt_entry.shadow_caster_id = entry.resource_handle.index();
+    rt_entry.raycast_batch_id = entry.raycast_batch_id;
     rt_entry.shadow_blocker_set = entry.shadow_blocker_set;
     rt_entry.casts_shadow = entry.casts_shadow;
     rt_entry.visible_raycast = entry.visible_raycast;
@@ -339,6 +343,7 @@ static bool hardware_scene_entries_material_proxy_changed(
         entry.shadow_terminator_geometry_offset != cached.shadow_terminator_geometry_offset ||
         entry.closure_type != cached.closure_type || entry.proxy_flags != cached.proxy_flags ||
         entry.resource_handle.index() != cached.resource_handle.index() ||
+        entry.raycast_batch_id != cached.raycast_batch_id ||
         entry.shadow_blocker_set != cached.shadow_blocker_set ||
         entry.shadow_alpha != cached.shadow_alpha || entry.raycast_only_alpha != cached.raycast_only_alpha ||
         entry.material_runtime_hash != cached.material_runtime_hash)

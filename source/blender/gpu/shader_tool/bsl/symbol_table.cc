@@ -570,6 +570,7 @@ void SymbolTable::register_builtins(LocalScope node)
 
       /* WORKAROUND: Should become an entry point argument. */
       {"gl_FragStencilRefARB", "uint", false, ConstexprError(0)},
+      {"gl_PrimitiveID", "int", false, ConstexprError(0)},
 
       {"gpu_RayFlagsNone", "uint", false, ConstexprValue(0)},
       {"gpu_RayFlagsOpaque", "uint", false, ConstexprValue(0)},

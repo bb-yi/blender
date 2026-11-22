@@ -7,6 +7,7 @@ struct ShadowCasterRecord {
   uvec4 identity;
   vec4 uv_x;
   vec4 uv_y;
+  uvec4 raycast_batch;
 };
 
 /* Indexed by instanceCustomIndex. The Draw instance ID is shared across material batches. */

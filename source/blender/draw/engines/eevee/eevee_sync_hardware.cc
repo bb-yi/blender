@@ -944,6 +944,8 @@ static uint64_t gpu_material_runtime_hash(GPUMaterial *gpu_material)
 void SyncModule::begin_sync()
 {
   tessellation_passes_.clear();
+  raycast_batch_ids_.clear();
+  raycast_batch_passes_.clear();
   object_attribute_requests_.clear();
   object_attribute_request_hits_ = 0;
   mesh_attribute_requests_ = 0;
@@ -1111,6 +1113,9 @@ void SyncModule::finalize_hardware_raytrace_scene_entries()
       entry.raycast_only_alpha = entry.shadow_alpha.image != nullptr;
     }
     entry.raycast_alpha_material = nullptr;
+    entry.raycast_batch_id = raycast && entry.visible_raycast && !entry.is_sculpt ?
+                                 raycast_batch_ids_.lookup_default(entry.batch, 0) :
+                                 0;
     hardware_raytrace_scene_signature_ = get_default_hash(
         hardware_raytrace_scene_signature_,
         entry.object_key.hash(),
@@ -1120,7 +1125,8 @@ void SyncModule::finalize_hardware_raytrace_scene_entries()
         get_default_hash(entry.material_runtime_hash,
                          entry.casts_shadow,
                          entry.visible_raycast,
-                         entry.shadow_blocker_set));
+                         entry.shadow_blocker_set,
+                         entry.raycast_batch_id));
   }
 }
 

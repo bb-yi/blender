@@ -1861,6 +1861,7 @@ struct ShadowCasterRecord {
   uint4 identity;
   float4 uv_x;
   float4 uv_y;
+  uint4 raycast_batch;
 };
 
 static uint32_t append_shadow_alpha_image(Image *image, std::vector<uint32_t> &data)
@@ -1915,6 +1916,7 @@ static bool build_shadow_caster_buffers(Span<GPUHardwareRaytraceSceneEntry> entr
     const GPUHardwareRaytraceShadowAlpha &alpha = entry.shadow_alpha;
     ShadowCasterRecord &caster = casters[entry.user_id];
     caster.identity = uint4(entry.shadow_caster_id, entry.shadow_blocker_set, 0, 0);
+    caster.raycast_batch = uint4(uint32_t(entry.raycast_batch_id), 0, 0, 0);
     if (!alpha.image || geometry[i].triangle_shadow_uvs.is_empty()) {
       continue;
     }
