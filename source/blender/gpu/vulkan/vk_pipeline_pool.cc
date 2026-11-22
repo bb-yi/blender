@@ -20,6 +20,7 @@
 #include "vk_backend.hh"
 #include "vk_graphics_pipeline.hh"
 #include "vk_pipeline_pool.hh"
+#include "vk_to_string.hh"
 
 namespace blender {
 
@@ -205,12 +206,17 @@ static VkPipeline create_graphics_pipeline_no_libs(const VKGraphicsInfo &graphic
   /* Build pipeline. */
   VkPipeline pipeline = VK_NULL_HANDLE;
   double start_time = BLI_time_now_seconds();
-  device.functions.vkCreateGraphicsPipelines(device.vk_handle(),
-                                             vk_pipeline_cache,
-                                             1,
-                                             &builder.vk_graphics_pipeline_create_info,
-                                             nullptr,
-                                             &pipeline);
+  const VkResult result = device.functions.vkCreateGraphicsPipelines(
+      device.vk_handle(),
+      vk_pipeline_cache,
+      1,
+      &builder.vk_graphics_pipeline_create_info,
+      nullptr,
+      &pipeline);
+  if (result != VK_SUCCESS) {
+    CLOG_ERROR(&LOG, "Could not create graphics pipeline %s: %s", name.c_str(), to_string(result));
+    return VK_NULL_HANDLE;
+  }
   double end_time = BLI_time_now_seconds();
   debug::object_label(pipeline, name);
   CLOG_DEBUG(&LOG,
@@ -233,6 +239,11 @@ static VkPipeline create_graphics_pipeline_libs(const VKGraphicsInfo &graphics_i
   VkPipeline shaders_lib = device.pipelines.get_or_create_shaders_lib(graphics_info.shaders);
   VkPipeline fragment_output_lib = device.pipelines.get_or_create_fragment_output_lib(
       graphics_info.fragment_out);
+  if (vertex_input_lib == VK_NULL_HANDLE || shaders_lib == VK_NULL_HANDLE ||
+      fragment_output_lib == VK_NULL_HANDLE)
+  {
+    return VK_NULL_HANDLE;
+  }
 
   std::array<VkPipeline, 3> pipeline_libraries = {
       vertex_input_lib, shaders_lib, fragment_output_lib};
@@ -265,8 +276,12 @@ static VkPipeline create_graphics_pipeline_libs(const VKGraphicsInfo &graphics_i
       vk_pipeline_base,
       0};
   double start_link_time = BLI_time_now_seconds();
-  device.functions.vkCreateGraphicsPipelines(
+  const VkResult result = device.functions.vkCreateGraphicsPipelines(
       device.vk_handle(), vk_pipeline_cache, 1, &linking_pipeline_create_info, nullptr, &pipeline);
+  if (result != VK_SUCCESS) {
+    CLOG_DEBUG(&LOG, "Could not link graphics pipeline %s: %s", name.c_str(), to_string(result));
+    return VK_NULL_HANDLE;
+  }
   double end_time = BLI_time_now_seconds();
   debug::object_label(pipeline, name);
   CLOG_TRACE(&LOG,
@@ -289,7 +304,12 @@ VkPipeline VKPipelineMap<VKGraphicsInfo>::create(const VKGraphicsInfo &graphics_
   VKDevice &device = VKBackend::get().device;
   const VKExtensions &extensions = device.extensions_get();
   if (extensions.graphics_pipeline_library) {
-    return create_graphics_pipeline_libs(graphics_info, vk_pipeline_cache, vk_pipeline_base, name);
+    if (const VkPipeline pipeline = create_graphics_pipeline_libs(
+            graphics_info, vk_pipeline_cache, vk_pipeline_base, name))
+    {
+      return pipeline;
+    }
+    CLOG_DEBUG(&LOG, "Retrying graphics pipeline %s without libraries", name.c_str());
   }
   return create_graphics_pipeline_no_libs(
       graphics_info, vk_pipeline_cache, vk_pipeline_base, name);
@@ -607,12 +627,17 @@ VkPipeline VKPipelineMap<VKGraphicsInfo::Shaders>::create(
   /* Build pipeline. */
   VkPipeline pipeline = VK_NULL_HANDLE;
   double start_time = BLI_time_now_seconds();
-  device.functions.vkCreateGraphicsPipelines(device.vk_handle(),
-                                             vk_pipeline_cache,
-                                             1,
-                                             &builder.vk_graphics_pipeline_create_info,
-                                             nullptr,
-                                             &pipeline);
+  const VkResult result = device.functions.vkCreateGraphicsPipelines(
+      device.vk_handle(),
+      vk_pipeline_cache,
+      1,
+      &builder.vk_graphics_pipeline_create_info,
+      nullptr,
+      &pipeline);
+  if (result != VK_SUCCESS) {
+    CLOG_DEBUG(&LOG, "Could not create graphics shader library: %s", to_string(result));
+    return VK_NULL_HANDLE;
+  }
   double end_time = BLI_time_now_seconds();
   debug::object_label(pipeline, name);
   CLOG_TRACE(&LOG, "Compiled shaders library in %fms ", (end_time - start_time) * 1000.0);

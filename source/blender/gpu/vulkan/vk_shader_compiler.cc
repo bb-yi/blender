@@ -16,13 +16,17 @@
 #  include "BLI_winstuff.hh"
 #endif
 
+#include "BLI_system.hh"
+#include BLI_SYSTEM_PID_H
+
 #include "vk_backend.hh"
 #include "vk_device.hh"
 #include "vk_shader.hh"
 #include "vk_shader_compiler.hh"
 
+#include <atomic>
 #include <cstring>
-#include <iostream>
+#include <filesystem>
 #include <string>
 
 #include "CLG_log.h"
@@ -79,6 +83,8 @@ struct SPIRVSidecar {
   uint32_t spirv_version;
 };
 
+static constexpr int64_t SPIRV_HEADER_WORD_COUNT = 5;
+
 static uint32_t spirv_target_version_get()
 {
   const VKDevice &device = VKBackend::get().device;
@@ -99,22 +105,15 @@ static bool read_spirv_from_disk(VKShaderModule &shader_module, StringRef hash_e
   std::string sidecar_path = (*cache_dir_get()) + SEP_STR + shader_module.sources_hash +
                              ".sidecar.bin";
 
-  if (!BLI_exists(spirv_path.c_str()) || !BLI_exists(sidecar_path.c_str())) {
-    return false;
-  }
-
-  BLI_file_touch(spirv_path.c_str());
-  BLI_file_touch(sidecar_path.c_str());
-
   /* Read sidecar. */
   fstream sidecar_file(sidecar_path, std::ios::binary | std::ios::in | std::ios::ate);
-  std::streamsize sidecar_size_on_disk = sidecar_file.tellg();
   SPIRVSidecar sidecar = {};
-  if (sidecar_size_on_disk != sizeof(sidecar)) {
+  if (sidecar_file.tellg() != sizeof(sidecar) ||
+      !sidecar_file.seekg(0).read(reinterpret_cast<char *>(&sidecar), sizeof(sidecar)))
+  {
     return false;
   }
-  sidecar_file.seekg(0, std::ios::beg);
-  sidecar_file.read(reinterpret_cast<char *>(&sidecar), sizeof(sidecar));
+  sidecar_file.close();
 
   if (sidecar.spirv_version != spirv_target_version_get()) {
     CLOG_TRACE(
@@ -126,18 +125,52 @@ static bool read_spirv_from_disk(VKShaderModule &shader_module, StringRef hash_e
     return false;
   }
 
-  /* Read spirv binary. */
+  /* Read the SPIR-V binary and reject incomplete or invalid cache entries. */
   fstream spirv_file(spirv_path, std::ios::binary | std::ios::in | std::ios::ate);
-  std::streamsize size = spirv_file.tellg();
-  if (size != sidecar.spirv_size) {
+  constexpr std::streamsize word_size = sizeof(uint32_t);
+  const std::streamsize size = spirv_file.tellg();
+  if (size <= SPIRV_HEADER_WORD_COUNT * word_size || size % word_size != 0 ||
+      uint64_t(size) != sidecar.spirv_size)
+  {
     return false;
   }
-  spirv_file.seekg(0, std::ios::beg);
-  shader_module.spirv_binary.resize(size / 4);
-  spirv_file.read(reinterpret_cast<char *>(shader_module.spirv_binary.data()), size);
+  Vector<uint32_t> binary(size / word_size);
+  if (!spirv_file.seekg(0).read(reinterpret_cast<char *>(binary.data()), size) ||
+      binary[0] != SpvMagicNumber || binary[1] != sidecar.spirv_version || binary[3] == 0 ||
+      binary[4] != 0)
+  {
+    CLOG_DEBUG(&LOG, "Ignoring invalid SPIR-V cache entry %s", spirv_path.c_str());
+    return false;
+  }
+  spirv_file.close();
 
+  const auto now = std::filesystem::file_time_type::clock::now();
+  std::error_code error;
+  std::filesystem::last_write_time(std::u8string(spirv_path.begin(), spirv_path.end()), now, error);
+  std::filesystem::last_write_time(
+      std::u8string(sidecar_path.begin(), sidecar_path.end()), now, error);
+
+  shader_module.spirv_binary = std::move(binary);
   CLOG_TRACE(&LOG, "reading SpirV from disk %s", spirv_path.c_str());
   return true;
+}
+
+static bool write_cache_file(const std::string &path, const char *data, std::streamsize size)
+{
+  static std::atomic<uint64_t> next_write_id = 0;
+  const std::string tmp_path = path + ".tmp-" + std::to_string(getpid()) + "-" +
+                               std::to_string(next_write_id.fetch_add(1, std::memory_order_relaxed));
+  fstream file(tmp_path, std::ios::binary | std::ios::out);
+  if (!file.is_open()) {
+    return false;
+  }
+  file.write(data, size);
+  file.close();
+  if (file && BLI_rename_overwrite(tmp_path.c_str(), path.c_str()) == 0) {
+    return true;
+  }
+  BLI_delete(tmp_path.c_str(), false, false);
+  return false;
 }
 
 static void write_spirv_to_disk(VKShaderModule &shader_module)
@@ -154,19 +187,23 @@ static void write_spirv_to_disk(VKShaderModule &shader_module)
    * that any post-processing (e.g. the injected OpString shader name) is stored in the cache and
    * does not have to be redone every time the cache entry is read back. */
   std::string spirv_path = (*cache_dir_get()) + SEP_STR + shader_module.sources_hash + ".spv";
-  CLOG_TRACE(&LOG, "write SpirV to disk %s", spirv_path.c_str());
-  size_t size = shader_module.spirv_binary.size() * sizeof(uint32_t);
-  fstream spirv_file(spirv_path, std::ios::binary | std::ios::out);
-  spirv_file.write(reinterpret_cast<const char *>(shader_module.spirv_binary.data()), size);
+  const uint64_t size = shader_module.spirv_binary.size() * sizeof(uint32_t);
+  if (!write_cache_file(
+          spirv_path, reinterpret_cast<const char *>(shader_module.spirv_binary.data()), size))
+  {
+    CLOG_DEBUG(&LOG, "Could not write SPIR-V cache entry %s", spirv_path.c_str());
+    return;
+  }
 
   /* Write the sidecar */
-  SPIRVSidecar sidecar;
-  sidecar.spirv_size = size;
-  sidecar.spirv_version = spirv_target_version_get();
+  const SPIRVSidecar sidecar = {size, spirv_target_version_get()};
   std::string sidecar_path = (*cache_dir_get()) + SEP_STR + shader_module.sources_hash +
                              ".sidecar.bin";
-  fstream sidecar_file(sidecar_path, std::ios::binary | std::ios::out);
-  sidecar_file.write(reinterpret_cast<const char *>(&sidecar), sizeof(SPIRVSidecar));
+  if (!write_cache_file(sidecar_path, reinterpret_cast<const char *>(&sidecar), sizeof(sidecar))) {
+    CLOG_DEBUG(&LOG, "Could not write SPIR-V cache metadata %s", sidecar_path.c_str());
+    return;
+  }
+  CLOG_TRACE(&LOG, "write SpirV to disk %s", spirv_path.c_str());
 }
 
 void VKShaderCompiler::cache_dir_clear_old()
@@ -237,7 +274,7 @@ static void spirv_inject_op_string(const Span<uint32_t> &spirv_in,
     uint32_t bound; /* Indicates the next available result ID. */
     uint32_t schema;
   };
-  constexpr uint32_t SPIRV_HEADER_WORD_COUNT = sizeof(SpirvHeader) / sizeof(uint32_t);
+  static_assert(sizeof(SpirvHeader) == SPIRV_HEADER_WORD_COUNT * sizeof(uint32_t));
   const SpirvHeader *header_in = reinterpret_cast<const SpirvHeader *>(spirv_in.data());
   if (spirv_in.size() < SPIRV_HEADER_WORD_COUNT || header_in->magic_number != SpvMagicNumber) {
     spirv_out.extend(spirv_in); /* pass through unmodified */
