@@ -319,6 +319,8 @@ void WM_window_pixels_read_sample_from_frontbuffer(const wmWindowManager *wm,
  * (see in-line code comments for details).
  */
 uint8_t *WM_window_pixels_read_from_offscreen(bContext *C, wmWindow *win, int r_size[2]);
+/** Read a drawn 3D viewport with its display transform and overlays, without drawing the window. */
+uint8_t *WM_viewport_pixels_read(bContext *C, wmWindow *win, GPUViewport *viewport, int r_size[2]);
 /** A version of #WM_window_pixels_read_from_offscreen that samples a pixel at `pos`. */
 bool WM_window_pixels_read_sample_from_offscreen(bContext *C,
                                                  wmWindow *win,

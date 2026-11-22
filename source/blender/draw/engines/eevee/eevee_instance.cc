@@ -37,6 +37,7 @@
 #include "GPU_context.hh"
 #include "GPU_pass.hh"
 #include "GPU_platform.hh"
+#include "GPU_viewport.hh"
 #include "GPU_work_in_flight.hh"
 #include "IMB_imbuf_types.hh"
 
@@ -1177,6 +1178,7 @@ bool Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, con
 void Instance::draw_viewport()
 {
   if (skip_render_ || !is_loaded(needed_shaders)) {
+    GPU_viewport_capture_shading_set(draw_ctx->viewport, -1);
     DefaultFramebufferList *dfbl = draw_ctx->viewport_framebuffer_list_get();
     GPU_framebuffer_clear_color_depth(dfbl->default_fb, double4(0.0), 1.0f);
     if (!is_loaded(needed_shaders & ~WORLD_SHADERS)) {
@@ -1214,6 +1216,7 @@ void Instance::draw_viewport()
   }
 
   if (materials.queued_shaders_count > 0 || materials.queued_textures_count > 0) {
+    GPU_viewport_capture_shading_set(draw_ctx->viewport, -1);
     if (materials.queued_textures_count > 0) {
       info_append_i18n("Loading textures ({} remaining)", materials.queued_textures_count);
     }

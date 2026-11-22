@@ -1653,6 +1653,10 @@ void view3d_main_region_draw(const bContext *C, ARegion *region)
   Main *bmain = CTX_data_main(C);
   View3D *v3d = CTX_wm_view3d(C);
 
+  if (GPUViewport *viewport = WM_draw_region_get_bound_viewport(region)) {
+    GPU_viewport_capture_shading_set(viewport, v3d->shading.type);
+  }
+
   view3d_update_viewer_path(C);
   view3d_draw_view(C, region);
 

@@ -23,6 +23,7 @@
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
+#include "DNA_view3d_types.h"
 
 #include "BKE_context.hh"
 #include "BKE_global.hh"
@@ -34,7 +35,10 @@
 
 #include "BLT_translation.hh"
 
+#include "GPU_viewport.hh"
+
 #include "RNA_access.hh"
+#include "RNA_define.hh"
 #include "RNA_prototypes.hh"
 
 #include "UI_interface.hh"
@@ -52,6 +56,7 @@ struct ScreenshotData {
   uint8_t *dumprect = nullptr;
   int dumpsx = 0, dumpsy = 0;
   rcti crop = {};
+  int2 output_size = int2(0);
   bool use_crop = false;
 
   ImageFormatData im_format;
@@ -63,11 +68,28 @@ static int screenshot_data_create(bContext *C, wmOperator *op, ScrArea *area)
   int dumprect_size[2];
 
   wmWindow *win = CTX_wm_window(C);
+  const bool use_drawn_frame = STREQ(op->idname, "SCREEN_OT_screenshot_area") &&
+                               RNA_boolean_get(op->ptr, "use_drawn_frame");
+  GPUViewport *capture_viewport = nullptr;
 
-  /* do redraw so we don't show popups/menus */
-  WM_redraw_windows(C);
+  if (use_drawn_frame) {
+    ARegion *region = CTX_wm_region(C);
+    const View3D *v3d = CTX_wm_view3d(C);
+    if (!v3d || !region || region->regiontype != RGN_TYPE_WINDOW) {
+      return false;
+    }
+    capture_viewport = WM_draw_region_get_viewport(region);
+    if (!capture_viewport || !GPU_viewport_is_ready_for_capture(capture_viewport, v3d->shading.type)) {
+      return false;
+    }
+  }
+  else {
+    /* Do redraw so we don't show popups/menus. */
+    WM_redraw_windows(C);
+  }
 
-  uint8_t *dumprect = WM_window_pixels_read(C, win, dumprect_size);
+  uint8_t *dumprect = capture_viewport ? WM_viewport_pixels_read(C, win, capture_viewport, dumprect_size) :
+                                       WM_window_pixels_read(C, win, dumprect_size);
 
   if (dumprect) {
     ScreenshotData *scd = MEM_new<ScreenshotData>("screenshot");
@@ -75,8 +97,12 @@ static int screenshot_data_create(bContext *C, wmOperator *op, ScrArea *area)
     scd->dumpsx = dumprect_size[0];
     scd->dumpsy = dumprect_size[1];
     scd->dumprect = dumprect;
-    if (area) {
+    if (capture_viewport) {
+      scd->output_size = int2(RNA_int_get(op->ptr, "width"), RNA_int_get(op->ptr, "height"));
+    }
+    else if (area) {
       scd->crop = area->totrct;
+      scd->use_crop = true;
     }
 
     BKE_image_format_init(&scd->im_format);
@@ -84,6 +110,9 @@ static int screenshot_data_create(bContext *C, wmOperator *op, ScrArea *area)
     op->customdata = scd;
 
     return true;
+  }
+  if (capture_viewport) {
+    BKE_report(op->reports, RPT_ERROR, "Could not read viewport pixels");
   }
   op->customdata = nullptr;
   return false;
@@ -122,10 +151,21 @@ static wmOperatorStatus screenshot_exec(bContext *C, wmOperator *op)
       scd->dumprect = nullptr;
 
       /* crop to show only single editor */
-      if (use_crop) {
+      if (scd->use_crop) {
         IMB_crop(ibuf,
                  int2(scd->crop.xmin, scd->crop.ymin),
                  int2(BLI_rcti_size_x(&scd->crop) + 1, BLI_rcti_size_y(&scd->crop) + 1));
+      }
+
+      const int2 output_size(scd->output_size.x ? scd->output_size.x : ibuf->x,
+                             scd->output_size.y ? scd->output_size.y : ibuf->y);
+      if (output_size != int2(ibuf->x, ibuf->y) &&
+          !IMB_scale(ibuf, output_size, IMBScaleFilter::Box))
+      {
+        BKE_report(op->reports, RPT_ERROR, "Could not resize screenshot");
+        IMB_freeImBuf(ibuf);
+        screenshot_data_free(op);
+        return OPERATOR_CANCELLED;
       }
 
       if ((scd->im_format.color_mode == ImColorMode::BW) &&
@@ -276,6 +316,17 @@ void SCREEN_OT_screenshot_area(wmOperatorType *ot)
   ot->description = "Capture a picture of an editor";
 
   screen_screenshot_impl(ot);
+
+  PropertyRNA *prop = RNA_def_boolean(ot->srna,
+                                      "use_drawn_frame",
+                                      false,
+                                      "Use Drawn Frame",
+                                      "Read the current 3D viewport region without forcing a redraw");
+  RNA_def_property_flag(prop, PROP_HIDDEN | PROP_SKIP_SAVE);
+  prop = RNA_def_int(ot->srna, "width", 0, 0, 16384, "Width", "Output width in pixels", 0, 16384);
+  RNA_def_property_flag(prop, PROP_HIDDEN | PROP_SKIP_SAVE);
+  prop = RNA_def_int(ot->srna, "height", 0, 0, 16384, "Height", "Output height in pixels", 0, 16384);
+  RNA_def_property_flag(prop, PROP_HIDDEN | PROP_SKIP_SAVE);
 
   ot->flag = OPTYPE_DEPENDS_ON_CURSOR;
 }

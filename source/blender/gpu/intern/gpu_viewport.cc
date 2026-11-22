@@ -56,6 +56,7 @@ static struct {
 struct GPUViewport {
   int2 size = int2(0);
   int flag = 0;
+  int capture_shading = -1;
 
   /* Set the active view (for stereoscopic viewport rendering). */
   int active_view = 0;
@@ -99,6 +100,16 @@ enum {
 void GPU_viewport_tag_update(GPUViewport *viewport)
 {
   viewport->flag |= DO_UPDATE;
+}
+
+void GPU_viewport_capture_shading_set(GPUViewport *viewport, int shading)
+{
+  viewport->capture_shading = shading;
+}
+
+bool GPU_viewport_is_ready_for_capture(const GPUViewport *viewport, int shading)
+{
+  return viewport->capture_shading == shading;
 }
 
 bool GPU_viewport_do_update(GPUViewport *viewport)

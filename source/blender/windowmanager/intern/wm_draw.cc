@@ -1521,6 +1521,49 @@ uint8_t *WM_window_pixels_read_from_offscreen(bContext *C, wmWindow *win, int r_
   return rect;
 }
 
+uint8_t *WM_viewport_pixels_read(bContext *C, wmWindow *win, GPUViewport *viewport, int r_size[2])
+{
+  gpu::Texture *color = GPU_viewport_color_texture(viewport, 0);
+  if (!color) {
+    return nullptr;
+  }
+
+  wm_window_make_drawable(CTX_wm_manager(C), win);
+  const int width = GPU_texture_width(color), height = GPU_texture_height(color);
+  GPUOffScreen *offscreen = GPU_offscreen_create(width,
+                                                height,
+                                                false,
+                                                get_hdr_framebuffer_format(
+                                                    WM_window_get_active_scene(win)),
+                                                GPU_TEXTURE_USAGE_SHADER_READ,
+                                                false,
+                                                nullptr);
+  if (!offscreen) {
+    return nullptr;
+  }
+
+  GPU_offscreen_bind(offscreen, false);
+  GPU_matrix_push();
+  GPU_matrix_push_projection();
+  GPU_matrix_identity_set();
+  GPU_matrix_ortho_set(0.0f, float(width), 0.0f, float(height), -1.0f, 1.0f);
+  GPU_depth_test(GPU_DEPTH_NONE);
+  GPU_blend(GPU_BLEND_NONE);
+  GPU_scissor_test(false);
+  const rcti rect = {0, width - 1, 0, height - 1};
+  GPU_viewport_draw_to_screen(viewport, 0, &rect);
+  GPU_matrix_pop_projection();
+  GPU_matrix_pop();
+  GPU_offscreen_unbind(offscreen, false);
+
+  uint8_t *pixels = MEM_new_array_uninitialized<uint8_t>(size_t(width) * height * 4, __func__);
+  GPU_offscreen_read_color(offscreen, GPU_DATA_UBYTE, pixels);
+  GPU_offscreen_free(offscreen);
+  r_size[0] = width;
+  r_size[1] = height;
+  return pixels;
+}
+
 bool WM_window_pixels_read_sample_from_offscreen(bContext *C,
                                                  wmWindow *win,
                                                  const int pos[2],
