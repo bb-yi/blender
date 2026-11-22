@@ -333,6 +333,7 @@ class ShaderModule {
   };
 
   Map<SpecializationsKey, Vector<AsyncSpecializationHandle>> specialization_handles_;
+  Map<eShaderType, AsyncSpecializationHandle> probe_pipeline_handles_;
 
   static gpu::StaticShaderCache<ShaderModule> &get_static_cache()
   {

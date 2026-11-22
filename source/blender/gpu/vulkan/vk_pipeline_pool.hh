@@ -9,6 +9,7 @@
 #pragma once
 
 #include <cstring>
+#include <optional>
 
 #include "xxhash.h"
 
@@ -212,7 +213,8 @@ struct VKGraphicsInfo {
  * Thread safe map to pipelines of a certain type (graphics or compute).
  */
 template<typename PipelineInfo> class VKPipelineMap {
-  Map<PipelineInfo, VkPipeline> pipelines_;
+  /* An empty entry is in progress. A completed creation may have returned a null handle. */
+  Map<PipelineInfo, std::optional<VkPipeline>> pipelines_;
   Mutex mutex_;
   std::condition_variable_any new_pipeline_added_;
 
@@ -241,18 +243,18 @@ template<typename PipelineInfo> class VKPipelineMap {
     r_created = false;
     {
       std::scoped_lock lock(mutex_);
-      const VkPipeline *found_pipeline = pipelines_.lookup_ptr(pipeline_info);
+      const std::optional<VkPipeline> *found_pipeline = pipelines_.lookup_ptr(pipeline_info);
       if (found_pipeline) {
-        if (*found_pipeline == VK_NULL_HANDLE) {
+        if (!found_pipeline->has_value()) {
           do_wait_for_pipeline = true;
         }
         else {
-          /* Early exit: pipeline_info found and has a valid pipeline. */
-          return *found_pipeline;
+          /* Early exit: a previous creation attempt finished. */
+          return **found_pipeline;
         }
       }
       else {
-        pipelines_.add_new(pipeline_info, VK_NULL_HANDLE);
+        pipelines_.add_new(pipeline_info, std::nullopt);
         do_compile_pipeline = true;
       }
     }
@@ -265,8 +267,7 @@ template<typename PipelineInfo> class VKPipelineMap {
       /* Store result in the compute pipelines map. */
       {
         std::scoped_lock lock(mutex_);
-        VkPipeline &pipeline_item = pipelines_.lookup(pipeline_info);
-        pipeline_item = pipeline;
+        pipelines_.lookup(pipeline_info) = pipeline;
       }
       /* Notify other threads that a new pipeline is available. */
       {
@@ -286,7 +287,9 @@ template<typename PipelineInfo> class VKPipelineMap {
     std::scoped_lock lock(mutex_);
     pipelines_.remove_if([&](auto item) {
       if (item.key.vk_pipeline_layout_get() == vk_pipeline_layout) {
-        discard_pool.discard_pipeline(item.value);
+        if (const VkPipeline pipeline = item.value.value_or(VK_NULL_HANDLE)) {
+          discard_pool.discard_pipeline(pipeline);
+        }
         return true;
       }
       return false;
@@ -300,8 +303,10 @@ template<typename PipelineInfo> class VKPipelineMap {
   void free_data(VkDevice vk_device, const volk::VolkDeviceTable &functions)
   {
     std::scoped_lock lock(mutex_);
-    for (VkPipeline &vk_pipeline : pipelines_.values()) {
-      functions.vkDestroyPipeline(vk_device, vk_pipeline, nullptr);
+    for (auto &entry : pipelines_.values()) {
+      if (const VkPipeline pipeline = entry.value_or(VK_NULL_HANDLE)) {
+        functions.vkDestroyPipeline(vk_device, pipeline, nullptr);
+      }
     }
     pipelines_.clear();
   }
@@ -339,13 +344,13 @@ template<typename PipelineInfo> class VKPipelineMap {
   VkPipeline wait_for_completion(const PipelineInfo &pipeline_info)
   {
     std::unique_lock<Mutex> lock(mutex_);
-    const VkPipeline *pipeline = nullptr;
+    const std::optional<VkPipeline> *pipeline = nullptr;
     new_pipeline_added_.wait(lock, [&]() {
       pipeline = pipelines_.lookup_ptr(pipeline_info);
       BLI_assert(pipeline != nullptr);
-      return *pipeline != VK_NULL_HANDLE;
+      return pipeline->has_value();
     });
-    return *pipeline;
+    return **pipeline;
   }
 };
 

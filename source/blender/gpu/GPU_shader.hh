@@ -11,6 +11,7 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <optional>
 
@@ -39,6 +40,7 @@ struct ShaderCompileDiagnostics {
 class VertBuf;
 class Shader;
 namespace shader {
+struct PipelineState;
 struct ShaderCreateInfo;
 }  // namespace shader
 }  // namespace gpu
@@ -288,6 +290,8 @@ using AsyncSpecializationHandle = int64_t;
 struct ShaderSpecialization {
   gpu::Shader *shader;
   gpu::shader::SpecializationConstants constants;
+  /** Optional framebuffer and drawing state for backends with explicit graphics pipelines. */
+  std::shared_ptr<const gpu::shader::PipelineState> graphics_pipeline;
 };
 
 /**
@@ -297,7 +301,7 @@ struct ShaderSpecialization {
  * A NULL handle indicates no compilation of any variant was possible (likely due to
  * some state being currently available) and so no batch was created. Compilation
  * of the specialized variant will instead occur at draw/dispatch time.
- * NOTE: This function is asynchronous on OpenGL and Metal and a no-op on Vulkan.
+ * Vulkan requires a graphics pipeline description to precompile the specialized variant.
  * Batches are processed one by one in FIFO order.
  * WARNING: Binding a specialization before the batch finishes will fail.
  */
@@ -309,7 +313,8 @@ AsyncSpecializationHandle GPU_shader_async_specialization(
  * Returns true if the specialization has finished its compilation.
  * WARNING: Invalidates the handle if it returns true.
  */
-bool GPU_shader_async_specialization_is_ready(AsyncSpecializationHandle &handle);
+bool GPU_shader_async_specialization_is_ready(AsyncSpecializationHandle &handle,
+                                              bool block_until_ready = false);
 
 /**
  * Cancel the specialization compilation.

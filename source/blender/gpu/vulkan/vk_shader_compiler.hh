@@ -28,8 +28,11 @@ class VKShaderModule;
  * Is used for both single threaded compilation by calling `VKShaderCompiler::compile_module` or
  * batch based compilation.
  */
-class VKShaderCompiler {
+class VKShaderCompiler : public ShaderCompiler {
  public:
+  VKShaderCompiler();
+  void specialize_shader(const ShaderSpecialization &specialization) override;
+
   static bool compile_module(VKShader &shader,
                              shaderc_shader_kind stage,
                              VKShaderModule &shader_module);

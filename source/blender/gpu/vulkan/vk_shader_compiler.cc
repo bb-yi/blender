@@ -11,6 +11,7 @@
 #include "BLI_fileops.hh"
 #include "BLI_path_utils.hh"
 #include "BLI_simd.hh"
+#include "GPU_capabilities.hh"
 #ifdef _WIN32
 #  include "BLI_winstuff.hh"
 #endif
@@ -35,6 +36,20 @@
 #endif
 
 namespace blender::gpu {
+
+VKShaderCompiler::VKShaderCompiler()
+    : ShaderCompiler(GPU_max_parallel_compilations(), GPUWorker::ContextType::Main, true)
+{
+}
+
+void VKShaderCompiler::specialize_shader(const ShaderSpecialization &specialization)
+{
+  BLI_assert(specialization.graphics_pipeline);
+  shader::PipelineState pipeline = *specialization.graphics_pipeline;
+  pipeline.specialization_constants_ = specialization.constants.values;
+  auto &vk_shader = *static_cast<VKShader *>(specialization.shader);
+  vk_shader.ensure_graphics_pipelines(Span<shader::PipelineState>(&pipeline, 1), false);
+}
 
 static CLG_LogRef LOG = {"gpu.vulkan"};
 

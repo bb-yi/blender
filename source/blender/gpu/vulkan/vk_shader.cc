@@ -1360,7 +1360,8 @@ VkPipeline VKShader::ensure_and_get_compute_pipeline(
   return vk_pipeline;
 }
 
-bool VKShader::ensure_graphics_pipelines(Span<shader::PipelineState> pipeline_states)
+bool VKShader::ensure_graphics_pipelines(Span<shader::PipelineState> pipeline_states,
+                                         const bool record_base_pipeline)
 {
   BLI_assert(!is_compute_shader_);
 
@@ -1416,15 +1417,19 @@ bool VKShader::ensure_graphics_pipelines(Span<shader::PipelineState> pipeline_st
         graphics_info.fragment_out.color_attachment_formats.size());
 
     bool pipeline_created = false;
+    /* An asynchronous specialization can run while another viewport uses the shader. */
+    const VkPipeline base = record_base_pipeline ? vk_pipeline_base_ : VK_NULL_HANDLE;
     VkPipeline vk_pipeline = device.pipelines.get_or_create_graphics_pipeline(
-        graphics_info, is_static_shader_, vk_pipeline_base_, name_get(), pipeline_created);
-    has_precompiled_pipelines_ = true;
+        graphics_info, is_static_shader_, base, name_get(), pipeline_created);
     UNUSED_VARS_NDEBUG(pipeline_created);
     if (vk_pipeline == VK_NULL_HANDLE) {
       return false;
     }
-    if (vk_pipeline_base_ == VK_NULL_HANDLE) {
-      vk_pipeline_base_ = vk_pipeline;
+    if (record_base_pipeline) {
+      has_precompiled_pipelines_ = true;
+      if (vk_pipeline_base_ == VK_NULL_HANDLE) {
+        vk_pipeline_base_ = vk_pipeline;
+      }
     }
   }
 

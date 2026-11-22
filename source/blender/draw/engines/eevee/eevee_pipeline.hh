@@ -36,6 +36,11 @@ namespace eevee {
 class Instance;
 struct RayTraceBuffer;
 
+inline constexpr DRWState deferred_light_state = DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_EQUAL;
+inline constexpr DRWState deferred_probe_light_state = DRW_STATE_WRITE_COLOR |
+                                                        DRW_STATE_BLEND_ADD_FULL |
+                                                        DRW_STATE_DEPTH_LESS;
+
 static constexpr uint8_t EEVEE_STENCIL_USER_MASK = 0x0Fu;
 static constexpr uint8_t EEVEE_STENCIL_INTERNAL_MASK = 0xF0u;
 static constexpr int EEVEE_SURFACE_CULL_METHOD_COUNT = 3;

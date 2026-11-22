@@ -497,11 +497,19 @@ void Shader::specialization_constants_init(const shader::ShaderCreateInfo &info)
 AsyncSpecializationHandle GPU_shader_async_specialization(
     const ShaderSpecialization &specialization, CompilationPriority priority)
 {
+  if (GPU_backend_get_type() == GPU_BACKEND_VULKAN && !specialization.graphics_pipeline) {
+    return 0;
+  }
   return GPUBackend::get()->get_compiler()->async_specialization(specialization, priority);
 }
 
-bool GPU_shader_async_specialization_is_ready(AsyncSpecializationHandle &handle)
+bool GPU_shader_async_specialization_is_ready(AsyncSpecializationHandle &handle,
+                                              bool block_until_ready)
 {
+  if (block_until_ready && handle) {
+    GPUBackend::get()->get_compiler()->async_compilation_finalize(handle);
+    return true;
+  }
   return GPUBackend::get()->get_compiler()->async_specialization_is_ready(handle);
 }
 

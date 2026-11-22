@@ -10,6 +10,7 @@
  */
 
 #include "GPU_capabilities.hh"
+#include "GPU_context.hh"
 
 #include "BKE_material.hh"
 #include "BKE_node_runtime.hh"
@@ -24,6 +25,7 @@
 
 #include "eevee_shader.hh"
 
+#include "eevee_pipeline.hh"
 #include "eevee_shadow.hh"
 
 #include "BLI_assert.hh"
@@ -393,6 +395,11 @@ ShaderModule::~ShaderModule()
       }
     }
   }
+  for (AsyncSpecializationHandle &handle : probe_pipeline_handles_.values()) {
+    if (handle) {
+      GPU_shader_async_specialization_cancel(handle);
+    }
+  }
 }
 
 /** \} */
@@ -401,6 +408,36 @@ ShaderModule::~ShaderModule()
 /** \name Static shaders
  *
  * \{ */
+
+static std::shared_ptr<const gpu::shader::PipelineState> deferred_pipeline_state(eShaderType shader)
+{
+  using gpu::TextureTargetFormat;
+  const bool is_planar_probe = shader == DEFERRED_PLANAR_EVAL;
+  const bool is_sphere_probe = shader == DEFERRED_CAPTURE_EVAL;
+  const DRWState state = (is_planar_probe || is_sphere_probe) ? deferred_probe_light_state :
+                                                               deferred_light_state;
+  auto pipeline = std::make_shared<gpu::shader::PipelineState>();
+  pipeline->primitive(GPU_PRIM_TRIS)
+      .viewports(1)
+      .state(draw::to_write_mask(state),
+             draw::to_blend(state),
+             draw::to_face_cull_test(state),
+             draw::to_depth_test(state),
+             draw::to_stencil_test(state),
+             draw::to_stencil_op(state),
+             draw::to_provoking_vertex(state));
+  if (is_planar_probe) {
+    pipeline->depth_format(TextureTargetFormat::SFLOAT_32_DEPTH)
+        .color_format(TextureTargetFormat::UFLOAT_11_11_10);
+  }
+  else {
+    pipeline->depth_format(TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+        .stencil_format(TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+        .color_format(is_sphere_probe ? TextureTargetFormat::SFLOAT_32_32_32_32 :
+                                        TextureTargetFormat::SFLOAT_16_16_16_16);
+  }
+  return pipeline;
+}
 
 ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                                bool block_until_ready)
@@ -413,21 +450,26 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
       bool all_loaded = true;
       bool any_failed = false;
       for (eShaderType shader : shader_types) {
-        if (shaders_[shader].is_ready()) {
-          if (shaders_[shader].get() == nullptr) {
-            all_loaded = false;
-            any_failed = true;
-          }
-        }
-        else if (block_until_ready) {
-          if (shaders_[shader].get() == nullptr) {
-            all_loaded = false;
-            any_failed = true;
-          }
-        }
-        else {
+        if (!shaders_[shader].is_ready() && !block_until_ready) {
           shaders_[shader].ensure_compile_async();
           all_loaded = false;
+          continue;
+        }
+        gpu::Shader *program = shaders_[shader].get();
+        if (!program) {
+          all_loaded = false;
+          any_failed = true;
+        }
+        else if (ELEM(shader, DEFERRED_CAPTURE_EVAL, DEFERRED_PLANAR_EVAL) &&
+                 GPU_backend_get_type() == GPU_BACKEND_VULKAN)
+        {
+          AsyncSpecializationHandle &handle = probe_pipeline_handles_.lookup_or_add_cb(
+              shader, [&]() {
+                return GPU_shader_async_specialization({program,
+                                                        GPU_shader_get_default_constant_state(program),
+                                                        deferred_pipeline_state(shader)});
+              });
+          all_loaded &= GPU_shader_async_specialization_is_ready(handle, block_until_ready);
         }
       }
       if (any_failed) {
@@ -677,6 +719,9 @@ bool ShaderModule::request_specializations(bool block_until_ready,
        use_lightprobe_eval},
       [&]() {
         Vector<AsyncSpecializationHandle> handles;
+        const auto pipeline = GPU_backend_get_type() == GPU_BACKEND_VULKAN ?
+                                  deferred_pipeline_state(DEFERRED_LIGHT_SINGLE) :
+                                  nullptr;
         for (int i : IndexRange(3)) {
           gpu::Shader *shader = static_shader_get(eShaderType(DEFERRED_LIGHT_SINGLE + i));
           if (shader == nullptr) {
@@ -685,6 +730,7 @@ bool ShaderModule::request_specializations(bool block_until_ready,
 
           ShaderSpecialization specialization;
           specialization.shader = shader;
+          specialization.graphics_pipeline = pipeline;
           gpu::shader::SpecializationConstants &constants = specialization.constants;
           constants = GPU_shader_get_default_constant_state(shader);
 
@@ -699,9 +745,8 @@ bool ShaderModule::request_specializations(bool block_until_ready,
             set_value("use_transmission", use_transmission);
             set_value("shadow_ray_count", shadow_ray_count);
             set_value("shadow_ray_step_count", shadow_ray_step_count);
+            handles.append(GPU_shader_async_specialization(specialization));
           }
-
-          handles.append(GPU_shader_async_specialization(specialization));
         }
 
         return handles;
@@ -713,13 +758,7 @@ bool ShaderModule::request_specializations(bool block_until_ready,
 
   bool is_ready = true;
   for (AsyncSpecializationHandle &handle : handles) {
-    while (!GPU_shader_async_specialization_is_ready(handle) && block_until_ready) {
-      /* Block until ready. */
-    }
-    if (handle != 0) {
-      is_ready = false;
-      break;
-    }
+    is_ready &= GPU_shader_async_specialization_is_ready(handle, block_until_ready);
   }
 
   return is_ready;
