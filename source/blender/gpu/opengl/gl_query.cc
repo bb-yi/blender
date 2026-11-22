@@ -73,14 +73,9 @@ int GLQueryPool::timestamp_write()
 
 bool GLQueryPool::timestamp_duration(int begin, int end, double &ms) const
 {
-  GLint ready = 0;
-  glGetQueryObjectiv(query_ids_[end], GL_QUERY_RESULT_AVAILABLE, &ready);
-  if (!ready) {
-    return false;
-  }
   GLuint64 start, finish;
-  glGetQueryObjectui64v(query_ids_[begin], GL_QUERY_RESULT, &start);
   glGetQueryObjectui64v(query_ids_[end], GL_QUERY_RESULT, &finish);
+  glGetQueryObjectui64v(query_ids_[begin], GL_QUERY_RESULT, &start);
   ms = double(finish - start) * 1e-6;
   return true;
 }
