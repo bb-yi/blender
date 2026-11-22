@@ -1112,6 +1112,11 @@ GPUNodeLink *GPU_color_band(GPUMaterial *mat, int size, float *pixels, float *r_
 
 /* Creating Nodes */
 
+void GPU_raycast_attribute_request(GPUNodeLink *link, UString name)
+{
+  link->output->node->raycast_attribute_name = name.c_str();
+}
+
 bool GPU_link(GPUMaterial *mat, const char *name, ...)
 {
   GPUNodeGraph *graph = gpu_material_node_graph(mat);

@@ -242,6 +242,10 @@ struct HardwareRaycast {
   [[resource_table]] HardwareTriangleScene scene;
   [[storage(24, read)]] const uint2 (&hardware_raycast_normal_ranges)[];
   [[storage(25, read)]] const float4 (&hardware_raycast_smooth_normals)[];
+#ifdef MAT_HARDWARE_RAYCAST_ATTRIBUTES
+  [[storage(26, read)]] const uint (&hardware_raycast_attributes)[];
+  [[push_constant]] int hardware_raycast_attributes_ready;
+#endif
 #ifdef MAT_HARDWARE_RAYCAST_SOURCE_TRIANGLE
   [[push_constant]] int hardware_raycast_source_batch;
 #endif
@@ -256,7 +260,8 @@ struct HardwareRaycast {
              bool &self_hit,
              float &hit_distance,
              float3 &hit_position,
-             float3 &hit_normal) const
+             float3 &hit_normal,
+             float4 &hit_attributes) const
   {
     const float direction_scale = reduce_max(abs(direction));
     if (!(direction_scale > 0.0f) || any(isnan(direction)) || any(isinf(direction)) ||
@@ -317,12 +322,15 @@ struct HardwareRaycast {
     hit_distance = rayQueryGetIntersectionT(query, true);
     hit_position = origin + direction * hit_distance;
 
+    const float2 barycentric = rayQueryGetIntersectionBarycentrics(query, true);
+#ifdef MAT_HARDWARE_RAYCAST_ATTRIBUTES
+    hit_attributes = float4(float(hit_id), uintBitsToFloat(primitive), barycentric);
+#endif
     const uint2 range = this->hardware_raycast_normal_ranges[hit_id];
     if (primitive >= range.y) {
       return;
     }
     const uint base = (range.x + primitive) * 3u;
-    const float2 barycentric = rayQueryGetIntersectionBarycentrics(query, true);
     const float4x3 world_to_object = rayQueryGetIntersectionWorldToObject(query, true);
     const float3x3 inverse_basis = float3x3(
         world_to_object[0], world_to_object[1], world_to_object[2]);
@@ -336,6 +344,63 @@ struct HardwareRaycast {
                                 local_second * barycentric.x + local_third * barycentric.y;
     hit_normal = safe_normalize(transpose(inverse_basis) * local_normal);
   }
+
+#ifdef MAT_HARDWARE_RAYCAST_ATTRIBUTES
+  float4 attribute(float4 hit, uint attribute_id, int &components) const
+  {
+    if (hit.x < 0.0f) {
+      return float4(0.0f);
+    }
+    const float4 missing = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    const uint instance = uint(hit.x);
+    if (this->hardware_raycast_attributes_ready == 0 ||
+        instance >= hardware_raycast_attributes[0])
+    {
+      return missing;
+    }
+    const uint record = 1u + instance * 4u;
+    const uint primitive = floatBitsToUint(hit.y);
+    const uint triangles = hardware_raycast_attributes[record];
+    const uint triangle_count = hardware_raycast_attributes[record + 1u];
+    const uint mesh = hardware_raycast_attributes[record + 2u];
+    if (mesh == 0u || primitive >= triangle_count) {
+      return missing;
+    }
+    const uint corner_map = hardware_raycast_attributes[mesh];
+    const uint attribute_count = hardware_raycast_attributes[mesh + 1u];
+    for (uint index = 0u; index < attribute_count; index++) {
+      const uint descriptor = mesh + 2u + index * 3u;
+      if (hardware_raycast_attributes[descriptor] != attribute_id) {
+        continue;
+      }
+      const uint format = hardware_raycast_attributes[descriptor + 1u];
+      const uint domain = format >> 4u;
+      const uint channels = format & 15u;
+      const uint values = hardware_raycast_attributes[descriptor + 2u];
+      float4 result = float4(0.0f);
+      const float3 weights = domain == 2u ? float3(1.0f, 0.0f, 0.0f) :
+                                            float3(1.0f - hit.z - hit.w, hit.z, hit.w);
+      for (uint vertex = 0u; vertex < (domain == 2u ? 1u : 3u); vertex++) {
+        const uint corner = hardware_raycast_attributes[triangles + primitive * 3u + vertex];
+        const uint element = domain == 1u ? corner :
+            hardware_raycast_attributes[corner_map + corner * 2u + (domain == 2u ? 1u : 0u)];
+        for (uint channel = 0u; channel < channels; channel++) {
+          result[channel] += weights[vertex] *
+              uintBitsToFloat(hardware_raycast_attributes[values + element * channels + channel]);
+        }
+      }
+      if (channels == 1u) {
+        result.yz = float2(result.x);
+      }
+      if (channels < 4u) {
+        result.w = 1.0f;
+      }
+      components = int(channels);
+      return result;
+    }
+    return missing;
+  }
+#endif
 };
 
 }  // namespace eevee

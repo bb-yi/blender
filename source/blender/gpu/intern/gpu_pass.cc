@@ -395,6 +395,15 @@ GPUPass *GPU_generate_pass(GPUMaterial *material,
 {
   GPUMaterialProfileTimer profile_codegen(GPUMaterialProfileStage::Codegen);
   gpu_node_graph_prune_unused(graph);
+  if (GPU_material_flag_get(material, GPU_MATFLAG_HARDWARE_RAYCAST) && !optimize_graph) {
+    Vector<UString> names;
+    for (const GPUNode &node : graph->nodes) {
+      if (node.raycast_attribute_name) {
+        names.append_non_duplicates(UString(node.raycast_attribute_name));
+      }
+    }
+    GPU_material_raycast_attributes_set(material, names);
+  }
 
   GPUCodegen codegen(material, graph, debug_name);
   codegen.generate_material_props();

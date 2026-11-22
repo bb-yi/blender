@@ -146,7 +146,9 @@ static void node_extra_info(NodeExtraInfoParams &parameters)
   }
 
   const NodeShaderRaycast &storage = node_storage(parameters.node);
-  if (storage.sample_attribute_items_num == 0) {
+  if (storage.sample_attribute_items_num == 0 ||
+      (parameters.node.custom2 == SHD_RAYCAST_HARDWARE && GPU_viewport_hardware_raytracing_support()))
+  {
     return;
   }
 
@@ -212,8 +214,27 @@ static int node_shader_gpu(GPUMaterial *mat,
     GPU_link(mat, "world_normals_get", GPU_shading_data(), &in[1].link);
   }
 
-  /* GPU raycast node does not support attribute sampling. Relink all attribute outputs to a zero
-   * value. */
+  const bool only_local = node->custom1;
+  GPUNodeLink *hit_attributes = nullptr;
+  if (hardware &&
+      !GPU_link(mat,
+                "node_raycast_hardware",
+                GPU_node_get_input_link(*node, in, "Position"),
+                GPU_node_get_input_link(*node, in, "Direction"),
+                GPU_node_get_input_link(*node, in, "Length"),
+                GPU_constant(&only_local),
+                GPU_kernel_globals(),
+                GPU_shading_data(),
+                &GPU_node_get_output(*node, out, "Is Hit").link,
+                &GPU_node_get_output(*node, out, "Self Hit").link,
+                &GPU_node_get_output(*node, out, "Hit Distance").link,
+                &GPU_node_get_output(*node, out, "Hit Position").link,
+                &GPU_node_get_output(*node, out, "Hit Normal").link,
+                &hit_attributes))
+  {
+    return false;
+  }
+
   const NodeShaderRaycast &storage = node_storage(*node);
   for (const NodeRaycastSampleAttributeItem &item :
        Span(storage.sample_attribute_items, storage.sample_attribute_items_num))
@@ -223,31 +244,54 @@ static int node_shader_gpu(GPUMaterial *mat,
     const UString output_identifier(
         RaycastSampleAttributeItemsAccessor::output_socket_identifier_for_item(item));
     GPUNodeStack &output = GPU_node_get_output(*node, out, output_identifier.ref());
-    GPU_link(mat, "set_value", GPU_constant(ZERO), &output.link);
-
+    GPUNodeStack *alpha = nullptr;
     if (item.data_type == CD_PROP_COLOR) {
       const UString alpha_output_identifier(
           RaycastSampleAttributeItemsAccessor::output_socket_identifier_for_item_alpha(item));
-      GPUNodeStack &alpha_output = GPU_node_get_output(*node, out, alpha_output_identifier.ref());
-      GPU_link(mat, "set_value", GPU_constant(ZERO), &alpha_output.link);
+      alpha = &GPU_node_get_output(*node, out, alpha_output_identifier.ref());
     }
+    if (!hardware) {
+      GPU_link(mat, "set_value", GPU_constant(ZERO), &output.link);
+      if (alpha) {
+        GPU_link(mat, "set_value", GPU_constant(ZERO), &alpha->link);
+      }
+      continue;
+    }
+
+    if (!output.hasoutput && !(alpha && alpha->hasoutput)) {
+      continue;
+    }
+    const bNodeSocket *socket = node->input_by_identifier(
+        UString(RaycastSampleAttributeItemsAccessor::input_socket_identifier_for_item(item)));
+    const UString name(socket->default_value_typed<bNodeSocketValueString>()->value);
+    const int attribute_id = GPU_raycast_attribute_id(name);
+    if (alpha) {
+      if (!GPU_link(mat,
+                    "node_raycast_attribute_color",
+                    hit_attributes,
+                    GPU_constant(&attribute_id),
+                    GPU_kernel_globals(),
+                    &output.link,
+                    &alpha->link))
+      {
+        return false;
+      }
+    }
+    else if (!GPU_link(mat,
+                       item.data_type == CD_PROP_FLOAT ? "node_raycast_attribute_float" :
+                                                        "node_raycast_attribute_vector",
+                       hit_attributes,
+                       GPU_constant(&attribute_id),
+                       GPU_kernel_globals(),
+                       &output.link))
+    {
+      return false;
+    }
+    GPU_raycast_attribute_request(output.link, name);
   }
 
-  const bool only_local = node->custom1;
   if (hardware) {
-    return GPU_link(mat,
-                    "node_raycast_hardware",
-                    GPU_node_get_input_link(*node, in, "Position"),
-                    GPU_node_get_input_link(*node, in, "Direction"),
-                    GPU_node_get_input_link(*node, in, "Length"),
-                    GPU_constant(&only_local),
-                    GPU_kernel_globals(),
-                    GPU_shading_data(),
-                    &GPU_node_get_output(*node, out, "Is Hit").link,
-                    &GPU_node_get_output(*node, out, "Self Hit").link,
-                    &GPU_node_get_output(*node, out, "Hit Distance").link,
-                    &GPU_node_get_output(*node, out, "Hit Position").link,
-                    &GPU_node_get_output(*node, out, "Hit Normal").link);
+    return true;
   }
   const char *shader_name = only_local ? "node_raycast_only_local" : "node_raycast";
 

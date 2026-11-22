@@ -90,6 +90,7 @@ struct GPUNode {
   char dependency_name[128];
   eGPUCustomNodeDependencyFlag dependency_flags;
   bool use_static_function;
+  const char *raycast_attribute_name;
 
   /* Internal flag to mark nodes during pruning */
   GPUNodeTag tag;

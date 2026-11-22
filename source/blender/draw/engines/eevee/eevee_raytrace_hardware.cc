@@ -9,6 +9,8 @@
  */
 
 #include "BLI_time.hh"
+#include "BKE_mesh_types.hh"
+#include "DRW_render.hh"
 #include "GPU_capabilities.hh"
 #include "GPU_context.hh"
 #include "GPU_debug.hh"
@@ -47,7 +49,14 @@ void RayTraceModule::bind_hardware_material_scene(PassMain::Sub &pass, GPUMateri
   const bool uses_raycast = GPU_shader_get_ssbo_binding(shader, "hardware_raycast_normal_ranges") >=
                             0;
   const bool uses_shadows = GPU_shader_get_uniform(shader, "forward_shadow_options") >= 0;
-  hardware_material_passes_.append({&pass, uses_raycast, uses_shadows});
+  const bool uses_attributes = GPU_shader_get_ssbo_binding(shader, "hardware_raycast_attributes") >= 0;
+  hardware_material_passes_.append(
+      {&pass, uses_raycast, uses_shadows,
+       uses_attributes ? GPU_material_raycast_attributes(material) : Span<UString>()});
+  if (uses_attributes) {
+    pass.bind_ssbo("hardware_raycast_attributes", &hardware_raycast_attributes_);
+    pass.push_constant("hardware_raycast_attributes_ready", &hardware_raycast_attributes_ready_);
+  }
   pass.bind_tlas("hardware_scene_as", &hardware_forward_bindings_.tlas);
   pass.bind_ssbo("hardware_scene_instances", &hardware_forward_bindings_.casters);
   pass.bind_ssbo("hardware_scene_uvs", &hardware_forward_bindings_.uvs);
@@ -73,21 +82,64 @@ void RayTraceModule::resolve_hardware_material_demand()
     if (!material.pass->is_empty()) {
       has_hardware_raycast_ |= material.uses_raycast;
       has_forward_hardware_shadows_ |= material.uses_shadows;
+      for (UString name : material.raycast_attributes) {
+        if (!name.is_empty()) {
+          hardware_raycast_attribute_names_.append_non_duplicates(name);
+        }
+      }
     }
   }
+  std::ranges::sort(hardware_raycast_attribute_names_, {}, &UString::ref);
 }
 
 void RayTraceModule::prepare_hardware_material_scene()
 {
-  if (hardware_material_passes_.is_empty()) {
-    return;
-  }
   const bool hardware_shadows = this->use_hardware_shadows();
   const bool needs_scene = has_hardware_raycast_ ||
                            (has_forward_hardware_shadows_ && hardware_shadows);
   GPUHardwareRaytraceScene *scene = needs_scene ?
                                        acquire_hardware_rt_scene(nullptr) :
                                        nullptr;
+  const uint64_t generation = inst_.sync.hardware_raytrace_sync_generation();
+  if (hardware_raycast_attribute_generation_ != generation) {
+    hardware_raycast_attributes_ = nullptr;
+    hardware_raycast_attributes_ready_ = 0;
+    if (hardware_raycast_attribute_names_.is_empty()) {
+      if (hardware_rt_scene_cache_) {
+        GPU_hardware_raytrace_attributes_update(*hardware_rt_scene_cache_, {}, {}, false);
+      }
+    }
+    else if (scene) {
+      Vector<GPUHardwareRaytraceAttributeSource> sources;
+      bool geometry_dirty = false;
+      for (const HardwareRaytraceSceneEntry &entry : hardware_rt_scene_entries_cache_) {
+        if (!entry.batch) {
+          continue;
+        }
+        const Mesh *mesh = nullptr;
+        if (entry.visible_raycast && !entry.is_sculpt && entry.hit_eval_object) {
+          const Mesh *evaluated = id_cast<Mesh *>(entry.hit_eval_object->data);
+          if (evaluated && !BKE_subsurf_modifier_has_gpu_subdiv(evaluated)) {
+            const Mesh &draw_mesh = DRW_object_get_data_for_drawing<Mesh>(*entry.hit_eval_object);
+            if (draw_mesh.runtime->wrapper_type == ME_WRAPPER_TYPE_MDATA &&
+                !draw_mesh.runtime->edit_mesh)
+            {
+              mesh = &draw_mesh;
+            }
+          }
+        }
+        sources.append({mesh, entry.batch});
+        geometry_dirty |= mesh != nullptr && (entry.recalc & ID_RECALC_GEOMETRY) != 0;
+      }
+      hardware_raycast_attributes_ = GPU_hardware_raytrace_attributes_update(
+          *scene, sources, hardware_raycast_attribute_names_, geometry_dirty);
+      hardware_raycast_attributes_ready_ = hardware_raycast_attributes_ != nullptr;
+    }
+    hardware_raycast_attribute_generation_ = generation;
+  }
+  if (hardware_material_passes_.is_empty()) {
+    return;
+  }
   const bool ready = GPU_hardware_raytrace_forward_bindings(scene, hardware_forward_bindings_);
   if (!ready) {
     /* Submission can still execute binding commands in sub-passes without draws. */
@@ -95,6 +147,9 @@ void RayTraceModule::prepare_hardware_material_scene()
       hardware_forward_empty_scene_ = GPU_hardware_raytrace_empty_scene();
     }
     GPU_hardware_raytrace_forward_bindings(hardware_forward_empty_scene_, hardware_forward_bindings_);
+  }
+  if (!hardware_raycast_attributes_ready_) {
+    hardware_raycast_attributes_ = hardware_forward_bindings_.alpha;
   }
   const SceneEEVEE &options = inst_.scene->eevee;
   hardware_forward_shadow_options_ = float4(ready && hardware_shadows ? 1.0f : 0.0f,
@@ -377,6 +432,9 @@ void RayTraceModule::free_hardware_rt_scene_cache()
 {
   GPU_hardware_raytrace_scene_free(hardware_rt_scene_cache_);
   hardware_rt_scene_cache_ = nullptr;
+  hardware_raycast_attributes_ = nullptr;
+  hardware_raycast_attributes_ready_ = 0;
+  hardware_raycast_attribute_generation_ = 0;
   hardware_rt_scene_stats_cache_ = {};
   hardware_rt_scene_entries_cache_.clear();
   hardware_rt_scene_update_count_ = 0;

@@ -20,6 +20,7 @@
 #include "BLI_math_vector_types.hh"
 #include "BLI_set.hh"
 #include "BLI_span.hh"
+#include "BLI_ustring.hh"
 #include "BLI_string_ref.hh"
 
 #include "DNA_customdata_types.h" /* for eCustomDataType */
@@ -930,6 +931,10 @@ bool GPU_material_closure_callback_input_frame_error_get(const GPUMaterial *mate
                                                          std::string &r_error);
 
 bool GPU_link(GPUMaterial *mat, const char *name, ...);
+int GPU_raycast_attribute_id(UString name);
+void GPU_raycast_attribute_request(GPUNodeLink *link, UString name);
+void GPU_material_raycast_attributes_set(GPUMaterial *mat, Span<UString> names);
+Span<UString> GPU_material_raycast_attributes(const GPUMaterial *mat);
 bool GPU_stack_link(GPUMaterial *mat,
                     const bNode *node,
                     const char *name,

@@ -2094,6 +2094,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                          MAT_PIPE_PREPASS_OVERLAP,
                                          MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH);
   bool use_hardware_raycast = false;
+  bool use_hardware_raycast_attributes = false;
   if (hardware_raycast_requested && probe_capture == MAT_PROBE_NONE &&
       (supports_surface_raycast || is_camera_depth_pass))
   {
@@ -2102,22 +2103,33 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                              codegen.surface;
     const GPUGraphOutput &shading_graph = pipeline_type == MAT_PIPE_DEFERRED_NPR ? codegen.npr :
                                                                                   surface_graph;
-    const auto uses_hardware_raycast = [](const GPUGraphOutput &output) {
-      return material_graph_serialized_contains(output, "node_raycast_hardware(");
+    const auto check_raycast = [&](const GPUGraphOutput &output) {
+      use_hardware_raycast |= material_graph_serialized_contains(output, "node_raycast_hardware(");
+      use_hardware_raycast_attributes |= material_graph_serialized_contains(
+          output, "node_raycast_attribute_");
     };
     /* Depth and surface shading must agree on coverage and depth offsets. An opaque material
      * whose query only affects color does not need ray query resources in the depth pass. */
     const bool evaluates_surface = supports_surface_raycast || use_transparency;
-    use_hardware_raycast = (evaluates_surface && uses_hardware_raycast(shading_graph)) ||
-                           (supports_surface_raycast && uses_hardware_raycast(codegen.thickness)) ||
-                           (depth_offset_supported && uses_hardware_raycast(*codegen.depth_offset));
+    if (evaluates_surface) {
+      check_raycast(shading_graph);
+    }
+    if (supports_surface_raycast) {
+      check_raycast(codegen.thickness);
+    }
+    if (depth_offset_supported) {
+      check_raycast(*codegen.depth_offset);
+    }
     if (evaluates_surface || depth_offset_supported) {
       for (const GPUGraphOutput &function : codegen.material_functions) {
-        use_hardware_raycast |= uses_hardware_raycast(function);
+        check_raycast(function);
       }
     }
   }
   info.compilation_constant(gpu::shader::Type::bool_t, "use_hardware_raycast", use_hardware_raycast);
+  if (use_hardware_raycast && use_hardware_raycast_attributes) {
+    info.define("MAT_HARDWARE_RAYCAST_ATTRIBUTES");
+  }
   if (use_hardware_raycast && geometry_type == MAT_GEOM_MESH) {
     info.define("MAT_HARDWARE_RAYCAST_SOURCE_TRIANGLE");
   }

@@ -295,8 +295,13 @@ class RayTraceModule {
     const PassMain::Sub *pass;
     bool uses_raycast;
     bool uses_shadows;
+    Span<UString> raycast_attributes;
   };
   Vector<HardwareMaterialPass> hardware_material_passes_;
+  Vector<UString> hardware_raycast_attribute_names_;
+  gpu::StorageBuf *hardware_raycast_attributes_ = nullptr;
+  int hardware_raycast_attributes_ready_ = 0;
+  uint64_t hardware_raycast_attribute_generation_ = 0;
   bool has_hardware_raycast_ = false;
   bool has_forward_hardware_shadows_ = false;
   GPUHardwareRaytraceScene *hardware_forward_empty_scene_ = nullptr;

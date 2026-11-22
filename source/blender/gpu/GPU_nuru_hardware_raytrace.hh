@@ -12,10 +12,12 @@
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
 #include "BLI_sys_types.hh"
+#include "BLI_ustring.hh"
 
 namespace blender {
 
 struct Image;
+struct Mesh;
 struct GPUHardwareRaytraceScene;
 
 /** Must match #HWRT_SPECULAR_MAX_BOUNCES in eevee_raytrace_shared.hh. */
@@ -105,6 +107,17 @@ struct GPUHardwareRaytraceForwardBindings {
 bool GPU_hardware_raytrace_forward_bindings(GPUHardwareRaytraceScene *scene,
                                            GPUHardwareRaytraceForwardBindings &r_bindings);
 GPUHardwareRaytraceScene *GPU_hardware_raytrace_empty_scene();
+struct GPUHardwareRaytraceAttributeSource {
+  const Mesh *mesh;
+  const gpu::Batch *batch;
+
+  bool operator==(const GPUHardwareRaytraceAttributeSource &) const = default;
+};
+gpu::StorageBuf *GPU_hardware_raytrace_attributes_update(
+    GPUHardwareRaytraceScene &scene,
+    Span<GPUHardwareRaytraceAttributeSource> sources,
+    Span<UString> names,
+    bool geometry_dirty);
 
 struct GPUHardwareRaytraceTraceParams {
   /** Full replay is a later sparse stage; traversal itself stays on proxy-only material data. */

@@ -1099,7 +1099,8 @@ void hardware_raycast_eval(KernelGlobals &kg,
                            bool &self_hit,
                            float &hit_distance,
                            float3 &hit_position,
-                           float3 &hit_normal)
+                           float3 &hit_normal,
+                           float4 &hit_attributes)
 {
   if (kg.pipe.use_hardware_raycast) [[static_branch]] {
     kg.hardware_raycast.trace(position,
@@ -1112,7 +1113,8 @@ void hardware_raycast_eval(KernelGlobals &kg,
                               self_hit,
                               hit_distance,
                               hit_position,
-                              hit_normal);
+                              hit_normal,
+                              hit_attributes);
   }
   else {
     raycast_eval(kg,
@@ -1127,6 +1129,17 @@ void hardware_raycast_eval(KernelGlobals &kg,
                  hit_position,
                  hit_normal);
   }
+}
+
+float4 hardware_raycast_attribute(KernelGlobals &kg, float4 hit, int attribute_id, int &components)
+{
+  components = 0;
+#ifdef MAT_HARDWARE_RAYCAST_ATTRIBUTES
+  if (kg.pipe.use_hardware_raycast) [[static_branch]] {
+    return kg.hardware_raycast.attribute(hit, uint(attribute_id), components);
+  }
+#endif
+  return float4(0.0f);
 }
 
 float3 nodetree_displacement(KernelGlobals &kg, ShadingData &sd);

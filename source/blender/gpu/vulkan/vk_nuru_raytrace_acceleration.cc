@@ -16,6 +16,7 @@
 #include "GPU_batch.hh"
 #include "GPU_capabilities.hh"
 #include "GPU_index_buffer.hh"
+#include "GPU_material.hh"
 #include "GPU_state.hh"
 #include "GPU_vertex_buffer.hh"
 #include "GPU_vertex_format.hh"
@@ -35,8 +36,10 @@
 #include "vk_vertex_buffer.hh"
 
 #include "BKE_appdir.hh"
+#include "BKE_attribute.hh"
 #include "BKE_image.hh"
 
+#include "BLI_color.hh"
 #include "BLI_fileops.hh"
 #include "BLI_hash.hh"
 #include "BLI_map.hh"
@@ -46,11 +49,13 @@
 #include "BLI_task.hh"
 #include "BLI_time.hh"
 #include "DNA_image_types.h"
+#include "DNA_mesh_types.h"
 #include "IMB_imbuf_types.hh"
 
 #include "shaderc/shaderc.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -141,6 +146,7 @@ struct GPUHardwareRaytraceScene {
   nuru_vk::RTBuffer shadow_caster_buffer;
   nuru_vk::RTBuffer shadow_uv_buffer;
   nuru_vk::RTBuffer shadow_alpha_buffer;
+  nuru_vk::RTBuffer raycast_attribute_buffer;
   bool has_shadow_alpha = false;
   std::optional<gpu::VKTopLevelAS> forward_tlas;
   std::optional<gpu::VKStorageBuffer> forward_casters;
@@ -149,6 +155,9 @@ struct GPUHardwareRaytraceScene {
   std::optional<gpu::VKStorageBuffer> forward_proxies;
   std::optional<gpu::VKStorageBuffer> forward_normal_ranges;
   std::optional<gpu::VKStorageBuffer> forward_smooth_normals;
+  std::optional<gpu::VKStorageBuffer> forward_raycast_attributes;
+  Vector<GPUHardwareRaytraceAttributeSource> raycast_attribute_sources;
+  Vector<UString> raycast_attribute_names;
   nuru_vk::RTBuffer triangle_normal_buffer;
   nuru_vk::RTBuffer triangle_smooth_normal_buffer;
   nuru_vk::RTBuffer triangle_local_position_buffer;
@@ -3429,6 +3438,198 @@ GPUHardwareRaytraceScene *raytrace_empty_scene()
   return scene;
 }
 
+/** Match the word layout in HardwareRaycast::attribute. All offsets address the same SSBO. */
+static uint32_t pack_raycast_mesh_attributes(const Mesh &mesh,
+                                            Span<UString> names,
+                                            const size_t max_words,
+                                            std::vector<uint32_t> &words)
+{
+  const Span<int> vertices = mesh.corner_verts();
+  const Span<int> faces = mesh.corner_to_face_map();
+  const size_t header = words.size();
+  const size_t descriptors_end = header + 2 + 3 * size_t(names.size());
+  if (descriptors_end + size_t(vertices.size()) * 2 > max_words || faces.size() != vertices.size()) {
+    return 0;
+  }
+  words.resize(descriptors_end);
+  words[header] = uint32_t(words.size());
+  for (const int64_t corner : vertices.index_range()) {
+    words.push_back(uint32_t(vertices[corner]));
+    words.push_back(uint32_t(faces[corner]));
+  }
+  const bke::AttributeAccessor attributes = mesh.attributes();
+  uint32_t count = 0;
+  for (const UString name : names) {
+    const bke::GAttributeReader attribute = attributes.lookup(name.ref());
+    if (!attribute || !ELEM(attribute.domain, bke::AttrDomain::Point, bke::AttrDomain::Corner,
+                            bke::AttrDomain::Face))
+    {
+      continue;
+    }
+    const size_t offset = words.size();
+    auto append = [&]<typename T>(const int components, const auto convert) {
+      if (size_t(attribute.varray.size()) > (max_words - offset) / size_t(components)) {
+        return 0;
+      }
+      const VArraySpan<T> values(attribute.varray.typed<T>());
+      for (const T &value : values) {
+        const float4 converted = convert(value);
+        for (int index = 0; index < components; index++) {
+          words.push_back(std::bit_cast<uint32_t>(converted[index]));
+        }
+      }
+      return components;
+    };
+    const CPPType &type = attribute.varray.type();
+    int components = 0;
+    if (type.is<float>()) {
+      components = append.template operator()<float>(1, [](float value) { return float4(value); });
+    }
+    else if (type.is<float2>()) {
+      components = append.template operator()<float2>(2, [](float2 value) {
+        return float4(value.x, value.y, 0.0f, 1.0f);
+      });
+    }
+    else if (type.is<float3>()) {
+      components = append.template operator()<float3>(3, [](float3 value) {
+        return float4(value.x, value.y, value.z, 1.0f);
+      });
+    }
+    else if (type.is<float4>()) {
+      components = append.template operator()<float4>(4, [](float4 value) { return value; });
+    }
+    else if (type.is<ColorGeometry4f>()) {
+      components = append.template operator()<ColorGeometry4f>(4, [](ColorGeometry4f value) {
+        return float4(value.r, value.g, value.b, value.a);
+      });
+    }
+    else if (type.is<ColorGeometry4b>()) {
+      components = append.template operator()<ColorGeometry4b>(4, [](ColorGeometry4b value) {
+        const ColorGeometry4f decoded = color::decode(value);
+        return float4(decoded.r, decoded.g, decoded.b, decoded.a);
+      });
+    }
+    if (components == 0) {
+      continue;
+    }
+    const uint32_t domain = attribute.domain == bke::AttrDomain::Face ? 2u :
+                            attribute.domain == bke::AttrDomain::Corner ? 1u : 0u;
+    const size_t descriptor = header + 2 + 3 * count++;
+    words[descriptor] = uint32_t(GPU_raycast_attribute_id(name));
+    words[descriptor + 1] = (domain << 4) | uint32_t(components);
+    words[descriptor + 2] = uint32_t(offset);
+  }
+  if (count == 0) {
+    words.resize(header);
+    return 0;
+  }
+  words[header + 1] = count;
+  return uint32_t(header);
+}
+
+StorageBuf *raytrace_attributes_update(GPUHardwareRaytraceScene &scene,
+                                      Span<GPUHardwareRaytraceAttributeSource> sources,
+                                      Span<UString> names,
+                                      const bool geometry_dirty)
+{
+  auto release = [&]() {
+    scene.forward_raycast_attributes.reset();
+    rt_buffer_free(scene.raycast_attribute_buffer);
+    scene.raycast_attribute_sources.clear_and_shrink();
+    scene.raycast_attribute_names.clear_and_shrink();
+  };
+  const size_t max_words = std::min(GPU_max_storage_buffer_size() / sizeof(uint32_t),
+                                    size_t(UINT32_MAX));
+  if (names.is_empty() || max_words < 1 || sources.size() != int64_t(scene.local_geometry.size()) ||
+      size_t(sources.size()) > (max_words - 1) / 4)
+  {
+    release();
+    return nullptr;
+  }
+  const bool measure = std::getenv("BLENDER_EEVEE_HWRT_PERF_LOG") != nullptr;
+  const double start = measure ? BLI_time_now_seconds() : 0.0;
+  if (!geometry_dirty && scene.forward_raycast_attributes &&
+      std::ranges::equal(sources, scene.raycast_attribute_sources) &&
+      std::ranges::equal(names, scene.raycast_attribute_names))
+  {
+    if (measure) {
+      std::fprintf(stderr, "EEVEE HWRT raycast_attributes cache=hit upload=0 sync_ms=%.3f\n",
+                   (BLI_time_now_seconds() - start) * 1000.0);
+    }
+    return &*scene.forward_raycast_attributes;
+  }
+  Map<const Mesh *, uint32_t> mesh_records;
+  Map<std::pair<const Mesh *, const Batch *>, uint2> batch_records;
+  std::vector<uint32_t> words(1 + size_t(sources.size()) * 4);
+  words[0] = uint32_t(sources.size());
+  bool has_data = false;
+  for (const int64_t index : sources.index_range()) {
+    const auto [mesh, batch] = sources[index];
+    const SceneLocalGeometry &geometry = scene.local_geometry[index];
+    if (!mesh || geometry.indices.empty() || geometry.positions.vertex_count != mesh->corners_num) {
+      continue;
+    }
+    const uint32_t mesh_record = mesh_records.lookup_or_add_cb(mesh, [&]() {
+      return pack_raycast_mesh_attributes(*mesh, names, max_words, words);
+    });
+    if (!mesh_record) {
+      continue;
+    }
+    const uint2 batch_record = batch_records.lookup_or_add_cb({mesh, batch}, [&]() {
+      if (geometry.indices.size() > max_words - words.size() ||
+          std::ranges::any_of(geometry.indices, [mesh](uint32_t corner) {
+            return corner >= uint32_t(mesh->corners_num);
+          }))
+      {
+        return uint2(0);
+      }
+      const uint2 record(uint32_t(words.size()), uint32_t(geometry.indices.size() / 3));
+      words.insert(words.end(), geometry.indices.begin(), geometry.indices.end());
+      return record;
+    });
+    if (batch_record.y == 0) {
+      continue;
+    }
+    const size_t record = 1 + size_t(index) * 4;
+    words[record] = batch_record.x;
+    words[record + 1] = batch_record.y;
+    words[record + 2] = mesh_record;
+    has_data = true;
+  }
+  if (!has_data) {
+    release();
+    return nullptr;
+  }
+  const size_t bytes = words.size() * sizeof(uint32_t);
+  RTBuffer &buffer = scene.raycast_attribute_buffer;
+  const bool upload = buffer.size != bytes || memcmp(buffer.mapped, words.data(), bytes) != 0;
+  if (upload) {
+    release();
+    if (!rt_storage_buffer_create(buffer, bytes)) {
+      return nullptr;
+    }
+    memcpy(buffer.mapped, words.data(), bytes);
+    if (!rt_buffer_flush(buffer)) {
+      release();
+      return nullptr;
+    }
+    scene.forward_raycast_attributes.emplace(bytes, GPU_USAGE_STATIC, "HWRT Raycast Attributes");
+    scene.forward_raycast_attributes->borrow(track_for_graphics(buffer), bytes);
+  }
+  scene.raycast_attribute_sources = sources;
+  scene.raycast_attribute_names = names;
+  if (measure) {
+    std::fprintf(stderr,
+                 "EEVEE HWRT raycast_attributes bytes=%zu instances=%lld meshes=%lld upload=%d sync_ms=%.3f\n",
+                 bytes,
+                 (long long)sources.size(),
+                 (long long)mesh_records.size(),
+                 int(upload),
+                 (BLI_time_now_seconds() - start) * 1000.0);
+  }
+  return &*scene.forward_raycast_attributes;
+}
+
 bool raytrace_forward_bindings(GPUHardwareRaytraceScene &scene,
                                 GPUHardwareRaytraceForwardBindings &r_bindings)
 {
@@ -5568,6 +5769,7 @@ GPUHardwareRaytraceScene::~GPUHardwareRaytraceScene()
   rt_buffer_free(shadow_caster_buffer);
   rt_buffer_free(shadow_uv_buffer);
   rt_buffer_free(shadow_alpha_buffer);
+  rt_buffer_free(raycast_attribute_buffer);
   rt_buffer_free(shadow_object_transform_buffer);
   rt_buffer_free(triangle_normal_buffer);
   rt_buffer_free(triangle_smooth_normal_buffer);

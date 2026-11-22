@@ -122,6 +122,7 @@ void RayTraceModule::init()
 void RayTraceModule::sync()
 {
   hardware_material_passes_.clear();
+  hardware_raycast_attribute_names_.clear();
   has_hardware_raycast_ = false;
   has_forward_hardware_shadows_ = false;
   Texture &depth_tx = inst_.render_buffers.depth_tx;

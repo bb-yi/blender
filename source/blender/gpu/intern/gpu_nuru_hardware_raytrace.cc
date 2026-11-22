@@ -57,6 +57,22 @@ GPUHardwareRaytraceScene *GPU_hardware_raytrace_scene_build(Span<GPUHardwareRayt
   return nullptr;
 }
 
+gpu::StorageBuf *GPU_hardware_raytrace_attributes_update(
+    GPUHardwareRaytraceScene &scene,
+    Span<GPUHardwareRaytraceAttributeSource> sources,
+    Span<UString> names,
+    bool geometry_dirty)
+{
+#ifdef WITH_VULKAN_BACKEND
+  if (GPU_backend_get_type() == GPU_BACKEND_VULKAN) {
+    return gpu::vulkan::raytrace_attributes_update(scene, sources, names, geometry_dirty);
+  }
+#else
+  UNUSED_VARS(scene, sources, names, geometry_dirty);
+#endif
+  return nullptr;
+}
+
 bool GPU_hardware_raytrace_scene_update(GPUHardwareRaytraceScene *scene,
                                      Span<GPUHardwareRaytraceSceneEntry> entries,
                                      const GPUHardwareRaytraceSceneUpdateParams &update_params,

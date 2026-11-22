@@ -45,13 +45,15 @@ void node_raycast_hardware(float3 position,
                            float &is_self_hit,
                            float &hit_distance,
                            float3 &hit_position,
-                           float3 &hit_normal)
+                           float3 &hit_normal,
+                           float4 &hit_attributes)
 {
   bool hit = false;
   bool self_hit = false;
   hit_distance = length;
   hit_position = float3(0.0f);
   hit_normal = float3(0.0f);
+  hit_attributes = float4(-1.0f, 0.0f, 0.0f, 0.0f);
   hardware_raycast_eval(kg,
                         sd,
                         position,
@@ -62,9 +64,40 @@ void node_raycast_hardware(float3 position,
                         self_hit,
                         hit_distance,
                         hit_position,
-                        hit_normal);
+                        hit_normal,
+                        hit_attributes);
   is_hit = hit ? 1.0f : 0.0f;
   is_self_hit = self_hit ? 1.0f : 0.0f;
+}
+
+[[node]] void node_raycast_attribute_float(float4 hit,
+                                           int attribute_id,
+                                           [[resource_table]] KernelGlobals &kg,
+                                           float &value)
+{
+  int components;
+  float4 sampled = hardware_raycast_attribute(kg, hit, attribute_id, components);
+  value = components < 3 ? sampled.x : (sampled.x + sampled.y + sampled.z) / 3.0f;
+}
+
+[[node]] void node_raycast_attribute_vector(float4 hit,
+                                            int attribute_id,
+                                            [[resource_table]] KernelGlobals &kg,
+                                            float3 &value)
+{
+  int components;
+  value = hardware_raycast_attribute(kg, hit, attribute_id, components).xyz;
+}
+
+[[node]] void node_raycast_attribute_color(float4 hit,
+                                           int attribute_id,
+                                           [[resource_table]] KernelGlobals &kg,
+                                           float4 &color,
+                                           float &alpha)
+{
+  int components;
+  color = hardware_raycast_attribute(kg, hit, attribute_id, components);
+  alpha = color.a;
 }
 
 [[node]]

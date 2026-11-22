@@ -516,8 +516,18 @@ void hardware_raycast_eval([[resource_table]] KernelGlobals & /*kg*/,
                            bool & /*self_hit*/,
                            float & /*hit_distance*/,
                            float3 & /*hit_position*/,
-                           float3 & /*hit_normal*/)
+                           float3 & /*hit_normal*/,
+                           float4 & /*hit_attributes*/)
 {
+}
+
+float4 hardware_raycast_attribute([[resource_table]] KernelGlobals & /*kg*/,
+                                  float4 /*hit*/,
+                                  int /*attribute_id*/,
+                                  int &components)
+{
+  components = 0;
+  return float4(0.0f);
 }
 
 /* Image Texture Node. */

@@ -152,6 +152,7 @@ struct GPUMaterial {
   std::string planar_probe_error;
   Vector<const bNode *> planar_probe_error_nodes;
   Vector<int> render_texture_ids;
+  Vector<UString> raycast_attribute_names;
   bool reads_stencil_value = false;
   bool uses_stencil_surface = false;
   bool reads_stencil_surface = false;
@@ -2013,6 +2014,27 @@ gpu::UniformBuf *GPU_material_uniform_buffer_get(GPUMaterial *material)
 ListBaseT<GPUMaterialAttribute> GPU_material_attributes(const GPUMaterial *material)
 {
   return material->graph.attributes;
+}
+
+int GPU_raycast_attribute_id(const UString name)
+{
+  if (name.is_empty()) {
+    return 0;
+  }
+  static std::mutex mutex;
+  static Map<UString, int> ids;
+  std::lock_guard lock(mutex);
+  return ids.lookup_or_add_cb(name, [&]() { return int(ids.size()) + 1; });
+}
+
+void GPU_material_raycast_attributes_set(GPUMaterial *mat, Span<UString> names)
+{
+  mat->raycast_attribute_names = Vector<UString>(names);
+}
+
+Span<UString> GPU_material_raycast_attributes(const GPUMaterial *mat)
+{
+  return mat->raycast_attribute_names;
 }
 
 ListBaseT<GPUMaterialTexture> GPU_material_textures(GPUMaterial *material)
