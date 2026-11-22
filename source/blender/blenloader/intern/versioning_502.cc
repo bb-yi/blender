@@ -28,6 +28,7 @@
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
+#include "DNA_view3d_types.h"
 #include "DNA_windowmanager_types.h"
 #include "DNA_xr_types.h"
 
@@ -719,7 +720,13 @@ void blo_do_versions_502(FileData *fd, Library * /*lib*/, Main *bmain)
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 503, 0)) {
     if (DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "char", "use_outline")) {
       /* Official 5.3 assigned the old NPR outline and outliner bits new meanings. */
+      const auto migrate_shading = [](View3DShading &shading) {
+        if (shading.render_pass == (1 << 22)) {
+          shading.render_pass = EEVEE_RENDER_PASS_OUTLINE;
+        }
+      };
       for (Scene &scene : bmain->scenes) {
+        migrate_shading(scene.display.shading);
         for (ViewLayer &view_layer : scene.view_layers) {
           if (int(view_layer.eevee.render_passes) & (1 << 22)) {
             view_layer.eevee.render_passes = eViewLayerEEVEEPassType(
@@ -731,10 +738,17 @@ void blo_do_versions_502(FileData *fd, Library * /*lib*/, Main *bmain)
           }
         }
       }
+      for (wmWindowManager &wm : bmain->wm) {
+        migrate_shading(wm.xr.session_settings.shading);
+      }
       for (bScreen &screen : bmain->screens) {
         for (ScrArea &area : screen.areabase) {
           for (SpaceLink &space : area.spacedata) {
-            if (space.spacetype == SPACE_OUTLINER) {
+            if (space.spacetype == SPACE_VIEW3D) {
+              View3D &view = reinterpret_cast<View3D &>(space);
+              migrate_shading(view.shading);
+            }
+            else if (space.spacetype == SPACE_OUTLINER) {
               SpaceOutliner &outliner = reinterpret_cast<SpaceOutliner &>(space);
               if (outliner.filter & (1 << 21)) {
                 outliner.filter = eSpaceOutliner_Filter(

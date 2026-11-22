@@ -1255,9 +1255,7 @@ void blo_do_versions_501(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 40) &&
-      !DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "char", "use_outline"))
-  {
+  if (!DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "char", "use_outline")) {
     for (Scene &scene : bmain->scenes) {
       scene.eevee.use_outline = true;
     }

@@ -229,7 +229,6 @@ void register_node_type_sh_outline_control()
   ntype.declare = file_ns::node_declare;
   ntype.add_ui_poll = file_ns::node_add_ui_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_outline_control;
-  ntype.no_muting = true;
 
   bke::node_register_type(ntype);
 }

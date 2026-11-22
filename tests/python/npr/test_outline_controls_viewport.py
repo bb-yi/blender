@@ -70,6 +70,17 @@ def run():
         controls.setup()
         _, _, control = controls.region_surface('flat')
         scene = bpy.context.scene
+
+        def has_outline(pixels):
+            return visibility.red_mask(pixels)[controls.CENTER].sum() > 200
+
+        unmuted = image('outline_control_unmuted', has_outline)
+        control.mute = True
+        assert control.mute
+        image('outline_control_muted', lambda pixels: not visibility.red_mask(pixels).any())
+        control.mute = False
+        np.testing.assert_array_equal(unmuted, image('outline_control_restored', has_outline))
+
         for scale, _ in viewport.SCALES:
             scene.eevee.outline_viewport_resolution = scale
             control.id_combine = 'LEGACY'

@@ -165,6 +165,46 @@ def image_texture(mat, values):
 
 
 class OutlineControlsTest(unittest.TestCase):
+    def test_mute(self):
+        for tree_kind in ('material', 'group', 'npr'):
+            with self.subTest(tree=tree_kind):
+                scene = setup()
+                mat, control = material('Mute outline')
+                visibility.plane('Mute outline', mat)
+                tree = mat.node_tree
+                if tree_kind != 'material':
+                    tree.nodes.remove(control)
+                    tree = bpy.data.node_groups.new('Mute outline ' + tree_kind, 'ShaderNodeTree')
+                    if tree_kind == 'group':
+                        group = mat.node_tree.nodes.new('ShaderNodeGroup')
+                        group.node_tree = tree
+                    else:
+                        npr_output = tree.nodes.new('ShaderNodeNPR_Output')
+                        npr_color = tree.nodes.new('ShaderNodeRGB')
+                        npr_color.outputs[0].default_value = (0.04, 0.1, 0.3, 1)
+                        tree.links.new(npr_color.outputs[0], npr_output.inputs['Color'])
+                        mat.node_tree.nodes.get('Material Output').nprtree = tree
+                    control = tree.nodes.new('ShaderNodeOutlineControl')
+                    control.inputs['Line Width'].default_value = 12
+                color = tree.nodes.new('ShaderNodeRGB')
+                color.outputs[0].default_value = (1, 0, 0, 1)
+                tree.links.new(color.outputs[0], control.inputs['Line Color'])
+
+                reference = render(tree_kind + '_outline_unmuted')
+                self.assertGreater(reference[..., 3].sum(), 100)
+                pixels, names = performance.exr_pixels(scene.render.filepath)
+                combined = [index for index, name in enumerate(names) if '.Combined.' in name]
+                self.assertEqual(len(combined), 4)
+                control.mute = True
+                self.assertTrue(control.mute)
+                self.assertFalse(render(tree_kind + '_outline_muted').any())
+                muted, _ = performance.exr_pixels(scene.render.filepath)
+                np.testing.assert_array_equal(pixels[..., combined], muted[..., combined])
+                self.assertTrue(control.inputs['Line Color'].is_linked)
+                control.mute = False
+                self.assertFalse(control.mute)
+                np.testing.assert_array_equal(reference, render(tree_kind + '_outline_restored'))
+
     def test_curved_texture_regions(self):
         scene = setup()
         mat, control = material('Curved texture regions', width=36)

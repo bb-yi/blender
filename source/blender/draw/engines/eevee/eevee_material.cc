@@ -211,6 +211,9 @@ static bool node_tree_uses_outline_control(const bNodeTree &ntree, Set<const bNo
   for (const bNode *node = static_cast<const bNode *>(ntree.nodes.first()); node != nullptr;
        node = node->next)
   {
+    if (node->is_muted()) {
+      continue;
+    }
     if (node->type_legacy == SH_NODE_OUTLINE_CONTROL ||
         STREQ(node->idname, "ShaderNodeOutlineControl"))
     {
