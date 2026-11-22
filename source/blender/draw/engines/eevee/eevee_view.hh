@@ -41,8 +41,6 @@ class ShadingView {
   Instance &inst_;
   /** Static string pointer. Used as debug name and as UUID for texture pool. */
   const char *name_;
-  /** Matrix to apply to the viewmat. */
-  float4x4 face_matrix_;
   /** Cubemap face index. Used by panoramic views and film reprojection. */
   ePanoramicFace face_id_;
 
@@ -76,13 +74,9 @@ class ShadingView {
   bool is_enabled_ = false;
 
  public:
-  ShadingView(Instance &inst,
-              const char *name,
-              const float4x4 &face_matrix,
-              ePanoramicFace face_id)
+  ShadingView(Instance &inst, const char *name, ePanoramicFace face_id)
       : inst_(inst),
         name_(name),
-        face_matrix_(face_matrix),
         face_id_(face_id),
         render_view_(name) {};
 
@@ -134,12 +128,12 @@ class MainView {
 
  public:
   MainView(Instance &inst)
-      : shading_views_0(inst, "posX_view", cubeface_mat(0), PANORAMIC_FACE_POS_X),
-        shading_views_1(inst, "negX_view", cubeface_mat(1), PANORAMIC_FACE_NEG_X),
-        shading_views_2(inst, "posY_view", cubeface_mat(2), PANORAMIC_FACE_POS_Y),
-        shading_views_3(inst, "negY_view", cubeface_mat(3), PANORAMIC_FACE_NEG_Y),
-        shading_views_4(inst, "posZ_view", cubeface_mat(4), PANORAMIC_FACE_POS_Z),
-        shading_views_5(inst, "negZ_view", cubeface_mat(5), PANORAMIC_FACE_NEG_Z)
+      : shading_views_0(inst, "posX_view", PANORAMIC_FACE_POS_X),
+        shading_views_1(inst, "negX_view", PANORAMIC_FACE_NEG_X),
+        shading_views_2(inst, "posY_view", PANORAMIC_FACE_POS_Y),
+        shading_views_3(inst, "negY_view", PANORAMIC_FACE_NEG_Y),
+        shading_views_4(inst, "posZ_view", PANORAMIC_FACE_POS_Z),
+        shading_views_5(inst, "negZ_view", PANORAMIC_FACE_NEG_Z)
   {
   }
 

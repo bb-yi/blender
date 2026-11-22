@@ -137,7 +137,9 @@ static int material_tessellation_camera_budget(const ObjectHandle &ob_handle,
   /* Use the same evaluated mesh as DRW_cache_mesh_surface_shaded_get (also in edit mode). */
   const Mesh &mesh = DRW_object_get_data_for_drawing<Mesh>(*ob_handle.object);
   const std::optional<Bounds<float3>> bounds = mesh.bounds_min_max();
-  if (!bounds) {
+  if (!bounds ||
+      (settings.mode == SHD_TESSELLATION_SCREEN_EDGE && is_panoramic(camera.type)))
+  {
     return material.tessellation_level;
   }
   int budget = 1;

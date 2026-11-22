@@ -711,7 +711,6 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_open_pbr_util.bsl.hh
   shaders/material/gpu_shader_material_output_aov.bsl.hh
   shaders/material/gpu_shader_material_output_material.bsl.hh
-  shaders/material/gpu_shader_material_render_texture.glsl
   shaders/material/gpu_shader_material_output_world.bsl.hh
   shaders/material/gpu_shader_material_parallax.glsl
   shaders/material/gpu_shader_material_particle_info.bsl.hh

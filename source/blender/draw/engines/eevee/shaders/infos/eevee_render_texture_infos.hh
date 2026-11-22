@@ -7,6 +7,7 @@
 #  include "gpu_shader_compat.hh"
 #  include "draw_view_infos.hh"
 #  include "eevee_defines.hh"
+#  include "eevee_uniform_infos.hh"
 #endif
 
 #include "gpu_shader_create_info.hh"
@@ -14,12 +15,14 @@
 GPU_SHADER_CREATE_INFO(eevee_render_texture_extract_base)
 LOCAL_GROUP_SIZE(FILM_GROUP_SIZE, FILM_GROUP_SIZE)
 ADDITIONAL_INFO(draw_view)
+ADDITIONAL_INFO(eevee_global_ubo)
 SAMPLER(0, sampler2D, depth_tx)
 SAMPLER(1, sampler2D, combined_tx)
 SAMPLER(2, usampler2DArray, gbuf_header_tx)
 SAMPLER(3, sampler2DArray, gbuf_normal_tx)
 PUSH_CONSTANT(int2, output_extent)
 PUSH_CONSTANT(int, output_type)
+PUSH_CONSTANT(int, panoramic_face)
 COMPUTE_SOURCE("eevee_render_texture_extract_comp.glsl")
 GPU_SHADER_CREATE_END()
 

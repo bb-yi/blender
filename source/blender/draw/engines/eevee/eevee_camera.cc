@@ -87,67 +87,6 @@ static void camera_data_update_screen_diagonal(CameraData &data)
   }
 }
 
-bool camera_data_from_object(const Scene *scene,
-                             const Object *camera_ob,
-                             int2 extent,
-                             CameraData &r_data)
-{
-  if (camera_ob == nullptr || camera_ob->type != OB_CAMERA) {
-    return false;
-  }
-
-  const blender::Camera *cam = reinterpret_cast<const blender::Camera *>(camera_ob->data);
-  CameraParams params;
-  BKE_camera_params_init(&params);
-  BKE_camera_params_from_object(&params, camera_ob);
-  BKE_camera_params_compute_viewplane(
-      &params, extent.x, extent.y, scene ? scene->r.xasp : 1.0f, scene ? scene->r.yasp : 1.0f);
-  BKE_camera_params_compute_matrix(&params);
-
-  r_data = {};
-  switch (cam->type) {
-    case CAM_ORTHO:
-      r_data.type = CAMERA_ORTHO;
-      break;
-    case CAM_PERSP:
-    default:
-      r_data.type = CAMERA_PERSP;
-      break;
-  }
-
-  r_data.viewinv = camera_ob->object_to_world();
-  r_data.viewmat = math::invert(r_data.viewinv);
-  r_data.winmat = float4x4(params.winmat);
-  r_data.wininv = math::invert(r_data.winmat);
-  r_data.persmat = r_data.winmat * r_data.viewmat;
-  r_data.persinv = math::invert(r_data.persmat);
-    r_data.shading_viewmat = r_data.viewmat;
-    r_data.shading_viewinv = r_data.viewinv;
-  r_data.uv_scale = float2(1.0f);
-  r_data.uv_bias = float2(0.0f);
-  r_data.equirect_bias = float2(0.0f);
-  r_data.equirect_scale = float2(0.0f);
-  r_data.equirect_scale_inv = float2(0.0f);
-  r_data.fisheye_fov = -1.0f;
-  r_data.fisheye_lens = -1.0f;
-    /* CameraData has a user-provided constructor, so `r_data = {}` does not zero its members.
-     * Initialize the added panoramic fields even for non-panoramic auxiliary cameras. They are
-     * compared when deciding whether a capture may retain its ray-tracing history. */
-    r_data.fisheye_polynomial_coefficients = float4(0.0f);
-    r_data.central_cylindrical_range = float4(0.0f);
-    r_data.fisheye_sensor = float2(0.0f);
-    r_data.fisheye_polynomial_bias = 0.0f;
-    r_data.panoramic_view_overscan = 0.0f;
-    r_data.panoramic_front_face_extent = 0.0f;
-    r_data.panoramic_view_mask = 0;
-    r_data._pad1 = 0.0f;
-  r_data.clip_near = cam->clip_start;
-  r_data.clip_far = cam->clip_end;
-  camera_data_update_screen_diagonal(r_data);
-  r_data.initialized = true;
-  return true;
-}
-
 /**
  * Bitmask identifying which of the 6 cubemap faces (in `cubeface_mat()` order) are needed to
  * cover a given panoramic projection. `FRONT`/`BACK` alias the `NEG_Z`/`POS_Z` faces since those
@@ -284,6 +223,156 @@ static float panoramic_front_face_extent_get(const CameraData &cam)
   }
 }
 
+static eCameraType camera_type_get(const blender::Camera &cam)
+{
+  if (cam.type != CAM_PANO) {
+    return cam.type == CAM_ORTHO ? CAMERA_ORTHO : CAMERA_PERSP;
+  }
+  switch (cam.panorama_type) {
+    case CAM_PANORAMA_EQUIANGULAR_CUBEMAP_FACE:
+      return CAMERA_PANO_EQUIANGULAR_CUBEMAP_FACE;
+    case CAM_PANORAMA_FISHEYE_EQUIDISTANT:
+      return CAMERA_PANO_EQUIDISTANT;
+    case CAM_PANORAMA_FISHEYE_EQUISOLID:
+      return CAMERA_PANO_EQUISOLID;
+    case CAM_PANORAMA_FISHEYE_LENS_POLYNOMIAL:
+      return CAMERA_PANO_FISHEYE_LENS_POLYNOMIAL;
+    case CAM_PANORAMA_CENTRAL_CYLINDRICAL:
+      return CAMERA_PANO_CENTRAL_CYLINDRICAL;
+    case CAM_PANORAMA_MIRRORBALL:
+      return CAMERA_PANO_MIRROR;
+    case CAM_PANORAMA_EQUIRECTANGULAR:
+    default:
+      return CAMERA_PANO_EQUIRECT;
+  }
+}
+
+static void camera_lens_data_set(CameraData &data,
+                                const blender::Camera &cam,
+                                const float fit_xratio,
+                                const float fit_yratio)
+{
+  data.clip_near = cam.clip_start;
+  data.clip_far = cam.clip_end;
+  if (is_panoramic(data.type)) {
+    /* Panoramic projection doesn't use winmat so offset the shared uv_bias instead. */
+    data.uv_bias += float2(cam.shiftx, cam.shifty);
+  }
+  if (data.type == CAMERA_PANO_EQUIRECT) {
+    data.equirect_bias.x = -cam.longitude_min + M_PI_2;
+    data.equirect_bias.y = -cam.latitude_min + M_PI_2;
+    data.equirect_scale.x = cam.longitude_min - cam.longitude_max;
+    data.equirect_scale.y = cam.latitude_min - cam.latitude_max;
+    /* Combine with uv_scale/bias to avoid doing extra computation. */
+    data.equirect_bias += data.uv_bias * data.equirect_scale;
+    data.equirect_scale *= data.uv_scale;
+    data.equirect_scale_inv = 1.0f / data.equirect_scale;
+  }
+  else {
+    data.equirect_bias = float2(0.0f);
+    data.equirect_scale = float2(0.0f);
+    data.equirect_scale_inv = float2(0.0f);
+  }
+  data.fisheye_fov = cam.fisheye_fov;
+  data.fisheye_lens = cam.fisheye_lens;
+  data.fisheye_polynomial_bias = cam.fisheye_polynomial_k0;
+  data.fisheye_polynomial_coefficients = float4(cam.fisheye_polynomial_k1,
+                                                cam.fisheye_polynomial_k2,
+                                                cam.fisheye_polynomial_k3,
+                                                cam.fisheye_polynomial_k4);
+  data.central_cylindrical_range = float4(
+      -cam.central_cylindrical_range_u_min,
+      -cam.central_cylindrical_range_u_max,
+      cam.central_cylindrical_range_v_min / cam.central_cylindrical_radius,
+      cam.central_cylindrical_range_v_max / cam.central_cylindrical_radius);
+  const int sensor_fit = BKE_camera_sensor_fit(cam.sensor_fit, fit_xratio, fit_yratio);
+  const float sensor_size = BKE_camera_sensor_size(
+      cam.sensor_fit, cam.sensor_x, cam.sensor_y);
+  if (sensor_fit == CAMERA_SENSOR_FIT_HOR) {
+    data.fisheye_sensor.x = sensor_size;
+    data.fisheye_sensor.y = sensor_size * fit_yratio / fit_xratio;
+  }
+  else {
+    data.fisheye_sensor.x = sensor_size * fit_xratio / fit_yratio;
+    data.fisheye_sensor.y = sensor_size;
+  }
+}
+
+bool camera_data_from_object(const Scene *scene,
+                            const Object *camera_ob,
+                            int2 extent,
+                            CameraData &r_data,
+                            const bool use_panorama)
+{
+  if (camera_ob == nullptr || camera_ob->type != OB_CAMERA) {
+    return false;
+  }
+
+  const blender::Camera *cam = reinterpret_cast<const blender::Camera *>(camera_ob->data);
+  CameraParams params;
+  BKE_camera_params_init(&params);
+  BKE_camera_params_from_object(&params, camera_ob);
+  BKE_camera_params_compute_viewplane(
+      &params, extent.x, extent.y, scene ? scene->r.xasp : 1.0f, scene ? scene->r.yasp : 1.0f);
+  BKE_camera_params_compute_matrix(&params);
+
+  r_data = {};
+  r_data.type = (cam->type == CAM_PANO && !use_panorama) ? CAMERA_PERSP : camera_type_get(*cam);
+  const bool panoramic = is_panoramic(r_data.type);
+  r_data.viewinv = camera_ob->object_to_world();
+  if (panoramic) {
+    normalize_m4(r_data.viewinv.ptr());
+  }
+  r_data.viewmat = math::invert(r_data.viewinv);
+  r_data.winmat = float4x4(params.winmat);
+  r_data.wininv = math::invert(r_data.winmat);
+  r_data.persmat = r_data.winmat * r_data.viewmat;
+  r_data.persinv = math::invert(r_data.persmat);
+  const float4x4 camera_from_view = panoramic ? panoramic_camera_from_view(r_data.type) :
+                                              float4x4::identity();
+  r_data.shading_viewmat = camera_from_view * r_data.viewmat;
+  r_data.shading_viewinv = r_data.viewinv * math::transpose(camera_from_view);
+  r_data.uv_scale = float2(1.0f);
+  r_data.uv_bias = float2(0.0f);
+  camera_lens_data_set(r_data,
+                       *cam,
+                       extent.x * (scene ? scene->r.xasp : 1.0f),
+                       extent.y * (scene ? scene->r.yasp : 1.0f));
+  r_data.panoramic_view_overscan = panoramic ? 1.05f : 1.0f;
+  r_data.panoramic_front_face_extent = panoramic_front_face_extent_get(r_data);
+  r_data.panoramic_view_mask = uint32_t(panoramic ? panoramic_view_mask_get(r_data) :
+                                                   PanoramicViewBits::FRONT);
+  r_data._pad1 = 0.0f;
+  if (panoramic) {
+    r_data.screen_diagonal_length = 2.0f * float(M_SQRT2);
+  }
+  else {
+    camera_data_update_screen_diagonal(r_data);
+  }
+  r_data.initialized = true;
+  return true;
+}
+
+void camera_view_matrices(const CameraData &cam,
+                          const ePanoramicFace face,
+                          float4x4 &r_viewmat,
+                          float4x4 &r_winmat)
+{
+  if (is_panoramic(cam.type)) {
+    float side = cam.clip_near * cam.panoramic_view_overscan;
+    if (face == PANORAMIC_FACE_NEG_Z) {
+      side *= cam.panoramic_front_face_extent;
+    }
+    r_winmat = math::projection::perspective(
+        -side, side, -side, side, cam.clip_near, cam.clip_far);
+    r_viewmat = cubeface_mat(face) * cam.viewmat;
+  }
+  else {
+    r_viewmat = cam.viewmat;
+    r_winmat = cam.winmat;
+  }
+}
+
 /* -------------------------------------------------------------------- */
 /** \name Camera
  * \{ */
@@ -296,42 +385,7 @@ void Camera::init()
 
   if (camera_eval && camera_eval->type == OB_CAMERA) {
     const blender::Camera *cam = reinterpret_cast<const blender::Camera *>(camera_eval->data);
-    switch (cam->type) {
-      default:
-      case CAM_PERSP:
-        data.type = CAMERA_PERSP;
-        break;
-      case CAM_ORTHO:
-        data.type = CAMERA_ORTHO;
-        break;
-      case CAM_PANO: {
-        switch (cam->panorama_type) {
-          default:
-          case CAM_PANORAMA_EQUIRECTANGULAR:
-            data.type = CAMERA_PANO_EQUIRECT;
-            break;
-          case CAM_PANORAMA_EQUIANGULAR_CUBEMAP_FACE:
-            data.type = CAMERA_PANO_EQUIANGULAR_CUBEMAP_FACE;
-            break;
-          case CAM_PANORAMA_FISHEYE_EQUIDISTANT:
-            data.type = CAMERA_PANO_EQUIDISTANT;
-            break;
-          case CAM_PANORAMA_FISHEYE_EQUISOLID:
-            data.type = CAMERA_PANO_EQUISOLID;
-            break;
-          case CAM_PANORAMA_FISHEYE_LENS_POLYNOMIAL:
-            data.type = CAMERA_PANO_FISHEYE_LENS_POLYNOMIAL;
-            break;
-          case CAM_PANORAMA_CENTRAL_CYLINDRICAL:
-            data.type = CAMERA_PANO_CENTRAL_CYLINDRICAL;
-            break;
-          case CAM_PANORAMA_MIRRORBALL:
-            data.type = CAMERA_PANO_MIRROR;
-            break;
-        }
-        break;
-      }
-    }
+    data.type = camera_type_get(*cam);
   }
   else if (inst_.drw_view) {
     data.type = inst_.drw_view->is_persp() ? CAMERA_PERSP : CAMERA_ORTHO;
@@ -463,54 +517,11 @@ void Camera::sync()
   is_camera_object_ = false;
   if (camera_eval && camera_eval->type == OB_CAMERA) {
     const blender::Camera *cam = reinterpret_cast<const blender::Camera *>(camera_eval->data);
-    data.clip_near = cam->clip_start;
-    data.clip_far = cam->clip_end;
-    if (this->is_panoramic()) {
-      /* Panoramic projection doesn't use winmat so offset the shared uv_bias instead. */
-      data.uv_bias += float2(cam->shiftx, cam->shifty);
-    }
-    if (data.type == CAMERA_PANO_EQUIRECT) {
-      data.equirect_bias.x = -cam->longitude_min + M_PI_2;
-      data.equirect_bias.y = -cam->latitude_min + M_PI_2;
-      data.equirect_scale.x = cam->longitude_min - cam->longitude_max;
-      data.equirect_scale.y = cam->latitude_min - cam->latitude_max;
-      /* Combine with uv_scale/bias to avoid doing extra computation. */
-      data.equirect_bias += data.uv_bias * data.equirect_scale;
-      data.equirect_scale *= data.uv_scale;
-      data.equirect_scale_inv = 1.0f / data.equirect_scale;
-    }
-    else {
-      data.equirect_bias = float2(0.0f);
-      data.equirect_scale = float2(0.0f);
-      data.equirect_scale_inv = float2(0.0f);
-    }
-    data.fisheye_fov = cam->fisheye_fov;
-    data.fisheye_lens = cam->fisheye_lens;
-    data.fisheye_polynomial_bias = cam->fisheye_polynomial_k0;
-    data.fisheye_polynomial_coefficients = float4(cam->fisheye_polynomial_k1,
-                                                  cam->fisheye_polynomial_k2,
-                                                  cam->fisheye_polynomial_k3,
-                                                  cam->fisheye_polynomial_k4);
-    data.central_cylindrical_range = float4(
-        -cam->central_cylindrical_range_u_min,
-        -cam->central_cylindrical_range_u_max,
-        cam->central_cylindrical_range_v_min / cam->central_cylindrical_radius,
-        cam->central_cylindrical_range_v_max / cam->central_cylindrical_radius);
     int render_width, render_height;
     BKE_render_resolution(&inst_.scene->r, false, &render_width, &render_height);
     const float fit_xratio = float(render_width) * inst_.scene->r.xasp;
     const float fit_yratio = float(render_height) * inst_.scene->r.yasp;
-    const int sensor_fit = BKE_camera_sensor_fit(cam->sensor_fit, fit_xratio, fit_yratio);
-    const float sensor_size = BKE_camera_sensor_size(
-        cam->sensor_fit, cam->sensor_x, cam->sensor_y);
-    if (sensor_fit == CAMERA_SENSOR_FIT_HOR) {
-      data.fisheye_sensor.x = sensor_size;
-      data.fisheye_sensor.y = sensor_size * fit_yratio / fit_xratio;
-    }
-    else {
-      data.fisheye_sensor.x = sensor_size * fit_xratio / fit_yratio;
-      data.fisheye_sensor.y = sensor_size;
-    }
+    camera_lens_data_set(data, *cam, fit_xratio, fit_yratio);
     is_camera_object_ = true;
   }
   else if (inst_.drw_view) {

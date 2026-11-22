@@ -2,6 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "eevee_camera_lib.bsl.hh"
+
 int render_texture_slot_find(const int uid)
 {
   if (uid < 0) {
@@ -31,9 +33,26 @@ int render_texture_storage_format(const int slot)
          int(RENDER_TEXTURE_SLOT_FORMAT_SHIFT);
 }
 
-float2 render_texture_project_uv(const float4x4 viewproj, const float3 world_position)
+float2 render_texture_project_uv(const int slot, const float3 world_position)
 {
-  float4 projected = viewproj * float4(world_position, 1.0f);
+  if (is_panoramic(render_texture_buf[slot].camera.type)) {
+    /* Load a local value before passing the camera to the projection library. The NVIDIA
+     * OpenGL compiler rejects passing the read-only storage buffer member directly. */
+    CameraData camera = render_texture_buf[slot].camera;
+    const float3 position = (camera.viewmat * float4(world_position, 1.0f)).xyz;
+    if (all(equal(position, float3(0.0f)))) {
+      return float2(-1.0f);
+    }
+    const float3 direction = normalize(position);
+    if ((camera.type == CAMERA_PANO_EQUIANGULAR_CUBEMAP_FACE && direction.z >= 0.0f) ||
+        (camera.type == CAMERA_PANO_FISHEYE_LENS_POLYNOMIAL &&
+         acos(clamp(-direction.z, -1.0f, 1.0f)) > camera.fisheye_fov * 0.5f))
+    {
+      return float2(-1.0f);
+    }
+    return eevee::camera::uv_from_view(camera, direction);
+  }
+  float4 projected = render_texture_buf[slot].camera.persmat * float4(world_position, 1.0f);
   if (projected.w <= 0.0f) {
     return float2(-1.0f);
   }
@@ -105,10 +124,11 @@ void render_texture_camera_data_get(const int slot,
                                     out float3 axis_y,
                                     out float3 axis_z)
 {
-  position = render_texture_buf[slot].camera_position.xyz;
-  axis_x = render_texture_buf[slot].camera_axis_x.xyz;
-  axis_y = render_texture_buf[slot].camera_axis_y.xyz;
-  axis_z = render_texture_buf[slot].camera_axis_z.xyz;
+  const float4x4 viewmat = transpose(render_texture_buf[slot].camera.viewmat);
+  position = render_texture_buf[slot].camera.viewinv[3].xyz;
+  axis_x = viewmat[0].xyz;
+  axis_y = viewmat[1].xyz;
+  axis_z = viewmat[2].xyz;
 }
 
 [[node]]
@@ -152,11 +172,9 @@ void node_render_texture(float3 vector,
   int output_type = render_texture_output_type(slot);
   int storage_format = render_texture_storage_format(slot);
 
-  float2 uv = (use_explicit_vector > 0.5f) ? vector.xy :
-                                         render_texture_project_uv(render_texture_buf[slot].viewproj,
-                                                                   sd.P);
+  float2 uv = (use_explicit_vector > 0.5f) ? vector.xy : render_texture_project_uv(slot, sd.P);
 
-  if (any(lessThan(uv, float2(0.0f))) || any(greaterThan(uv, float2(1.0f)))) {
+  if (!(all(greaterThanEqual(uv, float2(0.0f))) && all(lessThanEqual(uv, float2(1.0f))))) {
     color = float4(0.0f);
     alpha = 0.0f;
     return;

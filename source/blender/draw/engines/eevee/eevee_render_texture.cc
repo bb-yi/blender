@@ -6,12 +6,13 @@
  * \ingroup eevee
  */
 
-#include "BLI_listbase.hh"
+#include <cmath>
+
 #include "BKE_compositor.hh"
 #include "BKE_mesh.hh"
 #include "BKE_scene.hh"
+
 #include "BLI_listbase.hh"
-#include <cmath>
 
 #include "DEG_depsgraph_query.hh"
 
@@ -58,13 +59,13 @@ static int render_texture_info_flags(const int source, const int format)
 
 RenderTextureData RenderTextureModule::slot_default_data()
 {
-  RenderTextureData data = {};
-  data.viewproj = float4x4::identity();
-  data.prev_viewproj = float4x4::identity();
-  data.camera_position = float4(0.0f);
-  data.camera_axis_x = float4(0.0f);
-  data.camera_axis_y = float4(0.0f);
-  data.camera_axis_z = float4(0.0f);
+  /* CameraData's constructor initializes only its validity flag. */
+  static const RenderTextureData empty{};
+  RenderTextureData data = empty;
+  data.camera.persmat = float4x4::identity();
+  data.camera.viewinv = float4x4::zero();
+  data.camera.viewmat = float4x4::zero();
+  data.camera.type = CAMERA_PERSP;
   data.info = int4(-1, 0, 0, 0);
   return data;
 }
@@ -204,9 +205,9 @@ void RenderTextureModule::begin_sync()
     slot.active = (slot.camera != nullptr);
     slot.compositor_output = render_texture->use_compositor_output && !inst_.is_dlss_guide_render;
     slot.requires_full_capture = false;
-    slot.sync_camera_valid = slot.active &&
-                             camera_data_from_object(
-                                 inst_.scene, slot.camera, slot.extent, slot.sync_camera_data);
+    slot.sync_camera_valid =
+        slot.active &&
+        camera_data_from_object(inst_.scene, slot.camera, slot.extent, slot.sync_camera_data, true);
     if (reset_history) {
       slot.history_reset_pending = true;
       slot.rt_buffer_opaque.reset();
@@ -333,7 +334,8 @@ void RenderTextureModule::object_sync(const ObjectHandle &object, const Material
     if (!needs_visibility_test(slot)) {
       continue;
     }
-    bool visible = unbounded || !bounds || !slot.sync_camera_valid;
+    bool visible = unbounded || !bounds || !slot.sync_camera_valid ||
+                   is_panoramic(slot.sync_camera_data.type);
     if (!visible) {
       for (const int instance : IndexRange(object.instances_count())) {
         const float4x4 matrix = slot.sync_camera_data.persmat * object.object_to_world(instance);
@@ -415,7 +417,10 @@ void RenderTextureModule::end_sync()
   data_.push_update();
 }
 
-void RenderTextureModule::slot_extract(const int slot_index, RenderBuffers &rbufs)
+void RenderTextureModule::slot_extract(const int slot_index,
+                                      RenderBuffers &rbufs,
+                                      View &view,
+                                      const int face)
 {
   RuntimeSlot &slot = slots_[slot_index];
 
@@ -440,11 +445,14 @@ void RenderTextureModule::slot_extract(const int slot_index, RenderBuffers &rbuf
   extract_ps_.bind_texture("gbuf_header_tx", &inst_.gbuffer.header_tx);
   extract_ps_.bind_texture("gbuf_normal_tx", &inst_.gbuffer.normal_tx);
   extract_ps_.bind_image("output_img", &slot.color_tx.current());
+  extract_ps_.bind_ubo(UNIFORM_BUF_SLOT, &inst_.uniform_data.data);
   extract_ps_.push_constant("output_extent", slot.extent);
   extract_ps_.push_constant("output_type", slot.source);
+  extract_ps_.push_constant("panoramic_face", face);
+  extract_ps_.barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
   extract_ps_.dispatch(math::divide_ceil(slot.extent, int2(FILM_GROUP_SIZE)));
   extract_ps_.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
-  inst_.manager->submit(extract_ps_);
+  inst_.manager->submit(extract_ps_, view);
 }
 
 bool RenderTextureModule::slot_should_capture(const RuntimeSlot &slot) const
@@ -475,7 +483,7 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
   }
 
   CameraData rt_camera;
-  if (!camera_data_from_object(inst_.scene, slot.camera, slot.extent, rt_camera)) {
+  if (!camera_data_from_object(inst_.scene, slot.camera, slot.extent, rt_camera, true)) {
     slot_reset(slot_index);
     slot_ensure_textures(slot_index);
     data_.push_update();
@@ -493,63 +501,55 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
   slot.camera_data = rt_camera;
   slot.has_camera_data = true;
 
-  const float4x4 camera_view_basis = math::transpose(rt_camera.viewmat);
+  const bool panoramic = is_panoramic(rt_camera.type);
+  /* Use the same pixel budget as the output for the single reusable cubemap face. */
+  const int2 extent = panoramic ?
+                          int2(int(std::ceil(std::sqrt(double(slot.extent.x) * slot.extent.y)))) :
+                          slot.extent;
   for (const int index : capture_slots) {
     RuntimeSlot &capture = slots_[index];
     if (capture.needs_history) {
       capture.color_tx.swap();
     }
-    data_[index].prev_viewproj = data_[index].viewproj;
-    data_[index].viewproj = rt_camera.persmat;
-    data_[index].camera_position = float4(rt_camera.viewinv.location(), 1.0f);
-    data_[index].camera_axis_x = float4(camera_view_basis.x_axis(), 0.0f);
-    data_[index].camera_axis_y = float4(camera_view_basis.y_axis(), 0.0f);
-    data_[index].camera_axis_z = float4(camera_view_basis.z_axis(), 0.0f);
+    if (panoramic) {
+      const float alpha = capture.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR ? 1.0f : 0.0f;
+      capture.color_tx.current().clear(float4(0.0f, 0.0f, 0.0f, alpha));
+    }
+    data_[index].camera = rt_camera;
     data_[index].info.w = render_texture_info_flags(capture.source, capture.format) |
                           RENDER_TEXTURE_SLOT_CAPTURING;
   }
   data_.push_update();
 
-  const bool cache_render_buffers = slot.extent != inst_.film.render_extent_get();
-  const bool cache_hiz = !inst_.hiz_buffer.storage_matches_extent(slot.extent);
+  const bool cache_render_buffers = extent != inst_.film.render_extent_get();
+  const bool cache_hiz = !inst_.hiz_buffer.storage_matches_extent(extent);
   if (!cache_render_buffers && !cache_hiz) {
     slot.buffers.reset();
   }
-  if ((cache_render_buffers || cache_hiz) &&
-      (!slot.buffers || slot.buffers->extent != slot.extent))
-  {
+  if ((cache_render_buffers || cache_hiz) && (!slot.buffers || slot.buffers->extent != extent)) {
     slot.buffers.reset();
     for (const RuntimeSlot &other : slots_) {
-      if (other.buffers && other.buffers->extent == slot.extent) {
+      if (other.buffers && other.buffers->extent == extent) {
         slot.buffers = other.buffers;
         break;
       }
     }
     if (!slot.buffers) {
       slot.buffers = std::make_shared<CaptureBuffers>();
-      slot.buffers->extent = slot.extent;
+      slot.buffers->extent = extent;
     }
   }
   swap_capture_buffers(slot, cache_render_buffers, cache_hiz);
   for (const int index : capture_slots) {
     slots_[index].buffers = slot.buffers;
   }
-  inst_.render_extent_override_set(slot.extent);
-  inst_.lights.sync_render_extent(slot.extent);
+  inst_.render_extent_override_set(extent);
+  inst_.lights.sync_render_extent(extent);
   const int hiz_created = inst_.hiz_buffer.sync();
   inst_.camera.override(rt_camera, true);
   const uint32_t previous_draw_context = inst_.pipelines.data.draw_context;
   inst_.pipelines.data.draw_context |= DRAW_CONTEXT_RENDER_TEXTURE_CAPTURE;
-  inst_.uniform_data.push_update();
-
-  inst_.planar_probes.invalidate();
-  View main_view = {"RenderTexture.Main"};
-  View render_view = {"RenderTexture.Render"};
-  main_view.sync(rt_camera.viewmat, rt_camera.winmat);
-  render_view.sync(rt_camera.viewmat, rt_camera.winmat);
-
-  RenderBuffers &rbufs = inst_.render_buffers;
-  const int buffers_created = rbufs.acquire(slot.extent);
+  inst_.uniform_data.data.push_update();
 
   const bool full_capture = requires_full_capture_ ||
                             std::any_of(
@@ -558,15 +558,77 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
                                 });
   const bool depth_only = !full_capture && slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_DEPTH;
   const bool normal_only = !full_capture && slot.source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_NORMAL;
+  if (depth_only || normal_only) {
+    slot.rt_buffer_opaque.reset();
+    slot.rt_buffer_refract.reset();
+  }
+
+  View view = {"RenderTexture.Render"};
+  int buffers_created = hiz_created;
+  const uint face_mask = rt_camera.panoramic_view_mask;
+  for (int face : IndexRange(6)) {
+    if ((face_mask & (1u << face)) == 0u) {
+      continue;
+    }
+    float4x4 viewmat, winmat;
+    camera_view_matrices(rt_camera, ePanoramicFace(face), viewmat, winmat);
+    view.sync(viewmat, winmat);
+    inst_.uniform_data.pipeline.is_main_view_inverted = view.is_inverted();
+    inst_.uniform_data.pipeline.push_update();
+    inst_.planar_probes.invalidate();
+    RenderBuffers &rbufs = inst_.render_buffers;
+    buffers_created += rbufs.acquire(extent);
+    render_view(slot, view, extent, depth_only, normal_only);
+    for (const int index : capture_slots) {
+      slot_extract(index, rbufs, view, panoramic ? face : -1);
+    }
+    inst_.outline_shell.release();
+    inst_.gbuffer.release();
+    rbufs.release();
+  }
+
+  CLOG_INFO(&Instance::log,
+            "RenderTexture capture uid=%d outputs=%d path=%s extent=%dx%d storage_created=%d",
+            slot.uid,
+            int(capture_slots.size()),
+            depth_only  ? "depth" :
+            normal_only ? "normal" :
+                          "color",
+            extent.x,
+            extent.y,
+            buffers_created);
+  swap_capture_buffers(slot, cache_render_buffers, cache_hiz);
+  for (const int index : capture_slots) {
+    data_[index].info.w &= ~RENDER_TEXTURE_SLOT_CAPTURING;
+    slots_[index].capture_pending = false;
+    if (slots_[index].update_mode == SCE_EEVEE_RENDER_TEXTURE_UPDATE_MANUAL) {
+      slots_[index].buffers.reset();
+    }
+  }
+
+  inst_.pipelines.data.draw_context = previous_draw_context;
+  inst_.uniform_data.pipeline.push_update();
+  data_.push_update();
+}
+
+void RenderTextureModule::render_view(RuntimeSlot &slot,
+                                      View &view,
+                                      const int2 extent,
+                                      const bool depth_only,
+                                      const bool normal_only)
+{
+  inst_.raytracing.thickness_parameters_setup(view.winmat(), extent);
+  inst_.uniform_data.raytrace.push_update();
   /* Empty hybrid subpasses still bind planar resources. Set them up before acquiring the
    * capture GBuffer because planar setup releases its own temporary GBuffer. */
   if (normal_only) {
     inst_.planar_probes.ensure_resources();
   }
   else if (!depth_only) {
-    inst_.planar_probes.set_view(render_view, slot.extent);
+    inst_.planar_probes.set_view(view, extent);
   }
 
+  RenderBuffers &rbufs = inst_.render_buffers;
   combined_fb_.ensure(GPU_ATTACHMENT_TEXTURE(rbufs.depth_tx),
                       GPU_ATTACHMENT_TEXTURE(rbufs.combined_tx));
 
@@ -578,7 +640,7 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
       with_raycast ? GPU_ATTACHMENT_TEXTURE(rbufs.object_id_tx) : GPU_ATTACHMENT_NONE,
       GPU_ATTACHMENT_TEXTURE(rbufs.vector_tx));
 
-  inst_.gbuffer.acquire(depth_only ? int2(1) : slot.extent,
+  inst_.gbuffer.acquire(depth_only ? int2(1) : extent,
                         inst_.pipelines.deferred.header_layer_count(),
                         inst_.pipelines.deferred.closure_layer_count(),
                         inst_.pipelines.deferred.normal_layer_count());
@@ -604,83 +666,53 @@ void RenderTextureModule::slot_capture(const Span<int> capture_slots)
   GPU_framebuffer_bind(combined_fb_);
   GPU_framebuffer_clear_color_depth(combined_fb_, clear_color, inst_.film.depth.clear_value);
 
-  inst_.lights.set_view(render_view, slot.extent);
+  inst_.lights.set_view(view, extent);
   inst_.hiz_buffer.set_source(&inst_.render_buffers.depth_tx);
 
-  CLOG_INFO(&Instance::log,
-            "RenderTexture capture uid=%d outputs=%d path=%s extent=%dx%d storage_created=%d",
-            slot.uid,
-            int(capture_slots.size()),
-            depth_only  ? "depth" :
-            normal_only ? "normal" :
-                          "color",
-            slot.extent.x,
-            slot.extent.y,
-            hiz_created + buffers_created);
   inst_.gbuffer.header_tx.clear(uint4(0));
-  if (depth_only || normal_only) {
-    slot.rt_buffer_opaque.reset();
-    slot.rt_buffer_refract.reset();
-  }
   if (depth_only) {
-    inst_.pipelines.deferred.render_prepass_only(render_view, prepass_fb_);
-    inst_.pipelines.forward.render_prepass_only(render_view, prepass_fb_);
+    inst_.pipelines.deferred.render_prepass_only(view, prepass_fb_);
+    inst_.pipelines.forward.render_prepass_only(view, prepass_fb_);
   }
   else if (normal_only) {
-    inst_.pipelines.deferred.render_gbuffer_only(render_view, prepass_fb_, gbuffer_fb_);
+    inst_.pipelines.deferred.render_gbuffer_only(view, prepass_fb_, gbuffer_fb_);
   }
   else {
     if (!slot.rt_buffer_opaque) {
       slot.rt_buffer_opaque = std::make_unique<RayTraceBuffer>();
       slot.rt_buffer_refract = std::make_unique<RayTraceBuffer>();
     }
-    inst_.pipelines.background.clear(render_view);
-    inst_.volume.set_view(main_view, slot.extent, false);
+    if (is_panoramic(slot.camera_data.type)) {
+      slot.rt_buffer_opaque->invalidate_history();
+      slot.rt_buffer_refract->invalidate_history();
+    }
+    inst_.pipelines.background.clear(view);
+    inst_.volume.set_view(view, extent, false);
     inst_.uniform_data.data.push_update();
-    inst_.volume.draw_prepass(main_view);
-    inst_.pipelines.background.render(render_view, combined_fb_);
+    inst_.volume.draw_prepass(view);
+    inst_.pipelines.background.render(view, combined_fb_);
 
     bool volume_compute_done = false;
-    inst_.pipelines.deferred.render(main_view,
-                                    render_view,
+    inst_.pipelines.deferred.render(view,
+                                    view,
                                     prepass_fb_,
                                     combined_fb_,
                                     gbuffer_fb_,
-                                    slot.extent,
+                                    extent,
                                     *slot.rt_buffer_opaque,
                                     *slot.rt_buffer_refract,
                                     volume_compute_done);
 
     if (!volume_compute_done) {
-      inst_.volume.draw_compute(main_view, slot.extent);
+      inst_.volume.draw_compute(view, extent);
     }
     if (!inst_.pipelines.forward.volume_resolved()) {
-      inst_.volume.draw_resolve(main_view);
+      inst_.volume.draw_resolve(view);
     }
-    inst_.ambient_occlusion.render_pass(render_view);
+    inst_.ambient_occlusion.render_pass(view);
     inst_.pipelines.forward.render(
-        render_view, rbufs.depth_tx, prepass_fb_, transparent_fb_, combined_fb_, slot.extent);
+        view, rbufs.depth_tx, prepass_fb_, transparent_fb_, combined_fb_, extent);
   }
-
-  inst_.outline_shell.release();
-  for (const int index : capture_slots) {
-    slot_extract(index, rbufs);
-    data_[index].info.w &= ~RENDER_TEXTURE_SLOT_CAPTURING;
-    slots_[index].capture_pending = false;
-  }
-
-  inst_.gbuffer.release();
-  rbufs.release();
-  swap_capture_buffers(slot, cache_render_buffers, cache_hiz);
-  for (const int index : capture_slots) {
-    if (slots_[index].update_mode == SCE_EEVEE_RENDER_TEXTURE_UPDATE_MANUAL) {
-      slots_[index].buffers.reset();
-    }
-  }
-
-  inst_.pipelines.data.draw_context = previous_draw_context;
-  inst_.uniform_data.pipeline.push_update();
-  data_.push_update();
 }
 
 void RenderTextureModule::swap_capture_buffers(RuntimeSlot &slot,
@@ -714,6 +746,7 @@ void RenderTextureModule::render()
 
   const CameraData main_camera = inst_.camera.data_get();
   const bool main_is_camera_object = inst_.camera.is_camera_object();
+  const bool main_view_inverted = inst_.uniform_data.pipeline.is_main_view_inverted;
   std::array<bool, RENDER_TEXTURE_SLOT_MAX> captured = {};
   /* Temporal buffers belong to individual slots. Sharing only the extracted image would leave
    * followers without history when a different update cadence changes the next capture group. */
@@ -763,6 +796,7 @@ void RenderTextureModule::render()
   inst_.lights.sync_render_extent(inst_.film.render_extent_get());
   inst_.hiz_buffer.sync();
   inst_.camera.override(main_camera, main_is_camera_object);
+  inst_.uniform_data.pipeline.is_main_view_inverted = main_view_inverted;
   inst_.uniform_data.push_update();
 }
 

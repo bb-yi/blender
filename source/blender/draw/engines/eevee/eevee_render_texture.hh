@@ -137,7 +137,8 @@ class RenderTextureModule {
   static RenderTextureData slot_default_data();
   void slot_reset(int slot_index);
   uint8_t slot_ensure_textures(int slot_index);
-  void slot_extract(int slot_index, RenderBuffers &rbufs);
+  void slot_extract(int slot_index, RenderBuffers &rbufs, View &view, int face);
+  void render_view(RuntimeSlot &slot, View &view, int2 extent, bool depth_only, bool normal_only);
   void slot_capture(Span<int> capture_slots);
   bool slot_should_capture(const RuntimeSlot &slot) const;
   static bool material_requires_full_capture(GPUMaterial *material);

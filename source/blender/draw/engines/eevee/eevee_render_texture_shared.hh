@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "eevee_camera_shared.hh"
 #include "eevee_defines.hh"
 
 #ifndef GPU_SHADER
@@ -27,13 +28,7 @@ enum [[host_shared]] eRenderTextureFlags : uint32_t {
 };
 
 struct [[host_shared]] RenderTextureData {
-  float4x4 viewproj;
-  float4x4 prev_viewproj;
-  /* Camera data for reconstructing RT camera space from world space. */
-  float4 camera_position;
-  float4 camera_axis_x;
-  float4 camera_axis_y;
-  float4 camera_axis_z;
+  CameraData camera;
   int4 info;
 };
 

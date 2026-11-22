@@ -559,6 +559,7 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/eevee_reverse_z_lib.glsl
   engines/eevee/shaders/eevee_render_texture_extract_comp.glsl
   engines/eevee/shaders/eevee_render_texture_export_comp.glsl
+  engines/eevee/shaders/eevee_render_texture_material.glsl
   engines/eevee/shaders/eevee_renderpass_clear.bsl.hh
   engines/eevee/shaders/eevee_stencil_snapshot_frag.glsl
   engines/eevee/shaders/eevee_renderpass.bsl.hh

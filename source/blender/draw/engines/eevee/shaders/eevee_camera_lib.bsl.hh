@@ -23,6 +23,18 @@ namespace eevee::camera {
  * Adapted from Cycles to match EEVEE's coordinate system.
  * \{ */
 
+ePanoramicFace panoramic_face_index(float3 direction)
+{
+  float3 abs_direction = abs(direction);
+  if (abs_direction.x >= abs_direction.y && abs_direction.x >= abs_direction.z) {
+    return (direction.x >= 0.0f) ? PANORAMIC_FACE_POS_X : PANORAMIC_FACE_NEG_X;
+  }
+  if (abs_direction.y >= abs_direction.z) {
+    return (direction.y >= 0.0f) ? PANORAMIC_FACE_POS_Y : PANORAMIC_FACE_NEG_Y;
+  }
+  return (direction.z >= 0.0f) ? PANORAMIC_FACE_POS_Z : PANORAMIC_FACE_NEG_Z;
+}
+
 float2 equirectangular_from_direction(CameraData cam, float3 dir)
 {
   /* U wraps around behind the camera at the edges, like Cycles. */

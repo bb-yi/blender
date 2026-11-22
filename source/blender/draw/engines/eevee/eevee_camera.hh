@@ -20,9 +20,15 @@
 namespace blender::eevee {
 
 bool camera_data_from_object(const Scene *scene,
-                             const Object *camera_ob,
-                             int2 extent,
-                             CameraData &r_data);
+                            const Object *camera_ob,
+                            int2 extent,
+                            CameraData &r_data,
+                            bool use_panorama = false);
+
+void camera_view_matrices(const CameraData &cam,
+                          ePanoramicFace face,
+                          float4x4 &r_viewmat,
+                          float4x4 &r_winmat);
 
 class Instance;
 

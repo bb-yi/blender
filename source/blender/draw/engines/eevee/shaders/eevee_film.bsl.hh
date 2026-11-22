@@ -37,18 +37,6 @@ float depth_convert_to_scene(const ViewMatrices view,
   return -view.depth_screen_to_view(depth);
 }
 
-ePanoramicFace panoramic_face_index(float3 direction)
-{
-  float3 abs_direction = abs(direction);
-  if (abs_direction.x >= abs_direction.y && abs_direction.x >= abs_direction.z) {
-    return (direction.x >= 0.0f) ? PANORAMIC_FACE_POS_X : PANORAMIC_FACE_NEG_X;
-  }
-  if (abs_direction.y >= abs_direction.z) {
-    return (direction.y >= 0.0f) ? PANORAMIC_FACE_POS_Y : PANORAMIC_FACE_NEG_Y;
-  }
-  return (direction.z >= 0.0f) ? PANORAMIC_FACE_POS_Z : PANORAMIC_FACE_NEG_Z;
-}
-
 float display_depth_amend(float depth)
 {
   /* This effectively offsets the depth of the whole 2x2 region to the lowest value of the region
@@ -212,7 +200,7 @@ struct Film {
     if (is_zero(camera_direction)) {
       return false;
     }
-    return panoramic_face_index(camera_direction) == view_id;
+    return eevee::camera::panoramic_face_index(camera_direction) == view_id;
   }
 
   ePanoramicFace panoramic_view_id_get()
@@ -222,7 +210,7 @@ struct Film {
     const float4x4 face_mat = view.viewmat * uniforms.uniform_buf.camera.viewinv;
     const float3 direction = normalize(transpose(to_float3x3(face_mat)) *
                                        float3(0.0f, 0.0f, -1.0f));
-    return panoramic_face_index(direction);
+    return eevee::camera::panoramic_face_index(direction);
   }
 
   /* Panoramic samples outside the projection or on another face have an invalid texel. */

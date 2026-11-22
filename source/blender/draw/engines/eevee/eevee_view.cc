@@ -107,21 +107,7 @@ void ShadingView::sync()
 
   /* Create views. */
   float4x4 viewmat, winmat;
-  if (inst_.camera.is_panoramic()) {
-    /* panoramic_view_overscan has included the 5% overscan (see Camera::sync). */
-    float side = cam.clip_near * cam.panoramic_view_overscan;
-    if (face_id_ == PANORAMIC_FACE_NEG_Z) {
-      side *= cam.panoramic_front_face_extent;
-    }
-    float near = cam.clip_near;
-    float far = cam.clip_far;
-    winmat = math::projection::perspective(-side, side, -side, side, near, far);
-    viewmat = face_matrix_ * cam.viewmat;
-  }
-  else {
-    viewmat = cam.viewmat;
-    winmat = cam.winmat;
-  }
+  camera_view_matrices(cam, face_id_, viewmat, winmat);
 
   main_view_.sync(viewmat, winmat);
 

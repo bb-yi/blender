@@ -5,6 +5,7 @@
 #include "infos/eevee_render_texture_infos.hh"
 
 #include "draw_view_lib.glsl"
+#include "eevee_camera_lib.bsl.hh"
 #include "eevee_reverse_z_lib.glsl"
 
 /* Keep in sync with #SceneEEVEERenderTextureSource. */
@@ -31,33 +32,58 @@ void main()
     return;
   }
 
+  int2 source_texel = texel;
+  float2 source_uv = (float2(texel) + 0.5f) / float2(output_extent);
+  if (panoramic_face >= 0) {
+    const CameraData camera = uniform_buf.camera;
+    const float3 direction = eevee::camera::view_from_uv(camera, source_uv);
+    if (all(equal(direction, float3(0.0f))) ||
+        int(eevee::camera::panoramic_face_index(direction)) != panoramic_face)
+    {
+      return;
+    }
+    const ViewMatrices view = drw_view();
+    const float3 face_direction = to_float3x3(view.viewmat) *
+                                  (to_float3x3(camera.viewinv) * direction);
+    const float3 ndc = project_point(view.winmat, face_direction);
+    const int2 extent = textureSize(depth_tx, 0);
+    source_texel = clamp(int2(floor((ndc.xy * 0.5f + 0.5f) * float2(extent))),
+                         int2(0),
+                         extent - 1);
+    source_uv = (float2(source_texel) + 0.5f) / float2(extent);
+  }
+
   float4 out_color;
 
   switch (output_type) {
     case RENDER_TEXTURE_SOURCE_GRAYSCALE: {
-      float4 combined = texelFetch(combined_tx, texel, 0);
+      float4 combined = texelFetch(combined_tx, source_texel, 0);
       float luminance = dot(combined.rgb, float3(0.2126f, 0.7152f, 0.0722f));
       out_color = float4(float3(luminance), combined.a);
       break;
     }
     case RENDER_TEXTURE_SOURCE_DEPTH: {
-      float depth = reverse_z::read(texelFetch(depth_tx, texel, 0).r);
+      float depth = reverse_z::read(texelFetch(depth_tx, source_texel, 0).r);
       bool has_surface = depth < 1.0f;
-      float depth_value = has_surface ? -drw_depth_screen_to_view(depth) : 0.0f;
+      float depth_value = 0.0f;
+      if (has_surface) {
+        depth_value = panoramic_face >= 0 ? length(drw_point_screen_to_view(float3(source_uv, depth))) :
+                                            -drw_depth_screen_to_view(depth);
+      }
       out_color = float4(float3(depth_value), has_surface ? 1.0f : 0.0f);
       break;
     }
     case RENDER_TEXTURE_SOURCE_NORMAL: {
-      bool has_gbuffer = texelFetch(gbuf_header_tx, int3(texel, 0), 0).r != 0u;
+      bool has_gbuffer = texelFetch(gbuf_header_tx, int3(source_texel, 0), 0).r != 0u;
       float3 normal = has_gbuffer ? render_texture_gbuffer_normal_unpack(
-                                        texelFetch(gbuf_normal_tx, int3(texel, 0), 0).rg) :
+                                        texelFetch(gbuf_normal_tx, int3(source_texel, 0), 0).rg) :
                                     float3(0.0f);
       out_color = float4(normal * 0.5f + 0.5f, has_gbuffer ? 1.0f : 0.0f);
       break;
     }
     case RENDER_TEXTURE_SOURCE_COLOR:
     default:
-      out_color = texelFetch(combined_tx, texel, 0);
+      out_color = texelFetch(combined_tx, source_texel, 0);
       break;
   }
 
