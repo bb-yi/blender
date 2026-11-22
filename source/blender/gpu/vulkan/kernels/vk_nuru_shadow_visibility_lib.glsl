@@ -190,7 +190,7 @@ float shadow_alpha_sample(ShadowCasterRecord caster, uint primitive, vec2 baryce
   const ivec2 size = ivec2(shadow_alpha_images[offset], shadow_alpha_images[offset + 1u]);
   const int extension_mode = int(caster.uv_x.w);
   const vec2 texel = mapped * vec2(size);
-  if (caster.uv_y.w != 0.0f) {
+  if ((uint(caster.uv_y.w) & 1u) != 0u) {
     return shadow_alpha_texel(offset, size, ivec2(floor(texel)), extension_mode);
   }
   const ivec2 base = ivec2(floor(texel - 0.5f));
@@ -233,7 +233,7 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
         continue;
       }
       const ShadowCasterRecord caster = shadow_casters[candidate_id];
-      if (caster.identity.z != 0u &&
+      if (caster.identity.z != 0u && caster.uv_y.w < 2.0f &&
           shadow_alpha_sample(caster,
                               uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, false)),
                               rayQueryGetIntersectionBarycentricsEXT(query, false)) <= 1.0e-5f)
@@ -258,7 +258,7 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
     vec3 transmission = vec3(0.0f);
     float uncovered = 0.0f;
     float tint_weight = 0.0f;
-    if (caster.identity.z != 0u) {
+    if (caster.identity.z != 0u && caster.uv_y.w < 2.0f) {
       const float opacity = shadow_alpha_sample(
           caster,
           uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true)),

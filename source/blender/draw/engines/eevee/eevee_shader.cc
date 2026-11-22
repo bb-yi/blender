@@ -341,14 +341,6 @@ static bool material_depth_offset_graph_has_unsupported_dependencies(const GPUMa
          material_graph_dependency_source_contains(gpumat, graph, "glsl_light_shadow");
 }
 
-static bool material_depth_offset_graph_uses_supported_light_access(
-    const GPUMaterial *gpumat, const std::optional<GPUGraphOutput> &graph)
-{
-  return graph.has_value() &&
-         !material_depth_offset_graph_has_unsupported_dependencies(gpumat, *graph) &&
-         material_graph_uses_glsl_light_access(gpumat, *graph);
-}
-
 /* -------------------------------------------------------------------- */
 /** \name Module
  *
@@ -2045,12 +2037,55 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   info.compilation_constant(
       gpu::shader::Type::bool_t, "is_stencil_writer_surface", stencil_writer_surface);
 
+  const bool has_depth_offset = GPU_material_has_depth_offset_output(gpumat) &&
+                                material_pipeline_supports_depth_offset(pipeline_type,
+                                                                        geometry_type);
+  const bool depth_offset_supported = has_depth_offset && codegen.depth_offset.has_value() &&
+                                      !material_depth_offset_graph_has_unsupported_dependencies(
+                                          gpumat, *codegen.depth_offset);
+  const bool hardware_raycast_requested = GPU_material_flag_get(gpumat,
+                                                               GPU_MATFLAG_HARDWARE_RAYCAST);
+  const bool supports_surface_raycast = ELEM(
+      pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD);
+  const bool is_camera_depth_pass = ELEM(pipeline_type,
+                                         MAT_PIPE_PREPASS_DEFERRED,
+                                         MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+                                         MAT_PIPE_PREPASS_FORWARD,
+                                         MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+                                         MAT_PIPE_PREPASS_OVERLAP,
+                                         MAT_PIPE_OUTLINE_SHELL_SELF_DEPTH);
+  bool use_hardware_raycast = false;
+  if (hardware_raycast_requested && probe_capture == MAT_PROBE_NONE &&
+      (supports_surface_raycast || is_camera_depth_pass))
+  {
+    const GPUGraphOutput &surface_graph = codegen.outline_shell_surface.has_value() ?
+                                             *codegen.outline_shell_surface :
+                                             codegen.surface;
+    const GPUGraphOutput &shading_graph = pipeline_type == MAT_PIPE_DEFERRED_NPR ? codegen.npr :
+                                                                                  surface_graph;
+    const auto uses_hardware_raycast = [](const GPUGraphOutput &output) {
+      return material_graph_serialized_contains(output, "node_raycast_hardware(");
+    };
+    /* Depth and surface shading must agree on coverage and depth offsets. An opaque material
+     * whose query only affects color does not need ray query resources in the depth pass. */
+    const bool evaluates_surface = supports_surface_raycast || use_transparency;
+    use_hardware_raycast = (evaluates_surface && uses_hardware_raycast(shading_graph)) ||
+                           (supports_surface_raycast && uses_hardware_raycast(codegen.thickness)) ||
+                           (depth_offset_supported && uses_hardware_raycast(*codegen.depth_offset));
+    if (evaluates_surface || depth_offset_supported) {
+      for (const GPUGraphOutput &function : codegen.material_functions) {
+        use_hardware_raycast |= uses_hardware_raycast(function);
+      }
+    }
+  }
+  info.compilation_constant(gpu::shader::Type::bool_t, "use_hardware_raycast", use_hardware_raycast);
+  if (hardware_raycast_requested &&
+      (probe_capture != MAT_PROBE_NONE || pipeline_type == MAT_PIPE_BAKE_COLOR))
+  {
+    GPU_material_flag_set(gpumat, GPU_MATFLAG_RAYCAST);
+  }
   const bool use_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST) &&
-                           ELEM(pipeline_type,
-                                MAT_PIPE_DEFERRED,
-                                MAT_PIPE_DEFERRED_NPR,
-                                MAT_PIPE_FORWARD,
-                                MAT_PIPE_BAKE_COLOR);
+                           (supports_surface_raycast || pipeline_type == MAT_PIPE_BAKE_COLOR);
   const bool use_hiz_data = (GPU_material_uses_hiz_data(gpumat) || use_raycast ||
                              material_codegen_uses_hiz_data(gpumat, codegen)) &&
                             ELEM(pipeline_type,
@@ -2082,14 +2117,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.compilation_constant(gpu::shader::Type::bool_t, "use_hardware_forward_shadow", true);
     if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO)) {
       info.define("MAT_SHADER_INFO_FORWARD_HARDWARE_SHADOW");
+      if (!GPU_material_has_depth_offset_output(gpumat) && !use_shader_to_rgba &&
+          material_graph_serialized_contains(codegen.surface, "node_shader_info_hardware_shadow("))
+      {
+        info.define("MAT_FORWARD_HWRT_SHADOW_REUSE");
+      }
     }
   }
-  const bool has_depth_offset = GPU_material_has_depth_offset_output(gpumat) &&
-                                material_pipeline_supports_depth_offset(pipeline_type,
-                                                                        geometry_type);
   const bool depth_offset_uses_light_access =
-      has_depth_offset &&
-      material_depth_offset_graph_uses_supported_light_access(gpumat, codegen_->depth_offset);
+      depth_offset_supported && material_graph_uses_glsl_light_access(gpumat, *codegen.depth_offset);
   const bool supports_surface_light_access = geometry_type_has_surface(geometry_type) &&
                                              ELEM(pipeline_type,
                                                   MAT_PIPE_DEFERRED,
@@ -3206,9 +3242,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                        dependencies_set,
                                        emitted_generated_sources,
                                        generated_source_block);
-    if (has_depth_offset && codegen.depth_offset.has_value() &&
-        !material_depth_offset_graph_has_unsupported_dependencies(gpumat, *codegen.depth_offset))
-    {
+    if (depth_offset_supported) {
       material_graph_dependencies_append(gpumat,
                                          codegen.depth_offset->dependencies,
                                          dependencies_set,
@@ -3336,12 +3370,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       BLI_assert(codegen.depth_offset.has_value());
       frag_gen << "float nodetree_depth_offset(KernelGlobals kg, _ref(ShadingData, sd))\n";
       frag_gen << "{\n";
-      if (material_depth_offset_graph_has_unsupported_dependencies(gpumat, *codegen.depth_offset))
-      {
-        frag_gen << "return 0.0f;\n";
+      if (depth_offset_supported) {
+        frag_gen << codegen.depth_offset->serialized_or_default("return 0.0f;\n");
       }
       else {
-        frag_gen << codegen.depth_offset->serialized_or_default("return 0.0f;\n");
+        frag_gen << "return 0.0f;\n";
       }
       frag_gen << "}\n\n";
     }

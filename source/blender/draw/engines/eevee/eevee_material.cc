@@ -671,11 +671,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       matpass.sub_pass = &shader_sub->sub(GPU_material_get_name(matpass.gpumat));
       matpass.sub_pass->material_set(
           *inst_.manager, matpass.gpumat, true, inst_.anisotropic_filtering);
-      if (pipeline_type == MAT_PIPE_FORWARD &&
-          GPU_shader_get_tlas_binding(GPU_material_get_shader(matpass.gpumat), "forward_shadow_as") >= 0)
-      {
-        inst_.raytracing.bind_forward_shadows(*matpass.sub_pass);
-      }
+      inst_.raytracing.bind_hardware_material_scene(*matpass.sub_pass, matpass.gpumat);
       if (outline_shell && pipeline_type != MAT_PIPE_SHADOW &&
           (blender_mat->outline_shell_flag & MA_OUTLINE_SHELL_SELF_OCCLUSION))
       {
@@ -946,6 +942,11 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
             ob->refraction_layer_index,
             hide_from_raycast,
             true);
+        mat.prepass.sub_pass->material_set(
+            *inst_.manager, mat.prepass.gpumat, true, inst_.anisotropic_filtering);
+        inst_.raytracing.bind_hardware_material_scene(*mat.prepass.sub_pass, mat.prepass.gpumat);
+        mat.prepass.sub_pass->push_constant(
+            "surface_cull_mode", int(surface_draw_state_body(*blender_mat).cull_method));
       }
       if (hide_on_camera || !color_write) {
         /* Only null the sub_pass.

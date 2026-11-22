@@ -104,9 +104,6 @@ void RayTraceModule::init()
     inst_.info_append_i18n("Raytracing is not supported with panoramic camera yet");
   }
   hardware_shadow_ready_ = false;
-  if (!use_hardware_scene()) {
-    free_hardware_rt_scene_cache();
-  }
   if (!use_hardware_shadows()) {
     hardware_shadow_visibility_tx_.free();
   }
@@ -124,6 +121,9 @@ void RayTraceModule::init()
 
 void RayTraceModule::sync()
 {
+  hardware_material_passes_.clear();
+  has_hardware_raycast_ = false;
+  has_forward_hardware_shadows_ = false;
   Texture &depth_tx = inst_.render_buffers.depth_tx;
 
   if (!use_raytracing_) {
@@ -503,6 +503,9 @@ void RayTraceModule::resolve_shadow_backend()
 {
   hardware_shadows_require_native_ = false;
   if (!use_hardware_shadows()) {
+    if (!use_hardware_scene()) {
+      free_hardware_rt_scene_cache();
+    }
     return;
   }
 
@@ -524,7 +527,7 @@ void RayTraceModule::resolve_shadow_backend()
   }
 
   hardware_shadows_require_native_ = true;
-  if (active_hardware_feature_mask() == 0) {
+  if (!use_hardware_scene()) {
     free_hardware_rt_scene_cache();
   }
   if (inst_.is_viewport()) {

@@ -210,6 +210,7 @@ struct KernelGlobals {
 
   [[resource_table]] [[condition(use_raycast)]] eevee::Raycast raycast;
   [[resource_table]] [[condition(use_raycast)]] draw::ViewCulling view_culling;
+  [[resource_table]] [[condition(use_hardware_raycast)]] eevee::HardwareRaycast hardware_raycast;
 
   [[resource_table]] [[condition(use_forward_lighting)]] eevee::LightEvalIterator light_eval;
   [[resource_table]] [[condition(use_forward_lighting || use_lightprobe_data)]]
@@ -1081,6 +1082,45 @@ void raycast_eval(KernelGlobals &kg,
         self_hit = self_only || (hit_id == self_id);
       }
     }
+  }
+}
+
+void hardware_raycast_eval(KernelGlobals &kg,
+                           const ShadingData &sd,
+                           float3 position,
+                           float3 direction,
+                           float max_distance,
+                           bool self_only,
+                           bool &is_hit,
+                           bool &self_hit,
+                           float &hit_distance,
+                           float3 &hit_position,
+                           float3 &hit_normal)
+{
+  if (kg.pipe.use_hardware_raycast) [[static_branch]] {
+    kg.hardware_raycast.trace(position,
+                              direction,
+                              max_distance,
+                              kg.resource_id_get(sd),
+                              self_only,
+                              is_hit,
+                              self_hit,
+                              hit_distance,
+                              hit_position,
+                              hit_normal);
+  }
+  else {
+    raycast_eval(kg,
+                 sd,
+                 position,
+                 direction,
+                 max_distance,
+                 self_only,
+                 is_hit,
+                 self_hit,
+                 hit_distance,
+                 hit_position,
+                 hit_normal);
   }
 }
 

@@ -171832,3 +171832,24 @@ msgstr "预览过滤图／灯光节点"
 
 msgid "Preview a Filter Graph image or light shader output; click again to cycle sockets"
 msgstr "预览过滤图图像或灯光着色器输出；再次单击以切换插口"
+
+msgid "Tracing Mode"
+msgstr "追踪模式"
+
+msgid "Scene Geometry (Hardware)"
+msgstr "场景几何（硬件）"
+
+msgid "Geometry source used by EEVEE Raycast"
+msgstr "EEVEE 光线投射查询的几何来源"
+
+msgid "Trace against visible depth in EEVEE"
+msgstr "使用 EEVEE 的可见深度进行追踪"
+
+msgid "Trace against scene geometry in EEVEE, including surfaces outside the view"
+msgstr "查询 EEVEE 的场景几何，包括视图外的表面"
+
+msgid "Using Screen Space"
+msgstr "正在使用屏幕空间"
+
+msgid "Hardware Raycast requires a Vulkan device supporting ray queries"
+msgstr "硬件光线投射需要支持光线查询的 Vulkan 设备"

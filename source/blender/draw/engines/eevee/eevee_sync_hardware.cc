@@ -20,6 +20,7 @@
 #include "BLI_string_utf8.hh"
 #include "DNA_image_types.h"
 #include "DNA_node_types.h"
+#include "GPU_capabilities.hh"
 #include "GPU_context.hh"
 #include "GPU_vertex_format.hh"
 #include "NOD_shader.h"
@@ -959,21 +960,28 @@ void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_ha
                                                        int material_slot,
                                                        bool is_sculpt)
 {
-  if (!inst_.raytracing.use_hardware_scene() || geom == nullptr) {
+  if (geom == nullptr || !GPU_viewport_hardware_raytracing_support() || inst_.is_baking()) {
     return;
   }
-  has_untraced_shadow_caster_ |= material.shadow.sub_pass != nullptr &&
-                                 material.tessellation_level > 0;
   const bool casts_shadow = material.shadow.sub_pass != nullptr;
-  /* A shadows-only scene must honor EEVEE's object and material caster exclusions. */
-  if (!inst_.raytracing.use_hardware_tracing_method() && !casts_shadow) {
+  const bool hardware_shadow_caster = inst_.raytracing.use_hardware_shadows() && casts_shadow;
+  const bool use_proxy = inst_.raytracing.use_hardware_tracing() || hardware_shadow_caster;
+  has_untraced_shadow_caster_ |= hardware_shadow_caster && material.tessellation_level > 0;
+  GPUMaterial *gpumat = material.shading.gpumat;
+  blender::Material *blender_mat = gpumat ? GPU_material_get_material(gpumat) : nullptr;
+  const bool visible_raycast = material.has_surface &&
+                               !(ob_handle.object->visibility_flag & OB_HIDE_RAYCAST) &&
+                               (!blender_mat ||
+                                blender_mat->surface_render_method != MA_SURFACE_METHOD_FORWARD);
+  if (!use_proxy && !visible_raycast) {
     return;
   }
 
-  GPUMaterial *gpumat = material.shading.gpumat;
-  blender::Material *blender_mat = gpumat ? GPU_material_get_material(gpumat) : nullptr;
-  HardwareMaterialProxy proxy = material_hardware_proxy(blender_mat, ob_handle.object);
-  if (casts_shadow && proxy.dynamic_shadow_alpha &&
+  HardwareMaterialProxy proxy;
+  if (use_proxy) {
+    proxy = material_hardware_proxy(blender_mat, ob_handle.object);
+  }
+  if (hardware_shadow_caster && proxy.dynamic_shadow_alpha &&
       (is_sculpt || proxy.shadow_alpha.image == nullptr))
   {
     inst_.pipelines.require_native_shadows("a shadow caster uses an unsupported Alpha node graph");
@@ -1009,10 +1017,16 @@ void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_ha
       shadow_tint_material = nullptr;
     }
   }
-  const uint64_t material_hash = gpu_material_runtime_hash(gpumat);
-  const float3 emission = material_emissive_radiance(blender_mat);
-  const float3 albedo = hardware_raytrace_diffuse_albedo(blender_mat, proxy);
-  if (std::getenv("BLENDER_EEVEE_HWRT_CACHE_LOG") != nullptr) {
+  const uint64_t material_hash = use_proxy ? gpu_material_runtime_hash(gpumat) : 0;
+  const float3 emission = use_proxy ? material_emissive_radiance(blender_mat) : float3(0.0f);
+  const float3 albedo = use_proxy ? hardware_raytrace_diffuse_albedo(blender_mat, proxy) :
+                                   float3(0.8f);
+  const blender::Material *raycast_alpha_material =
+      visible_raycast && !is_sculpt && gpumat && proxy.shadow_alpha.image == nullptr &&
+              GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) ?
+          blender_mat :
+          nullptr;
+  if (use_proxy && std::getenv("BLENDER_EEVEE_HWRT_CACHE_LOG") != nullptr) {
     std::fprintf(stderr, "EEVEE HWRT hit_material name=%s ready=%d tint_dynamic=%d tint_ready=%d\n",
                  blender_mat ? blender_mat->id.name + 2 : "<default>",
                  material.hit_eval.gpumat != nullptr &&
@@ -1052,12 +1066,61 @@ void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_ha
          ob_handle.object->shadow_terminator_geometry_offset,
          shadow_blocker_set,
          casts_shadow,
+         visible_raycast,
+         false,
          proxy.shadow_alpha,
-         shadow_tint_material});
+         shadow_tint_material,
+         raycast_alpha_material});
+  }
+}
+
+void SyncModule::finalize_hardware_raytrace_scene_entries()
+{
+  if (!inst_.raytracing.use_hardware_scene()) {
+    hardware_raytrace_scene_entries_.clear();
+    return;
+  }
+  const bool transport = inst_.raytracing.use_hardware_tracing();
+  const bool shadows = inst_.raytracing.use_hardware_shadows();
+  const bool raycast = inst_.raytracing.use_hardware_raycast();
+  if (!transport) {
+    hardware_raytrace_scene_entries_.remove_if([&](const HardwareRaytraceSceneEntry &entry) {
+      return !(shadows && entry.casts_shadow) && !(raycast && entry.visible_raycast);
+    });
+  }
+
+  Map<const blender::Material *, GPUHardwareRaytraceShadowAlpha> raycast_alpha;
+  for (HardwareRaytraceSceneEntry &entry : hardware_raytrace_scene_entries_) {
+    if (raycast && entry.raycast_alpha_material && entry.raycast_alpha_material->nodetree) {
+      entry.shadow_alpha = raycast_alpha.lookup_or_add_cb(entry.raycast_alpha_material, [&]() {
+        const bNodeTree &tree = *entry.raycast_alpha_material->nodetree;
+        tree.ensure_topology_cache();
+        tree.ensure_interface_cache();
+        ResourceScope scope;
+        bke::ComputeContextCache compute_context_cache;
+        nodes::SocketValueInferencer inferencer{tree, scope, compute_context_cache};
+        for (const bNode *node : linked_shader_nodes_from_surface(entry.raycast_alpha_material,
+                                                                inferencer))
+        {
+          if (node->type_legacy == SH_NODE_BSDF_PRINCIPLED) {
+            return shadow_alpha_texture(bke::node_find_socket(*node, SOCK_IN, "Alpha"_ustr));
+          }
+        }
+        return GPUHardwareRaytraceShadowAlpha{};
+      });
+      entry.raycast_only_alpha = entry.shadow_alpha.image != nullptr;
+    }
+    entry.raycast_alpha_material = nullptr;
     hardware_raytrace_scene_signature_ = get_default_hash(
-        hardware_raytrace_scene_signature_, ObjectKey(ob_handle, instance).hash(),
-        geom, material_slot, is_sculpt,
-        get_default_hash(material_hash, casts_shadow, shadow_blocker_set));
+        hardware_raytrace_scene_signature_,
+        entry.object_key.hash(),
+        entry.batch,
+        entry.material_slot,
+        entry.is_sculpt,
+        get_default_hash(entry.material_runtime_hash,
+                         entry.casts_shadow,
+                         entry.visible_raycast,
+                         entry.shadow_blocker_set));
   }
 }
 

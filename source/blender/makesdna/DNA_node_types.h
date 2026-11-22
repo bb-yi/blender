@@ -4022,6 +4022,11 @@ struct NodeGeometryRaycast {
   int8_t data_type = 0;
 };
 
+enum NodeShaderRaycastMode : int16_t {
+  SHD_RAYCAST_SCREEN = 0,
+  SHD_RAYCAST_HARDWARE = 1,
+};
+
 struct NodeShaderRaycast {
   DNA_DEFINE_CXX_METHODS(NodeShaderRaycast)
 

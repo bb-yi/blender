@@ -338,6 +338,7 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
                                stencil.read_mask);
     marker_pass->state_stencil_test(stencil.test);
     marker_pass->material_set(*inst.manager, gpumat, true);
+    inst.raytracing.bind_hardware_material_scene(*marker_pass, gpumat);
     marker_pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
   }
 
@@ -372,6 +373,7 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
   pass->state_stencil(write_mask, reference, stencil.read_mask);
   pass->state_stencil_test(stencil.test);
   pass->material_set(*inst.manager, gpumat, true);
+  inst.raytracing.bind_hardware_material_scene(*pass, gpumat);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
 
   return pass;
@@ -1316,7 +1318,6 @@ void ForwardLayer::sync()
   camera_forward_ = inst_.camera.forward();
   has_opaque_ = false;
   has_transparent_ = false;
-  has_hardware_shadow_receivers_ = false;
   has_no_depth_ = false;
   has_colored_transparency_ = false;
   has_holdout_ = false;
@@ -1505,7 +1506,7 @@ PassMain::Sub *ForwardLayer::stencil_opaque_add(blender::Material *blender_mat,
 static bool forward_material_has_hardware_shadow(GPUMaterial *material)
 {
   gpu::Shader *shader = GPU_material_get_shader(material);
-  return shader && GPU_shader_get_tlas_binding(shader, "forward_shadow_as") >= 0;
+  return shader && GPU_shader_get_uniform(shader, "forward_shadow_options") >= 0;
 }
 
 PassMain::Sub *ForwardLayer::material_opaque_add(const Object *ob,
@@ -1521,7 +1522,6 @@ PassMain::Sub *ForwardLayer::material_opaque_add(const Object *ob,
   has_opaque_ = true;
   inst_.lights.tag_front_light_shader_needed();
   PassMain::Sub *sub_pass = &pass->sub(GPU_material_get_name(gpumat));
-  has_hardware_shadow_receivers_ |= forward_material_has_hardware_shadow(gpumat);
   bind_npr_shadow_surface(*sub_pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
   return sub_pass;
 }
@@ -1549,7 +1549,6 @@ PassMain::Sub *ForwardLayer::material_no_depth_add(const Object *ob,
   bind_npr_shadow_surface(*pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
-  has_hardware_shadow_receivers_ |= forward_material_has_hardware_shadow(gpumat);
   pass->push_constant("surface_cull_mode", int(draw_state.cull_method));
   if (!draw_state.is_outline_shell) {
     material_stencil_test_only_state_set(*pass, blender_mat);
@@ -1611,7 +1610,6 @@ void ForwardLayer::transparent_add(const Object *ob,
 
   has_transparent_ = true;
   const bool hardware_shadows = forward_material_has_hardware_shadow(gpumat);
-  has_hardware_shadow_receivers_ |= hardware_shadows;
   if ((forward_material_needs_lighting(gpumat) && !hardware_shadows) ||
       material_needs_native_shadows(gpumat, *blender_mat, true, hardware_shadows))
   {
@@ -1640,8 +1638,8 @@ void ForwardLayer::transparent_add(const Object *ob,
     PassMain::Sub *pass = &transparent_ps_.sub(GPU_material_get_name(gpumat), sorting_value);
     pass->state_set(prepass_state);
     pass->material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
+    inst_.raytracing.bind_hardware_material_scene(*pass, gpumat);
     if (hardware_shadows) {
-      inst_.raytracing.bind_forward_shadows(*pass);
       pass->push_constant("forward_shadow_options", float4(0));
     }
     pass->push_constant("surface_cull_mode", int(draw_state.cull_method));
@@ -1660,9 +1658,7 @@ void ForwardLayer::transparent_add(const Object *ob,
     PassMain::Sub *pass = &transparent_ps_.sub(GPU_material_get_name(gpumat), sorting_value);
     pass->state_set(material_state);
     pass->material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
-    if (hardware_shadows) {
-      inst_.raytracing.bind_forward_shadows(*pass);
-    }
+    inst_.raytracing.bind_hardware_material_scene(*pass, gpumat);
     pass->push_constant("surface_cull_mode", int(draw_state.cull_method));
     if (!draw_state.is_outline_shell) {
       material_stencil_test_only_state_set(*pass, blender_mat);
@@ -1697,6 +1693,7 @@ PassMain::Sub *ForwardLayer::outline_occlusion_add(blender::Material *blender_ma
   PassMain::Sub *pass = &outline_occlusion_ps_.sub(GPU_material_get_name(gpumat));
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
+  inst_.raytracing.bind_hardware_material_scene(*pass, gpumat);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
   material_stencil_test_only_state_set(*pass, blender_mat);
   return pass;
@@ -1789,10 +1786,6 @@ void ForwardLayer::render(View &view,
   {
     return;
   }
-  if (has_hardware_shadow_receivers_) {
-    inst_.raytracing.prepare_forward_shadows();
-  }
-
   inst_.hiz_buffer.swap_layer();
 
   const bool needs_transparency_resolve = has_opaque_ || has_no_depth_ || has_transparent_ ||
@@ -2902,6 +2895,7 @@ PassMain::Sub *DeferredPipeline::stencil_surface_add(blender::Material *material
   pass.bind_resources(inst_.lights);
   pass.bind_resources(inst_.render_textures);
   pass.material_set(*inst_.manager, gpumat, true);
+  inst_.raytracing.bind_hardware_material_scene(pass, gpumat);
   pass.push_constant("surface_cull_mode", int(material_surface_cull_method(material)));
   pass.push_constant("stencil_writer_reference", int(material->stencil_reference & 15));
   return &pass;
@@ -2951,6 +2945,7 @@ PassMain::Sub *DeferredPipeline::early_stencil_add(blender::Material *material,
   pass.bind_resources(inst_.render_textures);
   pass.bind_resources(inst_.lights);
   pass.material_set(*inst_.manager, gpumat, true);
+  inst_.raytracing.bind_hardware_material_scene(pass, gpumat);
   pass.push_constant("surface_cull_mode", int(material_surface_cull_method(material)));
   return &pass;
 }

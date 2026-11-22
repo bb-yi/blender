@@ -82,8 +82,11 @@ struct HardwareRaytraceSceneEntry {
   float shadow_terminator_geometry_offset = 0.1f;
   uint32_t shadow_blocker_set = 0;
   bool casts_shadow = true;
+  bool visible_raycast = false;
+  bool raycast_only_alpha = false;
   GPUHardwareRaytraceShadowAlpha shadow_alpha;
   GPUMaterial *shadow_tint_material = nullptr;
+  const blender::Material *raycast_alpha_material = nullptr;
 };
 
 class SyncModule {
@@ -105,6 +108,7 @@ class SyncModule {
   ~SyncModule() {};
 
   void begin_sync();
+  void finalize_hardware_raytrace_scene_entries();
   uint64_t hardware_raytrace_sync_generation() const
   {
     return hardware_raytrace_sync_generation_;

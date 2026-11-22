@@ -553,7 +553,14 @@ template<bool is_transmission> struct EvalCtx {
       const ForwardHardwareShadow &hwrt = srt.forward_shadow;
       use_hardware_shadow = hwrt.forward_shadow_options.x > 0.0f && light.hwrt_shadow_layer >= 0;
       if (use_hardware_shadow) {
+#if defined(MAT_FORWARD_HWRT_SHADOW_REUSE) && defined(GPU_FRAGMENT_SHADER)
+        shadow = forward_shadow_cache_lookup(light.hwrt_shadow_layer);
+        if (shadow.x < 0.0f) {
+          shadow = hwrt.evaluate(light, lv, is_directional, P, Ng);
+        }
+#else
         shadow = hwrt.evaluate(light, lv, is_directional, P, Ng);
+#endif
       }
     }
     if (srt.constants.use_hardware_shadow_data) [[static_branch]] {

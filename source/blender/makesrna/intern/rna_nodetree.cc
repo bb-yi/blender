@@ -9018,12 +9018,29 @@ static void rna_def_sh_raycast_sample_attribute_items(BlenderRNA *brna)
 
 static void def_sh_raycast(BlenderRNA *brna, StructRNA *srna)
 {
+  static const EnumPropertyItem tracing_modes[] = {
+      {SHD_RAYCAST_SCREEN, "SCREEN", 0, "Screen Space", "Trace against visible depth in EEVEE"},
+      {SHD_RAYCAST_HARDWARE,
+       "HARDWARE",
+       0,
+       "Scene Geometry (Hardware)",
+       "Trace against scene geometry in EEVEE, including surfaces outside the view"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
   rna_def_sh_raycast_sample_attribute_item(brna);
   rna_def_sh_raycast_sample_attribute_items(brna);
 
   PropertyRNA *prop = RNA_def_property(srna, "only_local", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "custom1", 0);
   RNA_def_property_ui_text(prop, "Only Local", "Only raycast against the object itself");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "tracing_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom2");
+  RNA_def_property_enum_items(prop, tracing_modes);
+  RNA_def_property_enum_default(prop, SHD_RAYCAST_SCREEN);
+  RNA_def_property_ui_text(prop, "Tracing Mode", "Geometry source used by EEVEE Raycast");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 
   RNA_def_struct_sdna_from(srna, "NodeShaderRaycast", "storage");

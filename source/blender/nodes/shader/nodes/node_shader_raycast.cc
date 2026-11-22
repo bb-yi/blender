@@ -19,6 +19,7 @@
 #include "NOD_socket_items_ui.hh"
 
 #include "BLO_read_write.hh"
+#include "GPU_capabilities.hh"
 
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
@@ -88,6 +89,7 @@ static void node_shader_init(bNodeTree * /*ntree*/, bNode *node)
   node->storage = data;
 
   node->custom1 = 0; /* Only Local */
+  node->custom2 = SHD_RAYCAST_SCREEN;
 }
 
 static bool node_insert_link(bke::NodeInsertLinkParams &params)
@@ -96,8 +98,12 @@ static bool node_insert_link(bke::NodeInsertLinkParams &params)
       params.ntree, params.node, params.node, params.link);
 }
 
-static void node_shader_buts(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
+static void node_shader_buts(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 {
+  const Scene *scene = C ? CTX_data_scene(C) : nullptr;
+  if (scene && StringRef(scene->r.engine) == RE_engine_id_BLENDER_EEVEE) {
+    layout.prop(ptr, "tracing_mode", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  }
   layout.prop(ptr, "only_local", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
@@ -106,7 +112,7 @@ static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
   bNodeTree &tree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
   bNode &node = *static_cast<bNode *>(ptr->data);
 
-  layout.prop(ptr, "only_local", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  node_shader_buts(layout, C, ptr);
 
   if (ui::Layout *panel = layout.panel(
           C, "sample_attribute_items", false, IFACE_("Sample Attributes")))
@@ -125,8 +131,18 @@ static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 static void node_extra_info(NodeExtraInfoParams &parameters)
 {
   const Scene *scene = CTX_data_scene(&parameters.C);
-  if (StringRef(scene->r.engine) != RE_engine_id_BLENDER_EEVEE) {
+  if (!scene || StringRef(scene->r.engine) != RE_engine_id_BLENDER_EEVEE) {
     return;
+  }
+
+  if (parameters.node.custom2 == SHD_RAYCAST_HARDWARE &&
+      !GPU_viewport_hardware_raytracing_support())
+  {
+    NodeExtraInfoRow row;
+    row.text = RPT_("Using Screen Space");
+    row.tooltip = TIP_("Hardware Raycast requires a Vulkan device supporting ray queries");
+    row.icon = ICON_INFO;
+    parameters.rows.append(std::move(row));
   }
 
   const NodeShaderRaycast &storage = node_storage(parameters.node);
@@ -178,8 +194,15 @@ static int node_shader_gpu(GPUMaterial *mat,
                            GPUNodeStack *in,
                            GPUNodeStack *out)
 {
-  GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
-  GPU_material_hiz_data_set(mat);
+  const bool hardware = node->custom2 == SHD_RAYCAST_HARDWARE &&
+                        GPU_viewport_hardware_raytracing_support();
+  if (hardware) {
+    GPU_material_flag_set(mat, GPU_MATFLAG_HARDWARE_RAYCAST);
+  }
+  else {
+    GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
+    GPU_material_hiz_data_set(mat);
+  }
 
   if (!in[0].link) {
     GPU_link(mat, "world_position_get", GPU_shading_data(), &in[0].link);
@@ -211,6 +234,21 @@ static int node_shader_gpu(GPUMaterial *mat,
   }
 
   const bool only_local = node->custom1;
+  if (hardware) {
+    return GPU_link(mat,
+                    "node_raycast_hardware",
+                    GPU_node_get_input_link(*node, in, "Position"),
+                    GPU_node_get_input_link(*node, in, "Direction"),
+                    GPU_node_get_input_link(*node, in, "Length"),
+                    GPU_constant(&only_local),
+                    GPU_kernel_globals(),
+                    GPU_shading_data(),
+                    &GPU_node_get_output(*node, out, "Is Hit").link,
+                    &GPU_node_get_output(*node, out, "Self Hit").link,
+                    &GPU_node_get_output(*node, out, "Hit Distance").link,
+                    &GPU_node_get_output(*node, out, "Hit Position").link,
+                    &GPU_node_get_output(*node, out, "Hit Normal").link);
+  }
   const char *shader_name = only_local ? "node_raycast_only_local" : "node_raycast";
 
   /* Explicitly link all sockets that are expected by the shader.

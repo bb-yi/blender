@@ -703,7 +703,9 @@ void Instance::end_sync()
     ScopedTelemetrySample phase(telemetry, TelemetryStageId::SyncEndVolumeShadowsLights);
     render_textures.end_sync();
     volume.end_sync();  /* Needs to be before shadows. */
+    raytracing.resolve_hardware_material_demand();
     raytracing.resolve_shadow_backend();
+    sync.finalize_hardware_raytrace_scene_entries();
     shadows.end_sync(); /* Needs to be before lights. */
     lights.end_sync();
   }
@@ -870,6 +872,7 @@ void Instance::render_sample()
     film.update_sample_table();
     uniform_data.push_update();
 
+    raytracing.prepare_hardware_material_scene();
     planar_probes.invalidate();
     capture_view.render_world();
     lookdev.rotate_world();

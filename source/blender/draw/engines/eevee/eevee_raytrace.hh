@@ -291,6 +291,14 @@ class RayTraceModule {
   uint32_t hardware_feature_mask_ = 0;
   uint32_t current_hardware_feature_mask_ = 0;
   bool hardware_shadows_require_native_ = false;
+  struct HardwareMaterialPass {
+    const PassMain::Sub *pass;
+    bool uses_raycast;
+    bool uses_shadows;
+  };
+  Vector<HardwareMaterialPass> hardware_material_passes_;
+  bool has_hardware_raycast_ = false;
+  bool has_forward_hardware_shadows_ = false;
   GPUHardwareRaytraceScene *hardware_forward_empty_scene_ = nullptr;
   GPUHardwareRaytraceForwardBindings hardware_forward_bindings_;
   float4 hardware_forward_shadow_options_ = float4(0);
@@ -421,10 +429,13 @@ class RayTraceModule {
   {
     return use_hardware_tracing_method() && active_hardware_feature_mask() != 0;
   }
-  /** Both hardware transport and screen tracing with hardware shadows need scene geometry. */
   bool use_hardware_scene() const
   {
-    return use_raytracing_ && hardware_feature_mask_ != 0;
+    return has_hardware_raycast_ || (use_raytracing_ && active_hardware_feature_mask() != 0);
+  }
+  bool use_hardware_raycast() const
+  {
+    return has_hardware_raycast_;
   }
   uint32_t active_hardware_feature_mask() const
   {
@@ -437,8 +448,9 @@ class RayTraceModule {
     return use_raytracing_ && (active_hardware_feature_mask() & RAYTRACE_EEVEE_HARDWARE_SHADOWS) != 0;
   }
   void resolve_shadow_backend();
-  void bind_forward_shadows(PassMain::Sub &pass);
-  void prepare_forward_shadows();
+  void bind_hardware_material_scene(PassMain::Sub &pass, GPUMaterial *material);
+  void resolve_hardware_material_demand();
+  void prepare_hardware_material_scene();
   const bool *hardware_shadow_ready() const
   {
     return &hardware_shadow_ready_;

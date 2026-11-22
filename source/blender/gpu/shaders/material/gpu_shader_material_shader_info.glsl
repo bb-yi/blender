@@ -268,6 +268,13 @@ void shader_info_eval_light(KernelGlobals &kg, ShadingData &sd, uint l_idx,
       float4 result = eevee::forward_shadow_classified(
           light_eval, light, lv, is_directional, position, geometry_normal, receiver_id);
       if (result.x >= 0.0f) {
+#  if defined(MAT_FORWARD_HWRT_SHADOW_REUSE)
+        const float3 origin = eevee::forward_shadow_origin(position, geometry_normal);
+        const float3 lighting_origin = eevee::forward_shadow_origin(sd.forward_lighting_P, sd.Ng);
+        if (all(equal(origin, lighting_origin))) {
+          eevee::forward_shadow_cache_store(light.hwrt_shadow_layer, result.rgb);
+        }
+#  endif
         hardware_shadow = shader_info_decode_hardware_shadow(result);
       }
     }

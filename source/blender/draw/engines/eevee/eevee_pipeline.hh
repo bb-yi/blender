@@ -320,7 +320,6 @@ class ForwardLayer {
 
   bool has_opaque_ = false;
   bool has_transparent_ = false;
-  bool has_hardware_shadow_receivers_ = false;
   bool has_no_depth_ = false;
   bool has_colored_transparency_ = false;
   bool has_holdout_ = false;

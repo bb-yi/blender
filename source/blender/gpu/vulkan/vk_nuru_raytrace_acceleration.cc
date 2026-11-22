@@ -147,6 +147,8 @@ struct GPUHardwareRaytraceScene {
   std::optional<gpu::VKStorageBuffer> forward_uvs;
   std::optional<gpu::VKStorageBuffer> forward_alpha;
   std::optional<gpu::VKStorageBuffer> forward_proxies;
+  std::optional<gpu::VKStorageBuffer> forward_normal_ranges;
+  std::optional<gpu::VKStorageBuffer> forward_smooth_normals;
   nuru_vk::RTBuffer triangle_normal_buffer;
   nuru_vk::RTBuffer triangle_smooth_normal_buffer;
   nuru_vk::RTBuffer triangle_local_position_buffer;
@@ -822,6 +824,7 @@ struct SceneGeometryBuild {
   Span<float2> triangle_shadow_uvs;
   bool has_shadow_alpha = false;
   bool casts_shadow = true;
+  bool visible_raycast = false;
   bool blas_uses_draw_buffers = false;
   bool blas_refitted = false;
 
@@ -856,6 +859,7 @@ static SceneGeometryBuild scene_geometry_for_entry(const GPUHardwareRaytraceScen
   geometry.proxy_flags = entry.proxy_flags;
   geometry.has_shadow_alpha = entry.shadow_alpha.image != nullptr;
   geometry.casts_shadow = entry.casts_shadow;
+  geometry.visible_raycast = entry.visible_raycast;
   return geometry;
 }
 
@@ -1630,8 +1634,8 @@ static bool build_top_level_acceleration_structure(
       /* Vulkan instance custom index is 24-bit; user ids are Eevee geometry indices and stay far
        * below that limit. Mask defensively to avoid touching the visibility mask bits. */
       instance.instanceCustomIndex = entry.user_id & 0x00FFFFFFu;
-      /* Reserve bit zero for shadow rays. Transport and receiver recovery see every instance. */
-      instance.mask = entry.casts_shadow ? 0xFFu : 0xFEu;
+      instance.mask = 0xFCu | (entry.casts_shadow ? 0x01u : 0u) |
+                      (entry.visible_raycast ? 0x02u : 0u);
       instance.instanceShaderBindingTableRecordOffset = 0;
       instance.flags = entry.has_shadow_alpha ? VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR :
                                                 VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
@@ -1905,6 +1909,7 @@ static bool build_shadow_caster_buffers(Span<GPUHardwareRaytraceSceneEntry> entr
   std::vector<float2> uvs(1, float2(0));
   std::vector<uint32_t> alpha_data(1, 0);
   std::vector<std::pair<Image *, uint32_t>> image_offsets;
+  r_has_alpha = false;
   for (const int i : entries.index_range()) {
     const GPUHardwareRaytraceSceneEntry &entry = entries[i];
     const GPUHardwareRaytraceShadowAlpha &alpha = entry.shadow_alpha;
@@ -1930,7 +1935,8 @@ static bool build_shadow_caster_buffers(Span<GPUHardwareRaytraceSceneEntry> entr
     caster.uv_x = alpha.uv_x;
     caster.uv_x.w = float(alpha.extension);
     caster.uv_y = alpha.uv_y;
-    caster.uv_y.w = alpha.nearest ? 1.0f : 0.0f;
+    caster.uv_y.w = float((alpha.nearest ? 1u : 0u) | (entry.raycast_only_alpha ? 2u : 0u));
+    r_has_alpha |= entry.casts_shadow && !entry.raycast_only_alpha;
     uvs.insert(uvs.end(), geometry[i].triangle_shadow_uvs.begin(),
                geometry[i].triangle_shadow_uvs.end());
   }
@@ -1943,7 +1949,6 @@ static bool build_shadow_caster_buffers(Span<GPUHardwareRaytraceSceneEntry> entr
   memcpy(r_casters.mapped, casters.data(), casters.size() * sizeof(ShadowCasterRecord));
   memcpy(r_uv.mapped, uvs.data(), uvs.size() * sizeof(float2));
   memcpy(r_alpha.mapped, alpha_data.data(), alpha_data.size() * sizeof(uint32_t));
-  r_has_alpha = !image_offsets.empty();
   return rt_buffer_flush(r_casters) && rt_buffer_flush(r_uv) && rt_buffer_flush(r_alpha);
 }
 
@@ -3408,7 +3413,13 @@ GPUHardwareRaytraceScene *raytrace_empty_scene()
                                    scene->shadow_caster_buffer,
                                    scene->shadow_uv_buffer,
                                    scene->shadow_alpha_buffer,
-                                   scene->has_shadow_alpha))
+                                   scene->has_shadow_alpha) ||
+      !build_triangle_normal_buffers({},
+                                     scene->triangle_normal_buffer,
+                                     scene->triangle_smooth_normal_buffer,
+                                     scene->triangle_normal_ranges) ||
+      !build_triangle_normal_range_buffer(scene->triangle_normal_ranges,
+                                          scene->triangle_normal_range_buffer))
   {
     delete scene;
     return nullptr;
@@ -3425,6 +3436,10 @@ bool raytrace_forward_bindings(GPUHardwareRaytraceScene &scene,
     scene.forward_uvs.emplace(scene.shadow_uv_buffer.size, GPU_USAGE_STATIC, "HWRT UVs");
     scene.forward_alpha.emplace(scene.shadow_alpha_buffer.size, GPU_USAGE_STATIC, "HWRT Alpha");
     scene.forward_proxies.emplace(scene.material_proxy_buffer.size, GPU_USAGE_STATIC, "HWRT Proxies");
+    scene.forward_normal_ranges.emplace(
+        scene.triangle_normal_range_buffer.size, GPU_USAGE_STATIC, "HWRT Normal Ranges");
+    scene.forward_smooth_normals.emplace(
+        scene.triangle_smooth_normal_buffer.size, GPU_USAGE_STATIC, "HWRT Corner Normals");
   }
   scene.forward_tlas->borrow(scene.top_level_acceleration_structure,
                              track_for_graphics(scene.top_level_buffer),
@@ -3436,8 +3451,13 @@ bool raytrace_forward_bindings(GPUHardwareRaytraceScene &scene,
                               scene.shadow_alpha_buffer.size);
   scene.forward_proxies->borrow(track_for_graphics(scene.material_proxy_buffer),
                                 scene.material_proxy_buffer.size);
+  scene.forward_normal_ranges->borrow(track_for_graphics(scene.triangle_normal_range_buffer),
+                                      scene.triangle_normal_range_buffer.size);
+  scene.forward_smooth_normals->borrow(track_for_graphics(scene.triangle_smooth_normal_buffer),
+                                       scene.triangle_smooth_normal_buffer.size);
   r_bindings = {&*scene.forward_tlas, &*scene.forward_casters, &*scene.forward_uvs,
-                &*scene.forward_alpha, &*scene.forward_proxies, scene.has_shadow_alpha};
+                &*scene.forward_alpha, &*scene.forward_proxies, &*scene.forward_normal_ranges,
+                &*scene.forward_smooth_normals, scene.has_shadow_alpha};
   return true;
 }
 

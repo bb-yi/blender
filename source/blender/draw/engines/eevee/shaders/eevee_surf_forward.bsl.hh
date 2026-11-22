@@ -109,6 +109,10 @@ void surf_forward_impl([[resource_table]] KernelGlobals &kg,
   const uint resource_id = id.resource_id<1>();
   const ViewMatrices view = views.get(0);
 
+#if defined(MAT_FORWARD_HWRT_SHADOW_REUSE) && defined(GPU_FRAGMENT_SHADER)
+  forward_shadow_cache_valid = 0u;
+#endif
+
   float noise = util_tx.fetch(frag_co.xy, UTIL_BLUE_NOISE_LAYER).r;
   float closure_rand = fract(noise + sampling.rng_1D_get(SAMPLING_CLOSURE));
 

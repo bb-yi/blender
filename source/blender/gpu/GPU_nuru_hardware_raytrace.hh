@@ -85,6 +85,8 @@ struct GPUHardwareRaytraceSceneEntry {
   uint32_t shadow_caster_id = 0xFFFFFFFFu;
   uint32_t shadow_blocker_set = 0;
   bool casts_shadow = true;
+  bool visible_raycast = false;
+  bool raycast_only_alpha = false;
   GPUHardwareRaytraceShadowAlpha shadow_alpha;
 };
 
@@ -94,6 +96,8 @@ struct GPUHardwareRaytraceForwardBindings {
   gpu::StorageBuf *uvs = nullptr;
   gpu::StorageBuf *alpha = nullptr;
   gpu::StorageBuf *proxies = nullptr;
+  gpu::StorageBuf *normal_ranges = nullptr;
+  gpu::StorageBuf *smooth_normals = nullptr;
   bool has_alpha = false;
 };
 
