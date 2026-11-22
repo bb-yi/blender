@@ -77,7 +77,12 @@ struct ForwardHardwareShadow {
     return mix(mix(a, b, weight.x), mix(c, d, weight.x), weight.y);
   }
 
-  float3 visibility_ray(float3 origin, float3 L, float tmax, uint2 membership) const
+  /* RGB is visibility. Alpha is the occlusion attributed to the receiver's own instance. */
+  float4 visibility_ray(float3 origin,
+                        float3 L,
+                        float tmax,
+                        uint2 membership,
+                        uint receiver_id) const
   {
     const bool linked = any(notEqual(membership, uint2(0xFFFFFFFFu)));
     const bool textured = this->forward_shadow_options.y > 0.0f;
@@ -86,6 +91,8 @@ struct ForwardHardwareShadow {
                        textured ? gpu_RayFlagsNone : gpu_RayFlagsOpaque;
     float tmin = 0.0f;
     float3 visibility = float3(1.0f);
+    float self_shadow = 0.0f;
+    const float3 luma_weights = float3(0.2126f, 0.7152f, 0.0722f);
     bool transmitted = false;
     for (int layer = 0; layer < 8 && tmin < tmax; layer++) {
       rayQuery query;
@@ -144,39 +151,53 @@ struct ForwardHardwareShadow {
           transmitted = true;
         }
       }
-      visibility *= T;
+      const float3 next_visibility = visibility * T;
+      if (receiver_id != 0xFFFFFFFFu && caster.identity.x == receiver_id) {
+        self_shadow += dot(visibility - next_visibility, luma_weights);
+      }
+      visibility = next_visibility;
       if (max(visibility.r, max(visibility.g, visibility.b)) < 1.0e-3f) {
         break;
       }
     }
-    const float luma = dot(visibility, float3(0.2126f, 0.7152f, 0.0722f));
-    return mix(float3(luma), visibility, this->forward_shadow_options.w);
+    const float luma = dot(visibility, luma_weights);
+    return float4(mix(float3(luma), visibility, this->forward_shadow_options.w), self_shadow);
   }
 
-  float3 evaluate(LightData light, LightVector lv, bool is_directional, float3 P, float3 Ng) const
+  float4 evaluate_classified(LightData light,
+                             LightVector lv,
+                             bool is_directional,
+                             float3 P,
+                             float3 Ng,
+                             uint receiver_id) const
   {
     const float position_scale = max(max(abs(P.x), abs(P.y)), abs(P.z));
     const float bias = max(position_scale * 1.25e-6f, 1.0e-7f);
     const float3 origin = P + Ng * bias;
     const float radius = max(light.hwrt_shadow_size, 0.0f);
     const int samples = radius > 1.0e-6f ? this->forward_shadow_samples : 1;
-    float3 visibility = float3(0.0f);
+    float4 visibility = float4(0.0f);
     for (int i = 0; i < samples; i++) {
       const float angle = float(i) * 2.39996323f;
       const float r = sqrt((float(i) + 0.5f) / float(samples)) * (samples > 1 ? radius : 0.0f);
       const float3 offset = r * (cos(angle) * light.x_axis() + sin(angle) * light.y_axis());
       if (is_directional) {
         visibility += this->visibility_ray(origin, normalize(lv.L + offset), 1.0e5f,
-                                            light.shadow_set_membership);
+                                            light.shadow_set_membership, receiver_id);
       }
       else {
         const float3 delta = light.position() + offset - origin;
         const float distance = length(delta);
         visibility += this->visibility_ray(origin, delta / max(distance, 1.0e-6f), distance,
-                                            light.shadow_set_membership);
+                                            light.shadow_set_membership, receiver_id);
       }
     }
     return visibility / float(samples);
+  }
+
+  float3 evaluate(LightData light, LightVector lv, bool is_directional, float3 P, float3 Ng) const
+  {
+    return this->evaluate_classified(light, lv, is_directional, P, Ng, 0xFFFFFFFFu).rgb;
   }
 };
 

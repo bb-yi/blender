@@ -56,6 +56,9 @@ struct GPUHardwareRaytraceShadowAlpha {
   bool operator==(const GPUHardwareRaytraceShadowAlpha &) const = default;
 };
 
+/** The primary shadow pass can replay the GPU material at this transmissive hit. */
+static constexpr uint32_t GPU_HARDWARE_RAYTRACE_DYNAMIC_SHADOW_TINT = 1u << 8;
+
 struct GPUHardwareRaytraceSceneEntry {
   gpu::Batch *batch = nullptr;
   float4x4 object_to_world = float4x4::identity();
@@ -184,6 +187,16 @@ struct GPUHardwareRaytraceTraceParams {
   float4 sampling_rand = float4(0.0f);
 };
 
+struct GPUHardwareRaytraceShadowTintCapture {
+  gpu::StorageBuf *hits = nullptr;
+  gpu::StorageBuf *rays = nullptr;
+  gpu::StorageBuf *count = nullptr;
+  int2 offset = int2(0);
+  int2 extent = int2(0);
+  int samples = 1;
+  int hit_capacity = 0;
+};
+
 struct GPUHardwareRaytraceDirectionalShadowParams {
   gpu::Texture *receiver_id_tx = nullptr;
   uint2 shadow_link_mask = uint2(0xFFFFFFFFu);
@@ -213,6 +226,7 @@ struct GPUHardwareRaytraceDirectionalShadowParams {
   /** Nuru: blend opaque HWRT shadows (0) with transparent transmission shadows (1). */
   float shadow_transparency = 1.0f;
   float4 sampling_rand = float4(0.0f);
+  GPUHardwareRaytraceShadowTintCapture tint;
 };
 
 struct GPUHardwareRaytraceDirectionalHitShadowParams {
@@ -268,6 +282,7 @@ struct GPUHardwareRaytraceLocalShadowParams {
   float photons_intensity = 1.0f;
   float shadow_transparency = 1.0f;
   float4 sampling_rand = float4(0.0f);
+  GPUHardwareRaytraceShadowTintCapture tint;
 };
 
 struct GPUHardwareRaytraceLocalHitShadowParams {

@@ -54,6 +54,24 @@ struct LightEvalData {
   [[resource_table, condition(use_light_shader_surfel_eval)]] LightShaderSurfelEvalData light_shader_surfel_data;
 };
 
+float4 forward_shadow_classified([[resource_table]] const LightEvalData &srt,
+                                  LightData light,
+                                  LightVector lv,
+                                  bool is_directional,
+                                  float3 position,
+                                  float3 geometry_normal,
+                                  uint receiver_id)
+{
+  if (srt.constants.use_hardware_forward_shadow) [[static_branch]] {
+    const ForwardHardwareShadow &hwrt = srt.forward_shadow;
+    if (hwrt.forward_shadow_options.x > 0.0f && light.hwrt_shadow_layer >= 0) {
+      return hwrt.evaluate_classified(
+          light, lv, is_directional, position, geometry_normal, receiver_id);
+    }
+  }
+  return float4(-1.0f);
+}
+
 namespace light {
 
 template<bool is_transmission> struct ClosureStack {};

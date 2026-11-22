@@ -5,7 +5,11 @@
 #include "infos/eevee_surf_hit_eval_infos.hh"
 
 FRAGMENT_SHADER_CREATE_INFO(eevee_geom_hit_mesh)
+#ifdef MAT_SHADOW_TINT
+FRAGMENT_SHADER_CREATE_INFO(eevee_surf_shadow_tint)
+#else
 FRAGMENT_SHADER_CREATE_INFO(eevee_surf_hit_eval)
+#endif
 
 #define HWRT_HIT_IDENTITY_PRINCIPLED_LAYERED_SCENE_FINAL 32u
 #define HWRT_HIT_IDENTITY_METALLIC_BSDF_SCENE_FINAL 64u
@@ -129,6 +133,84 @@ ClosureUndetermined hit_eval_closure_select_type(const ShadingData &sd,
   return best;
 }
 
+/* Both transport and shadow replay use the draw buffers and the same generated node graph. */
+void hit_eval_surface_at_triangle(KernelGlobals kg,
+                                  ShadingData &sd,
+                                  uint primitive_id,
+                                  float2 barycentric_coords,
+                                  float3 object_P,
+                                  float3 traced_world_P,
+                                  bool interpolate_position)
+{
+  const float3 barycentric = hit_eval_barycentric_expand(barycentric_coords);
+  const uint primitive_index = primitive_id * 3u + uint(max(hit_eval_index_start, 0));
+  const uint i0 = gpu_index_load(primitive_index + 0u);
+  const uint i1 = gpu_index_load(primitive_index + 1u);
+  const uint i2 = gpu_index_load(primitive_index + 2u);
+
+  const float3 pos0 = hit_attr_fetch_float3(pos, gpu_attr_0, gpu_attr_0_meta, i0);
+  const float3 pos1 = hit_attr_fetch_float3(pos, gpu_attr_0, gpu_attr_0_meta, i1);
+  const float3 pos2 = hit_attr_fetch_float3(pos, gpu_attr_0, gpu_attr_0_meta, i2);
+  const float3 nor0 = hit_attr_fetch_float3(nor, gpu_attr_1, gpu_attr_1_meta, i0);
+  const float3 nor1 = hit_attr_fetch_float3(nor, gpu_attr_1, gpu_attr_1_meta, i1);
+  const float3 nor2 = hit_attr_fetch_float3(nor, gpu_attr_1, gpu_attr_1_meta, i2);
+
+  const ObjectMatrices obj = kg.object_matrices_get(sd);
+  const ObjectInfos ob_infos = kg.object_infos_get(sd);
+  if (interpolate_position) {
+    object_P = pos0 * barycentric.x + pos1 * barycentric.y + pos2 * barycentric.z;
+  }
+  float3 world_P = obj.point_object_to_world(object_P);
+  if (!interpolate_position && dot(traced_world_P, traced_world_P) > 1.0e-10f) {
+    world_P = traced_world_P;
+    object_P = obj.point_world_to_object(traced_world_P);
+  }
+  float3 object_N = nor0 * barycentric.x + nor1 * barycentric.y + nor2 * barycentric.z;
+  if (!(dot(object_N, object_N) > 1.0e-10f)) {
+    object_N = cross(pos1 - pos0, pos2 - pos0);
+  }
+  hit_eval_init_globals(sd, world_P, safe_normalize(obj.normal_object_to_world(object_N)));
+#ifdef MAT_SHADOW_TINT
+  sd.ray_type = RAY_TYPE_SHADOW;
+#endif
+  HitMeshVertex domain = HitMeshVertex{
+      MeshVertex{object_P, to_float3x3(obj.model_inverse),
+                 object_P * ob_infos.orco_mul + ob_infos.orco_add},
+      int3(i0, i1, i2),
+      barycentric};
+  attrib_load(domain);
+  fragment_displacement(kg, sd);
+  nodetree_surface(kg, sd, 0.5f);
+}
+
+#ifdef MAT_SHADOW_TINT
+void hit_eval_shadow_tint(KernelGlobals kg, ShadingData &sd, uint hit_index)
+{
+  const HardwareShadowTintHit hit = shadow_tint_hits[hit_index];
+  /* The direct order includes rays that were fully blocked later in the walk. */
+  if (shadow_tint_rays[hit.identity.z >> 2u].range.x == 0u) {
+    return;
+  }
+  sd.resource_id_raw = shadow_tint_entries[hit.identity.x].y;
+  sd.front_facing = (hit.identity.z & SHADOW_TINT_HIT_FRONT_FACING) != 0u;
+  sd.hit_view_origin = hit.origin.xyz;
+  hit_eval_surface_at_triangle(
+      kg, sd, hit.identity.y, hit.barycentric.xy, float3(0.0f), float3(0.0f), true);
+
+  ClosureUndetermined transmission = hit_eval_closure_select_type(
+      sd, CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID);
+  if (transmission.type == CLOSURE_NONE_ID) {
+    transmission = hit_eval_closure_select_type(sd, CLOSURE_BSDF_TRANSLUCENT_ID);
+  }
+  float3 tint = (transmission.type == CLOSURE_NONE_ID) ?
+                    float3(sd.transmittance) : transmission.color;
+  if (any(isnan(tint)) || any(isinf(tint))) {
+    return;
+  }
+  shadow_tint_hits[hit_index].transmission = float4(
+      hit.barycentric.z + hit.barycentric.w * saturate(tint), 0.0f);
+}
+#else
 ClosureUndetermined hit_eval_closure_select_specular(const ShadingData &sd,
                                                      ClosureType traced_specular_type,
                                                      ClosureUndetermined secondary_cl)
@@ -246,55 +328,17 @@ void hit_eval_material(KernelGlobals kg, ShadingData &sd, int2 texel, ThicknessM
   const float4 traced_barycentric = texelFetch(hit_barycentric_tx, texel, 0);
   const float2 barycentric_coords = traced_barycentric.xy;
   const float reflection_layer_coverage = saturate(traced_barycentric.w);
-  const float3 barycentric = hit_eval_barycentric_expand(barycentric_coords);
   const ClosureType traced_specular_type = ClosureType(
       uint(max(imageLoadFast(hit_material_img, texel).z, 0.0f) + 0.5f));
 
   float2 packed_direction = float2(imageLoadFast(hit_material_img, texel).w,
                                    imageLoadFast(hit_normal_img, texel).w);
 
-  /* Hit primitive ids are relative to the per-material index subrange the BLAS was built from. */
-  const uint primitive_index = primitive_id * 3u + uint(max(hit_eval_index_start, 0));
-  const uint i0 = gpu_index_load(primitive_index + 0u);
-  const uint i1 = gpu_index_load(primitive_index + 1u);
-  const uint i2 = gpu_index_load(primitive_index + 2u);
-
-  const float3 pos0 = hit_attr_fetch_float3(pos, gpu_attr_0, gpu_attr_0_meta, i0);
-  const float3 pos1 = hit_attr_fetch_float3(pos, gpu_attr_0, gpu_attr_0_meta, i1);
-  const float3 pos2 = hit_attr_fetch_float3(pos, gpu_attr_0, gpu_attr_0_meta, i2);
-
-  const float3 nor0 = hit_attr_fetch_float3(nor, gpu_attr_1, gpu_attr_1_meta, i0);
-  const float3 nor1 = hit_attr_fetch_float3(nor, gpu_attr_1, gpu_attr_1_meta, i1);
-  const float3 nor2 = hit_attr_fetch_float3(nor, gpu_attr_1, gpu_attr_1_meta, i2);
-
-  const ObjectMatrices obj = kg.object_matrices_get(sd);
   const ObjectInfos ob_infos = kg.object_infos_get(sd);
-  float3 object_P = imageLoadFast(hit_position_img, texel).xyz;
-  float3 world_P = obj.point_object_to_world(object_P);
+  const float3 object_P = imageLoadFast(hit_position_img, texel).xyz;
   const float3 traced_world_P = texelFetch(hit_world_position_tx, texel, 0).xyz;
-  if (dot(traced_world_P, traced_world_P) > 1.0e-10f) {
-    world_P = traced_world_P;
-    object_P = obj.point_world_to_object(traced_world_P);
-  }
-  float3 object_N = nor0 * barycentric.x + nor1 * barycentric.y + nor2 * barycentric.z;
-  if (!(dot(object_N, object_N) > 1.0e-10f)) {
-    object_N = cross(pos1 - pos0, pos2 - pos0);
-  }
-
-  const float3 world_N = safe_normalize(obj.normal_object_to_world(object_N));
-  /* Keep the replayed material on the same side of the surface that the hardware trace hit.
-   * Re-deriving this from the replay normal can diverge on subdivided geometry and make glass hits
-   * shade as if they crossed to the opposite side, which shows up as a grey fallback in
-   * reflections. */
-  hit_eval_init_globals(sd, world_P, world_N);
-  HitMeshVertex domain = HitMeshVertex{
-      MeshVertex{object_P, to_float3x3(obj.model_inverse),
-                 object_P * ob_infos.orco_mul + ob_infos.orco_add},
-      int3(i0, i1, i2), barycentric};
-  attrib_load(domain);
-  fragment_displacement(kg, sd);
-  const float closure_rand = 0.5f;
-  nodetree_surface(kg, sd, closure_rand);
+  hit_eval_surface_at_triangle(
+      kg, sd, primitive_id, barycentric_coords, object_P, traced_world_P, false);
 
   Thickness thickness = Thickness::from(nodetree_thickness(kg, sd), mode);
   eObjectInfoFlag ob_flag = ob_infos.flag;
@@ -461,3 +505,4 @@ void hit_eval_material(KernelGlobals kg, ShadingData &sd, int2 texel, ThicknessM
   radiance.a = uintBitsToFloat(packed_uv);
   imageStoreFast(ray_radiance_img, texel, radiance);
 }
+#endif

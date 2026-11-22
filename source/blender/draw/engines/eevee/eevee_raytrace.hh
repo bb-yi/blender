@@ -390,6 +390,25 @@ class RayTraceModule {
   int hit_eval_resource_ids_count_ = 0;
   draw::Framebuffer hit_eval_fb_ = {"Trace.HitEvalFB"};
 
+  draw::StorageArrayBuffer<HardwareShadowTintHit, 1024, true> shadow_tint_hits_ = {
+      "shadow_tint_hits"};
+  draw::StorageArrayBuffer<HardwareShadowTintRay, 1024, true> shadow_tint_rays_ = {
+      "shadow_tint_rays"};
+  draw::StorageArrayBuffer<uint, 4, true> shadow_tint_count_ = {"shadow_tint_count"};
+  draw::StorageArrayBuffer<uint, 1024, true> shadow_tint_order_ = {"shadow_tint_order"};
+  draw::StorageArrayBuffer<uint2, 64> shadow_tint_entries_ = {"shadow_tint_entries"};
+  draw::PassSimple shadow_tint_count_ps_ = {"Shadow.TintCount"};
+  draw::PassSimple shadow_tint_compact_ps_ = {"Shadow.TintCompact"};
+  draw::PassSimple shadow_tint_resolve_ps_ = {"Shadow.TintResolve"};
+
+  void evaluate_shadow_tint(View &view,
+                            gpu::Texture *depth,
+                            int2 full_extent,
+                            Span<int> entries,
+                            const GPUHardwareRaytraceShadowTintCapture &capture,
+                            int layer,
+                            float saturation);
+
  public:
   RayTraceModule(Instance &inst, RayTraceData &data) : inst_(inst), data_(data) {};
   ~RayTraceModule();

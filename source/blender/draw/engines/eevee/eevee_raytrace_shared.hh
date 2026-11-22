@@ -225,9 +225,32 @@ struct [[host_shared]] HardwareHitEvalRecord {
   packed_float3 view_origin;
   float _pad1;
 };
-#ifndef GPU_SHADER
-BLI_STATIC_ASSERT_ALIGN(HardwareHitEvalRecord, 16)
-#endif
+
+enum [[host_shared]] eHardwareShadowHitFlag : uint32_t {
+  SHADOW_TINT_HIT_FRONT_FACING = 1u << 0,
+  SHADOW_TINT_HIT_SELF = 1u << 1,
+};
+
+/** Dynamic transmissive hit and the constant attenuation since the preceding dynamic hit. */
+struct [[host_shared]] HardwareShadowTintHit {
+  /* Scene entry, primitive, ray index with flags in the low two bits, next hit (one-based). */
+  uint4 identity;
+  /* Barycentric coordinates, uncovered fraction, transmission scale. */
+  float4 barycentric;
+  /* World-space ray origin. */
+  float4 origin;
+  float4 before_visibility;
+  float4 before_self;
+  float4 transmission;
+};
+
+struct [[host_shared]] HardwareShadowTintRay {
+  /* First hit (one-based), effective sample count. */
+  uint4 range;
+  float4 tail_visibility;
+  float4 tail_self;
+  float4 fallback;
+};
 
 struct [[host_shared]] AOData {
   float2 pixel_size;

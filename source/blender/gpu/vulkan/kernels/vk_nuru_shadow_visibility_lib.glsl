@@ -23,6 +23,115 @@ layout(scalar, binding = 12) readonly buffer ShadowAlphaImages {
 const uint SHADOW_UNKNOWN_RECEIVER_ID = 0xFFFFFFFFu;
 const vec3 SHADOW_LUMA = vec3(0.2126f, 0.7152f, 0.0722f);
 
+#ifdef NURU_SHADOW_TINT
+/* Layout matches eevee_raytrace_shared.hh. Only the tint kernel variants use this storage. */
+struct ShadowTintHit {
+  uvec4 identity;
+  vec4 barycentric;
+  vec4 origin;
+  vec4 before_visibility;
+  vec4 before_self;
+  vec4 transmission;
+};
+struct ShadowTintRay {
+  uvec4 range;
+  vec4 tail_visibility;
+  vec4 tail_self;
+  vec4 fallback;
+};
+layout(scalar, binding = 13) buffer ShadowTintHits { ShadowTintHit tint_hits[]; };
+layout(scalar, binding = 14) buffer ShadowTintRays { ShadowTintRay tint_rays[]; };
+layout(scalar, binding = 15) buffer ShadowTintCount { uint tint_count; };
+
+uint tint_pixel_index;
+uint tint_ray_index;
+uint tint_first;
+uint tint_last;
+int tint_sample_count;
+bool tint_overflow;
+vec3 tint_segment_visibility;
+vec3 tint_segment_self;
+
+bool shadow_tint_pixel_init(ivec2 local, out uvec2 texel)
+{
+  if (any(greaterThanEqual(local, uniforms.tint_rect.zw))) {
+    return false;
+  }
+  texel = uvec2(uniforms.tint_rect.xy + local);
+  tint_pixel_index = uint(local.y * uniforms.tint_rect.z + local.x) *
+                     uint(uniforms.tint_params.x);
+  /* Early exits for the background or invalid rays must leave no live records. */
+  for (int i = 0; i < uniforms.tint_params.x; i++) {
+    tint_rays[tint_pixel_index + uint(i)].range.x = 0u;
+  }
+  return true;
+}
+
+void shadow_tint_ray_init(int sample_index, int sample_count)
+{
+  tint_ray_index = tint_pixel_index + uint(sample_index);
+  tint_sample_count = sample_count;
+  tint_first = 0u;
+  tint_last = 0u;
+  tint_overflow = false;
+  tint_segment_visibility = vec3(1.0f);
+  tint_segment_self = vec3(0.0f);
+}
+
+void shadow_tint_record(uint entry,
+                        uint primitive,
+                        vec2 barycentric,
+                        bool front_facing,
+                        vec3 origin,
+                        vec3 fallback,
+                        float uncovered,
+                        float tint_weight,
+                        bool self)
+{
+  uint index = atomicAdd(tint_count, 1u);
+  const uint capacity = min(uint(uniforms.tint_params.y), uint(tint_hits.length()));
+  if (index >= capacity) {
+    atomicMin(tint_count, capacity);
+    tint_overflow = true;
+    return;
+  }
+  uint flags = front_facing ? 1u : 0u;
+  flags |= self ? 2u : 0u;
+  ShadowTintHit hit;
+  hit.identity = uvec4(entry, primitive, (tint_ray_index << 2u) | flags, 0u);
+  hit.barycentric = vec4(barycentric, uncovered, tint_weight);
+  hit.origin = vec4(origin, 0.0f);
+  hit.before_visibility = vec4(tint_segment_visibility, 0.0f);
+  hit.before_self = vec4(tint_segment_self, 0.0f);
+  hit.transmission = vec4(fallback, 0.0f);
+  tint_hits[index] = hit;
+  if (tint_last != 0u) {
+    tint_hits[tint_last - 1u].identity.w = index + 1u;
+  }
+  else {
+    tint_first = index + 1u;
+  }
+  tint_last = index + 1u;
+  tint_segment_visibility = vec3(1.0f);
+  tint_segment_self = vec3(0.0f);
+}
+
+void shadow_tint_finish(vec4 fallback, vec3 upper_visibility, uint receiver_id)
+{
+  if (tint_first == 0u || tint_overflow ||
+      (receiver_id == SHADOW_UNKNOWN_RECEIVER_ID && all(equal(upper_visibility, vec3(0.0f)))))
+  {
+    return;
+  }
+  ShadowTintRay ray;
+  ray.range = uvec4(tint_first, uint(tint_sample_count), 0u, 0u);
+  ray.tail_visibility = vec4(tint_segment_visibility, 0.0f);
+  ray.tail_self = vec4(tint_segment_self, 0.0f);
+  ray.fallback = fallback;
+  tint_rays[tint_ray_index] = ray;
+}
+#endif
+
 bool shadow_link_is_restricted()
 {
   return any(notEqual(uniforms.shadow_options.xy, uvec2(0xFFFFFFFFu)));
@@ -30,8 +139,12 @@ bool shadow_link_is_restricted()
 
 bool shadow_needs_hit_details()
 {
+#ifdef NURU_SHADOW_TINT
+  return true;
+#else
   return uniforms.shadow_options.z != 0u || uniforms.shadow_options.w != 0u ||
          shadow_link_is_restricted();
+#endif
 }
 
 bool shadow_link_includes(uint user_id)
@@ -104,6 +217,9 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
   const uint flags = restricted ? gl_RayFlagsNoOpaqueEXT :
                      textured ? gl_RayFlagsNoneEXT : gl_RayFlagsOpaqueEXT;
   vec3 visibility = vec3(1.0f);
+#ifdef NURU_SHADOW_TINT
+  vec3 upper_visibility = vec3(1.0f);
+#endif
   float self_shadow = 0.0f;
   bool transmitted = false;
 
@@ -140,13 +256,17 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
 
     const ShadowCasterRecord caster = shadow_casters[user_id];
     vec3 transmission = vec3(0.0f);
+    float uncovered = 0.0f;
+    float tint_weight = 0.0f;
     if (caster.identity.z != 0u) {
       const float opacity = shadow_alpha_sample(
           caster,
           uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true)),
           rayQueryGetIntersectionBarycentricsEXT(query, true));
-      transmission = vec3(1.0f - opacity);
+      uncovered = 1.0f - opacity;
+      transmission = vec3(uncovered);
       if (transparency > 0.0f && uint(proxy.ior_closure_type.z) == HWRT_CLOSURE_REFRACTION) {
+        tint_weight = opacity * transparency;
         transmission += opacity * clamp(proxy.transmission_color_roughness.rgb, 0.0f, 1.0f) *
                         transparency;
       }
@@ -154,6 +274,7 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
     else if (transparency > 0.0f) {
       if (uint(proxy.ior_closure_type.z) == HWRT_CLOSURE_REFRACTION) {
         transmission = clamp(proxy.transmission_color_roughness.rgb, 0.0f, 1.0f);
+        tint_weight = transmitted ? 1.0f : transparency;
       }
       else if ((proxy_flags & HWRT_PROXY_FLAG_ALPHA_BLEND_TRANSPARENT) != 0u) {
         transmission = vec3(clamp(1.0f - proxy.packed_thickness.y, 0.0f, 1.0f));
@@ -164,13 +285,41 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
       }
     }
     const vec3 next_visibility = visibility * transmission;
-    if (receiver_id != SHADOW_UNKNOWN_RECEIVER_ID && caster.identity.x == receiver_id) {
+    const bool self = receiver_id != SHADOW_UNKNOWN_RECEIVER_ID &&
+                      caster.identity.x == receiver_id;
+    if (self) {
       self_shadow += dot(visibility - next_visibility, SHADOW_LUMA);
     }
     visibility = next_visibility;
+#ifdef NURU_SHADOW_TINT
+    const bool dynamic_tint = tint_weight > 0.0f && (proxy_flags & (1u << 8u)) != 0u;
+    if (dynamic_tint) {
+      shadow_tint_record(user_id,
+                         uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true)),
+                         rayQueryGetIntersectionBarycentricsEXT(query, true),
+                         rayQueryGetIntersectionFrontFaceEXT(query, true),
+                         origin, transmission, uncovered, tint_weight, self);
+      /* Dynamic color could be brighter than its proxy, so use a conservative early-out. */
+      upper_visibility *= uncovered + tint_weight;
+    }
+    else {
+      vec3 next_segment = tint_segment_visibility * transmission;
+      if (self) {
+        tint_segment_self += tint_segment_visibility - next_segment;
+      }
+      tint_segment_visibility = next_segment;
+      upper_visibility *= transmission;
+    }
+    if (max(upper_visibility.r, max(upper_visibility.g, upper_visibility.b)) < 1.0e-3f) {
+#else
     if (max(visibility.r, max(visibility.g, visibility.b)) < 1.0e-3f) {
+#endif
       break;
     }
   }
-  return vec4(hardware_shadow_apply_color_transmission(visibility, color_intensity), self_shadow);
+  vec4 result = vec4(hardware_shadow_apply_color_transmission(visibility, color_intensity), self_shadow);
+#ifdef NURU_SHADOW_TINT
+  shadow_tint_finish(result, upper_visibility, receiver_id);
+#endif
+  return result;
 }

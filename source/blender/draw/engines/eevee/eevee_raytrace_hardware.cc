@@ -9,6 +9,7 @@
  */
 
 #include "BLI_time.hh"
+#include "GPU_capabilities.hh"
 #include "GPU_context.hh"
 #include "GPU_debug.hh"
 #include "GPU_index_buffer.hh"
@@ -21,6 +22,10 @@
 #include <cstdlib>
 
 namespace blender::eevee {
+
+BLI_STATIC_ASSERT_ALIGN(HardwareHitEvalRecord, 16)
+static_assert(sizeof(HardwareShadowTintHit) == 96);
+static_assert(sizeof(HardwareShadowTintRay) == 64);
 
 static bool hardware_perf_logging_enabled()
 {
@@ -714,6 +719,122 @@ void RayTraceModule::merge_specular_result(RayTraceBuffer &rt_buffer,
   inst_.manager->submit(pass, render_view);
 }
 
+void RayTraceModule::evaluate_shadow_tint(
+    View &view,
+    gpu::Texture *depth,
+    int2 full_extent,
+    Span<int> entries,
+    const GPUHardwareRaytraceShadowTintCapture &capture,
+    int layer,
+    float saturation)
+{
+  /* The traversal submitted an external Vulkan command buffer. The shared queue orders it
+   * before these render-graph consumers, which read its compactable hit list. */
+  GPU_memory_barrier(GPU_BARRIER_SHADER_STORAGE | GPU_BARRIER_SHADER_IMAGE_ACCESS);
+  hit_eval_count_buf_.resize(entries.size());
+  hit_eval_offset_buf_.resize(entries.size());
+  hit_eval_cursor_buf_.resize(entries.size());
+  hit_eval_indirect_buf_.resize(entries.size());
+
+  const bool direct_order = entries.size() == 1;
+  auto bind_hits = [&](PassSimple &pass) {
+    pass.push_constant("shadow_tint_capacity", capture.hit_capacity);
+    pass.bind_ssbo("shadow_tint_count", &shadow_tint_count_);
+    pass.bind_ssbo("shadow_tint_hits", &shadow_tint_hits_);
+    pass.bind_ssbo("shadow_tint_rays", &shadow_tint_rays_);
+    pass.bind_ssbo("shadow_tint_entries", &shadow_tint_entries_);
+  };
+  const int3 dispatch = int3(divide_ceil_u(capture.hit_capacity, 64), 1, 1);
+  if (!direct_order) {
+    hit_eval_count_buf_.clear_to_zero();
+    shadow_tint_count_ps_.init();
+    shadow_tint_count_ps_.shader_set(inst_.shaders.static_shader_get(RAY_SHADOW_TINT_COUNT));
+    bind_hits(shadow_tint_count_ps_);
+    shadow_tint_count_ps_.bind_ssbo("hit_eval_count_buf", &hit_eval_count_buf_);
+    shadow_tint_count_ps_.dispatch(dispatch);
+    shadow_tint_count_ps_.barrier(GPU_BARRIER_SHADER_STORAGE);
+    inst_.manager->submit(shadow_tint_count_ps_);
+  }
+
+  hit_eval_prefix_ps_.init();
+  hit_eval_prefix_ps_.shader_set(inst_.shaders.static_shader_get(RAY_HIT_EVAL_PREFIX));
+  hit_eval_prefix_ps_.push_constant("scene_entry_count", int(entries.size()));
+  if (direct_order) {
+    hit_eval_prefix_ps_.bind_ssbo("hit_eval_count_buf", &shadow_tint_count_);
+  }
+  else {
+    hit_eval_prefix_ps_.bind_ssbo("hit_eval_count_buf", &hit_eval_count_buf_);
+  }
+  hit_eval_prefix_ps_.bind_ssbo("hit_eval_offset_buf", &hit_eval_offset_buf_);
+  hit_eval_prefix_ps_.bind_ssbo("hit_eval_cursor_buf", &hit_eval_cursor_buf_);
+  hit_eval_prefix_ps_.bind_ssbo("hit_eval_indirect_draw_buf", &hit_eval_indirect_buf_);
+  hit_eval_prefix_ps_.dispatch(int3(divide_ceil_u(entries.size(), 64), 1, 1));
+  hit_eval_prefix_ps_.barrier(GPU_BARRIER_SHADER_STORAGE | GPU_BARRIER_COMMAND);
+  inst_.manager->submit(hit_eval_prefix_ps_);
+
+  if (!direct_order) {
+    shadow_tint_compact_ps_.init();
+    shadow_tint_compact_ps_.shader_set(inst_.shaders.static_shader_get(RAY_SHADOW_TINT_COMPACT));
+    bind_hits(shadow_tint_compact_ps_);
+    shadow_tint_compact_ps_.bind_ssbo("hit_eval_offset_buf", &hit_eval_offset_buf_);
+    shadow_tint_compact_ps_.bind_ssbo("hit_eval_cursor_buf", &hit_eval_cursor_buf_);
+    shadow_tint_compact_ps_.bind_ssbo("shadow_tint_order", &shadow_tint_order_);
+    shadow_tint_compact_ps_.dispatch(dispatch);
+    shadow_tint_compact_ps_.barrier(GPU_BARRIER_SHADER_STORAGE);
+    inst_.manager->submit(shadow_tint_compact_ps_);
+  }
+  GPU_storagebuf_sync_as_indirect_buffer(hit_eval_indirect_buf_);
+
+  gpu::FrameBuffer *previous_fb = GPU_framebuffer_active_get();
+  hit_eval_fb_.ensure(GPU_ATTACHMENT_TEXTURE(depth));
+  hit_eval_fb_.bind();
+  GPU_framebuffer_viewport_set(hit_eval_fb_, 0, 0, UNPACK2(full_extent));
+  hit_eval_ps_.init();
+  hit_eval_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_ALWAYS);
+  hit_eval_ps_.framebuffer_set(&hit_eval_fb_);
+  for (const int i : entries.index_range()) {
+    const HardwareRaytraceSceneEntry &entry = hardware_rt_scene_entries_cache_[entries[i]];
+    hit_eval_ps_.material_set(
+        *inst_.manager, entry.shadow_tint_material, true, inst_.anisotropic_filtering);
+    hit_eval_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+    hit_eval_ps_.bind_resources(inst_.uniform_data);
+    hit_eval_ps_.bind_resources(inst_.sampling);
+    hit_eval_ps_.bind_ssbo("shadow_tint_hits", &shadow_tint_hits_);
+    hit_eval_ps_.bind_ssbo("shadow_tint_order", &shadow_tint_order_);
+    hit_eval_ps_.bind_ssbo("shadow_tint_entries", &shadow_tint_entries_);
+    hit_eval_ps_.bind_ssbo("shadow_tint_rays", &shadow_tint_rays_);
+    hit_eval_ps_.push_constant("shadow_tint_grid", full_extent);
+    hit_eval_ps_.push_constant("shadow_tint_direct_order", direct_order);
+    hit_eval_ps_.push_constant("hit_eval_index_start",
+                               entry.batch->elem ? int(entry.batch->elem->index_start_get()) : 0);
+    hit_eval_ps_.draw_expand_indirect(entry.batch,
+                                      GPU_PRIM_TRIS,
+                                      1,
+                                      &hit_eval_indirect_buf_,
+                                      uint32_t(sizeof(DrawCommandArray) * i),
+                                      ResourceIDRange(entry.resource_handle).first);
+  }
+  hit_eval_ps_.barrier(GPU_BARRIER_SHADER_STORAGE);
+  inst_.manager->submit(hit_eval_ps_, view);
+  if (previous_fb) {
+    GPU_framebuffer_bind(previous_fb);
+  }
+
+  shadow_tint_resolve_ps_.init();
+  shadow_tint_resolve_ps_.shader_set(inst_.shaders.static_shader_get(RAY_SHADOW_TINT_RESOLVE));
+  shadow_tint_resolve_ps_.push_constant(
+      "shadow_tint_rect", int4(capture.offset, capture.extent));
+  shadow_tint_resolve_ps_.push_constant("shadow_tint_samples", capture.samples);
+  shadow_tint_resolve_ps_.push_constant("shadow_tint_layer", layer);
+  shadow_tint_resolve_ps_.push_constant("shadow_tint_saturation", saturation);
+  shadow_tint_resolve_ps_.bind_ssbo("shadow_tint_hits", &shadow_tint_hits_);
+  shadow_tint_resolve_ps_.bind_ssbo("shadow_tint_rays", &shadow_tint_rays_);
+  shadow_tint_resolve_ps_.bind_image("shadow_tint_visibility", &hardware_shadow_visibility_tx_);
+  shadow_tint_resolve_ps_.dispatch(int3(math::divide_ceil(capture.extent, int2(8)), 1));
+  shadow_tint_resolve_ps_.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+  inst_.manager->submit(shadow_tint_resolve_ps_);
+}
+
 void RayTraceModule::render_hardware_shadows(View &view,
                                              gpu::Texture *depth_tx,
                                              int2 extent,
@@ -761,15 +882,31 @@ void RayTraceModule::render_hardware_shadows(View &view,
   /* The ray-cast prepass can retain another surface's normal at the same pixel. */
   gpu::Texture *prepass_normal = from_prepass && !inst_.pipelines.has_raycast ?
                                      inst_.render_buffers.prepass_normal_tx.gpu_texture() : nullptr;
-  bool success = true;
-  int traced = 0;
-  GPU_debug_group_begin("Hardware RT Shadows");
-  const bool batched = GPU_hardware_raytrace_scene_shadow_batch_begin(scene);
-  for (const int i : IndexRange(lights_len)) {
-    const LightData &light = inst_.lights.sync_light(i);
-    if (light.hwrt_shadow_layer < 0) {
-      continue;
+  Vector<int> tint_entries;
+  int hits_per_ray = 0;
+  if (options.hardware_raytracing_shadow_transparency > 0.0f) {
+    const Span<HardwareRaytraceSceneEntry> entries = hardware_rt_scene_entries_cache_;
+    for (const int i : entries.index_range()) {
+      const HardwareRaytraceSceneEntry &entry = entries[i];
+      if (entry.shadow_tint_material == nullptr || entry.batch == nullptr) {
+        continue;
+      }
+      tint_entries.append(i);
+      /* A straight ray can cross each triangle once, and the shadow walk has eight steps. */
+      const int triangles = entry.batch->elem ? int(entry.batch->elem->index_len_get() / 3u) : 8;
+      hits_per_ray = std::min(8, hits_per_ray + std::min(triangles, 8));
     }
+    if (hits_per_ray > 0) {
+      shadow_tint_entries_.resize(entries.size());
+      for (const int i : tint_entries.index_range()) {
+        int entry_index = tint_entries[i];
+        shadow_tint_entries_[entry_index] = uint2(i, entries[entry_index].resource_handle.index());
+      }
+      shadow_tint_entries_.push_update();
+    }
+  }
+
+  auto trace_light = [&](const LightData &light, const GPUHardwareRaytraceShadowTintCapture &tint) {
     if (is_sun_light(light.type)) {
       GPUHardwareRaytraceDirectionalShadowParams p;
       p.receiver_id_tx = inst_.render_buffers.hwrt_receiver_id_tx;
@@ -794,7 +931,8 @@ void RayTraceModule::render_hardware_shadows(View &view,
       p.use_caustics = false;
       p.photons_intensity = 0.0f;
       p.sampling_rand = sampling_rand;
-      success &= GPU_hardware_raytrace_scene_trace_directional_shadow(scene, p);
+      p.tint = tint;
+      return GPU_hardware_raytrace_scene_trace_directional_shadow(scene, p);
     }
     else {
       GPUHardwareRaytraceLocalShadowParams p;
@@ -830,9 +968,68 @@ void RayTraceModule::render_hardware_shadows(View &view,
       p.use_caustics = false;
       p.photons_intensity = 0.0f;
       p.sampling_rand = sampling_rand;
-      success &= GPU_hardware_raytrace_scene_trace_local_shadow(scene, p);
+      p.tint = tint;
+      return GPU_hardware_raytrace_scene_trace_local_shadow(scene, p);
+    }
+  };
+  bool success = true;
+  int traced = 0;
+  GPU_debug_group_begin("Hardware RT Shadows");
+  const bool batched = hits_per_ray == 0 && GPU_hardware_raytrace_scene_shadow_batch_begin(scene);
+  for (const int i : IndexRange(lights_len)) {
+    const LightData &light = inst_.lights.sync_light(i);
+    if (light.hwrt_shadow_layer < 0) {
+      continue;
     }
     traced++;
+    if (hits_per_ray == 0) {
+      success &= trace_light(light, {});
+      continue;
+    }
+
+    const float radius = is_area_light(light.type) ?
+                             math::reduce_max(light.area.hwrt_shadow_half_size) :
+                             light.hwrt_shadow_size;
+    const int samples = radius > 1.0e-6f ? sample_count : 1;
+    /* Reuse the buffers across lights and tiles. Each tile has capacity for every possible
+     * encounter, so the result is independent of the order in which GPU threads append hits. */
+    const size_t record_bytes = sizeof(HardwareShadowTintHit) + sizeof(uint);
+    const size_t bytes_per_pixel =
+        samples * (sizeof(HardwareShadowTintRay) + hits_per_ray * record_bytes);
+    const size_t budget = std::min<size_t>(128u * 1024u * 1024u, GPU_max_storage_buffer_size());
+    const int tile_pixels = int(std::max<size_t>(budget / bytes_per_pixel, 1));
+    const int tile_width = std::min(extent.x, tile_pixels);
+    const int tile_height = std::min(extent.y, std::max(tile_pixels / tile_width, 1));
+    const int ray_capacity = tile_width * tile_height * samples;
+    const int hit_capacity = ray_capacity * hits_per_ray;
+    shadow_tint_hits_.resize(hit_capacity);
+    shadow_tint_rays_.resize(ray_capacity);
+    shadow_tint_order_.resize(tint_entries.size() > 1 ? hit_capacity : 4);
+    for (int y = 0; y < extent.y; y += tile_height) {
+      for (int x = 0; x < extent.x; x += tile_width) {
+        GPUHardwareRaytraceShadowTintCapture capture;
+        capture.hits = shadow_tint_hits_;
+        capture.rays = shadow_tint_rays_;
+        capture.count = shadow_tint_count_;
+        capture.samples = samples;
+        capture.offset = int2(x, y);
+        capture.extent = math::min(int2(tile_width, tile_height), extent - capture.offset);
+        capture.hit_capacity = capture.extent.x * capture.extent.y * samples * hits_per_ray;
+        shadow_tint_count_.clear_to_zero();
+        GPU_flush();
+        if (!trace_light(light, capture)) {
+          success = false;
+          continue;
+        }
+        evaluate_shadow_tint(view,
+                             depth_tx,
+                             extent,
+                             tint_entries,
+                             capture,
+                             light.hwrt_shadow_layer,
+                             options.hardware_raytracing_shadow_color_intensity);
+      }
+    }
   }
   if (batched) {
     success &= GPU_hardware_raytrace_scene_shadow_batch_end(scene);

@@ -671,6 +671,11 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       matpass.sub_pass = &shader_sub->sub(GPU_material_get_name(matpass.gpumat));
       matpass.sub_pass->material_set(
           *inst_.manager, matpass.gpumat, true, inst_.anisotropic_filtering);
+      if (pipeline_type == MAT_PIPE_FORWARD &&
+          GPU_shader_get_tlas_binding(GPU_material_get_shader(matpass.gpumat), "forward_shadow_as") >= 0)
+      {
+        inst_.raytracing.bind_forward_shadows(*matpass.sub_pass);
+      }
       if (outline_shell && pipeline_type != MAT_PIPE_SHADOW &&
           (blender_mat->outline_shell_flag & MA_OUTLINE_SHELL_SELF_OCCLUSION))
       {

@@ -2113,6 +2113,8 @@ struct HardwareShadowUniforms {
   int4 world_sun_slot_pad;
   float4 sampling_rand;
   uint4 shadow_options;
+  int4 tint_rect;
+  int4 tint_params;
 };
 
 struct HardwareReceiverGIUniforms {
@@ -2134,6 +2136,8 @@ struct HardwareLocalShadowUniforms {
   /* Nuru: caustic-shadow extras. .x = Photons intensity (0..10). Remaining slots reserved. */
   float4 caustic_params;
   uint4 shadow_options;
+  int4 tint_rect;
+  int4 tint_params;
 };
 
 struct HardwareEnvironmentVisibilityUniforms {
@@ -2161,8 +2165,16 @@ enum class NuruKernel : int {
   LOCAL_HIT_SHADOW,
   OIDN_PACK,
   OIDN_UNPACK,
+  DIRECTIONAL_SHADOW_TINT,
+  LOCAL_SHADOW_TINT,
   KERNEL_MAX,
 };
+
+static bool kernel_captures_shadow_tint(const NuruKernel kernel)
+{
+  return kernel == NuruKernel::DIRECTIONAL_SHADOW_TINT ||
+         kernel == NuruKernel::LOCAL_SHADOW_TINT;
+}
 
 enum class BindingKind : uint8_t {
   UBO,
@@ -2195,6 +2207,8 @@ static const char *kernel_name(const NuruKernel kernel)
       return "eevee_hardware_receiver_gi";
     case NuruKernel::DIRECTIONAL_SHADOW:
       return "eevee_hardware_trace_directional_shadow";
+    case NuruKernel::DIRECTIONAL_SHADOW_TINT:
+      return "eevee_hardware_trace_directional_shadow_tint";
     case NuruKernel::DIRECTIONAL_HIT_SHADOW:
       return "eevee_hardware_trace_directional_hit_shadow";
     case NuruKernel::ENVIRONMENT_VISIBILITY:
@@ -2203,6 +2217,8 @@ static const char *kernel_name(const NuruKernel kernel)
       return "eevee_hardware_trace_hit_environment_visibility";
     case NuruKernel::LOCAL_SHADOW:
       return "eevee_hardware_trace_local_shadow";
+    case NuruKernel::LOCAL_SHADOW_TINT:
+      return "eevee_hardware_trace_local_shadow_tint";
     case NuruKernel::LOCAL_HIT_SHADOW:
       return "eevee_hardware_trace_local_hit_shadow";
     case NuruKernel::OIDN_PACK:
@@ -2222,6 +2238,7 @@ static const char *kernel_glsl(const NuruKernel kernel)
     case NuruKernel::RECEIVER_GI:
       return nuru_kernels::receiver_gi_glsl();
     case NuruKernel::DIRECTIONAL_SHADOW:
+    case NuruKernel::DIRECTIONAL_SHADOW_TINT:
       return nuru_kernels::directional_shadow_glsl();
     case NuruKernel::DIRECTIONAL_HIT_SHADOW:
       return nuru_kernels::directional_hit_shadow_glsl();
@@ -2230,6 +2247,7 @@ static const char *kernel_glsl(const NuruKernel kernel)
     case NuruKernel::HIT_ENVIRONMENT_VISIBILITY:
       return nuru_kernels::hit_environment_visibility_glsl();
     case NuruKernel::LOCAL_SHADOW:
+    case NuruKernel::LOCAL_SHADOW_TINT:
       return nuru_kernels::local_shadow_glsl();
     case NuruKernel::LOCAL_HIT_SHADOW:
       return nuru_kernels::local_hit_shadow_glsl();
@@ -2274,6 +2292,7 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       add_range(40 + 5, 33, BK::STORAGE_IMAGE); /* textures 5..37. */
       break;
     case NuruKernel::DIRECTIONAL_SHADOW:
+    case NuruKernel::DIRECTIONAL_SHADOW_TINT:
       specs.push_back({0, BK::UBO});
       specs.push_back({1, BK::ACCELERATION_STRUCTURE});
       add_range(2, 5, BK::SSBO); /* sunlight, proxies, tri normals, smooth, ranges. */
@@ -2305,6 +2324,7 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       specs.push_back({40 + 2, BK::STORAGE_IMAGE});
       break;
     case NuruKernel::LOCAL_SHADOW:
+    case NuruKernel::LOCAL_SHADOW_TINT:
       specs.push_back({0, BK::UBO});
       specs.push_back({1, BK::ACCELERATION_STRUCTURE});
       add_range(2, 4, BK::SSBO);
@@ -2335,6 +2355,9 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       break;
     default:
       break;
+  }
+  if (kernel_captures_shadow_tint(kernel)) {
+    add_range(13, 3, BK::SSBO);
   }
   return specs;
 }
@@ -2476,6 +2499,9 @@ static bool compile_kernel_spirv(const NuruKernel kernel, std::vector<uint32_t> 
 
   shaderc::Compiler compiler;
   shaderc::CompileOptions options;
+  if (kernel_captures_shadow_tint(kernel)) {
+    options.AddMacroDefinition("NURU_SHADOW_TINT", "1");
+  }
   options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_2);
   options.SetOptimizationLevel(shaderc_optimization_level_performance);
 
@@ -4357,6 +4383,21 @@ bool raytrace_scene_shadow_batch_end(GPUHardwareRaytraceScene *scene)
   return submission_end(submission, /*wait=*/false);
 }
 
+static bool bind_shadow_tint_capture(KernelArgs &args,
+                                      const GPUHardwareRaytraceShadowTintCapture &tint)
+{
+  for (const auto &[binding, buffer] : {
+           std::pair{13u, tint.hits}, std::pair{14u, tint.rays}, std::pair{15u, tint.count}})
+  {
+    BufferBinding storage;
+    if (!storage_buffer_binding(storage, binding, buffer)) {
+      return false;
+    }
+    args.ssbos.push_back(storage);
+  }
+  return true;
+}
+
 bool raytrace_scene_trace_directional_shadow(
     GPUHardwareRaytraceScene *scene, const GPUHardwareRaytraceDirectionalShadowParams &params)
 {
@@ -4431,11 +4472,20 @@ bool raytrace_scene_trace_directional_shadow(
   args.images.push_back(sampled_binding(20, params.receiver_id_tx));
   args.images.push_back(storage_binding(40 + 3, params.shadow_visibility_tx, /*arrayed=*/true));
 
-  args.group_count = int3((std::max(params.full_resolution.x, 1) + 7) / 8,
-                          (std::max(params.full_resolution.y, 1) + 7) / 8,
-                          1);
-
-  return dispatch_kernel(scene, NuruKernel::DIRECTIONAL_SHADOW, args, /*allow_batch=*/true);
+  const bool capture_tint = params.tint.hits != nullptr;
+  const int2 extent = capture_tint ? params.tint.extent : params.full_resolution;
+  if (capture_tint) {
+    uniforms.tint_rect = int4(params.tint.offset, params.tint.extent);
+    uniforms.tint_params = int4(params.tint.samples, params.tint.hit_capacity, 0, 0);
+    if (!bind_shadow_tint_capture(args, params.tint)) {
+      return false;
+    }
+  }
+  args.group_count = int3((std::max(extent.x, 1) + 7) / 8,
+                          (std::max(extent.y, 1) + 7) / 8, 1);
+  const NuruKernel kernel = capture_tint ? NuruKernel::DIRECTIONAL_SHADOW_TINT :
+                                          NuruKernel::DIRECTIONAL_SHADOW;
+  return dispatch_kernel(scene, kernel, args, /*allow_batch=*/!capture_tint);
 }
 
 bool raytrace_scene_trace_directional_hit_shadow(
@@ -4678,11 +4728,20 @@ bool raytrace_scene_trace_local_shadow(GPUHardwareRaytraceScene *scene,
   args.images.push_back(sampled_binding(20, params.receiver_id_tx));
   args.images.push_back(storage_binding(40 + 3, params.shadow_visibility_tx, /*arrayed=*/true));
 
-  args.group_count = int3((std::max(params.full_resolution.x, 1) + 7) / 8,
-                          (std::max(params.full_resolution.y, 1) + 7) / 8,
-                          1);
-
-  return dispatch_kernel(scene, NuruKernel::LOCAL_SHADOW, args, /*allow_batch=*/true);
+  const bool capture_tint = params.tint.hits != nullptr;
+  const int2 extent = capture_tint ? params.tint.extent : params.full_resolution;
+  if (capture_tint) {
+    uniforms.tint_rect = int4(params.tint.offset, params.tint.extent);
+    uniforms.tint_params = int4(params.tint.samples, params.tint.hit_capacity, 0, 0);
+    if (!bind_shadow_tint_capture(args, params.tint)) {
+      return false;
+    }
+  }
+  args.group_count = int3((std::max(extent.x, 1) + 7) / 8,
+                          (std::max(extent.y, 1) + 7) / 8, 1);
+  const NuruKernel kernel = capture_tint ? NuruKernel::LOCAL_SHADOW_TINT :
+                                          NuruKernel::LOCAL_SHADOW;
+  return dispatch_kernel(scene, kernel, args, /*allow_batch=*/!capture_tint);
 }
 
 bool raytrace_scene_trace_local_hit_shadow(GPUHardwareRaytraceScene *scene,

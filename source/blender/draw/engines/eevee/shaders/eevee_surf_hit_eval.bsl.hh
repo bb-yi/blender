@@ -8,6 +8,7 @@
 #include "eevee_raytrace_shared.hh"
 
 void hit_eval_material(KernelGlobals &kg, ShadingData &sd, int2 texel, ThicknessMode mode);
+void hit_eval_shadow_tint(KernelGlobals &kg, ShadingData &sd, uint hit_index);
 
 namespace eevee {
 
@@ -63,6 +64,45 @@ struct HitEvalVertexResources {
                     sd,
                     int2(unpackUvec2x16(hit_interp.packed_texel)),
                     ThicknessMode(kg.nt.node_tree.thickness_mode));
+}
+
+struct ShadowTintInterp {
+  [[flat]] uint hit_index;
+};
+
+struct ShadowTintVertexResources {
+  [[storage(12, read)]] const uint (&shadow_tint_order)[];
+  [[push_constant]] int2 shadow_tint_grid;
+  [[push_constant]] bool shadow_tint_direct_order;
+};
+
+[[vertex]] void geom_shadow_tint([[resource_table]] const ShadowTintVertexResources &srt,
+                                 [[vertex_id]] const int vertex_id,
+                                 [[out]] ShadowTintInterp &interp,
+                                 [[position]] float4 &out_position)
+{
+  uint index = uint(vertex_id) / 3u;
+  uint corner = uint(vertex_id) % 3u;
+  interp.hit_index = srt.shadow_tint_direct_order ? index : srt.shadow_tint_order[index];
+  const uint2 grid = uint2(srt.shadow_tint_grid);
+  float2 texel = float2(index % grid.x, (index / grid.x) % grid.y);
+  /* The proxy covers one pixel center, even where the grid is reused for later records. */
+  const float2 corner_offset = float2(corner == 1u ? 1.5f : 0.0f, corner == 2u ? 1.5f : 0.0f);
+  out_position = float4((texel + corner_offset) * (2.0f / float2(grid)) - 1.0f, 0.0f, 1.0f);
+}
+
+struct ShadowTintResources {
+  [[legacy_info]] ShaderCreateInfo eevee_surf_shadow_tint;
+};
+
+[[fragment]] void surf_shadow_tint([[resource_table]] KernelGlobals &kg,
+                                   [[resource_table]] const ShadowTintResources & /*srt*/,
+                                   [[in]] const ShadowTintInterp &interp,
+                                   [[frag_coord]] const float4 frag_co)
+{
+  ShadingData sd = {};
+  sd.frag_co = frag_co;
+  hit_eval_shadow_tint(kg, sd, interp.hit_index);
 }
 
 }  // namespace eevee

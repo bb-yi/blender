@@ -129,9 +129,13 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                               node->custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED;
   const float cache_eligible_value = cache_eligible ? 1.0f : 0.0f;
   const float native_shadow = 0.0f;
+  const float primary_receiver = default_surface ? 1.0f : 0.0f;
   GPUNodeLink *hardware_shadow = nullptr;
-  if (default_surface && shadow_outputs) {
-    GPU_link(mat, "node_shader_info_hardware_shadow", &hardware_shadow);
+  if (shadow_outputs) {
+    GPU_link(mat,
+             "node_shader_info_hardware_shadow",
+             GPU_constant(&primary_receiver),
+             &hardware_shadow);
   }
   else {
     hardware_shadow = GPU_constant(&native_shadow);
@@ -147,7 +151,7 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
     GPU_material_shader_info_shadow_classification_set(mat);
   }
   if (shadow_outputs && !default_surface) {
-    GPU_material_flag_set(mat, GPU_MATFLAG_SHADOW_OFFSET);
+    GPU_material_flag_set(mat, GPU_MATFLAG_SHADER_INFO_SHADOW_OFFSET);
   }
   if (shadow_outputs && node->custom1 >= SHD_SHADER_INFO_SHADOW_HARD) {
     GPU_material_flag_set(mat, GPU_MATFLAG_SHADOW_FILTER_METHODS);

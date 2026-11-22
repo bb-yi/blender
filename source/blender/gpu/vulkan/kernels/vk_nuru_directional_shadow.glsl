@@ -29,6 +29,10 @@ layout(scalar, binding = 0) uniform NuruUniforms {
   ivec4 world_sun_slot_pad;
   vec4 sampling_rand;
   uvec4 shadow_options;
+#ifdef NURU_SHADOW_TINT
+  ivec4 tint_rect;
+  ivec4 tint_params;
+#endif
 } uniforms;
 
 layout(binding = 1) uniform accelerationStructureEXT scene;
@@ -510,10 +514,17 @@ vec3 hardware_shadow_visibility(accelerationStructureEXT scene_as,
 
 void main()
 {
+#ifdef NURU_SHADOW_TINT
+  uvec2 tid;
+  if (!shadow_tint_pixel_init(ivec2(gl_GlobalInvocationID.xy), tid)) {
+    return;
+  }
+#else
   const uvec2 tid = gl_GlobalInvocationID.xy;
   if (tid.x >= uint(uniforms.resolution_layer.x) || tid.y >= uint(uniforms.resolution_layer.y)) {
     return;
   }
+#endif
   const vec2 uv = (vec2(tid) + 0.5f) / vec2(uniforms.resolution_layer.xy);
   const float reverse_depth = textureLod(depth_tx, uv, 0.0f).r;
   const float depth = 1.0f - reverse_depth;
@@ -576,6 +587,9 @@ void main()
     const vec3 sample_dir = sample_directional_shadow_direction(tid, sample_index);
     const vec3 offset = terminator_shadow_offset(receiver, unshifted_origin, sample_dir, normal_bias);
     const vec3 origin = unshifted_origin + offset;
+#ifdef NURU_SHADOW_TINT
+    shadow_tint_ray_init(sample_index, sample_count);
+#endif
     if (detailed) {
       visibility += hardware_shadow_detailed_visibility(scene, origin, sample_dir, ray_tmin,
                                                          100000.0f, transparent_shadows,

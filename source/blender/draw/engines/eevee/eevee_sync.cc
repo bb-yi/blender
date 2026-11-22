@@ -411,8 +411,8 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
     const bool has_displacement = GPU_material_has_displacement_output(gpu_material) &&
                                   (bl_material->displacement_method != MA_DISPLACEMENT_BUMP);
     const bool has_time_node = GPU_material_is_time_dependent(gpu_material);
-    const bool mat_has_shadow_offset = GPU_material_flag_get(gpu_material,
-                                                             GPU_MATFLAG_SHADOW_OFFSET);
+    const bool mat_has_shadow_offset = GPU_material_flag_get(
+        gpu_material, GPU_MATFLAG_SHADOW_OFFSET | GPU_MATFLAG_SHADER_INFO_SHADOW_OFFSET);
 
     is_alpha_blend |= material->is_alpha_blend_transparent || material->is_outline_shell_blended;
     has_transparent_shadows |= material->has_transparent_shadows ||

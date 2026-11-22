@@ -70,6 +70,7 @@ struct HardwareMaterialProxy {
   uint32_t closure_type = HWRT_CLOSURE_DIFFUSE;
   uint32_t flags = 0u;
   bool dynamic_shadow_alpha = false;
+  bool dynamic_shadow_tint = false;
   GPUHardwareRaytraceShadowAlpha shadow_alpha;
 };
 
@@ -172,18 +173,25 @@ static float socket_float_value(const bNodeSocket *socket)
   return static_cast<const bNodeSocketValueFloat *>(socket->default_value)->value;
 }
 
+static std::optional<float3> static_socket_color_value(const bNodeSocket *socket,
+                                                       nodes::SocketValueInferencer &inferencer)
+{
+  if (!socket || !socket->link) {
+    return socket_color_value(socket);
+  }
+  const bNodeLink *link = shadow_alpha_input_link(socket);
+  if (link && link->fromnode->type_legacy == SH_NODE_RGB &&
+      !(link->fromnode->flag & NODE_MUTED))
+  {
+    return socket_color_value(link->fromsock);
+  }
+  return inferencer.get_socket_value({nullptr, socket}).get_if_primitive<float3>();
+}
+
 static float3 inferred_socket_color_value(const bNodeSocket *socket,
                                           nodes::SocketValueInferencer &inferencer)
 {
-  if (socket == nullptr) {
-    return float3(0.0f);
-  }
-  if (const std::optional<float3> value = inferencer.get_socket_value({nullptr, socket})
-                                                .get_if_primitive<float3>())
-  {
-    return *value;
-  }
-  return socket_color_value(socket);
+  return static_socket_color_value(socket, inferencer).value_or(socket_color_value(socket));
 }
 
 static bool inferred_socket_color_is_dynamic(const bNodeSocket *socket,
@@ -700,6 +708,8 @@ static HardwareMaterialProxy material_hardware_proxy(const blender::Material *bl
                                    inferred_socket_float_value(
                                        bke::node_find_socket(*node, SOCK_IN, "IOR"_ustr), inferencer));
         const bool transmissive_proxy = (transmission > 1.0e-3f) && (metallic <= 0.5f);
+        proxy.dynamic_shadow_tint = transmissive_proxy &&
+                                    !static_socket_color_value(base_color_socket, inferencer);
         const bool metallic_proxy = (metallic > 1.0e-3f) && (transmission <= 1.0e-3f);
         const bool dielectric_reflection_scene_final_proxy =
             (coat_weight <= 1.0e-3f) && (metallic < 1.0f - 1.0e-3f) &&
@@ -768,6 +778,7 @@ static HardwareMaterialProxy material_hardware_proxy(const blender::Material *bl
       case SH_NODE_BSDF_REFRACTION: {
         const bNodeSocket *color_socket = bke::node_find_socket(*node, SOCK_IN, "Color"_ustr);
         const float3 color = inferred_socket_color_value(color_socket, inferencer);
+        proxy.dynamic_shadow_tint = !static_socket_color_value(color_socket, inferencer);
         const float roughness = inferred_socket_float_value(
             bke::node_find_socket(*node, SOCK_IN, "Roughness"_ustr), inferencer);
         const float ior = std::max(1.0e-3f,
@@ -828,6 +839,7 @@ static HardwareMaterialProxy material_hardware_proxy(const blender::Material *bl
       case SH_NODE_BSDF_TRANSPARENT: {
         const bNodeSocket *color_socket = bke::node_find_socket(*node, SOCK_IN, "Color"_ustr);
         const float3 color = inferred_socket_color_value(color_socket, inferencer);
+        proxy.dynamic_shadow_tint = !static_socket_color_value(color_socket, inferencer);
         proxy.reflection_color = color;
         proxy.transmission_color = color;
         proxy.reflection_roughness = 0.0f;
@@ -852,6 +864,7 @@ static HardwareMaterialProxy material_hardware_proxy(const blender::Material *bl
       case SH_NODE_BSDF_TRANSLUCENT: {
         const bNodeSocket *color_socket = bke::node_find_socket(*node, SOCK_IN, "Color"_ustr);
         const float3 color = inferred_socket_color_value(color_socket, inferencer);
+        proxy.dynamic_shadow_tint = !static_socket_color_value(color_socket, inferencer);
         proxy.reflection_color = color;
         proxy.transmission_color = color;
         proxy.reflection_roughness = 0.0f;
@@ -968,14 +981,44 @@ void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_ha
   if (!casts_shadow) {
     proxy.shadow_alpha = {};
   }
+  GPUMaterial *shadow_tint_material = nullptr;
+  if (casts_shadow && proxy.dynamic_shadow_tint && !is_sculpt &&
+      ob_handle.object->type == OB_MESH && inst_.raytracing.use_hardware_shadows() &&
+      inst_.scene->eevee.hardware_raytracing_shadow_transparency > 0.0f)
+  {
+    shadow_tint_material = inst_.shaders.material_shader_get(blender_mat,
+                                                             blender_mat->nodetree,
+                                                             MAT_PIPE_SHADOW_TINT,
+                                                             MAT_GEOM_MESH,
+                                                             MAT_PROBE_NONE,
+                                                             false,
+                                                             nullptr,
+                                                             false);
+    if (shadow_tint_material &&
+        GPU_material_status(shadow_tint_material) == GPU_MAT_SUCCESS)
+    {
+      inst_.manager->register_material_resources(shadow_tint_material);
+      proxy.flags |= GPU_HARDWARE_RAYTRACE_DYNAMIC_SHADOW_TINT;
+    }
+    else {
+      if (shadow_tint_material && std::getenv("BLENDER_EEVEE_HWRT_CACHE_LOG") != nullptr) {
+        std::fprintf(stderr, "EEVEE HWRT shadow tint shader %s: %s\n",
+                     blender_mat->id.name + 2,
+                     std::string(GPU_material_error_message(shadow_tint_material)).c_str());
+      }
+      shadow_tint_material = nullptr;
+    }
+  }
   const uint64_t material_hash = gpu_material_runtime_hash(gpumat);
   const float3 emission = material_emissive_radiance(blender_mat);
   const float3 albedo = hardware_raytrace_diffuse_albedo(blender_mat, proxy);
   if (std::getenv("BLENDER_EEVEE_HWRT_CACHE_LOG") != nullptr) {
-    std::fprintf(stderr, "EEVEE HWRT hit_material name=%s ready=%d\n",
+    std::fprintf(stderr, "EEVEE HWRT hit_material name=%s ready=%d tint_dynamic=%d tint_ready=%d\n",
                  blender_mat ? blender_mat->id.name + 2 : "<default>",
                  material.hit_eval.gpumat != nullptr &&
-                     GPU_material_status(material.hit_eval.gpumat) == GPU_MAT_SUCCESS);
+                     GPU_material_status(material.hit_eval.gpumat) == GPU_MAT_SUCCESS,
+                 int(proxy.dynamic_shadow_tint),
+                 int(shadow_tint_material != nullptr));
   }
 
   /* 5.2 batches object instances into a resource range. Nuru's single object matrix cannot
@@ -1009,7 +1052,8 @@ void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_ha
          ob_handle.object->shadow_terminator_geometry_offset,
          shadow_blocker_set,
          casts_shadow,
-         proxy.shadow_alpha});
+         proxy.shadow_alpha,
+         shadow_tint_material});
     hardware_raytrace_scene_signature_ = get_default_hash(
         hardware_raytrace_scene_signature_, ObjectKey(ob_handle, instance).hash(),
         geom, material_slot, is_sculpt,

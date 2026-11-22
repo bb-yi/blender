@@ -148,10 +148,13 @@ float4 shader_info_cached_shadow(uint light_index, float cache_eligible, int qua
 }
 
 [[node]]
-void node_shader_info_hardware_shadow(out float use_hardware_shadow)
+void node_shader_info_hardware_shadow(float primary_receiver, out float use_hardware_shadow)
 {
-#if defined(MAT_SHADER_INFO_HARDWARE_SHADOW) && defined(GPU_FRAGMENT_SHADER)
-  use_hardware_shadow = shader_info_hardware_shadow_layers > 0 ? 1.0f : 0.0f;
+#if defined(MAT_SHADER_INFO_FORWARD_HARDWARE_SHADOW) && defined(GPU_FRAGMENT_SHADER)
+  use_hardware_shadow = 1.0f;
+#elif defined(MAT_SHADER_INFO_HARDWARE_SHADOW) && defined(GPU_FRAGMENT_SHADER)
+  use_hardware_shadow = (primary_receiver > 0.5f && shader_info_hardware_shadow_layers > 0) ?
+                            1.0f : 0.0f;
 #else
   use_hardware_shadow = 0.0f;
 #endif
@@ -251,9 +254,28 @@ void shader_info_eval_light(KernelGlobals &kg, ShadingData &sd, uint l_idx,
   if (diffuse_power >= LIGHT_ATTENUATION_THRESHOLD &&
       surface_attenuation > LIGHT_ATTENUATION_THRESHOLD)
   {
+#if defined(MAT_SHADER_INFO_FORWARD_HARDWARE_SHADOW) && defined(GPU_FRAGMENT_SHADER)
+    float3 hardware_shadow = float3(-1.0f);
+    if (use_hardware_shadow > 0.5f && light.hwrt_shadow_layer >= 0) {
+      [[resource_table]] const eevee::LightEvalData &light_eval = resource_table_get(eevee::LightEvalData);
+#  if defined(SHADOW_CASTER_CLASSIFY)
+      const uint receiver_id = kg.resource_id_get(sd);
+#  else
+      const uint receiver_id = SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID;
+#  endif
+      /* A blended fragment owns its position, including when another depth is stored at
+       * the same screen pixel. Sample its shadow directly rather than using the prepass. */
+      float4 result = eevee::forward_shadow_classified(
+          light_eval, light, lv, is_directional, position, geometry_normal, receiver_id);
+      if (result.x >= 0.0f) {
+        hardware_shadow = shader_info_decode_hardware_shadow(result);
+      }
+    }
+#else
     float3 hardware_shadow = use_hardware_shadow > 0.5f ?
                                  shader_info_hardware_shadow_sample(light, sd.frag_co.xy) :
                                  float3(-1.0f);
+#endif
     if (hardware_shadow.x >= 0.0f) {
       visibility_sum += hardware_shadow.x * diffuse_weight;
       shadow_weight_sum += diffuse_weight;

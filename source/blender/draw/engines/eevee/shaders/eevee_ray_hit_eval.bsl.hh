@@ -167,6 +167,111 @@ void hit_eval_compact([[resource_table]] HitEvalInput &payload,
   srt.hit_eval_list_buf[record_index] = record;
 }
 
+struct ShadowTintInput {
+  [[push_constant]] int shadow_tint_capacity;
+  [[storage(0, read)]] const uint (&shadow_tint_count)[];
+  [[storage(1, read)]] const HardwareShadowTintHit (&shadow_tint_hits)[];
+  [[storage(2, read)]] const HardwareShadowTintRay (&shadow_tint_rays)[];
+  [[storage(3, read)]] const uint2 (&shadow_tint_entries)[];
+
+  bool hit_entry(uint index, uint &entry) const
+  {
+    if (index >= min(uint(shadow_tint_capacity), shadow_tint_count[0])) {
+      return false;
+    }
+    uint4 identity = shadow_tint_hits[index].identity;
+    if (shadow_tint_rays[identity.z >> 2u].range.x == 0u) {
+      return false;
+    }
+    entry = shadow_tint_entries[identity.x].x;
+    return true;
+  }
+};
+
+struct ShadowTintCount {
+  [[storage(4, read_write)]] uint (&hit_eval_count_buf)[];
+};
+
+[[compute, local_size(64)]]
+void shadow_tint_count([[resource_table]] const ShadowTintInput &payload,
+                       [[resource_table]] ShadowTintCount &srt,
+                       [[global_invocation_id]] const uint3 id)
+{
+  uint entry;
+  if (payload.hit_entry(id.x, entry)) {
+    atomicAdd(srt.hit_eval_count_buf[entry], 1u);
+  }
+}
+
+struct ShadowTintCompact {
+  [[storage(4, read)]] const uint (&hit_eval_offset_buf)[];
+  [[storage(5, read_write)]] uint (&hit_eval_cursor_buf)[];
+  [[storage(6, write)]] uint (&shadow_tint_order)[];
+};
+
+[[compute, local_size(64)]]
+void shadow_tint_compact([[resource_table]] const ShadowTintInput &payload,
+                         [[resource_table]] ShadowTintCompact &srt,
+                         [[global_invocation_id]] const uint3 id)
+{
+  uint entry;
+  if (payload.hit_entry(id.x, entry)) {
+    uint slot = srt.hit_eval_offset_buf[entry] + atomicAdd(srt.hit_eval_cursor_buf[entry], 1u);
+    srt.shadow_tint_order[slot] = id.x;
+  }
+}
+
+struct ShadowTintResolve {
+  [[push_constant]] int4 shadow_tint_rect;
+  [[push_constant]] int shadow_tint_samples;
+  [[push_constant]] int shadow_tint_layer;
+  [[push_constant]] float shadow_tint_saturation;
+  [[storage(0, read)]] const HardwareShadowTintHit (&shadow_tint_hits)[];
+  [[storage(1, read)]] const HardwareShadowTintRay (&shadow_tint_rays)[];
+  [[image(0, read_write, SFLOAT_16_16_16_16)]] image2DArray shadow_tint_visibility;
+};
+
+[[compute, local_size(8, 8)]]
+void shadow_tint_resolve([[resource_table]] ShadowTintResolve &srt,
+                         [[global_invocation_id]] const uint3 id)
+{
+  int2 local = int2(id.xy);
+  if (any(greaterThanEqual(local, srt.shadow_tint_rect.zw))) {
+    return;
+  }
+  uint first_ray = uint((local.y * srt.shadow_tint_rect.z + local.x) * srt.shadow_tint_samples);
+  float4 correction = float4(0.0f);
+  const float3 luma = float3(0.2126f, 0.7152f, 0.0722f);
+  for (int i = 0; i < srt.shadow_tint_samples; i++) {
+    HardwareShadowTintRay ray = srt.shadow_tint_rays[first_ray + uint(i)];
+    uint next = ray.range.x;
+    if (next == 0u) {
+      continue;
+    }
+    float3 visibility = float3(1.0f);
+    float3 self_shadow = float3(0.0f);
+    while (next != 0u) {
+      HardwareShadowTintHit hit = srt.shadow_tint_hits[next - 1u];
+      self_shadow += visibility * hit.before_self.xyz;
+      visibility *= hit.before_visibility.xyz;
+      if ((hit.identity.z & SHADOW_TINT_HIT_SELF) != 0u) {
+        self_shadow += visibility * (1.0f - hit.transmission.xyz);
+      }
+      visibility *= hit.transmission.xyz;
+      next = hit.identity.w;
+    }
+    self_shadow += visibility * ray.tail_self.xyz;
+    visibility *= ray.tail_visibility.xyz;
+    float3 tint = mix(float3(dot(visibility, luma)), visibility, srt.shadow_tint_saturation);
+    correction += (float4(tint, dot(self_shadow, luma)) - ray.fallback) / float(ray.range.y);
+  }
+  if (any(notEqual(correction, float4(0.0f)))) {
+    int3 texel = int3(local + srt.shadow_tint_rect.xy, srt.shadow_tint_layer);
+    float4 visibility = imageLoadFast(srt.shadow_tint_visibility, texel);
+    imageStoreFast(srt.shadow_tint_visibility, texel, saturate(visibility + correction));
+  }
+}
+
 struct HitDenoiseGuides {
   [[image(0, read, SFLOAT_16_16_16_16)]] image2D hit_albedo_img;
   [[image(1, read, SFLOAT_16_16_16_16)]] image2D hit_normal_img;
@@ -196,4 +301,7 @@ void hit_denoise_guides([[resource_table]] HitDenoiseGuides &srt,
 PipelineCompute eevee_ray_hit_eval_count(eevee::raytracing::hit_eval_count);
 PipelineCompute eevee_ray_hit_eval_prefix(eevee::raytracing::hit_eval_prefix);
 PipelineCompute eevee_ray_hit_eval_compact(eevee::raytracing::hit_eval_compact);
+PipelineCompute eevee_ray_shadow_tint_count(eevee::raytracing::shadow_tint_count);
+PipelineCompute eevee_ray_shadow_tint_compact(eevee::raytracing::shadow_tint_compact);
+PipelineCompute eevee_ray_shadow_tint_resolve(eevee::raytracing::shadow_tint_resolve);
 PipelineCompute eevee_ray_hit_denoise_guides(eevee::raytracing::hit_denoise_guides);

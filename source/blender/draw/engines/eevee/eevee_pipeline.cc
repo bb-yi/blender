@@ -1502,6 +1502,12 @@ PassMain::Sub *ForwardLayer::stencil_opaque_add(blender::Material *blender_mat,
   return pass;
 }
 
+static bool forward_material_has_hardware_shadow(GPUMaterial *material)
+{
+  gpu::Shader *shader = GPU_material_get_shader(material);
+  return shader && GPU_shader_get_tlas_binding(shader, "forward_shadow_as") >= 0;
+}
+
 PassMain::Sub *ForwardLayer::material_opaque_add(const Object *ob,
                                                  const SurfaceDrawState &draw_state,
                                                  GPUMaterial *gpumat)
@@ -1515,6 +1521,7 @@ PassMain::Sub *ForwardLayer::material_opaque_add(const Object *ob,
   has_opaque_ = true;
   inst_.lights.tag_front_light_shader_needed();
   PassMain::Sub *sub_pass = &pass->sub(GPU_material_get_name(gpumat));
+  has_hardware_shadow_receivers_ |= forward_material_has_hardware_shadow(gpumat);
   bind_npr_shadow_surface(*sub_pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
   return sub_pass;
 }
@@ -1542,6 +1549,7 @@ PassMain::Sub *ForwardLayer::material_no_depth_add(const Object *ob,
   bind_npr_shadow_surface(*pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
+  has_hardware_shadow_receivers_ |= forward_material_has_hardware_shadow(gpumat);
   pass->push_constant("surface_cull_mode", int(draw_state.cull_method));
   if (!draw_state.is_outline_shell) {
     material_stencil_test_only_state_set(*pass, blender_mat);
@@ -1560,10 +1568,22 @@ static bool forward_material_needs_lighting(GPUMaterial *material)
   return GPU_material_flag_get(material, lighting);
 }
 
-static bool forward_material_has_hardware_shadow(GPUMaterial *material)
+static bool material_needs_native_shadows(GPUMaterial *material,
+                                          const blender::Material &blender_mat,
+                                          bool forward,
+                                          bool forward_hardware_shadow)
 {
-  gpu::Shader *shader = GPU_material_get_shader(material);
-  return shader && GPU_shader_get_tlas_binding(shader, "forward_shadow_as") >= 0;
+  const eGPUMaterialNPRFeature npr_shadows = GPU_MAT_NPR_SHADOW_STABLE |
+                                             GPU_MAT_NPR_SHADOW_TEMPORAL |
+                                             GPU_MAT_NPR_SHADOW_SOFT;
+  return GPU_material_flag_get(material,
+                               GPU_MATFLAG_SHADOW_OFFSET | GPU_MATFLAG_LIGHTING |
+                                   GPU_MATFLAG_NPR_FOREACH_LIGHT | GPU_MATFLAG_GLSL_SHADOW_ACCESS) ||
+         (!forward_hardware_shadow &&
+          GPU_material_flag_get(material, GPU_MATFLAG_SHADER_INFO_SHADOW_OFFSET)) ||
+         (forward && (GPU_material_npr_features_get(material) & npr_shadows) != 0) ||
+         GPU_material_has_depth_offset_output(material) ||
+         (blender_mat.blend_flag & MA_BL_THICKNESS_FROM_SHADOW);
 }
 
 void ForwardLayer::transparent_add(const Object *ob,
@@ -1592,10 +1612,13 @@ void ForwardLayer::transparent_add(const Object *ob,
   has_transparent_ = true;
   const bool hardware_shadows = forward_material_has_hardware_shadow(gpumat);
   has_hardware_shadow_receivers_ |= hardware_shadows;
-  if (forward_material_needs_lighting(gpumat) &&
-      (!hardware_shadows || GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO)))
+  if ((forward_material_needs_lighting(gpumat) && !hardware_shadows) ||
+      material_needs_native_shadows(gpumat, *blender_mat, true, hardware_shadows))
   {
     inst_.pipelines.require_native_shadows("a blended material needs unsupported shadow lighting");
+  }
+  if (GPU_material_has_shader_info_shadow_classification(gpumat)) {
+    inst_.shadows.tag_caster_atlas_needed();
   }
   has_colored_transparency_ |= GPU_material_flag_get(gpumat,
                                                      GPU_MATFLAG_TRANSPARENT_MAYBE_COLORED);
@@ -3120,6 +3143,8 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
       !(ob->visibility_flag & OB_HIDE_CAMERA) &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
   {
+    const bool forward_hardware_shadow = pipeline_type == MAT_PIPE_FORWARD &&
+                                         forward_material_has_hardware_shadow(gpumat);
     if (GPU_material_has_shader_info_shadow_classification(gpumat)) {
       if (GPU_backend_get_type() == GPU_BACKEND_VULKAN && pipeline_type != MAT_PIPE_FORWARD &&
           ob->type == OB_MESH && draw_state.depth_write &&
@@ -3128,26 +3153,24 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
       {
         has_hardware_shadow_classification = true;
       }
-      else {
+      else if (!forward_hardware_shadow) {
         require_native_shadows("a material needs unsupported shadow classification");
       }
     }
     if (pipeline_type == MAT_PIPE_FORWARD && forward_material_needs_lighting(gpumat) &&
-        !forward_material_has_hardware_shadow(gpumat))
+        !forward_hardware_shadow)
     {
       require_native_shadows("a forward material uses lighting");
     }
-    else if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
+    else if (!forward_hardware_shadow && GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
              (ob->type != OB_MESH || GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT)))
     {
       require_native_shadows("Shader Info is used on a transparent or non-mesh surface");
     }
-    else if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADOW_OFFSET | GPU_MATFLAG_LIGHTING |
-                                             GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
-             GPU_material_has_depth_offset_output(gpumat) ||
-             (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW))
+    else if (material_needs_native_shadows(
+                 gpumat, *blender_mat, pipeline_type == MAT_PIPE_FORWARD, forward_hardware_shadow))
     {
-      require_native_shadows("a material uses shadow offsets, light accumulation, or shadow thickness");
+      require_native_shadows("a material uses native shadow-map lighting");
     }
     else if (GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS) &&
              !GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
@@ -3257,6 +3280,7 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
       BLI_assert_msg(0, "Bake shaders are evaluated by the Eevee bake callback.");
       return nullptr;
     case MAT_PIPE_HIT_EVAL:
+    case MAT_PIPE_SHADOW_TINT:
       BLI_assert_msg(0, "Hardware hit shaders are submitted by sparse material replay.");
       return nullptr;
 

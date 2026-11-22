@@ -583,6 +583,7 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
   {
     const eShaderType shader_list[] = {
         RAY_HIT_EVAL_COUNT, RAY_HIT_EVAL_PREFIX, RAY_HIT_EVAL_COMPACT, RAY_HIT_DENOISE_GUIDES,
+        RAY_SHADOW_TINT_COUNT, RAY_SHADOW_TINT_COMPACT, RAY_SHADOW_TINT_RESOLVE,
         RAY_SHARED_INDIRECT_ACCUM, RAY_SHARED_INDIRECT_RECONSTRUCT, RAY_MERGE_SPECULAR,
         RAY_SCENE_FINAL_SPECULAR,
         RAY_TRACE_HARDWARE_LIGHTING, RAY_HW_DIRECT_TILE_COMPACT, RAY_HW_DIRECT_VISIBILITY,
@@ -973,6 +974,12 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_ray_hit_eval_prefix";
     case RAY_HIT_EVAL_COMPACT:
       return "eevee_ray_hit_eval_compact";
+    case RAY_SHADOW_TINT_COUNT:
+      return "eevee_ray_shadow_tint_count";
+    case RAY_SHADOW_TINT_COMPACT:
+      return "eevee_ray_shadow_tint_compact";
+    case RAY_SHADOW_TINT_RESOLVE:
+      return "eevee_ray_shadow_tint_resolve";
     case RAY_HIT_DENOISE_GUIDES:
       return "eevee_ray_hit_denoise_guides";
     case RAY_SHARED_INDIRECT_ACCUM:
@@ -1439,6 +1446,8 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
       return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_BAKE;
     case MAT_PIPE_HIT_EVAL:
       return 9;
+    case MAT_PIPE_SHADOW_TINT:
+      return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL;
     case MAT_PIPE_OUTLINE_FREESTYLE:
       return OUTLINE_INFO_TEX_SLOT;
     case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
@@ -1696,6 +1705,13 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           info.fragment_source("eevee_surf_hit_eval.bsl.hh");
           info.fragment_function("eevee_surf_hit_eval");
           break;
+        case MAT_PIPE_SHADOW_TINT:
+          pipeline_info_name = "eevee_surf_shadow_tint_infos_";
+          info.name_ += "_shadow_tint";
+          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
+          info.fragment_source("eevee_surf_hit_eval.bsl.hh");
+          info.fragment_function("eevee_surf_shadow_tint");
+          break;
         case MAT_PIPE_DEFERRED:
           info.define("MAT_DEFERRED");
           if (is_hybrid) {
@@ -1789,7 +1805,13 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
       info.vertex_function("eevee_geom_gsplat");
       break;
     case MAT_GEOM_MESH:
-      if (pipeline_type == MAT_PIPE_HIT_EVAL) {
+      if (pipeline_type == MAT_PIPE_SHADOW_TINT) {
+        geometry_info_name = "eevee_geom_shadow_tint_infos_";
+        info.name_ += "_hit_mesh";
+        info.vertex_source("eevee_surf_hit_eval.bsl.hh");
+        info.vertex_function("eevee_geom_shadow_tint");
+      }
+      else if (pipeline_type == MAT_PIPE_HIT_EVAL) {
         geometry_info_name = "eevee_geom_hit_mesh_infos_";
         info.name_ += "_hit_mesh";
         info.vertex_source("eevee_surf_hit_eval.bsl.hh");
@@ -1851,7 +1873,9 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
   if (!geometry_info_name.is_empty()) {
     add_create_info_and_reserve(info, available_slots, geometry_info_name);
   }
-  if (pipeline_type == MAT_PIPE_HIT_EVAL && geometry_type == MAT_GEOM_MESH) {
+  if (ELEM(pipeline_type, MAT_PIPE_HIT_EVAL, MAT_PIPE_SHADOW_TINT) &&
+      geometry_type == MAT_GEOM_MESH)
+  {
     add_create_info_and_reserve(info, available_slots, "eevee_geom_hit_mesh");
   }
   available_slots.reserve_slots(info);
@@ -1909,7 +1933,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
   auto &codegen_info = *reinterpret_cast<GPUCodegenCreateInfo *>(codegen.create_info);
-  const bool is_hit_eval_mesh = pipeline_type == MAT_PIPE_HIT_EVAL &&
+  const bool is_hit_eval_mesh = ELEM(pipeline_type, MAT_PIPE_HIT_EVAL, MAT_PIPE_SHADOW_TINT) &&
                                 geometry_type == MAT_GEOM_MESH;
   Map<std::string, int> hit_eval_attr_slots;
   Map<std::string, std::string> hit_eval_attr_symbols;
@@ -2052,11 +2076,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const bool depth_offset_affect_lighting = material_depth_offset_affects_lighting(blender_mat);
   if (pipeline_type == MAT_PIPE_FORWARD && probe_capture == MAT_PROBE_NONE && blender_mat &&
       blender_mat->surface_render_method == MA_SURFACE_METHOD_FORWARD &&
-      GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) &&
       geometry_type == MAT_GEOM_MESH && GPU_backend_get_type() == GPU_BACKEND_VULKAN &&
       GPU_viewport_hardware_raytracing_support())
   {
     info.compilation_constant(gpu::shader::Type::bool_t, "use_hardware_forward_shadow", true);
+    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO)) {
+      info.define("MAT_SHADER_INFO_FORWARD_HARDWARE_SHADOW");
+    }
   }
   const bool has_depth_offset = GPU_material_has_depth_offset_output(gpumat) &&
                                 material_pipeline_supports_depth_offset(pipeline_type,
@@ -2091,6 +2117,23 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
         material_graph_uses_glsl_light_access(gpumat, codegen.volume);
     for (const GPUGraphOutput &graph : codegen.material_functions) {
       material_pass_uses_glsl_light_access |= material_graph_uses_glsl_light_access(gpumat, graph);
+    }
+    if (material_pass_uses_glsl_light_access) {
+      const auto uses_shadow_helper = [&](const GPUGraphOutput &graph) {
+        return material_graph_dependency_source_contains(gpumat, graph, "glsl_light_shadow") ||
+               material_graph_dependency_source_contains(gpumat, graph, "glsl_light_cast_shadow_raw");
+      };
+      bool uses_glsl_shadow = uses_shadow_helper(pipeline_type == MAT_PIPE_DEFERRED_NPR ?
+                                                    codegen.npr : codegen.surface) ||
+                              uses_shadow_helper(codegen.thickness) ||
+                              uses_shadow_helper(codegen.filter) ||
+                              uses_shadow_helper(codegen.volume);
+      for (const GPUGraphOutput &graph : codegen.material_functions) {
+        uses_glsl_shadow |= uses_shadow_helper(graph);
+      }
+      if (uses_glsl_shadow) {
+        GPU_material_flag_set(gpumat, GPU_MATFLAG_GLSL_SHADOW_ACCESS);
+      }
     }
   }
   const bool uses_glsl_light_access = material_pass_uses_glsl_light_access ||
@@ -4093,7 +4136,8 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
       break;
     }
 
-    case MAT_PIPE_HIT_EVAL: {
+    case MAT_PIPE_HIT_EVAL:
+    case MAT_PIPE_SHADOW_TINT: {
       r_info.pipeline_state()
           .primitive(GPU_PRIM_TRIS)
           .state(GPU_WRITE_NONE, GPU_BLEND_NONE, GPU_CULL_NONE, GPU_DEPTH_NONE,

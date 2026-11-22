@@ -83,6 +83,7 @@ struct HardwareRaytraceSceneEntry {
   uint32_t shadow_blocker_set = 0;
   bool casts_shadow = true;
   GPUHardwareRaytraceShadowAlpha shadow_alpha;
+  GPUMaterial *shadow_tint_material = nullptr;
 };
 
 class SyncModule {
