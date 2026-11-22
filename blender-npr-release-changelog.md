@@ -690,6 +690,7 @@
 - EEVEE 新增实验性硬件光线追踪，可分别用于彩色透射阴影、反射、折射和间接光照，也可在原有追踪模式下单独启用硬件阴影。硬件路径目前仅支持 Windows 下满足 Vulkan Ray Query 等能力要求的 NVIDIA GPU。其他后端或不满足要求的设备会使用原有阴影和屏幕空间追踪。
 - 材质 `Raycast` 新增 `Scene Geometry (Hardware)`，可查询屏幕外的场景几何体，并保留 `Only Local`。设备不支持时回退到屏幕空间模式。
 - `Shader Info` 补充 PCSS 和固定半径 PCF 等阴影滤波。自阴影、投射阴影可单独输出强度遮罩。`NPR Input` 新增 `Emission`，可在 NPR 材质树中直接获取表面自发光。
+- `Shader Info` 的 `Soft Filtered` 改用 EEVEE 原生阴影射线采样，旧工程的半影外观可能变化。需要基于遮挡距离的接触硬化时，可选择 `PCSS`。
 - `Render Texture` 支持全景相机捕获，可输出颜色、深度和法线，并在材质中按全景投影采样。全景深度为与相机之间的径向距离。
 - EEVEE Performance 增加逐帧渲染历史、可选 GPU 阶段计时，以及通过 Python 导出 JSON 或 CSV 的接口。
 - Shader Portal 可按名称搜索、跳转和成对重命名，支持从连接创建 Portal、转换回显式连接，以及更换输入源时同步类型。Node Wrangler 支持预览 NPR 图像闭包。

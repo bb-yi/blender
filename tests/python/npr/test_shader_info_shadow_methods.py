@@ -119,7 +119,7 @@ def run(out):
     assert np.abs(no_penumbra[:,:,0] - zero[:,:,0]).max() < .003
     check_material_textures(scene, tree, node, out)
     (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
-    print("SHADOW_METHODS_PASS", metrics, flush=True)
+    print("SHADOW_METHODS_PASS", flush=True)
 
 
 if __name__ == "__main__":

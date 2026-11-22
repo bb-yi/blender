@@ -3,8 +3,9 @@
 
 """Real Eevee mask renders and paired render-time measurements; run in isolated Blender.
 
---suite precision|soft|benchmark|all --out DIR [--label NAME] [--size 256] [--repeat 15]
+--suite {precision,soft,regression,viewport,benchmark,all} ... --out DIR
 The fixture uses a camera-invisible geometric blocker, not a postprocess blur or TAA.
+The soft suite retains analytical references for the historical single-frame PCSS algorithm.
 """
 import argparse
 import json
@@ -25,7 +26,8 @@ REFERENCE_DIRECTORY = None
 
 def arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--suite', choices=['precision', 'soft', 'regression', 'viewport', 'benchmark', 'all'], default='all')
+    suites = ('precision', 'soft', 'regression', 'viewport', 'benchmark')
+    parser.add_argument('--suite', choices=(*suites, 'all'), nargs='+', default=['all'])
     parser.add_argument('--out', required=True)
     parser.add_argument('--label', default='candidate')
     parser.add_argument('--size', type=int, default=256)
@@ -39,7 +41,10 @@ def arguments():
     parser.add_argument('--warmup', type=int, default=3)
     parser.add_argument('--native-only', action='store_true')
     parser.add_argument('--assert-quality', action='store_true')
-    return parser.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else [])
+    args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else [])
+    if 'all' in args.suite:
+        args.suite = suites
+    return args
 
 
 def configure(size):
@@ -360,9 +365,9 @@ def main():
               'device':gpu.platform.renderer_get(),
               'resolution':args.size, 'single_sample':True, 'cases':[]}
     failures = []
-    if args.suite in ['viewport', 'all']:
+    if 'viewport' in args.suite:
         viewport_tests(args,out,report,failures)
-    if args.suite in ['precision','all']:
+    if 'precision' in args.suite:
         reference = None
         for scale in [1., .01, .001]:
             scene = fixture(args.size, scale=scale, checker=True)
@@ -373,7 +378,7 @@ def main():
             error = float(np.mean(np.abs(pixels[8:-8,8:-8,0]-reference[8:-8,8:-8,0])))
             report['cases'].append({'case':'precision','scale':scale,'mae_vs_scale_1':error,'seconds':elapsed})
             if scale != 1 and error > .06: failures.append('Scale %g error %.5f' % (scale,error))
-    if args.suite in ['soft','all']:
+    if 'soft' in args.suite:
         for kind in ['SUN','POINT']:
             for self_shadow in [False,True]:
                 scene = fixture(args.size, mode='SOFT_FILTERED', kind=kind,
@@ -401,7 +406,7 @@ def main():
                 if classification_error > .005 or flat_error > .005: failures.append(label+' classification')
                 if repeat_error > .001: failures.append(label+' unstable')
         extended_soft_tests(args, out, report, failures)
-    if args.suite in ['regression', 'all']:
+    if 'regression' in args.suite:
         for kind in ['SUN', 'POINT']:
             reference = None
             for classify in [True,False]:
@@ -431,7 +436,7 @@ def main():
                 # Render target/film arithmetic is half precision. The old SPOT path already
                 # differs by 3 half-float ULPs at 1; keep the bound below one 8-bit mask step.
                 if error > .002: failures.append(label+' shadows disabled')
-    if args.suite in ['benchmark','all']:
+    if 'benchmark' in args.suite:
         for kind in ['SUN', 'POINT']:
             if args.benchmark_light and kind != args.benchmark_light: continue
             for mode in (['SOFT_FILTERED'] if args.stress else ['NATIVE_BSDF', 'TEMPORAL', 'SOFT_FILTERED']):
