@@ -13,12 +13,19 @@
 #include "BLI_string.hh"
 
 #include "gpu_context_private.hh"
+#include "gpu_backend.hh"
+#include "gpu_query.hh"
 
 #include "GPU_debug.hh"
 
 namespace blender {
 
 using namespace blender::gpu;
+
+std::unique_ptr<TimestampPool> gpu::TimestampPool::create()
+{
+  return std::unique_ptr<TimestampPool>(GPUBackend::get()->querypool_alloc());
+}
 
 void GPU_debug_group_begin(const char *name)
 {

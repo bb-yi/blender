@@ -89,6 +89,7 @@ class VKDiscardPool {
   TimelineResources<VkBufferView> buffer_views_;
   TimelineResources<VkShaderModule> shader_modules_;
   TimelineResources<VkPipeline> pipelines_;
+  TimelineResources<VkQueryPool> queries_;
   TimelineResources<VkPipelineLayout> pipeline_layouts_;
   TimelineResources<VkAccelerationStructureKHR> acceleration_structures_;
   TimelineResources<std::pair<VkDescriptorPool, VKDescriptorPools *>> descriptor_pools_;
@@ -117,6 +118,7 @@ class VKDiscardPool {
   void discard_allocation(VmaAllocation vma_allocation);
   void discard_shader_module(VkShaderModule vk_shader_module);
   void discard_pipeline(VkPipeline vk_pipeline);
+  void discard_query_pool(VkQueryPool pool);
   void discard_pipeline_layout(VkPipelineLayout vk_pipeline_layout);
   void discard_descriptor_pool_for_reuse(VkDescriptorPool vk_descriptor_pool,
                                          VKDescriptorPools *descriptor_pools);

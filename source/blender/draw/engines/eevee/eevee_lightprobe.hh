@@ -168,6 +168,7 @@ struct SphereProbe : public LightProbe, SphereProbeData {
 };
 
 struct PlanarProbe : public LightProbe, PlanarProbeData {
+  std::string profile_name;
   ObjectKey selection_key;
   /* Copy of object matrices. */
   float4x4 plane_to_world;

@@ -56,15 +56,28 @@ void VKCommandBuilder::groups_init(const VKRenderGraph &render_graph,
 {
   group_nodes_.clear();
   IndexRange nodes_range = node_handles.index_range();
+  bool in_rendering_scope = false;
+  const auto is_groupable = [&](VKNodeType type) {
+    return node_type_is_rendering(type) || (in_rendering_scope && type == VKNodeType::WRITE_TIMESTAMP);
+  };
   while (!nodes_range.is_empty()) {
     IndexRange node_group = nodes_range.slice(0, 1);
     NodeHandle node_handle = node_handles[nodes_range.first()];
     const VKRenderGraphNode &node = render_graph.nodes_[node_handle];
-    while (node_type_is_rendering(node.type) && node_group.size() < nodes_range.size()) {
+    if (node.type == VKNodeType::BEGIN_RENDERING) {
+      in_rendering_scope = true;
+    }
+    else if (node.type == VKNodeType::END_RENDERING) {
+      in_rendering_scope = false;
+    }
+    while (is_groupable(node.type) && node_group.size() < nodes_range.size()) {
       NodeHandle node_handle = node_handles[nodes_range[node_group.size()]];
       const VKRenderGraphNode &node = render_graph.nodes_[node_handle];
-      if (!node_type_is_rendering(node.type) || node.type == VKNodeType::BEGIN_RENDERING) {
+      if (!is_groupable(node.type) || node.type == VKNodeType::BEGIN_RENDERING) {
         break;
+      }
+      if (node.type == VKNodeType::END_RENDERING) {
+        in_rendering_scope = false;
       }
       node_group = nodes_range.slice(0, node_group.size() + 1);
     }
@@ -148,8 +161,6 @@ void VKCommandBuilder::groups_extract_barriers(VKRenderGraph &render_graph,
 
       else if (node.type == VKNodeType::END_RENDERING) {
         /* End rendering scope. */
-        BLI_assert(rendering_active);
-
         /* Save rendering scope handle for resource state update below. */
         const NodeHandle end_rendering_scope = rendering_scope;
         rendering_scope = 0;
@@ -194,7 +205,8 @@ void VKCommandBuilder::groups_extract_barriers(VKRenderGraph &render_graph,
         }
       }
 
-      else if (rendering_active && !node_type_is_within_rendering(node.type)) {
+      else if (rendering_active && !node_type_is_within_rendering(node.type) &&
+               node.type != VKNodeType::WRITE_TIMESTAMP) {
         /* Suspend active rendering scope. */
         rendering_active = false;
 
@@ -419,6 +431,9 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
       }
 
       else if (node.type == VKNodeType::END_RENDERING) {
+        if (!rendering_active) {
+          continue;
+        }
         rendering_active = false;
       }
       else if (node_type_is_within_rendering(node.type)) {

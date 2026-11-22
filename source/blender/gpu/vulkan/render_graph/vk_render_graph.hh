@@ -84,6 +84,7 @@ class VKRenderGraph : public NonCopyable {
 
   /** All nodes inside the graph indexable via NodeHandle. */
   Vector<VKRenderGraphNode, 1024> nodes_;
+  bool has_timestamps_ = false;
   /**
    * Node read/write links to buffer and image resources.
    */
@@ -201,6 +202,9 @@ class VKRenderGraph : public NonCopyable {
   template<typename NodeInfo> NodeHandle add_node(const typename NodeInfo::CreateInfo &create_info)
   {
     std::scoped_lock lock(resources_.mutex);
+    if constexpr (NodeInfo::node_type == VKNodeType::WRITE_TIMESTAMP) {
+      has_timestamps_ = true;
+    }
     static VKRenderGraphNode node_template = {};
     NodeHandle node_handle = nodes_.append_and_get_index(node_template);
 #if 0
@@ -280,6 +284,7 @@ class VKRenderGraph : public NonCopyable {
   ADD_NODE(VKDispatchNode)
   ADD_NODE(VKDispatchIndirectNode)
   ADD_NODE(VKResetQueryPoolNode)
+  ADD_NODE(VKWriteTimestampNode)
   ADD_NODE(VKUpdateBufferNode)
   ADD_NODE(VKUpdateMipmapsNode)
   ADD_NODE(VKSynchronizationNode)

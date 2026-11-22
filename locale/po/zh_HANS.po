@@ -171800,3 +171800,156 @@ msgstr "预览过滤图／灯光节点"
 
 msgid "Preview a Filter Graph image or light shader output; click again to cycle sockets"
 msgstr "预览过滤图图像或灯光着色器输出；再次单击以切换插口"
+
+msgid "RenderTime Breakdown"
+msgstr "渲染时间构成"
+
+msgid "Scene Evaluation"
+msgstr "场景求值"
+
+msgid "Pass and Buffer Setup"
+msgstr "通道和缓冲区准备"
+
+msgid "Merge Render Results"
+msgstr "合并渲染结果"
+
+msgid "GPU and Draw Context Setup"
+msgstr "GPU 与绘制上下文准备"
+
+msgid "Engine and Resource Cleanup"
+msgstr "引擎和资源释放"
+
+msgid "Eevee Initialization"
+msgstr "Eevee 初始化"
+
+msgid "Eevee Sampling and Readback"
+msgstr "Eevee 采样与回读"
+
+msgid "First Eevee Frame"
+msgstr "进程首帧"
+
+msgid "Unclassified Engine Time"
+msgstr "未归类的引擎耗时"
+
+msgid "Compositor File Output"
+msgstr "合成器文件输出"
+
+msgid "Unclassified Time"
+msgstr "未归类耗时"
+
+msgid "Outside RenderTime"
+msgstr "不计入 RenderTime"
+
+msgid "Frame Preparation"
+msgstr "帧前准备"
+
+msgid "Main Output / Saving"
+msgstr "主图像或视频写入"
+
+msgid "What to Check First"
+msgstr "优先排查"
+
+msgid "Compare heavy modifiers, Geometry Nodes and animated geometry."
+msgstr "对比重型修改器、几何节点和动画几何体。"
+
+msgid "Scene Data Sync"
+msgstr "场景数据同步"
+
+msgid "Expand Sync stages; compare frequently updated geometry and materials on the same frame."
+msgstr "展开 Sync 阶段；对照同一帧中频繁更新的几何体和材质。"
+
+msgid "Compare a warm repeat; if setup stays slow, check GPU load and available memory."
+msgstr "预热后复测；如果准备仍然很慢，检查 GPU 负载和可用显存。"
+
+msgid "Compare a warm repeat; initialization can include shader and buffer setup."
+msgstr "预热后复测；初始化可能包含着色器及缓冲区准备。"
+
+msgid "Render Result Setup and Merge"
+msgstr "渲染结果准备与合并"
+
+msgid "Compare only unneeded view layers or render passes; keep compositor inputs."
+msgstr "只对照禁用不需要的视图层或通道，保留最终合成的输入。"
+
+msgid "Compare persistent render data on repeat renders; check memory use."
+msgstr "重复渲染时对照持久数据设置，并检查内存占用。"
+
+msgid "Shader Compilation Wait"
+msgstr "着色器编译等待"
+
+msgid "Repeat the same frame warm before changing materials."
+msgstr "先在预热后复测同一帧，再决定是否调整材质。"
+
+msgid "Render Pass Readback"
+msgstr "渲染通道回读"
+
+msgid "Test removing unused passes or AOVs, not just muting File Output."
+msgstr "对照禁用未使用的通道或 AOV；仅静音文件输出不会取消通道回读。"
+
+msgid "Longest Readback"
+msgstr "回读最久的通道"
+
+msgid "Shadow Statistics Readback (CPU Wait)"
+msgstr "阴影统计回读（CPU 等待）"
+
+msgid "This waits for queued work; do not treat it as shadow drawing."
+msgstr "此处等待之前排队的工作，不是 GPU 绘制阴影的耗时。"
+
+msgid "Readbacks"
+msgstr "次回读"
+
+msgid "Main / Other Shadow Readback"
+msgstr "主视图／其他阴影回读"
+
+msgid "Planar Shadow Readback"
+msgstr "平面探针阴影回读"
+
+msgid "Inspect Planar Probe"
+msgstr "检查平面反射探针"
+
+msgid "Sample GPU Queue Wait"
+msgstr "采样间 GPU 队列等待"
+
+msgid "Compare GPU measurements and check other GPU workloads; the wait is not a draw cost."
+msgstr "结合 GPU 实测并检查其他 GPU 负载；等待不等于绘制耗时。"
+
+msgid "Compare the heaviest compositor branch before changing scene settings."
+msgstr "先对照合成器中开销较大的分支，再决定是否调整场景。"
+
+msgid "Compare output count, compression and disk speed."
+msgstr "对照输出数量、压缩设置与磁盘速度。"
+
+msgid "No measured owner for this time; repeat the frame before changing scene settings."
+msgstr "这段时间尚未归因；先复测该帧，不要据此修改场景。"
+
+msgid "No measured hotspot identified"
+msgstr "未找到明显的已测热点"
+
+msgid "Measured GPU Intervals (Do Not Add)"
+msgstr "GPU 实测区间（不可相加）"
+
+msgid "Main / Other Shadow Page Drawing"
+msgstr "主视图／其他阴影页绘制"
+
+msgid "Planar Shadow Page Drawing"
+msgstr "平面探针阴影页绘制"
+
+msgid "If shadow drawing dominates, compare shadow-casting lights and geometry."
+msgstr "若阴影页绘制确实占大头，再对照投影灯光和投影几何体。"
+
+msgid "Largest Main View Interval"
+msgstr "主视图最大 GPU 区间"
+
+msgid "Check shadow drawing separately, then compare lighting and material complexity."
+msgstr "先单独核对阴影绘制，再对照灯光与材质复杂度。"
+
+msgid "Compare transparent layers and overlapping surfaces on the same frame."
+msgstr "在同一帧对照透明材质层和重叠表面。"
+
+msgid "Compare volume settings on the same frame."
+msgstr "在同一帧对照体积效果设置。"
+
+msgid "GPU Timing Not Measured"
+msgstr "GPU 未测（不是零耗时）"
+
+msgid "Time Not Available"
+msgstr "整帧计时未完成"

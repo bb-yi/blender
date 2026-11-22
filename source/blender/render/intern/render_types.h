@@ -15,8 +15,10 @@
 #include <memory>
 
 #include "DNA_scene_types.h"
+#include "BKE_eevee_frame_timing.hh"
 
 #include "BLI_mutex.hh"
+#include "BLI_time.hh"
 #include "BLI_threads.hh"
 
 #include "RE_compositor.hh"
@@ -120,6 +122,9 @@ struct Render : public BaseRender {
 
   /* One RE_RenderAnim operation, independent of per-frame render_run_id. */
   uint64_t animation_sequence_id = 0;
+  uint64_t profiler_frame_run = 0;
+  bke::EeveeFrameTiming profiler_timing;
+  bool profiler_engine_active = false;
 
   /* state settings */
   short flag = 0;
@@ -186,6 +191,28 @@ struct Render : public BaseRender {
 
   Vector<MovieWriter *> movie_writers;
   char viewname[MAX_NAME] = "";
+};
+
+class ScopedEeveeEngineTiming {
+  Render &render_;
+  bke::EeveeEngineStage stage_;
+  double start_;
+
+ public:
+  ScopedEeveeEngineTiming(Render &render, bke::EeveeEngineStage stage)
+      : render_(render), stage_(stage), start_(render.profiler_engine_active ? BLI_time_now_seconds() : 0.0)
+  {
+  }
+
+  void finish()
+  {
+    if (start_ != 0.0) {
+      render_.profiler_timing.engine_stages[int(stage_)] += (BLI_time_now_seconds() - start_) * 1000.0;
+      start_ = 0.0;
+    }
+  }
+
+  ~ScopedEeveeEngineTiming() { finish(); }
 };
 
 struct RenderDisplay {

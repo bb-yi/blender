@@ -164,6 +164,8 @@ void PlanarProbeModule::set_view(const draw::View &main_view, int2 main_view_ext
     }
 
     PlanarResources &res = resources_[resource_index];
+    ScopedTelemetrySample capture(inst_.telemetry, TelemetryStageId::PlanarCapture,
+                                  probe.profile_name.c_str());
 
     /* TODO Cull out of view planars. */
 

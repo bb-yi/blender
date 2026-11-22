@@ -286,7 +286,10 @@ void ShadingView::render()
 
   /* Independent geometry lines are also a Filter Graph source. The raw image never enters
    * scene sampling/history; only its explicit Filter consumers or final Film overlay do. */
-  inst_.geometry_lines.render(main_view_);
+  {
+    ScopedTelemetrySample scope(inst_.telemetry, TelemetryStageId::GeometryLines);
+    inst_.geometry_lines.render(main_view_);
+  }
 
   if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG)) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
@@ -330,6 +333,7 @@ void ShadingView::render()
   inst_.outline_shell.release();
 
   if (inst_.outline.enabled()) {
+    ScopedTelemetrySample scope(inst_.telemetry, TelemetryStageId::ScreenOutline);
     inst_.outline.render(render_view_, extent_);
   }
 
@@ -368,10 +372,12 @@ void ShadingView::render()
     render_stencil_value_preview();
   }
   else if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX)) {
-    ScopedTelemetrySample telemetry_sample(inst_.telemetry,
-                                           TelemetryStageId::MainFilterBeforePostFX);
-    gpu::Texture *postfx_input_tx = inst_.filter_materials.render_stage(
-        render_view_, rbufs.combined_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX);
+    gpu::Texture *postfx_input_tx;
+    {
+      ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainFilterBeforePostFX);
+      postfx_input_tx = inst_.filter_materials.render_stage(
+          render_view_, rbufs.combined_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX);
+    }
     inst_.film.capture_pre_fx(
         render_view_, postfx_input_tx, inst_.outline.use_in_combined() ? outline_raw_tx : nullptr);
     combined_final_tx = render_postfx(postfx_input_tx, postfx_tx_, dof_buffer_, true);

@@ -73,6 +73,10 @@ static std::string sample_progress_string(const TelemetryFrameRecord &record)
 
 static const char *sample_status_string(const TelemetryFrameRecord &record)
 {
+  if (record.runtime_mode == TelemetryRuntimeMode::FinalRender && record.sampling_finished &&
+      uint64_t(record.sample_index) < record.sample_count) {
+    return "Complete (Time Limit)";
+  }
   if (record.sample_count >= 0xFFFFFFu) {
     return "Continuous";
   }
@@ -121,18 +125,20 @@ static void scope_node_add_sample(TelemetryFrameRecord &record,
   node.call_count += 1;
 }
 
+using ScopePath = Vector<std::pair<TelemetryStageId, std::string_view>>;
+
 static const TelemetryScopeNode *scope_node_find_path(
-    const TelemetryFrameRecord &record, const Vector<TelemetryStageId> &path)
+    const TelemetryFrameRecord &record, const ScopePath &path)
 {
   if (record.scope_nodes.is_empty()) {
     return nullptr;
   }
 
   int parent_index = 0;
-  for (const TelemetryStageId stage : path) {
+  for (const auto &[stage, subject] : path) {
     int matching_child_index = -1;
     for (const int child_index : record.scope_nodes[parent_index].children) {
-      if (record.scope_nodes[child_index].stage == stage) {
+      if (record.scope_nodes[child_index].stage == stage && record.scope_nodes[child_index].subject == subject) {
         matching_child_index = child_index;
         break;
       }
@@ -149,10 +155,10 @@ static void scope_node_averages_update(TelemetryFrameRecord &record,
                                        const Vector<TelemetryFrameRecord> &history,
                                        const int average_count,
                                        const int node_index,
-                                       Vector<TelemetryStageId> &path)
+                                       ScopePath &path)
 {
   TelemetryScopeNode &node = record.scope_nodes[node_index];
-  path.append(node.stage);
+  path.append({node.stage, node.subject});
 
   double total_cpu_ms = 0.0;
   /* Keep the window denominator stable: an absent path contributes zero for that frame. */
@@ -221,9 +227,12 @@ static bke::SceneEeveePerformanceNode snapshot_scope_node(
   const TelemetryScopeNode &source = record.scope_nodes[node_index];
   const TelemetryStageInfo &info = TelemetryModule::stage_info(source.stage);
   bke::SceneEeveePerformanceNode result;
-  result.id = parent_id + "/stage-" + std::to_string(int(source.stage));
-  result.kind = (source.stage >= TelemetryStageId::DrawSyncShared) ? "phase" : "stage";
-  result.label = info.label;
+  result.id = parent_id + "/stage-" + std::to_string(int(source.stage)) + source.subject;
+  result.kind = (source.stage >= TelemetryStageId::DrawSyncShared &&
+                 source.stage <= TelemetryStageId::DrawSubmissionFramebufferRestore) ? "phase" : "stage";
+  result.label = source.subject.empty() ? info.label : std::string(info.label) + ": " + source.subject;
+  result.gpu_ms = source.gpu_ms;
+  result.gpu_calls = source.gpu_calls;
   result.current_ms = source.cpu_ms;
   result.average_ms = source.average_cpu_ms;
   result.calls = source.call_count;
@@ -445,6 +454,16 @@ static constexpr std::array<TelemetryStageInfo, stage_count> telemetry_stage_inf
     {TelemetryStageId::DrawSubmissionFramebufferRestore,
      "Draw.Submission.FramebufferRestore",
      "Draw/Submission (Shared)/Framebuffer Restore"},
+    {TelemetryStageId::ShaderWait, "Shader.Wait", "Shader Wait"},
+    {TelemetryStageId::SampleWork, "Sample.Work", "Sample Work"},
+    {TelemetryStageId::ShadowReadback, "Shadow.StatisticsReadback", "Shadow/Statistics Readback"},
+    {TelemetryStageId::PlanarCapture, "Planar.Capture", "Main View/Planar Probes/Capture"},
+    {TelemetryStageId::GeometryLines, "GeometryLines", "Main View/Geometry Lines"},
+    {TelemetryStageId::ScreenOutline, "ScreenOutline", "Main View/Screen Outline"},
+    {TelemetryStageId::ShadowRender, "Shadow.Render", "Shadow/Render"},
+    {TelemetryStageId::SampleQueueWait, "Sample.QueueWait", "Sample/GPU Queue Wait"},
+    {TelemetryStageId::SampleSubmit, "Sample.Submit", "Sample/Submit"},
+    {TelemetryStageId::PassReadback, "Pass.Readback", "Read Result/Pass Readback"},
 }};
 
 bool TelemetryModule::enabled() const
@@ -620,7 +639,7 @@ bool TelemetryModule::use_time_sort() const
 
 bool TelemetryModule::viewport_publish_paused() const
 {
-  return inst_.scene != nullptr && inst_.scene->eevee.performance_profiler_viewport_pause != 0;
+  return inst_.scene != nullptr && (inst_.scene->eevee.performance_profiler_viewport_pause & 1);
 }
 
 void TelemetryModule::frame_begin(const TelemetryRuntimeMode mode)
@@ -656,6 +675,9 @@ void TelemetryModule::frame_begin(const TelemetryRuntimeMode mode)
                                     int(inst_.sampling.sample_index());
   current_frame_.sample_count = inst_.sampling.sample_count();
   frame_start_time_ = BLI_time_now_seconds();
+  if (mode == TelemetryRuntimeMode::FinalRender && (inst_.scene->eevee.performance_profiler_viewport_pause & 2)) {
+    gpu_queries_ = gpu::TimestampPool::create();
+  }
   frame_active_ = true;
 }
 
@@ -726,10 +748,24 @@ void TelemetryModule::frame_end()
                                     int(inst_.sampling.sample_index());
   current_frame_.sample_count = inst_.sampling.sample_count();
   const double frame_end_time = BLI_time_now_seconds();
+  current_frame_.sampling_finished = current_frame_.runtime_mode == TelemetryRuntimeMode::FinalRender && inst_.sampling.finished();
   if (!current_frame_.has_shared_draw_timing) {
     current_frame_.total_cpu_ms = (frame_end_time - frame_start_time_) * 1000.0;
   }
   snapshot_features();
+  if (gpu_queries_) {
+    gpu_queries_->timestamp_resolve();
+    for (const GpuInterval &interval : gpu_intervals_) {
+      double ms;
+      if (gpu_queries_->timestamp_duration(interval.begin, interval.end, ms)) {
+        TelemetryScopeNode &node = current_frame_.scope_nodes[interval.node];
+        node.gpu_ms += ms;
+        node.gpu_calls++;
+      }
+    }
+    gpu_queries_.reset();
+    gpu_intervals_.clear();
+  }
   {
     const auto &updates = current_frame_.object_updates;
     const auto &v = inst_.velocity.runtime_stats_get();
@@ -852,7 +888,7 @@ void TelemetryModule::frame_end()
       current_frame_.average_stage_values[stage_index] =
           stage_average[stage_index] / double(average_count);
     }
-    Vector<TelemetryStageId> scope_path;
+    ScopePath scope_path;
     for (const int child_index : current_frame_.scope_nodes[0].children) {
       scope_node_averages_update(
           current_frame_, history, average_count, child_index, scope_path);
@@ -978,6 +1014,8 @@ void TelemetryModule::maybe_publish_cached_viewport()
 
 void TelemetryModule::reset()
 {
+  gpu_queries_.reset();
+  gpu_intervals_.clear();
   frame_active_ = false;
   profiler_accounting_start_time_ = 0.0;
   scope_stack_.clear();
@@ -1178,7 +1216,28 @@ void TelemetryModule::draw_performance_end(const blender::DrawPerformanceMetrics
   this->frame_end();
 }
 
-int TelemetryModule::scope_begin(const TelemetryStageId stage)
+int TelemetryModule::gpu_begin(const TelemetryStageId stage)
+{
+  if (gpu_queries_ && ELEM(stage, TelemetryStageId::PlanarCapture, TelemetryStageId::ShadowSurface,
+                           TelemetryStageId::MainDeferred, TelemetryStageId::MainForward,
+                           TelemetryStageId::MainVolumeCompute, TelemetryStageId::MainFilmAccumulate))
+  {
+    return gpu_queries_->timestamp_write();
+  }
+  return -1;
+}
+
+void TelemetryModule::gpu_end(int node, int begin)
+{
+  if (gpu_queries_ && begin >= 0 && node >= 0) {
+    const int end = gpu_queries_->timestamp_write();
+    if (end >= 0) {
+      gpu_intervals_.append({node, begin, end});
+    }
+  }
+}
+
+int TelemetryModule::scope_begin(const TelemetryStageId stage, const char *subject)
 {
   if (!enabled() || !frame_active_ || current_frame_.scope_nodes.is_empty()) {
     return -1;
@@ -1187,7 +1246,8 @@ int TelemetryModule::scope_begin(const TelemetryStageId stage)
   const int parent_index = scope_stack_.is_empty() ? 0 : scope_stack_.last();
   int node_index = -1;
   for (const int child_index : current_frame_.scope_nodes[parent_index].children) {
-    if (current_frame_.scope_nodes[child_index].stage == stage) {
+    const auto &child = current_frame_.scope_nodes[child_index];
+    if (child.stage == stage && (!subject || child.subject == subject)) {
       node_index = child_index;
       break;
     }
@@ -1195,6 +1255,9 @@ int TelemetryModule::scope_begin(const TelemetryStageId stage)
   if (node_index == -1) {
     TelemetryScopeNode node;
     node.stage = stage;
+    if (subject) {
+      node.subject = subject;
+    }
     node_index = current_frame_.scope_nodes.size();
     current_frame_.scope_nodes.append(std::move(node));
     current_frame_.scope_nodes[parent_index].children.append(node_index);
@@ -1305,6 +1368,11 @@ void TelemetryModule::pass_readback_add(const TelemetryPassReadbackType type,
   }
 
   TelemetryPassReadbackSample &sample = current_frame_.pass_readbacks[int(type)];
+  if (current_frame_.runtime_mode == TelemetryRuntimeMode::FinalRender && name && name[0]) {
+    const int node = scope_begin(TelemetryStageId::PassReadback, name);
+    stage_add(TelemetryStageId::PassReadback, elapsed_seconds);
+    scope_end(node, elapsed_seconds);
+  }
   sample.pass_count += 1;
   sample.pixel_count += int64_t(width) * int64_t(height);
   sample.output_value_count += int64_t(width) * int64_t(height) * int64_t(channels);
@@ -1440,6 +1508,11 @@ std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> TelemetryModule::build
   snapshot->last_evaluation_ms = record.last_evaluation_ms;
   snapshot->depsgraph_eval_serial = record.depsgraph_eval_serial;
   snapshot->total_cpu_ms = record.total_cpu_ms;
+  snapshot->instance_init_ms = instance_init_ms;
+  for (const TelemetryPassReadbackSample &readback : record.pass_readbacks) {
+    snapshot->readback_count += readback.pass_count;
+    snapshot->readback_bytes += readback.output_value_count * sizeof(float);
+  }
   snapshot->draw_sync_ms = record.draw_sync_ms;
   snapshot->draw_submission_ms = record.draw_submission_ms;
   snapshot->profiler_accounting_ms = record.profiler_accounting_ms;
@@ -2083,8 +2156,8 @@ std::string TelemetryModule::render_report() const
     const TelemetryStageSample &stage = record->stages[stage_index];
     const double value = stage.cpu_ms;
     const double ms_per_call = (stage.call_count > 0) ? value / double(stage.call_count) : 0.0;
-    const double ms_per_sample = (record->sample_count > 0) ?
-                                     value / double(record->sample_count) :
+    const double ms_per_sample = (record->sample_index > 0) ?
+                                     value / double(record->sample_index) :
                                      0.0;
     result += fmt::format(
         "  - {:<26} {:>8.3f} ms ({} call{}, {:.3f} ms/call, {:.3f} ms/sample)\n",
@@ -2104,12 +2177,14 @@ std::string TelemetryModule::render_report() const
   return result;
 }
 
-ScopedTelemetrySample::ScopedTelemetrySample(TelemetryModule &telemetry, const TelemetryStageId stage)
+ScopedTelemetrySample::ScopedTelemetrySample(TelemetryModule &telemetry, const TelemetryStageId stage,
+                                           const char *subject)
     : telemetry_(telemetry.enabled() && telemetry.frame_active() ? &telemetry : nullptr),
       stage_(stage)
 {
   if (telemetry_ != nullptr) {
-    scope_node_index_ = telemetry_->scope_begin(stage_);
+    scope_node_index_ = telemetry_->scope_begin(stage_, subject);
+    gpu_begin_ = telemetry_->gpu_begin(stage_);
     start_time_ = BLI_time_now_seconds();
   }
 }
@@ -2118,6 +2193,9 @@ ScopedTelemetrySample::~ScopedTelemetrySample()
 {
   if (telemetry_ != nullptr) {
     const double elapsed_seconds = BLI_time_now_seconds() - start_time_;
+    if (gpu_begin_ >= 0) {
+      telemetry_->gpu_end(scope_node_index_, gpu_begin_);
+    }
     telemetry_->stage_add(stage_, elapsed_seconds);
     telemetry_->scope_end(scope_node_index_, elapsed_seconds);
   }

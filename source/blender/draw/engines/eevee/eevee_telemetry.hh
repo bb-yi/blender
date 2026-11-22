@@ -17,6 +17,7 @@
 #include "BLI_span.hh"
 #include "BLI_vector.hh"
 #include "GPU_material_profile.hh"
+#include "GPU_timestamps.hh"
 
 namespace blender::eevee {
 
@@ -157,6 +158,8 @@ enum class TelemetryStageId : uint8_t {
   DrawSubmissionEngineDraw = 93,
   DrawSubmissionCallbacksPost = 94,
   DrawSubmissionFramebufferRestore = 95,
+  ShaderWait, SampleWork, ShadowReadback, PlanarCapture, GeometryLines, ScreenOutline, ShadowRender,
+  SampleQueueWait, SampleSubmit, PassReadback,
   Count,
 };
 
@@ -182,6 +185,9 @@ struct TelemetryStageSample {
 
 struct TelemetryScopeNode {
   TelemetryStageId stage = TelemetryStageId::Count;
+  std::string subject;
+  double gpu_ms = 0.0;
+  int gpu_calls = 0;
   double cpu_ms = 0.0;
   /* Average of this exact root-to-node scope path over the active history window. */
   double average_cpu_ms = 0.0;
@@ -254,6 +260,7 @@ struct TelemetryFrameRecord {
   uint64_t epoch = 0;
   uint64_t capture_seq = 0;
   bool is_playback = false;
+  bool sampling_finished = false;
   uint32_t scene_session_uid = 0;
   uint64_t render_run_id = 0;
   std::string view_layer_name;
@@ -336,6 +343,9 @@ class TelemetryModule {
    * the measured Draw CPU total. */
   double profiler_accounting_start_time_ = 0.0;
   TelemetryFrameRecord current_frame_;
+  std::unique_ptr<gpu::TimestampPool> gpu_queries_;
+  struct GpuInterval { int node, begin, end; };
+  Vector<GpuInterval> gpu_intervals_;
   Vector<int> scope_stack_;
 
  public:
@@ -390,7 +400,10 @@ class TelemetryModule {
   }
 
   void stage_add(TelemetryStageId stage, double elapsed_seconds);
-  int scope_begin(TelemetryStageId stage);
+  double instance_init_ms = 0.0;
+  int scope_begin(TelemetryStageId stage, const char *subject);
+  int gpu_begin(TelemetryStageId stage);
+  void gpu_end(int node, int begin);
   void scope_end(int node_index, double elapsed_seconds);
   void shadow_context_add(TelemetryShadowContext context, double elapsed_seconds, int loop_count);
   void material_sync_add(bool shader_queued,
@@ -454,10 +467,11 @@ class ScopedTelemetrySample {
   TelemetryModule *telemetry_ = nullptr;
   TelemetryStageId stage_;
   int scope_node_index_ = -1;
+  int gpu_begin_ = -1;
   double start_time_ = 0.0;
 
  public:
-  ScopedTelemetrySample(TelemetryModule &telemetry, TelemetryStageId stage);
+  ScopedTelemetrySample(TelemetryModule &telemetry, TelemetryStageId stage, const char *subject = nullptr);
   ~ScopedTelemetrySample();
 };
 

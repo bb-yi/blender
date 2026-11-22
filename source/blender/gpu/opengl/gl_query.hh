@@ -28,7 +28,7 @@ class GLQueryPool : public QueryPool {
    * Number of queries that have been issued since last initialization.
    * Should be equal to query_ids_.size().
    */
-  uint32_t query_issued_;
+  uint32_t query_issued_ = 0;
   /** Can only be initialized once. */
   bool initialized_ = false;
 
@@ -41,6 +41,8 @@ class GLQueryPool : public QueryPool {
   void end_query() override;
 
   void get_occlusion_result(MutableSpan<uint32_t> r_values) override;
+  int timestamp_write() override;
+  bool timestamp_duration(int begin, int end, double &ms) const override;
 };
 
 static inline GLenum to_gl(GPUQueryType type)

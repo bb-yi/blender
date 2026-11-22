@@ -7,6 +7,7 @@
  */
 
 #include "BLI_rect.hh"
+#include "BLI_time.hh"
 #include "GPU_framebuffer.hh"
 #include <memory>
 
@@ -66,9 +67,14 @@ static void eevee_render(RenderEngine *engine, Depsgraph *depsgraph)
     int size[2] = {engine->resolution_x, engine->resolution_y};
 
     /* Avoid leaking in the case of multiview. (see #145743) */
-    delete instance;
+    if (instance) {
+      ScopedEeveeEngineTiming cleanup(*render, bke::EeveeEngineStage::Cleanup);
+      delete instance;
+    }
     /* WORKAROUND: Fails if created in the parent scope. Must be because of lack of active
      * `DRWContext`. To be revisited. */
+    const double init_start = (scene && (scene->eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER)) ?
+                                  BLI_time_now_seconds() : 0.0;
     instance = new Instance();
 
     rctf view_rect;
@@ -77,6 +83,9 @@ static void eevee_render(RenderEngine *engine, Depsgraph *depsgraph)
     rcti visible_rect = rect;
 
     instance->init(size, &rect, &visible_rect, engine, depsgraph, camera_original_ob, layer);
+    if (init_start) {
+      instance->telemetry.instance_init_ms = (BLI_time_now_seconds() - init_start) * 1000.0;
+    }
     if (!instance->render_frame(engine, layer, viewname)) {
       return;
     }
@@ -89,6 +98,7 @@ static void eevee_render(RenderEngine *engine, Depsgraph *depsgraph)
 
   DRW_render_to_image(engine, depsgraph, eevee_render_to_image, eevee_store_metadata);
 
+  ScopedEeveeEngineTiming cleanup(*engine->re, bke::EeveeEngineStage::Cleanup);
   delete instance;
 }
 

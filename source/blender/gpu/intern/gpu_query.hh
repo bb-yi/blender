@@ -9,6 +9,7 @@
 #pragma once
 
 #include "BLI_span.hh"
+#include "GPU_timestamps.hh"
 
 namespace blender::gpu {
 
@@ -18,7 +19,7 @@ enum GPUQueryType {
   GPU_QUERY_OCCLUSION = 0,
 };
 
-class QueryPool {
+class QueryPool : public TimestampPool {
  public:
   virtual ~QueryPool() = default;
 

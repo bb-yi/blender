@@ -71,7 +71,7 @@ class VKScheduler {
    *
    * This reduces context switches when executing commands on the GPU.
    */
-  void move_initial_transfer_to_start(const VKRenderGraph &render_graph);
+  void move_initial_transfer_to_start(const VKRenderGraph &render_graph, IndexRange range);
 
   /**
    * Any data transfer or dispatch nodes should be scheduled before or after a rendering scope.

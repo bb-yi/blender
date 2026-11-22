@@ -1944,6 +1944,7 @@ bool ShadowModule::shadow_update_finished(int loop_count)
   }
 
   if (loop_count == 2) {
+    ScopedTelemetrySample readback(inst_.telemetry, TelemetryStageId::ShadowReadback);
     /* Read back and check if there is still tile-map to update. */
     /* TODO: Only the first loop should call `async_flush_to_host()`, but we need to fix the VK and
      * Metal implementations first. */
@@ -2050,6 +2051,8 @@ void ShadowModule::render(View &view, int2 extent)
   }
 
   const bool record_shadow_context = inst_.telemetry.enabled() && inst_.telemetry.frame_active();
+  ScopedTelemetrySample render_scope(inst_.telemetry, TelemetryStageId::ShadowRender,
+                                     TelemetryModule::shadow_context_label(active_shadow_context_));
   const double context_start_time = record_shadow_context ? BLI_time_now_seconds() : 0.0;
 
   input_depth_extent_ = extent;

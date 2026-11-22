@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "BKE_compositor.hh"
+#include "BKE_eevee_frame_timing.hh"
 #include "BKE_sound_types.hh"
 
 #include "BLI_mutex.hh"
@@ -76,6 +77,8 @@ struct SceneEeveePerformanceNode {
   double current_ms = 0.0;
   double average_ms = 0.0;
   double self_ms = 0.0;
+  double gpu_ms = 0.0;
+  int gpu_calls = 0;
   int calls = 0;
   bool active = false;
   std::vector<SceneEeveePerformanceNode> children;
@@ -113,6 +116,9 @@ struct SceneEeveePerformanceSnapshot {
   /* CPU spent finalizing telemetry history/scope accounting after the measured draw boundary.
    * Report formatting, snapshot publication, viewport unbind and later UI drawing are excluded. */
   double profiler_accounting_ms = 0.0;
+  double instance_init_ms = 0.0;
+  int64_t readback_count = 0;
+  int64_t readback_bytes = 0;
   SceneEeveePerformanceNode root;
   std::string summary;
   std::string report;
@@ -130,6 +136,8 @@ struct SceneEeveePerformanceSnapshotSet {
   std::vector<SceneEeveePerformanceViewportSource> viewport_sources;
   /* All layer/view results from one complete RE_engine_render() invocation. */
   uint64_t final_render_run_id = 0;
+  int final_frame_number = 0;
+  EeveeFrameTiming final_timing;
   std::vector<std::shared_ptr<const SceneEeveePerformanceSnapshot>> final_renders;
   /* Latest result retained for legacy single-report RNA consumers. */
   std::shared_ptr<const SceneEeveePerformanceSnapshot> final_render;
@@ -141,8 +149,20 @@ struct SceneEeveePerformanceRuntime {
  private:
   mutable Mutex snapshot_mutex;
   std::shared_ptr<const SceneEeveePerformanceSnapshotSet> snapshot_set;
+  struct FinalFrame {
+    int number;
+    uint64_t run, sequence;
+    EeveeFrameTiming timing;
+    std::vector<std::shared_ptr<const SceneEeveePerformanceSnapshot>> layers;
+  };
+  std::vector<FinalFrame> final_frames;
 
  public:
+  uint64_t frame_complete(int number, uint64_t sequence, uint64_t previous_run,
+                          const EeveeFrameTiming &timing);
+  void frame_saved(uint64_t run, double save_ms);
+  std::shared_ptr<const SceneEeveePerformanceSnapshotSet> snapshot_for_timeline_frame(int number) const;
+  std::string frame_history_json(bool latest_only = false) const;
   std::string viewport_summary;
   std::string viewport_report;
   std::string render_report;
@@ -278,6 +298,7 @@ struct SceneEeveePerformanceRuntime {
     }
     if (snapshot->render_run_id != next->final_render_run_id) {
       next->final_render_run_id = snapshot->render_run_id;
+      next->final_timing = {};
       next->final_renders.clear();
       next->final_render.reset();
     }
@@ -309,6 +330,7 @@ struct SceneEeveePerformanceRuntime {
       return;
     }
     next->final_render_run_id = render_run_id;
+    next->final_timing = {};
     next->final_renders.clear();
     next->final_render.reset();
     snapshot_set = std::move(next);

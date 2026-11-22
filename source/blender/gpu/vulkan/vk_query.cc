@@ -21,13 +21,78 @@ VKQueryPool::~VKQueryPool()
 
   while (!vk_query_pools_.is_empty()) {
     VkQueryPool vk_query_pool = vk_query_pools_.pop_last();
-    device.functions.vkDestroyQueryPool(device.vk_handle(), vk_query_pool, nullptr);
+    if (timestamp_bits_ > 0) {
+      VKDiscardPool::discard_pool_get().discard_query_pool(vk_query_pool);
+    }
+    else {
+      device.functions.vkDestroyQueryPool(device.vk_handle(), vk_query_pool, nullptr);
+    }
   }
 }
 
 uint32_t VKQueryPool::query_index_in_pool() const
 {
   return queries_issued_ - (vk_query_pools_.size() - 1) * query_chunk_len_;
+}
+
+int VKQueryPool::timestamp_write()
+{
+  const VKDevice &device = VKBackend::get().device;
+  if (timestamp_bits_ == -1) {
+    uint32_t count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(device.physical_device_get(), &count, nullptr);
+    Vector<VkQueueFamilyProperties> properties(count);
+    vkGetPhysicalDeviceQueueFamilyProperties(device.physical_device_get(), &count, properties.data());
+    timestamp_bits_ = properties[device.queue_family_get()].timestampValidBits;
+  }
+  if (!timestamp_bits_) {
+    return -1;
+  }
+  const uint32_t index = queries_issued_ % query_chunk_len_;
+  auto &graph = VKContext::get()->render_graph();
+  if (index == 0) {
+    VkQueryPoolCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    info.queryCount = query_chunk_len_;
+    VkQueryPool pool;
+    if (device.functions.vkCreateQueryPool(device.vk_handle(), &info, nullptr, &pool) != VK_SUCCESS) {
+      return -1;
+    }
+    vk_query_pools_.append(pool);
+    graph.add_node(render_graph::VKResetQueryPoolNode::Data{pool, 0, query_chunk_len_});
+  }
+  graph.add_node(render_graph::VKWriteTimestampNode::Data{vk_query_pools_.last(), index});
+  return queries_issued_++;
+}
+
+void VKQueryPool::timestamp_resolve()
+{
+  const VKDevice &device = VKBackend::get().device;
+  timestamps_.resize(queries_issued_, {0, 0});
+  for (int pool : vk_query_pools_.index_range()) {
+    const uint32_t first = pool * query_chunk_len_;
+    const uint32_t count = std::min(query_chunk_len_, queries_issued_ - first);
+    auto *data = &timestamps_[first];
+    const VkResult result = device.functions.vkGetQueryPoolResults(
+        device.vk_handle(), vk_query_pools_[pool], 0, count, count * sizeof(*data), data,
+        sizeof(*data), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+    if (result != VK_SUCCESS && result != VK_NOT_READY) {
+      timestamps_.clear();
+      return;
+    }
+  }
+}
+
+bool VKQueryPool::timestamp_duration(int begin, int end, double &ms) const
+{
+  if (end >= timestamps_.size() || !timestamps_[begin][1] || !timestamps_[end][1]) {
+    return false;
+  }
+  const uint64_t mask = UINT64_MAX >> (64 - timestamp_bits_);
+  ms = double((timestamps_[end][0] - timestamps_[begin][0]) & mask) *
+       VKBackend::get().device.physical_device_properties_get().limits.timestampPeriod * 1e-6;
+  return true;
 }
 
 void VKQueryPool::init(GPUQueryType type)

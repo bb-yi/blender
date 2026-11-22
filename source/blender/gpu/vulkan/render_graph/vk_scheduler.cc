@@ -32,7 +32,16 @@ Span<NodeHandle> VKScheduler::select_nodes(const VKRenderGraph &render_graph)
 
 void VKScheduler::reorder_nodes(const VKRenderGraph &render_graph)
 {
-  move_initial_transfer_to_start(render_graph);
+  int64_t start = 0;
+  if (render_graph.has_timestamps_) {
+    for (int64_t index : result_.index_range()) {
+      if (render_graph.nodes_[result_[index]].type == VKNodeType::WRITE_TIMESTAMP) {
+        move_initial_transfer_to_start(render_graph, IndexRange(start, index - start));
+        start = index + 1;
+      }
+    }
+  }
+  move_initial_transfer_to_start(render_graph, IndexRange(start, result_.size() - start));
   move_transfer_and_dispatch_outside_rendering_scope(render_graph);
 }
 
@@ -66,15 +75,18 @@ std::optional<std::pair<int64_t, int64_t>> VKScheduler::find_rendering_scope(
 /** \name Reorder - Move initial data transfers to the start
  * \{ */
 
-void VKScheduler::move_initial_transfer_to_start(const VKRenderGraph &render_graph)
+void VKScheduler::move_initial_transfer_to_start(const VKRenderGraph &render_graph, IndexRange range)
 {
+  if (range.size() < 2) {
+    return;
+  }
   Vector<NodeHandle> data_transfers;
   Vector<NodeHandle> other_nodes;
 
-  data_transfers.reserve(result_.size());
-  other_nodes.reserve(result_.size());
+  data_transfers.reserve(range.size());
+  other_nodes.reserve(range.size());
 
-  for (const int64_t index : result_.index_range()) {
+  for (const int64_t index : range) {
     NodeHandle node_handle = result_[index];
     const VKRenderGraphNode &node = render_graph.nodes_[node_handle];
     Span<VKRenderGraphBuffer> node_buffers = render_graph.linked_buffers(node);
@@ -102,8 +114,8 @@ void VKScheduler::move_initial_transfer_to_start(const VKRenderGraph &render_gra
   }
 
   MutableSpan<NodeHandle> store_data_transfers = result_.as_mutable_span().slice(
-      0, data_transfers.size());
-  MutableSpan<NodeHandle> store_other = result_.as_mutable_span().slice(data_transfers.size(),
+      range.start(), data_transfers.size());
+  MutableSpan<NodeHandle> store_other = result_.as_mutable_span().slice(range.start() + data_transfers.size(),
                                                                         other_nodes.size());
   store_data_transfers.copy_from(data_transfers);
   store_other.copy_from(other_nodes);
@@ -123,6 +135,13 @@ void VKScheduler::move_transfer_and_dispatch_outside_rendering_scope(
   Set<ResourceHandle> used_buffers;
 
   foreach_rendering_scope(render_graph, [&](int64_t start_index, int64_t end_index) {
+    if (render_graph.has_timestamps_) {
+      for (int64_t index = start_index + 1; index < end_index; index++) {
+        if (render_graph.nodes_[result_[index]].type == VKNodeType::WRITE_TIMESTAMP) {
+          return;
+        }
+      }
+    }
     /* Move end_rendering right after the last graphics node. */
     for (int index = end_index - 1; index >= start_index; index--) {
       NodeHandle node_handle = result_[index];

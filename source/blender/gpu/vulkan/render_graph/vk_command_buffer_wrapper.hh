@@ -131,6 +131,7 @@ class VKCommandBufferInterface {
                            uint32_t query_index,
                            VkQueryControlFlags vk_query_control_flags) = 0;
   virtual void end_query(VkQueryPool vk_query_pool, uint32_t query_index) = 0;
+  virtual void write_timestamp(VkQueryPool pool, uint32_t index) = 0;
   virtual void reset_query_pool(VkQueryPool vk_query_pool,
                                 uint32_t first_query,
                                 uint32_t query_count) = 0;
@@ -285,6 +286,7 @@ class VKCommandBufferWrapper : public VKCommandBufferInterface {
                    uint32_t query_index,
                    VkQueryControlFlags vk_query_control_flags) override;
   void end_query(VkQueryPool vk_query_pool, uint32_t query_index) override;
+  void write_timestamp(VkQueryPool pool, uint32_t index) override;
   void reset_query_pool(VkQueryPool, uint32_t first_query, uint32_t query_count) override;
   void begin_rendering(const VkRenderingInfo *p_rendering_info) override;
   void end_rendering() override;

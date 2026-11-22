@@ -780,6 +780,7 @@ void Instance::render_sync()
 
 void Instance::wait_for_material_passes()
 {
+  ScopedTelemetrySample wait(telemetry, TelemetryStageId::ShaderWait);
   const int64_t queued_shaders = materials.queued_shaders_count;
   const int64_t queued_textures = materials.queued_textures_count;
   const bool record_wait = telemetry.enabled() && telemetry.frame_active();
@@ -939,7 +940,9 @@ void Instance::render_read_result(RenderLayer *render_layer, const char *view_na
 
   if (view_layer->eevee.use_pass_geometry_line) {
     if (RenderPass *pass = RE_pass_find_by_name(render_layer, "Geometry Line", view_name)) {
+      const double start = record_readbacks ? BLI_time_now_seconds() : 0.0;
       if (float *data = geometry_lines.read_pass()) {
+        record_readback(TelemetryPassReadbackType::RenderPass, "Geometry Line", pass, start);
         BLI_mutex_lock(&render->update_render_passes_mutex);
         RE_pass_set_buffer_data(pass, data);
         BLI_mutex_unlock(&render->update_render_passes_mutex);
@@ -1074,7 +1077,11 @@ bool Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, con
       telemetry.reset();
       return false;
     }
-    samples_in_flight->begin_work();
+    ScopedTelemetrySample sample(telemetry, TelemetryStageId::SampleWork);
+    {
+      ScopedTelemetrySample wait(telemetry, TelemetryStageId::SampleQueueWait);
+      samples_in_flight->begin_work();
+    }
     this->render_sample();
 
     if (dlss_sr.active() && dlss_sr.failed() && !native_retry) {
@@ -1117,8 +1124,11 @@ bool Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, con
       RE_engine_update_progress(engine, progress);
     }
 
-    samples_in_flight->end_work();
-    GPU_render_step();
+    {
+      ScopedTelemetrySample submit(telemetry, TelemetryStageId::SampleSubmit);
+      samples_in_flight->end_work();
+      GPU_render_step();
+    }
     sampling.update_time();
 
 #if 0

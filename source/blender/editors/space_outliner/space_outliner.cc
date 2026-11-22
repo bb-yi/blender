@@ -157,8 +157,12 @@ static void outliner_main_region_listener(const wmRegionListenerParams *params)
           }
           break;
         case ND_FRAME:
-          /* Rebuilding the outliner tree is expensive and shouldn't be done when scrubbing. */
-          ED_region_tag_redraw_no_rebuild(region);
+          if (space_outliner->outlinevis == SO_EEVEE_PERFORMANCE) {
+            ED_region_tag_redraw(region);
+          }
+          else {
+            ED_region_tag_redraw_no_rebuild(region);
+          }
           break;
         case ND_OB_VISIBLE:
         case ND_OB_RENDER:

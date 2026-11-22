@@ -516,6 +516,7 @@ set(SRC
   BKE_scene.hh
   BKE_scene_context.hh
   BKE_scene_runtime.hh
+  BKE_eevee_frame_timing.hh
   BKE_screen.hh
   BKE_shader_fx.hh
   BKE_shrinkwrap.hh

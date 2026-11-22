@@ -892,12 +892,16 @@ static void engine_render_view_layer(Render *re,
     re->display->draw_unlock();
     return;
   }
-  engine_depsgraph_init(engine, view_layer);
+  {
+    ScopedEeveeEngineTiming timer(*re, bke::EeveeEngineStage::Depsgraph);
+    engine_depsgraph_init(engine, view_layer);
+  }
 
   /* Sync data to engine, within draw lock so scene data can be accessed safely. */
   if (use_engine) {
     const bool use_gpu_context = (engine->type->flag & RE_USE_GPU_CONTEXT);
     if (use_gpu_context) {
+      ScopedEeveeEngineTiming context_setup(*re, bke::EeveeEngineStage::DrawSetup);
       DRW_render_context_enable(engine->re);
     }
     else if (G.background && ((engine->has_grease_pencil && use_grease_pencil) ||
@@ -928,6 +932,7 @@ static void engine_render_view_layer(Render *re,
       engine->type->update(engine, re->main, engine->depsgraph);
     }
     if (use_gpu_context) {
+      ScopedEeveeEngineTiming cleanup(*re, bke::EeveeEngineStage::Cleanup);
       DRW_render_context_disable(engine->re);
     }
   }
@@ -938,6 +943,7 @@ static void engine_render_view_layer(Render *re,
   if (use_engine) {
     const bool use_gpu_context = (engine->type->flag & RE_USE_GPU_CONTEXT);
     if (use_gpu_context) {
+      ScopedEeveeEngineTiming context_setup(*re, bke::EeveeEngineStage::DrawSetup);
       DRW_render_context_enable(engine->re);
     }
 
@@ -952,6 +958,7 @@ static void engine_render_view_layer(Render *re,
     BLI_mutex_unlock(&engine->re->engine_draw_mutex);
 
     if (use_gpu_context) {
+      ScopedEeveeEngineTiming cleanup(*re, bke::EeveeEngineStage::Cleanup);
       DRW_render_context_disable(engine->re);
     }
   }
@@ -970,6 +977,7 @@ static void engine_render_view_layer(Render *re,
   }
 
   /* Free dependency graph, if engine has not done it already. */
+  ScopedEeveeEngineTiming cleanup(*re, bke::EeveeEngineStage::Cleanup);
   engine_depsgraph_exit(engine);
 }
 
@@ -1030,6 +1038,7 @@ bool RE_engine_render(Render *re, bool do_all)
   re->display->draw_lock();
 
   if (type->flag & RE_USE_GPU_CONTEXT) {
+    ScopedEeveeEngineTiming context_setup(*re, bke::EeveeEngineStage::DrawSetup);
     WM_init_gpu_backend();
     if (!GPU_backend_supported()) {
       /* Clear UI drawing locks. */
@@ -1051,6 +1060,7 @@ bool RE_engine_render(Render *re, bool do_all)
   /* Create render result. Do this before acquiring lock, to avoid lock
    * inversion as this calls python to get the render passes, while python UI
    * code can also hold a lock on the render result. */
+  ScopedEeveeEngineTiming result_setup(*re, bke::EeveeEngineStage::ResultSetup);
   const bool create_new_result = (re->result == nullptr || !(re->r.scemode & R_BUTS_PREVIEW));
   RenderResult *new_result = (create_new_result) ? engine_render_create_result(re) : nullptr;
 
@@ -1064,6 +1074,7 @@ bool RE_engine_render(Render *re, bool do_all)
   }
   BLI_rw_mutex_unlock(&re->resultmutex);
 
+  result_setup.finish();
   if (re->result == nullptr) {
     /* Clear UI drawing locks. */
     re->display->draw_unlock();
@@ -1150,6 +1161,7 @@ bool RE_engine_render(Render *re, bool do_all)
   /* Clear tile data */
   engine->flag &= ~RE_ENGINE_RENDERING;
 
+  ScopedEeveeEngineTiming cleanup(*re, bke::EeveeEngineStage::Cleanup);
   render_result_free_list(&engine->fullresult, engine->fullresult.first());
 
   /* re->engine becomes zero if user changed active render engine during render */
@@ -1160,6 +1172,7 @@ bool RE_engine_render(Render *re, bool do_all)
     re->engine = nullptr;
   }
 
+  cleanup.finish();
   if (re->r.scemode & R_EXR_CACHE_FILE) {
     BLI_rw_mutex_lock(&re->resultmutex, THREAD_LOCK_WRITE);
     render_result_exr_file_cache_write(re);

@@ -32,6 +32,7 @@ void VKRenderGraph::reset()
     node.free_data();
   }
   nodes_.clear();
+  has_timestamps_ = false;
   storage_.reset();
 
   debug_.node_group_map.clear();

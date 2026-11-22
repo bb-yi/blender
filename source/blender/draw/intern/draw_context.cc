@@ -128,6 +128,7 @@
 #include "BLI_time.hh"
 
 #include "DRW_select_buffer.hh"
+#include "render_types.h"
 
 namespace blender {
 
@@ -3317,6 +3318,7 @@ void DRW_render_to_image(
    * multiple threads. */
 
   /* Begin GPU workload Boundary */
+  ScopedEeveeEngineTiming draw_setup(*render, bke::EeveeEngineStage::DrawSetup);
   GPU_render_begin();
 
   DRWContext draw_ctx(DRWContext::RENDER, depsgraph, {engine->resolution_x, engine->resolution_y});
@@ -3338,6 +3340,8 @@ void DRW_render_to_image(
   GPU_viewport(0, 0, draw_ctx.size[0], draw_ctx.size[1]);
 
   /* Init render result. */
+  draw_setup.finish();
+  ScopedEeveeEngineTiming result_setup(*render, bke::EeveeEngineStage::ResultSetup);
   RenderResult *render_result = RE_engine_begin_result(engine,
                                                        0,
                                                        0,
@@ -3346,6 +3350,7 @@ void DRW_render_to_image(
                                                        view_layer->name,
                                                        /*RR_ALL_VIEWS*/ nullptr);
   RenderLayer *render_layer = render_result->layers.first();
+  result_setup.finish();
   for (RenderView *render_view = render_result->views.first(); render_view != nullptr;
        render_view = render_view->next)
   {
@@ -3353,10 +3358,13 @@ void DRW_render_to_image(
     render_view_cb(engine, render_layer, render_rect);
   }
 
+  ScopedEeveeEngineTiming result_merge(*render, bke::EeveeEngineStage::ResultMerge);
   RE_engine_end_result(engine, render_result, false, false, false);
 
   store_metadata_cb(RE_engine_get_result(engine));
+  result_merge.finish();
 
+  ScopedEeveeEngineTiming cleanup(*render, bke::EeveeEngineStage::Cleanup);
   GPU_framebuffer_restore();
 
   gpu::TexturePool::get().reset(true);

@@ -21,6 +21,8 @@ class VKQueryPool : public QueryPool {
   Vector<VkQueryPool> vk_query_pools_;
   VkQueryType vk_query_type_;
   uint32_t queries_issued_ = 0;
+  int timestamp_bits_ = -1;
+  Vector<std::array<uint64_t, 2>> timestamps_;
 
  protected:
   ~VKQueryPool();
@@ -30,6 +32,9 @@ class VKQueryPool : public QueryPool {
   void begin_query() override;
   void end_query() override;
   void get_occlusion_result(MutableSpan<uint32_t> r_values) override;
+  int timestamp_write() override;
+  void timestamp_resolve() override;
+  bool timestamp_duration(int begin, int end, double &ms) const override;
 
  private:
   uint32_t query_index_in_pool() const;

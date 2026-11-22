@@ -1877,6 +1877,8 @@ static void rna_SceneRender_file_ext_get(PointerRNA *ptr, char *value)
 }
 
 enum class SceneEEVEEPerformanceString {
+  FrameHistory,
+  LatestFrame,
   ViewportSummary,
   ViewportReport,
   RenderReport,
@@ -1895,6 +1897,9 @@ static std::string rna_SceneEEVEE_performance_string(
   }
 
   switch (which) {
+    case SceneEEVEEPerformanceString::FrameHistory:
+    case SceneEEVEEPerformanceString::LatestFrame:
+      return scene->runtime->eevee_performance.frame_history_json(which == SceneEEVEEPerformanceString::LatestFrame);
     case SceneEEVEEPerformanceString::DlssSrViewportStatus:
     case SceneEEVEEPerformanceString::DlssSrRenderStatus: {
       const bool viewport = which == SceneEEVEEPerformanceString::DlssSrViewportStatus;
@@ -1932,7 +1937,7 @@ struct RnaEeveePerformanceStringPin {
   bool valid = false;
 };
 
-static thread_local std::array<RnaEeveePerformanceStringPin, 7> rna_eevee_performance_pins;
+static thread_local std::array<RnaEeveePerformanceStringPin, 9> rna_eevee_performance_pins;
 
 static std::string rna_SceneEEVEE_performance_string_pinned(
     const PointerRNA *ptr, const SceneEEVEEPerformanceString which)
@@ -1962,6 +1967,25 @@ static int rna_SceneEEVEE_performance_string_length(
     pin.valid = true;
   }
   return int(pin.text.size());
+}
+
+static void rna_eevee_history_get(PointerRNA *ptr, char *value)
+{
+  const auto text = rna_SceneEEVEE_performance_string_pinned(ptr, SceneEEVEEPerformanceString::FrameHistory);
+  memcpy(value, text.c_str(), text.size() + 1);
+}
+static int rna_eevee_history_length(PointerRNA *ptr)
+{
+  return rna_SceneEEVEE_performance_string_length(ptr, SceneEEVEEPerformanceString::FrameHistory);
+}
+static void rna_eevee_latest_get(PointerRNA *ptr, char *value)
+{
+  const auto text = rna_SceneEEVEE_performance_string_pinned(ptr, SceneEEVEEPerformanceString::LatestFrame);
+  memcpy(value, text.c_str(), text.size() + 1);
+}
+static int rna_eevee_latest_length(PointerRNA *ptr)
+{
+  return rna_SceneEEVEE_performance_string_length(ptr, SceneEEVEEPerformanceString::LatestFrame);
 }
 
 static void rna_SceneEEVEE_performance_profiler_viewport_summary_get(PointerRNA *ptr, char *value)
@@ -9889,6 +9913,21 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
       "Number of recent frames averaged for viewport profiler timings");
   RNA_def_property_update(
       prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_Scene_eevee_profiler_view_update");
+
+  prop = RNA_def_property(srna, "use_performance_profiler_gpu", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "performance_profiler_viewport_pause", 2);
+  RNA_def_property_ui_text(prop, "Final Render GPU Timings", "Collect asynchronous GPU timestamps for major final-render passes");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+
+  prop = RNA_def_property(srna, "performance_profiler_frame_history", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop, "rna_eevee_history_get", "rna_eevee_history_length", nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Final Frame History", "Measured final frames as JSON, oldest first (up to 256)");
+
+  prop = RNA_def_property(srna, "performance_profiler_latest_frame", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop, "rna_eevee_latest_get", "rna_eevee_latest_length", nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Latest Final Frame", "Latest measured final frame as a JSON array");
 
   prop = RNA_def_property(srna, "use_performance_profiler_pause", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "performance_profiler_viewport_pause", 1);

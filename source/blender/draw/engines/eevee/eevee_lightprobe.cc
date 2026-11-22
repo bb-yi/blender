@@ -214,6 +214,9 @@ void LightProbeModule::sync_planar(const ObjectRef &ob_ref)
   plane.selection_key = ObjectKey(ob_ref);
   const ID &original = ob_ref.object->id.orig_id ? *ob_ref.object->id.orig_id : ob_ref.object->id;
   plane.object_uid = original.session_uid;
+  if (inst_.telemetry.enabled()) {
+    plane.profile_name = original.name + 2;
+  }
   plane.is_instance = uint(ob_ref.is_dupli());
   if (inst_.get_recalc_flags(ob_ref) != 0 || plane.initialized == false) {
     const blender::LightProbe &light_probe = DRW_object_get_data_for_drawing<blender::LightProbe>(

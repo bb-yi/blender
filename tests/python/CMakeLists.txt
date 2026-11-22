@@ -1255,6 +1255,17 @@ if((WITH_CYCLES OR WITH_GPU_RENDER_TESTS) AND TEST_SRC_DIR_EXISTS)
       --python ${CMAKE_CURRENT_LIST_DIR}/npr/test_eevee_native_sun_shadow.py
       -- ${TEST_OUT_DIR}/eevee_native_sun_shadow
     )
+    foreach(backend IN ITEMS opengl vulkan)
+      string(TOUPPER "${backend}" backend_upper)
+      if(WITH_${backend_upper}_BACKEND AND (backend STREQUAL "opengl" OR WITH_GPU_RENDER_TESTS_VULKAN))
+        add_blender_test(
+          eevee_frame_history_${backend}
+          --gpu-backend ${backend}
+          --python ${CMAKE_CURRENT_LIST_DIR}/npr/test_eevee_frame_history.py
+          -- ${TEST_OUT_DIR}/eevee_frame_history_${backend}
+        )
+      endif()
+    endforeach()
     if(WITH_GPU_RENDER_TESTS_HEADED)
       add_gpu_render_tests(overlay "overlay_render_tests.py" "overlay")
     endif()

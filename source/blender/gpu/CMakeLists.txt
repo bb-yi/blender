@@ -154,6 +154,7 @@ set(SRC
   GPU_compute.hh
   GPU_context.hh
   GPU_debug.hh
+  GPU_timestamps.hh
   GPU_format.hh
   GPU_framebuffer.hh
   GPU_immediate.hh
@@ -378,6 +379,7 @@ set(VULKAN_SRC
   vulkan/render_graph/nodes/vk_draw_indirect_node.hh
   vulkan/render_graph/nodes/vk_draw_node.hh
   vulkan/render_graph/nodes/vk_end_query_node.hh
+  vulkan/render_graph/nodes/vk_write_timestamp_node.hh
   vulkan/render_graph/nodes/vk_end_rendering_node.hh
   vulkan/render_graph/nodes/vk_fill_buffer_node.hh
   vulkan/render_graph/nodes/vk_node_info.hh

@@ -431,6 +431,7 @@ class CommandBufferLog : public VKCommandBufferInterface {
   {
   }
   void end_query(VkQueryPool /*vk_query_pool*/, uint32_t /*query_index*/) override {}
+  void write_timestamp(VkQueryPool, uint32_t) override {}
   void reset_query_pool(VkQueryPool /*vk_query_pool*/,
                         uint32_t /*first_query*/,
                         uint32_t /*query_count*/) override

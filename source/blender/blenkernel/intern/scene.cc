@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstring>
 #include <optional>
+#include <sstream>
 
 #include "MEM_guardedalloc.h"
 
@@ -86,6 +87,7 @@
 #include "BKE_rigidbody.h"
 #include "BKE_scene.hh"
 #include "BKE_scene_runtime.hh"
+#include "BLI_serialize.hh"
 #include "BKE_screen.hh"
 #include "BKE_sound.hh"
 #include "BKE_unit.hh"
@@ -118,6 +120,150 @@
 #include "versioning_common.hh"
 
 namespace blender {
+
+double bke::EeveeFrameTiming::unclassified_ms() const
+{
+  return std::max(0.0, render_ms - engine_ms - compositor_ms - output_nodes_ms);
+}
+
+uint64_t bke::SceneEeveePerformanceRuntime::frame_complete(
+    int number, uint64_t sequence, uint64_t previous_run, const EeveeFrameTiming &timing)
+{
+  std::lock_guard<Mutex> lock(snapshot_mutex);
+  if (!snapshot_set || snapshot_set->final_render_run_id <= previous_run ||
+      snapshot_set->final_renders.empty())
+  {
+    return 0;
+  }
+  const uint64_t run = snapshot_set->final_render_run_id;
+  auto next = std::make_shared<SceneEeveePerformanceSnapshotSet>(*snapshot_set);
+  next->final_frame_number = number;
+  next->final_timing = timing;
+  snapshot_set = std::move(next);
+  if (final_frames.size() == 256) {
+    final_frames.erase(final_frames.begin());
+  }
+  final_frames.push_back({number, run, sequence, timing, snapshot_set->final_renders});
+  return run;
+}
+
+void bke::SceneEeveePerformanceRuntime::frame_saved(uint64_t run, double save_ms)
+{
+  std::lock_guard<Mutex> lock(snapshot_mutex);
+  for (auto it = final_frames.rbegin(); it != final_frames.rend(); ++it) {
+    if (it->run == run) {
+      it->timing.save_ms = save_ms;
+      if (snapshot_set && snapshot_set->final_render_run_id == run) {
+        auto next = std::make_shared<SceneEeveePerformanceSnapshotSet>(*snapshot_set);
+        next->final_timing.save_ms = save_ms;
+        snapshot_set = std::move(next);
+      }
+      break;
+    }
+  }
+}
+
+std::shared_ptr<const bke::SceneEeveePerformanceSnapshotSet>
+bke::SceneEeveePerformanceRuntime::snapshot_for_timeline_frame(const int number) const
+{
+  std::lock_guard<Mutex> lock(snapshot_mutex);
+  if (!snapshot_set || final_frames.empty() || snapshot_set->final_frame_number == number ||
+      snapshot_set->final_timing.render_ms < 0.0 || final_frames.back().sequence == 0 ||
+      final_frames.back().run != snapshot_set->final_render_run_id)
+  {
+    return snapshot_set;
+  }
+  for (auto it = final_frames.rbegin(); it != final_frames.rend() && it->sequence == final_frames.back().sequence; ++it) {
+    if (it->number == number) {
+      auto selected = std::make_shared<SceneEeveePerformanceSnapshotSet>(*snapshot_set);
+      selected->final_render_run_id = it->run;
+      selected->final_frame_number = number;
+      selected->final_timing = it->timing;
+      selected->final_renders = it->layers;
+      selected->final_render = it->layers.back();
+      return selected;
+    }
+  }
+  return snapshot_set;
+}
+
+static void profiler_node_json(io::serialize::DictionaryValue &dict,
+                               const bke::SceneEeveePerformanceNode &node)
+{
+  dict.append_str("stage", node.label);
+  dict.append_double("cpu_ms", node.current_ms);
+  dict.append_double("self_ms", node.self_ms);
+  dict.append_int("calls", node.calls);
+  dict.append_int("gpu_calls", node.gpu_calls);
+  if (node.gpu_calls == node.calls && node.gpu_calls > 0) {
+    dict.append_double("gpu_ms", node.gpu_ms);
+  }
+  else {
+    dict.append("gpu_ms", std::make_shared<io::serialize::NullValue>());
+  }
+  auto children = dict.append_array("children");
+  for (const auto &child : node.children) {
+    profiler_node_json(*children->append_dict(), child);
+  }
+}
+
+std::string bke::SceneEeveePerformanceRuntime::frame_history_json(const bool latest_only) const
+{
+  std::vector<FinalFrame> frames;
+  {
+    std::lock_guard<Mutex> lock(snapshot_mutex);
+    if (latest_only && !final_frames.empty()) {
+      frames.push_back(final_frames.back());
+    }
+    else {
+      frames = final_frames;
+    }
+  }
+  io::serialize::ArrayValue result;
+  for (const FinalFrame &frame : frames) {
+    auto row = result.append_dict();
+    row->append_int("frame", frame.number);
+    row->append_int("run", frame.run);
+    row->append_int("sequence", frame.sequence);
+    const EeveeFrameTiming &timing = frame.timing;
+    row->append_bool("first_capture", timing.first_render);
+    row->append_double("render_ms", timing.render_ms);
+    row->append_double("engine_ms", timing.engine_ms);
+    row->append_double("compositor_ms", timing.compositor_ms);
+    row->append_double("file_output_ms", timing.output_nodes_ms);
+    row->append_double("unclassified_ms", timing.unclassified_ms());
+    if (timing.preparation_ms >= 0.0) {
+      row->append_double("preparation_ms", timing.preparation_ms);
+    }
+    auto stages = row->append_dict("engine_stages_ms");
+    for (size_t index = 0; index < timing.engine_stages.size(); index++) {
+      stages->append_double(eevee_engine_stage_names[index], timing.engine_stages[index]);
+    }
+    if (timing.save_ms >= 0.0) {
+      row->append_double("saving_ms", timing.save_ms);
+    }
+    else {
+      row->append("saving_ms", std::make_shared<io::serialize::NullValue>());
+    }
+    auto layers = row->append_array("views");
+    for (const auto &view : frame.layers) {
+      auto layer = layers->append_dict();
+      layer->append_str("layer", view->view_layer_name);
+      layer->append_str("view", view->render_view_name);
+      layer->append_int("samples", view->sample_index);
+      layer->append_int("width", view->resolution_x);
+      layer->append_int("height", view->resolution_y);
+      layer->append_double("init_ms", view->instance_init_ms);
+      layer->append_int("readback_count", view->readback_count);
+      layer->append_int("readback_bytes", view->readback_bytes);
+      layer->append_str("report", view->report);
+      profiler_node_json(*layer->append_dict("tree"), view->root);
+    }
+  }
+  std::ostringstream out;
+  io::serialize::JsonFormatter{}.serialize(out, result);
+  return out.str();
+}
 
 /* -------------------------------------------------------------------- */
 /** \name Scene Data-Block

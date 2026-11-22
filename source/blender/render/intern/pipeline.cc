@@ -59,6 +59,7 @@
 #include "BKE_pointcache.h"
 #include "BKE_report.hh"
 #include "BKE_scene.hh"
+#include "BKE_scene_runtime.hh"
 #include "BKE_sound.hh"
 
 #include "NOD_composite.hh"
@@ -1059,6 +1060,12 @@ static void render_result_uncrop(Render *re)
 }
 
 /* Render scene into render result, with a render engine. */
+static bool record_eevee_frame(const Render *re)
+{
+  return re->scene && re->scene->runtime && !(re->r.scemode & R_BUTS_PREVIEW) && STREQ(re->r.engine, "BLENDER_EEVEE") &&
+         (re->scene->eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER);
+}
+
 static void do_render_engine(Render *re)
 {
   Object *camera = RE_GetCamera(re);
@@ -1073,7 +1080,13 @@ static void do_render_engine(Render *re)
   RE_SetCamera(re, camera);
 
   re->display->current_scene_update(re->scene);
+  const double start = record_eevee_frame(re) ? BLI_time_now_seconds() : 0.0;
+  re->profiler_engine_active = start != 0.0;
   RE_engine_render(re, false);
+  re->profiler_engine_active = false;
+  if (start) {
+    re->profiler_timing.engine_ms += (BLI_time_now_seconds() - start) * 1000.0;
+  }
 
   /* when border render, check if we have to insert it in black */
   render_result_uncrop(re);
@@ -1379,6 +1392,7 @@ static void do_render_compositor(Render *re)
         re->i.infostr = nullptr;
 
         compositor::RenderContext compositor_render_context;
+        const double compositor_start = record_eevee_frame(re) ? BLI_time_now_seconds() : 0.0;
         compositor_render_context.is_animation_render = re->flag & R_ANIMATION;
         for (RenderView &rv : re->result->views) {
           RE_compositor_execute(render::CompositorInputData(*re,
@@ -1390,8 +1404,15 @@ static void do_render_compositor(Render *re)
                                                             needed_side_effects_outputs,
                                                             false));
         }
+        const double output_start = compositor_start ? BLI_time_now_seconds() : 0.0;
+        if (compositor_start) {
+          re->profiler_timing.compositor_ms += (output_start - compositor_start) * 1000.0;
+        }
         if (GPU_backend_get_error() == nullptr) {
           compositor_render_context.save_file_outputs(re->pipeline_scene_eval);
+          if (output_start) {
+            re->profiler_timing.output_nodes_ms += (BLI_time_now_seconds() - output_start) * 1000.0;
+          }
         }
       }
     }
@@ -1578,15 +1599,23 @@ static void do_render_sequencer(Render *re)
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 /* Render full pipeline, using render engine, sequencer and compositing nodes. */
-static void do_render_full_pipeline(Render *re)
+static void do_render_full_pipeline(Render *re, double preparation_start)
 {
   bool render_seq = false;
+  const bool capture = record_eevee_frame(re);
+  const auto previous = capture ? re->scene->runtime->eevee_performance.snapshot_set_get() : nullptr;
+  re->profiler_frame_run = 0;
+  re->profiler_timing = {};
 
   re->display->current_scene_update_cb(re->display->suh, re->scene);
 
   BKE_scene_camera_switch_update(re->scene);
 
   re->i.starttime = BLI_time_now_seconds();
+
+  if (capture && preparation_start > 0.0) {
+    re->profiler_timing.preparation_ms = (re->i.starttime - preparation_start) * 1000.0;
+  }
 
   /* ensure no rendered results are cached from previous animated sequences */
   BKE_image_all_free_anim_ibufs(re->main, re->r.cfra);
@@ -1609,6 +1638,20 @@ static void do_render_full_pipeline(Render *re)
   }
 
   re->i.lastframetime = BLI_time_now_seconds() - re->i.starttime;
+
+  if (!render_seq && STREQ(re->r.engine, "BLENDER_EEVEE") && !(re->r.scemode & R_BUTS_PREVIEW) &&
+      !G.is_break && !re->display->test_break())
+  {
+    static std::atomic<bool> first_eevee_frame{true};
+    const bool first = first_eevee_frame.exchange(false, std::memory_order_relaxed);
+    if (capture) {
+      re->profiler_timing.render_ms = re->i.lastframetime * 1000.0;
+      re->profiler_timing.first_render = first;
+      re->profiler_frame_run = re->scene->runtime->eevee_performance.frame_complete(
+          re->r.cfra, re->animation_sequence_id, previous ? previous->final_render_run_id : 0,
+          re->profiler_timing);
+    }
+  }
 
   re->display->stats_draw(&re->i);
 
@@ -2030,6 +2073,7 @@ void RE_RenderFrame(Render *re,
 {
   re->animation_sequence_id = 0;
   CLOG_INFO(&LOG, "Rendering frame %d", frame);
+  const double preparation_start = (scene->eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER) ? BLI_time_now_seconds() : 0.0;
 
   render_callback_exec_id(re, re->main, &scene->id, BKE_CB_EVT_RENDER_INIT);
 
@@ -2061,7 +2105,7 @@ void RE_RenderFrame(Render *re,
 
     render_init_depsgraph(re);
 
-    do_render_full_pipeline(re);
+    do_render_full_pipeline(re, preparation_start);
 
     if (GPU_backend_get_error() != nullptr) {
       G.is_break = true;
@@ -2364,6 +2408,10 @@ static bool do_write_image_or_movie(Render *re,
 
   render_time = re->i.lastframetime;
   re->i.lastframetime = BLI_time_now_seconds() - re->i.starttime;
+  if (do_write_file && ok && re->profiler_frame_run) {
+    scene->runtime->eevee_performance.frame_saved(re->profiler_frame_run,
+                                                 (re->i.lastframetime - render_time) * 1000.0);
+  }
 
   BLI_timecode_string_from_time_simple(filepath, sizeof(filepath), re->i.lastframetime);
   std::string message = fmt::format("Time: {}", filepath);
@@ -2546,6 +2594,7 @@ void RE_RenderAnim(Render *re,
   scene->r.subframe = 0.0f;
   for (nfra = sfra, scene->r.cfra = sfra; scene->r.cfra <= efra; scene->r.cfra++) {
     CLOG_INFO(&LOG, "Rendering frame %d", nfra);
+    const double preparation_start = record_eevee_frame(re) ? BLI_time_now_seconds() : 0.0;
 
     char filepath[FILE_MAX];
 
@@ -2670,7 +2719,7 @@ void RE_RenderAnim(Render *re,
     /* run callbacks before rendering, before the scene is updated */
     render_callback_exec_id(re, re->main, &scene->id, BKE_CB_EVT_RENDER_PRE);
 
-    do_render_full_pipeline(re);
+    do_render_full_pipeline(re, preparation_start);
     totrendered++;
 
     const bool should_write = !(re->flag & R_SKIP_WRITE);

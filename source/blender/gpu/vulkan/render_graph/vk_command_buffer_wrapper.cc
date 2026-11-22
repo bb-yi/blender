@@ -344,6 +344,11 @@ void VKCommandBufferWrapper::end_query(VkQueryPool vk_query_pool, uint32_t query
   functions->vkCmdEndQuery(vk_command_buffer_, vk_query_pool, query_index);
 }
 
+void VKCommandBufferWrapper::write_timestamp(VkQueryPool pool, uint32_t index)
+{
+  functions->vkCmdWriteTimestamp(vk_command_buffer_, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, pool, index);
+}
+
 void VKCommandBufferWrapper::reset_query_pool(VkQueryPool vk_query_pool,
                                               uint32_t first_query,
                                               uint32_t query_count)

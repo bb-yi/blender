@@ -26,6 +26,7 @@ void VKDiscardPool::move_data(VKDiscardPool &src_pool, TimelineValue timeline)
   src_pool.images_.update_timeline(timeline);
   src_pool.shader_modules_.update_timeline(timeline);
   src_pool.pipelines_.update_timeline(timeline);
+  src_pool.queries_.update_timeline(timeline);
   src_pool.pipeline_layouts_.update_timeline(timeline);
   src_pool.descriptor_pools_.update_timeline(timeline);
   src_pool.swapchain_images_.update_timeline(timeline);
@@ -38,6 +39,7 @@ void VKDiscardPool::move_data(VKDiscardPool &src_pool, TimelineValue timeline)
   images_.extend(std::move(src_pool.images_));
   shader_modules_.extend(std::move(src_pool.shader_modules_));
   pipelines_.extend(std::move(src_pool.pipelines_));
+  queries_.extend(std::move(src_pool.queries_));
   pipeline_layouts_.extend(std::move(src_pool.pipeline_layouts_));
   descriptor_pools_.extend(std::move(src_pool.descriptor_pools_));
   swapchain_images_.extend(std::move(src_pool.swapchain_images_));
@@ -112,6 +114,12 @@ void VKDiscardPool::discard_pipeline(VkPipeline vk_pipeline)
   std::scoped_lock mutex(mutex_);
   pipelines_.append_timeline(timeline_, vk_pipeline);
 }
+
+void VKDiscardPool::discard_query_pool(VkQueryPool pool)
+{
+  std::scoped_lock mutex(mutex_);
+  queries_.append_timeline(timeline_, pool);
+}
 void VKDiscardPool::discard_pipeline_layout(VkPipelineLayout vk_pipeline_layout)
 {
   std::scoped_lock mutex(mutex_);
@@ -171,6 +179,9 @@ void VKDiscardPool::destroy_discarded_resources(VKDevice &device, TimelineValue 
 
   pipelines_.remove_old(current_timeline, [&](VkPipeline vk_pipeline) {
     device.functions.vkDestroyPipeline(device.vk_handle(), vk_pipeline, nullptr);
+  });
+  queries_.remove_old(current_timeline, [&](VkQueryPool pool) {
+    device.functions.vkDestroyQueryPool(device.vk_handle(), pool, nullptr);
   });
 
   pipeline_layouts_.remove_old(current_timeline, [&](VkPipelineLayout vk_pipeline_layout) {

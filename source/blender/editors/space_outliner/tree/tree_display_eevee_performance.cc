@@ -12,6 +12,7 @@
 #include <cstring>
 #include <iomanip>
 #include <memory>
+#include <numeric>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -21,6 +22,8 @@
 #include "BKE_scene_runtime.hh"
 
 #include "BLI_hash_c.hh"
+#include "BLI_timecode.hh"
+#include "BLT_translation.hh"
 
 #include "DNA_outliner_types.h"
 #include "DNA_scene_types.h"
@@ -233,6 +236,15 @@ double finalize_stage_times(PerfNode &node)
     node.time_ms = child_total;
   }
   return node.time_ms;
+}
+
+PerfNode &add_measured_time(PerfNode &parent, const std::string &label, double ms, const char *key,
+                            bool default_open = false)
+{
+  PerfNode &row = ensure_child(parent, label, default_open, key);
+  row.has_time = true;
+  row.time_ms = ms;
+  return row;
 }
 
 void sort_nodes_by_time(PerfNode &node)
@@ -747,6 +759,9 @@ std::string snapshot_node_label(const bke::SceneEeveePerformanceNode &node,
     label += ", self " + format_ms(metrics.self_ms) + " ms, calls " +
              std::to_string(node.calls);
   }
+  if (node.gpu_calls) {
+    label += node.gpu_calls == node.calls ? ", GPU " + format_ms(node.gpu_ms) + " ms" : ", GPU incomplete";
+  }
   return label + ")";
 }
 
@@ -853,8 +868,8 @@ void collect_snapshot_content_keys(const bke::SceneEeveePerformanceSnapshot &sna
   {
     r_keys.push_back(metadata_key + "/" + key);
   }
-  const bke::SceneEeveePerformanceNode *current_main_view = snapshot_node_find(
-      snapshot.root, "MainView");
+  const bool final = snapshot.kind == "final_render";
+  const bke::SceneEeveePerformanceNode *current_main_view = final ? nullptr : snapshot_node_find(snapshot.root, "MainView");
   const std::string main_view_key = snapshot_key + "/main-view";
   r_keys.push_back(main_view_key);
   if (current_main_view) {
@@ -1059,8 +1074,8 @@ void append_snapshot_contents(PerformanceTreeBuilder &builder,
           " ms (excluded from Draw CPU; pre-publication accounting only)",
       metadata_key + "/profiler-accounting");
 
-  const bke::SceneEeveePerformanceNode *current_main_view = snapshot_node_find(
-      snapshot.root, "MainView");
+  const bool final = snapshot.kind == "final_render";
+  const bke::SceneEeveePerformanceNode *current_main_view = final ? nullptr : snapshot_node_find(snapshot.root, "MainView");
   const std::string main_view_key = snapshot_key + "/main-view";
   if (current_main_view) {
     const std::string main_view_label = snapshot_node_label(*current_main_view, metrics_cache);
@@ -1075,7 +1090,7 @@ void append_snapshot_contents(PerformanceTreeBuilder &builder,
                          &main_view_label,
                          &main_view_key);
   }
-  else {
+  else if (!final) {
     builder.add_label(root.subtree, &root, "MainView (Not Run)", main_view_key, true);
   }
 
@@ -1160,7 +1175,222 @@ std::vector<std::shared_ptr<const bke::SceneEeveePerformanceSnapshot>> final_ren
   return result;
 }
 
+struct FinalRenderHotspots {
+  double shadow_main_wait_ms = 0.0;
+  double shadow_planar_wait_ms = 0.0;
+  int shadow_reads = 0;
+  double queue_wait_ms = 0.0;
+  double result_readback_ms = 0.0;
+  int64_t pass_count = 0;
+  int64_t pass_bytes = 0;
+  const bke::SceneEeveePerformanceNode *top_readback = nullptr;
+  double shader_wait_ms = 0.0;
+  double sync_ms = 0.0;
+  const bke::SceneEeveePerformanceNode *top_planar = nullptr;
+  double shadow_gpu_ms = 0.0;
+  double planar_shadow_gpu_ms = 0.0;
+  int shadow_gpu_calls = 0;
+  int shadow_surface_calls = 0;
+  std::string strongest_draw;
+  double strongest_draw_gpu_ms = 0.0;
+
+  void gather(const bke::SceneEeveePerformanceNode &node, bool in_probe = false)
+  {
+    const std::string &label = node.label;
+    if (label == "Shadow.StatisticsReadback") {
+      (in_probe ? shadow_planar_wait_ms : shadow_main_wait_ms) += node.current_ms;
+      shadow_reads += node.calls;
+    }
+    else if (label == "Sample.QueueWait") {
+      queue_wait_ms += node.current_ms;
+    }
+    else if (label == "ReadResult") {
+      result_readback_ms += node.current_ms;
+    }
+    else if (startswith(label, "Pass.Readback: ") &&
+             (!top_readback || node.current_ms > top_readback->current_ms))
+    {
+      top_readback = &node;
+    }
+    else if (label == "Shader.Wait") {
+      shader_wait_ms += node.current_ms;
+    }
+    else if (label == "Sync.Begin" || label == "Sync.Objects" || label == "Sync.End") {
+      sync_ms += node.current_ms;
+    }
+    else if (startswith(label, "Planar.Capture: ")) {
+      in_probe = true;
+      if (!top_planar || node.current_ms > top_planar->current_ms) {
+        top_planar = &node;
+      }
+    }
+    if (label == "Shadow.Surface") {
+      shadow_surface_calls += node.calls;
+      shadow_gpu_calls += node.gpu_calls;
+      shadow_gpu_ms += node.gpu_ms;
+      if (in_probe) {
+        planar_shadow_gpu_ms += node.gpu_ms;
+      }
+    }
+    if (!in_probe && node.calls > 0 && node.gpu_calls == node.calls &&
+        (label == "Deferred" || label == "Forward" || label == "Volume.Compute") &&
+        node.gpu_ms > strongest_draw_gpu_ms)
+    {
+      strongest_draw = label;
+      strongest_draw_gpu_ms = node.gpu_ms;
+    }
+    for (const auto &child : node.children) {
+      gather(child, in_probe);
+    }
+  }
+};
+
+PerfNode final_frame_diagnostics(const bke::SceneEeveePerformanceSnapshotSet &snapshots,
+                                 bool sort_by_time)
+{
+  const bke::EeveeFrameTiming &timing = snapshots.final_timing;
+  PerfNode summary(IFACE_("Final Render"), true, "Final Render");
+  if (timing.render_ms < 0.0) {
+    return summary;
+  }
+  const auto &stages = timing.engine_stages;
+  const double engine_stages_ms = std::accumulate(stages.begin(), stages.end(), 0.0);
+  double eevee_init_ms = 0.0;
+  double eevee_render_ms = 0.0;
+  FinalRenderHotspots hotspots;
+  PerfNode &breakdown = ensure_child(summary, IFACE_("RenderTime Breakdown"), true, "breakdown");
+  PerfNode &engine = add_measured_time(breakdown, IFACE_("Render Engine"), timing.engine_ms, "engine");
+  const char *stage_labels[] = {N_("Scene Evaluation"), N_("Pass and Buffer Setup"),
+                               N_("Merge Render Results"), N_("GPU and Draw Context Setup"),
+                               N_("Engine and Resource Cleanup")};
+  static_assert(std::size(stage_labels) == size_t(bke::EeveeEngineStage::Count));
+  for (size_t index = 0; index < stages.size(); index++) {
+    add_measured_time(engine, IFACE_(stage_labels[index]), stages[index], bke::eevee_engine_stage_names[index]);
+  }
+  for (const auto &view : snapshots.final_renders) {
+    eevee_init_ms += view->instance_init_ms;
+    eevee_render_ms += view->total_cpu_ms;
+    hotspots.gather(view->root);
+    hotspots.pass_count += view->readback_count;
+    hotspots.pass_bytes += view->readback_bytes;
+  }
+  add_measured_time(engine, IFACE_("Eevee Initialization"), eevee_init_ms, "eevee-init");
+  add_measured_time(engine, IFACE_("Eevee Sampling and Readback"), eevee_render_ms, "eevee");
+  const double engine_other_ms = std::max(
+      0.0, timing.engine_ms - engine_stages_ms - eevee_init_ms - eevee_render_ms);
+  add_measured_time(engine, IFACE_("Unclassified Engine Time"), engine_other_ms, "other");
+  add_measured_time(breakdown, IFACE_("Compositing"), timing.compositor_ms, "composite");
+  add_measured_time(breakdown, IFACE_("Compositor File Output"), timing.output_nodes_ms, "file-output");
+  add_measured_time(breakdown, IFACE_("Unclassified Time"), timing.unclassified_ms(), "unclassified");
+  PerfNode &outside = ensure_child(summary, IFACE_("Outside RenderTime"), false, "outside");
+  if (timing.preparation_ms >= 0.0) {
+    add_measured_time(outside, IFACE_("Frame Preparation"), timing.preparation_ms, "prepare");
+  }
+  if (timing.save_ms >= 0.0) {
+    add_measured_time(outside, IFACE_("Main Output / Saving"), timing.save_ms, "saving");
+  }
+  if (sort_by_time) {
+    sort_nodes_by_time(breakdown);
+  }
+
+  PerfNode &checks = ensure_child(summary, IFACE_("What to Check First"), true, "diagnostics");
+  const double threshold = std::max(1.0, timing.render_ms * 0.05);
+  const auto suggest = [&](double ms, const std::string &label, const char *key, const char *action) {
+    if (ms >= threshold) {
+      PerfNode &row = add_measured_time(checks, label, ms, key, true);
+      ensure_child(row, IFACE_(action), false, "action");
+      return &row;
+    }
+    return static_cast<PerfNode *>(nullptr);
+  };
+  suggest(stages[int(bke::EeveeEngineStage::Depsgraph)], IFACE_("Scene Evaluation"), "depsgraph",
+          N_("Compare heavy modifiers, Geometry Nodes and animated geometry."));
+  suggest(hotspots.sync_ms, IFACE_("Scene Data Sync"), "sync",
+          N_("Expand Sync stages; compare frequently updated geometry and materials on the same frame."));
+  suggest(stages[int(bke::EeveeEngineStage::DrawSetup)],
+          IFACE_("GPU and Draw Context Setup"), "draw-setup",
+          N_("Compare a warm repeat; if setup stays slow, check GPU load and available memory."));
+  suggest(eevee_init_ms, IFACE_("Eevee Initialization"), "init",
+          N_("Compare a warm repeat; initialization can include shader and buffer setup."));
+  suggest(stages[int(bke::EeveeEngineStage::ResultSetup)] + stages[int(bke::EeveeEngineStage::ResultMerge)],
+          IFACE_("Render Result Setup and Merge"), "results",
+          N_("Compare only unneeded view layers or render passes; keep compositor inputs."));
+  suggest(stages[int(bke::EeveeEngineStage::Cleanup)], IFACE_("Engine and Resource Cleanup"), "cleanup",
+          N_("Compare persistent render data on repeat renders; check memory use."));
+  suggest(hotspots.shader_wait_ms, IFACE_("Shader Compilation Wait"), "shaders",
+          N_("Repeat the same frame warm before changing materials."));
+  if (PerfNode *row = suggest(hotspots.result_readback_ms, IFACE_("Render Pass Readback"), "readback",
+                              N_("Test removing unused passes or AOVs, not just muting File Output.")))
+  {
+    ensure_child(*row, std::to_string(hotspots.pass_count) + " " + IFACE_("Passes") + ", " +
+                 format_ms(double(hotspots.pass_bytes) / 1.0e6) + " MB", false, "bytes");
+    if (hotspots.top_readback) {
+      add_measured_time(*row, std::string(IFACE_("Longest Readback")) + ": " +
+                        hotspots.top_readback->label.substr(sizeof("Pass.Readback: ") - 1),
+                        hotspots.top_readback->current_ms, "pass");
+    }
+  }
+  if (PerfNode *row = suggest(hotspots.shadow_main_wait_ms + hotspots.shadow_planar_wait_ms,
+                              IFACE_("Shadow Statistics Readback (CPU Wait)"), "shadow-wait",
+                              N_("This waits for queued work; do not treat it as shadow drawing.")))
+  {
+    ensure_child(*row, std::to_string(hotspots.shadow_reads) + " " + IFACE_("Readbacks"), false, "calls");
+    add_measured_time(*row, IFACE_("Main / Other Shadow Readback"), hotspots.shadow_main_wait_ms,
+                      "main-reads");
+    if (hotspots.top_planar && hotspots.shadow_planar_wait_ms > 0.0) {
+      add_measured_time(*row, IFACE_("Planar Shadow Readback"), hotspots.shadow_planar_wait_ms,
+                        "planar-reads");
+      ensure_child(*row, std::string(IFACE_("Inspect Planar Probe")) + ": " +
+                   hotspots.top_planar->label.substr(sizeof("Planar.Capture: ") - 1), false, "probe");
+    }
+  }
+  suggest(hotspots.queue_wait_ms, IFACE_("Sample GPU Queue Wait"), "queue",
+          N_("Compare GPU measurements and check other GPU workloads; the wait is not a draw cost."));
+  suggest(timing.compositor_ms, IFACE_("Compositing"), "compositor",
+          N_("Compare the heaviest compositor branch before changing scene settings."));
+  suggest(timing.output_nodes_ms, IFACE_("Compositor File Output"), "output",
+          N_("Compare output count, compression and disk speed."));
+  suggest(engine_other_ms + timing.unclassified_ms(), IFACE_("Unclassified Time"), "unknown",
+          N_("No measured owner for this time; repeat the frame before changing scene settings."));
+  sort_nodes_by_time(checks);
+  if (checks.children.size() > 3) {
+    checks.children.resize(3);
+  }
+  if (checks.children.empty()) {
+    ensure_child(checks, IFACE_("No measured hotspot identified"), false, "no-hotspot");
+  }
+  PerfNode &gpu = ensure_child(summary, IFACE_("Measured GPU Intervals (Do Not Add)"), false, "gpu");
+  if (hotspots.shadow_surface_calls > 0 && hotspots.shadow_gpu_calls == hotspots.shadow_surface_calls) {
+    add_measured_time(gpu, IFACE_("Main / Other Shadow Page Drawing"),
+                      hotspots.shadow_gpu_ms - hotspots.planar_shadow_gpu_ms, "shadow-main");
+    if (hotspots.top_planar) {
+      add_measured_time(gpu, IFACE_("Planar Shadow Page Drawing"), hotspots.planar_shadow_gpu_ms, "shadow-planar");
+    }
+    ensure_child(gpu, IFACE_("If shadow drawing dominates, compare shadow-casting lights and geometry."), false, "action");
+  }
+  if (!hotspots.strongest_draw.empty()) {
+    add_measured_time(gpu, std::string(IFACE_("Largest Main View Interval")) + ": " + hotspots.strongest_draw,
+                      hotspots.strongest_draw_gpu_ms, "main");
+    if (hotspots.strongest_draw == "Deferred") {
+      ensure_child(gpu, IFACE_("Check shadow drawing separately, then compare lighting and material complexity."),
+                   false, "draw-action");
+    }
+    else if (hotspots.strongest_draw == "Forward") {
+      ensure_child(gpu, IFACE_("Compare transparent layers and overlapping surfaces on the same frame."),
+                   false, "draw-action");
+    }
+    else {
+      ensure_child(gpu, IFACE_("Compare volume settings on the same frame."), false, "draw-action");
+    }
+  }
+  if (gpu.children.empty()) {
+    ensure_child(gpu, IFACE_("GPU Timing Not Measured"), false, "not-measured");
+  }
+  return summary;
+}
+
 void collect_structured_snapshot_keys(const bke::SceneEeveePerformanceSnapshotSet &snapshots,
+                                      const PerfNode &diagnostics,
                                       std::vector<std::string> &r_keys,
                                       SnapshotReportCache &report_cache)
 {
@@ -1176,6 +1406,9 @@ void collect_structured_snapshot_keys(const bke::SceneEeveePerformanceSnapshotSe
     }
   }
   r_keys.push_back("Final Render");
+  for (const auto &child : diagnostics.children) {
+    collect_node_keys(*child, "Final Render", r_keys);
+  }
   const auto final_snapshots = final_render_snapshots(snapshots);
   if (final_snapshots.size() == 1) {
     collect_snapshot_content_keys(*final_snapshots.front(), "Final Render", r_keys, report_cache);
@@ -1200,10 +1433,48 @@ void collect_structured_snapshot_keys(const bke::SceneEeveePerformanceSnapshotSe
 void append_structured_snapshots(PerformanceTreeBuilder &builder,
                                  ListBaseT<TreeElement> &tree,
                                  const bke::SceneEeveePerformanceSnapshotSet &snapshots,
+                                 const PerfNode &diagnostics,
                                  const bool sort_by_time,
                                  SnapshotReportCache &report_cache)
 {
   SnapshotNodeMetricsCache metrics_cache;
+  const auto final_snapshots = final_render_snapshots(snapshots);
+  const bke::EeveeFrameTiming &timing = snapshots.final_timing;
+  std::string final_name = IFACE_("Final Render");
+  if (timing.render_ms >= 0.0) {
+    char render_time[32];
+    BLI_timecode_string_from_time_simple(render_time, sizeof(render_time), timing.render_ms / 1000.0);
+    final_name += " | " + std::string(IFACE_("Frame")) + " " +
+                  std::to_string(snapshots.final_frame_number) + " | RenderTime " + render_time;
+    if (timing.first_render) {
+      final_name += " (" + std::string(IFACE_("First Eevee Frame")) + ")";
+    }
+  }
+  else {
+    final_name += " (" + std::string(final_snapshots.empty() ? IFACE_("Not Run") :
+                                                               IFACE_("Time Not Available")) + ")";
+  }
+  TreeElement &final_root = builder.add_label(tree, nullptr, final_name, "Final Render", true);
+  for (const auto &child : diagnostics.children) {
+    append_node_tree(builder, final_root, *child, "Final Render");
+  }
+  if (final_snapshots.size() == 1) {
+    append_snapshot_contents(builder,
+                             final_root,
+                             *final_snapshots.front(),
+                             "Final Render",
+                             sort_by_time,
+                             metrics_cache,
+                             report_cache);
+  }
+  else {
+    for (const auto &snapshot : final_snapshots) {
+      const std::string &view_name = snapshot->render_view_name;
+      append_snapshot(builder, tree, &final_root, *snapshot,
+                      snapshot->view_layer_name + " / " + (view_name.empty() ? "<default>" : view_name),
+                      final_render_snapshot_key(*snapshot), sort_by_time, metrics_cache, report_cache);
+    }
+  }
   const bool has_viewport_source = !snapshots.viewport_sources.empty();
   TreeElement &viewports = builder.add_label(
       tree,
@@ -1244,47 +1515,6 @@ void append_structured_snapshots(PerformanceTreeBuilder &builder,
                         &source_root,
                         "No timing captured yet (Not Run)",
                         source_key + "/not-run");
-    }
-  }
-  const auto final_snapshots = final_render_snapshots(snapshots);
-  if (final_snapshots.empty()) {
-    builder.add_label(tree, nullptr, "Final Render (Not Run)", "Final Render", true);
-  }
-  else if (final_snapshots.size() == 1) {
-    const bke::SceneEeveePerformanceSnapshot &snapshot = *final_snapshots.front();
-    TreeElement &final_root = builder.add_label(
-        tree,
-        nullptr,
-        snapshot_root_label(snapshot, "Final Render", metrics_cache),
-        "Final Render",
-        true);
-    append_snapshot_contents(
-        builder, final_root, snapshot, "Final Render", sort_by_time, metrics_cache, report_cache);
-  }
-  else {
-    TreeElement &final_root = builder.add_label(
-        tree,
-        nullptr,
-        "Final Render (" + std::to_string(final_snapshots.size()) + " results)",
-        "Final Render",
-        true);
-    for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot :
-         final_snapshots)
-    {
-      const std::string layer_name = snapshot->view_layer_name.empty() ? std::string("<None>") :
-                                                                         snapshot->view_layer_name;
-      const std::string view_name = snapshot->render_view_name.empty() ?
-                                        std::string("<default>") :
-                                        snapshot->render_view_name;
-      append_snapshot(builder,
-                      tree,
-                      &final_root,
-                      *snapshot,
-                      "Layer " + layer_name + " / View " + view_name,
-                      final_render_snapshot_key(*snapshot),
-                      sort_by_time,
-                      metrics_cache,
-                      report_cache);
     }
   }
   if (snapshots.color_bake) {
@@ -1334,13 +1564,14 @@ ListBaseT<TreeElement> TreeDisplayEeveePerformance::build_tree(const TreeSourceD
   const bool sort_by_time = (scene.eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER_SORT_BY_TIME) != 0;
 
   const std::shared_ptr<const bke::SceneEeveePerformanceSnapshotSet> snapshots =
-      runtime ? runtime->snapshot_set_get() : nullptr;
+      runtime ? runtime->snapshot_for_timeline_frame(scene.r.cfra) : nullptr;
   if (snapshots) {
     SnapshotReportCache report_cache(sort_by_time);
+    const PerfNode diagnostics = final_frame_diagnostics(*snapshots, sort_by_time);
     std::vector<std::string> persistent_keys;
-    collect_structured_snapshot_keys(*snapshots, persistent_keys, report_cache);
+    collect_structured_snapshot_keys(*snapshots, diagnostics, persistent_keys, report_cache);
     PerformanceTreeBuilder builder{*this, scene.id, std::move(persistent_keys)};
-    append_structured_snapshots(builder, tree, *snapshots, sort_by_time, report_cache);
+    append_structured_snapshots(builder, tree, *snapshots, diagnostics, sort_by_time, report_cache);
     return tree;
   }
 
@@ -1351,10 +1582,11 @@ ListBaseT<TreeElement> TreeDisplayEeveePerformance::build_tree(const TreeSourceD
   if (legacy_viewport_report.empty() && legacy_render_report.empty()) {
     const bke::SceneEeveePerformanceSnapshotSet empty_snapshots;
     SnapshotReportCache report_cache(sort_by_time);
+    const PerfNode diagnostics = final_frame_diagnostics(empty_snapshots, sort_by_time);
     std::vector<std::string> persistent_keys;
-    collect_structured_snapshot_keys(empty_snapshots, persistent_keys, report_cache);
+    collect_structured_snapshot_keys(empty_snapshots, diagnostics, persistent_keys, report_cache);
     PerformanceTreeBuilder builder{*this, scene.id, std::move(persistent_keys)};
-    append_structured_snapshots(builder, tree, empty_snapshots, sort_by_time, report_cache);
+    append_structured_snapshots(builder, tree, empty_snapshots, diagnostics, sort_by_time, report_cache);
     return tree;
   }
 

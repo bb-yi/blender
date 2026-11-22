@@ -61,4 +61,28 @@ void GLQueryPool::get_occlusion_result(MutableSpan<uint32_t> r_values)
   }
 }
 
+int GLQueryPool::timestamp_write()
+{
+  if (query_issued_ == query_ids_.size()) {
+    query_ids_.resize(query_issued_ + QUERY_CHUNCK_LEN);
+    glGenQueries(QUERY_CHUNCK_LEN, &query_ids_[query_issued_]);
+  }
+  glQueryCounter(query_ids_[query_issued_], GL_TIMESTAMP);
+  return query_issued_++;
+}
+
+bool GLQueryPool::timestamp_duration(int begin, int end, double &ms) const
+{
+  GLint ready = 0;
+  glGetQueryObjectiv(query_ids_[end], GL_QUERY_RESULT_AVAILABLE, &ready);
+  if (!ready) {
+    return false;
+  }
+  GLuint64 start, finish;
+  glGetQueryObjectui64v(query_ids_[begin], GL_QUERY_RESULT, &start);
+  glGetQueryObjectui64v(query_ids_[end], GL_QUERY_RESULT, &finish);
+  ms = double(finish - start) * 1e-6;
+  return true;
+}
+
 }  // namespace blender::gpu
