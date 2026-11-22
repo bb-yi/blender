@@ -122,6 +122,7 @@ static int node_copy_local(bNodeTree &from_tree,
   }
 
   remap_node_pairing(to_tree, node_map);
+  remap_shader_portal_pairing(to_tree, node_map);
 
   /* Copy links between selected nodes. */
   for (bNodeLink &link : from_tree.links) {

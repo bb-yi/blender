@@ -10,8 +10,12 @@
 #include "BLI_string.hh"
 #include "BLI_string_utils.hh"
 
+#include "RNA_access.hh"
+
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
+
+#include "WM_types.hh"
 
 #include "BKE_node_runtime.hh"
 
@@ -75,7 +79,19 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  layout.prop(ptr, "portal_name", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  const bNode &node = *ptr->data_as<bNode>();
+  const bNodeTree &tree = *reinterpret_cast<const bNodeTree *>(ptr->owner_id);
+  ui::Layout &row = layout.row(true);
+  row.operator_context_set(wm::OpCallContext::InvokeRegionWin);
+  row.prop(ptr, "paired_name", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  ui::Layout &swatch = row.row(true);
+  swatch.use_property_split_set(false);
+  swatch.ui_units_x_set(1.0f);
+  swatch.prop(ptr, "portal_color", UI_ITEM_NONE, "", ICON_NONE);
+  ui::Layout &jump_button = row.row(true);
+  jump_button.active_set(!bke::node_tree_runtime::shader_portal_output_nodes(tree, node).is_empty());
+  PointerRNA jump = jump_button.op("node.shader_portal_jump_to_output", "", ICON_VIEWZOOM);
+  RNA_int_set(&jump, "node_id", node.identifier);
   layout.prop(ptr, "data_type", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
@@ -91,7 +107,7 @@ static void node_copy(bNodeTree *dest_ntree, bNode *dest_node, const bNode *src_
 {
   node_copy_standard_storage(dest_ntree, dest_node, src_node);
   const bNodeTree *src_ntree = (src_node->runtime != nullptr) ? src_node->runtime->owner_tree :
-                                                             nullptr;
+                                                                 nullptr;
   if (dest_ntree != nullptr && src_ntree == dest_ntree) {
     assign_unique_portal_name(dest_ntree, *dest_node);
   }
@@ -120,6 +136,7 @@ void register_node_type_sh_portal_in()
       "Store a named typed value that can be reused by portal outputs in the same shader tree";
   ntype.enum_name_legacy = "PORTAL_IN";
   ntype.nclass = NODE_CLASS_LAYOUT;
+  ntype.default_width = bke::NodeWidth::_180;
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_layout;
   ntype.initfunc = file_ns::node_init;

@@ -36,6 +36,11 @@ void node_operatortypes()
 
   WM_operatortype_append(NODE_OT_find_node);
   WM_operatortype_append(NODE_OT_jump_to_shader_portal_in);
+  WM_operatortype_append(NODE_OT_shader_portal_bind);
+  WM_operatortype_append(NODE_OT_shader_portal_rename);
+  WM_operatortype_append(NODE_OT_shader_portal_jump_to_output);
+  WM_operatortype_append(NODE_OT_shader_portal_from_link);
+  WM_operatortype_append(NODE_OT_shader_portal_to_links);
 
   WM_operatortype_append(NODE_OT_view_all);
   WM_operatortype_append(NODE_OT_view_selected);

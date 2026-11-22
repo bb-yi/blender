@@ -14,6 +14,8 @@
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
+#include "WM_types.hh"
+
 #include "node_shader_util.hh"
 #include "node_util.hh"
 
@@ -75,12 +77,17 @@ static void node_declare(NodeDeclarationBuilder &b)
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
   ui::Layout *row = &layout.row(true);
+  row->operator_context_set(wm::OpCallContext::InvokeRegionWin);
   row->prop(ptr, "portal_name", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
   if (const bNode *node = static_cast<const bNode *>(ptr->data)) {
+    PointerRNA bind = row->op("node.shader_portal_bind", "", ICON_LINKED);
+    RNA_int_set(&bind, "node_id", node->identifier);
     PointerRNA op_ptr = row->op("node.jump_to_shader_portal_in", "", ICON_VIEWZOOM);
     RNA_int_set(&op_ptr, "portal_out_node_id", node->identifier);
   }
-  layout.prop(ptr, "data_type", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  ui::Layout &type_row = layout.row(false);
+  type_row.active_set(false);
+  type_row.prop(ptr, "data_type", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
 static void node_init(bNodeTree *ntree, bNode *node)
@@ -123,6 +130,7 @@ void register_node_type_sh_portal_out()
       "Read a named typed value from a portal input in the same shader tree";
   ntype.enum_name_legacy = "PORTAL_OUT";
   ntype.nclass = NODE_CLASS_LAYOUT;
+  ntype.default_width = bke::NodeWidth::_180;
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_layout;
   ntype.initfunc = file_ns::node_init;

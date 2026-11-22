@@ -43,6 +43,8 @@
 #include "BKE_colorband.hh"
 #include "BKE_node_runtime.hh"
 
+#include "BLI_math_vector_c.hh"
+
 #include "DEG_depsgraph_build.hh"
 
 #include "RNA_access.hh"
@@ -3617,6 +3619,28 @@ void rna_Node_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
   }
   BKE_ntree_update_tag_node_property(ntree, node);
   BKE_main_ensure_invariants(*bmain, ntree->id);
+}
+
+static void rna_ShaderNodePortalIn_paired_name_set(PointerRNA *ptr, const char *name)
+{
+  auto &tree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
+  auto &node = *ptr->data_as<bNode>();
+  bke::node_tree_runtime::rename_shader_portal_input(tree, node, name);
+}
+
+static void rna_ShaderNodePortalIn_portal_color_get(PointerRNA *ptr, float *color)
+{
+  const auto &tree = *reinterpret_cast<const bNodeTree *>(ptr->owner_id);
+  const auto &node = *ptr->data_as<bNode>();
+  const float3 value = bke::node_tree_runtime::shader_portal_color(tree, node);
+  copy_v3_v3(color, value);
+}
+
+static void rna_ShaderNodePortalIn_portal_color_set(PointerRNA *ptr, const float *color)
+{
+  auto &node = *ptr->data_as<bNode>();
+  copy_v3_v3(node.color, color);
+  node.flag |= NODE_CUSTOM_COLOR;
 }
 
 void rna_Node_update_relations(Main *bmain, Scene *scene, PointerRNA *ptr)
@@ -9942,6 +9966,14 @@ static void def_sh_portal_in(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_ui_text(prop, "Name", "Portal identifier used to match portal outputs");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 
+  prop = RNA_def_property(srna, "paired_name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_sdna(prop, nullptr, "name");
+  RNA_def_property_string_funcs(
+      prop, nullptr, nullptr, "rna_ShaderNodePortalIn_paired_name_set");
+  RNA_def_property_ui_text(
+      prop, "Name", "Set a unique, non-empty name and rename the paired Portal Out nodes");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
   prop = RNA_def_property(srna, "data_type", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "data_type");
   RNA_def_property_enum_items(prop, shader_portal_data_type_items);
@@ -9949,6 +9981,15 @@ static void def_sh_portal_in(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
 
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+  prop = RNA_def_property(srna, "portal_color", PROP_FLOAT, PROP_COLOR_GAMMA);
+  RNA_def_property_float_sdna(prop, nullptr, "color");
+  RNA_def_property_float_funcs(prop,
+                              "rna_ShaderNodePortalIn_portal_color_get",
+                              "rna_ShaderNodePortalIn_portal_color_set",
+                              nullptr);
+  RNA_def_property_range(prop, 0.0f, 1.0f);
+  RNA_def_property_ui_text(prop, "Portal Color", "Header color shared with paired Portal Out nodes");
+  RNA_def_property_update(prop, NC_NODE | ND_DISPLAY, nullptr);
 }
 
 static void def_sh_portal_out(BlenderRNA * /*brna*/, StructRNA *srna)
@@ -9965,7 +10006,7 @@ static void def_sh_portal_out(BlenderRNA * /*brna*/, StructRNA *srna)
   prop = RNA_def_property(srna, "data_type", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "data_type");
   RNA_def_property_enum_items(prop, shader_portal_data_type_items);
-  RNA_def_property_ui_text(prop, "Type", "Data type expected from the portal input");
+  RNA_def_property_ui_text(prop, "Type", "Data type inherited from the matching Portal In");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
 
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);

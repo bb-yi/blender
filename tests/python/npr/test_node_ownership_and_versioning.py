@@ -238,7 +238,7 @@ def portal():
     obj = bpy.data.objects['Cube']
     cases = (
         'acyclic', 'cycle', 'two_portals', 'duplicate_name', 'unmatched',
-        'type_mismatch', 'reroute_cycle', 'muted_math_cycle', 'acyclic_fanout',
+        'type_override', 'reroute_cycle', 'muted_math_cycle', 'acyclic_fanout',
         'muted_in_cycle', 'muted_out_cycle', 'empty_name', 'cache_refresh',
     )
     for kind in cases:
@@ -276,8 +276,9 @@ def portal():
         elif kind == 'unmatched':
             pout.portal_name = 'B'
             tree.links.new(math.outputs[0], first_enabled(pin.inputs))
-        elif kind == 'type_mismatch':
+        elif kind == 'type_override':
             pout.data_type = 'VECTOR'
+            check(pout.data_type == pin.data_type, "paired output follows the input type")
             tree.links.new(math.outputs[0], first_enabled(pin.inputs))
         elif kind == 'two_portals':
             pin2, pout2 = make_portal(tree, 'B')
@@ -307,7 +308,8 @@ def portal():
             pin.portal_name = 'A'
             check_portal_value('renamed_restored', 0.75)
             pin.data_type = 'VECTOR'
-            check_portal_value('type_mismatch', 0.0)
+            check(pout.data_type == 'VECTOR', "an input type change updates the paired output")
+            check_portal_value('type_switched_unlinked', 0.0)
             pin.data_type = 'FLOAT'
             check_portal_value('type_restored', 0.75)
             extra = tree.nodes.new('ShaderNodePortalIn')

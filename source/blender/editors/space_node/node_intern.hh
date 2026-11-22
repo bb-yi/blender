@@ -420,6 +420,11 @@ void NODE_OT_select_grouped(wmOperatorType *ot);
 void NODE_OT_select_same_type_step(wmOperatorType *ot);
 void NODE_OT_find_node(wmOperatorType *ot);
 void NODE_OT_jump_to_shader_portal_in(wmOperatorType *ot);
+void NODE_OT_shader_portal_bind(wmOperatorType *ot);
+void NODE_OT_shader_portal_rename(wmOperatorType *ot);
+void NODE_OT_shader_portal_jump_to_output(wmOperatorType *ot);
+void NODE_OT_shader_portal_from_link(wmOperatorType *ot);
+void NODE_OT_shader_portal_to_links(wmOperatorType *ot);
 
 /* `node_view.cc` */
 
@@ -577,6 +582,8 @@ float node_link_dim_factor(const View2D &v2d, const bNodeLink &link);
 bool node_link_is_hidden_or_dimmed(const View2D &v2d, const bNodeLink &link);
 
 void remap_node_pairing(bNodeTree &dst_tree, const Map<const bNode *, bNode *> &node_map);
+void remap_shader_portal_pairing(bNodeTree &dst_tree,
+                                 const Map<const bNode *, bNode *> &node_map);
 
 void NODE_OT_duplicate(wmOperatorType *ot);
 void NODE_OT_delete(wmOperatorType *ot);

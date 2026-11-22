@@ -481,11 +481,18 @@ const bNodeSocket *find_shader_portal_source_socket(const bNodeTree &tree,
                                                     const bNode &portal_out_node);
 const bNodeSocket *find_shader_portal_origin_socket(const bNodeTree &tree,
                                                     const bNode &portal_out_node);
+Vector<const bNode *> shader_portal_output_nodes(const bNodeTree &tree, const bNode &portal_in);
+bool rename_shader_portal_input(bNodeTree &tree,
+                                bNode &portal_in,
+                                StringRefNull name,
+                                const char **r_error = nullptr);
+float3 shader_portal_color(const bNodeTree &tree, const bNode &node);
 /**
  * Replace Portal Out links with real direct links to their resolved origin sockets.
  * This is intended for temporary backend compilation trees only.
  */
 void materialize_shader_portals(bNodeTree &tree);
+void sync_shader_portal_output_types(bNodeTree &tree);
 void update_shader_portal_validation(bNodeTree &tree);
 
 class AllowUsingOutdatedInfo : NonCopyable, NonMovable {

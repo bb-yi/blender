@@ -27,8 +27,8 @@ The output directory can alternatively be supplied with `NPR_REVIEW_OUTPUT_DIR`.
   change object users. The enabled center is approximately 0.6, the disabled
   and background samples are black, and the mask follows the moved object.
 - `portal`: renders thirteen graph variants, including Math, reroute and
-  multi-Portal cycles, muted Math/In/Out, empty/duplicate/unmatched names, type
-  mismatch, fan-out and cache invalidation after rename/type change/removing
+  multi-Portal cycles, muted Math/In/Out, empty/duplicate/unmatched names, paired
+  type synchronization, fan-out and cache invalidation after rename/type change/removing
   a duplicate In. Normal and fan-out center pixels must be 0.75 and 1.5;
   cache restoration must recover 0.75. Cyclic/invalid variants must complete
   without exhausting memory, hanging or crashing. Physical `link.is_valid`

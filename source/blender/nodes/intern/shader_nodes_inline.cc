@@ -36,6 +36,56 @@
 #include "NOD_shader_glsl_bundle.hh"
 
 namespace blender::nodes {
+
+bNodeSocket *add_shader_portal_conversion(bNodeTree &tree,
+                                         bNode &source,
+                                         bNodeSocket &socket,
+                                         const eNodeSocketDatatype from,
+                                         const eNodeSocketDatatype to,
+                                         const FunctionRef<bNode &(UString)> add_node)
+{
+  if (from == to) {
+    return &socket;
+  }
+  if (!ELEM(from, SOCK_FLOAT, SOCK_RGBA, SOCK_VECTOR) ||
+      !ELEM(to, SOCK_FLOAT, SOCK_RGBA, SOCK_VECTOR))
+  {
+    return nullptr;
+  }
+  if (to == SOCK_FLOAT) {
+    if (from == SOCK_RGBA) {
+      bNode &convert = add_node("ShaderNodeRGBToBW"_ustr);
+      bke::node_add_link(tree, source, socket, convert, *convert.inputs.first());
+      return convert.outputs.first();
+    }
+    bNode &convert = add_node("ShaderNodeVectorMath"_ustr);
+    convert.custom1 = NODE_VECTOR_MATH_DOT_PRODUCT;
+    convert.typeinfo->updatefunc(&tree, &convert);
+    bNodeSocket &weights = *bke::node_find_socket(convert, SOCK_IN, "Vector_001"_ustr);
+    copy_v3_fl(weights.default_value_typed<bNodeSocketValueVector>()->value, 1.0f / 3.0f);
+    bke::node_add_link(tree, source, socket, convert, *convert.inputs.first());
+    return bke::node_find_socket(convert, SOCK_OUT, "Value"_ustr);
+  }
+
+  bNode *components_node = &source;
+  bNodeSocket *component = &socket;
+  if (from != SOCK_FLOAT) {
+    components_node = &add_node(from == SOCK_RGBA ? "ShaderNodeSeparateColor"_ustr :
+                                                  "ShaderNodeSeparateXYZ"_ustr);
+    bke::node_add_link(tree, source, socket, *components_node, *components_node->inputs.first());
+    component = components_node->outputs.first();
+  }
+  bNode &combine = add_node(to == SOCK_RGBA ? "ShaderNodeCombineColor"_ustr :
+                                             "ShaderNodeCombineXYZ"_ustr);
+  for (bNodeSocket &input : combine.inputs) {
+    bke::node_add_link(tree, *components_node, *component, combine, input);
+    if (from != SOCK_FLOAT) {
+      component = component->next;
+    }
+  }
+  return combine.outputs.first();
+}
+
 namespace {
 
 struct SocketValue;
@@ -569,7 +619,9 @@ class ShaderNodesInliner {
             continue;
           }
           /* A muted node may have dangling input values that can't be assigned to a socket. */
-          if (output_type == "ShaderNodeOutputOutlineShell"_ustr && node->is_muted()) {
+          if (node->is_muted() &&
+              ELEM(output_type, "ShaderNodeOutlineControl"_ustr, "ShaderNodeOutputOutlineShell"_ustr))
+          {
             continue;
           }
           const bke::bNodeTreeZone *zone = zones.get_zone_by_node(node->identifier);
@@ -1018,6 +1070,13 @@ class ShaderNodesInliner {
     }
     group->ensure_interface_cache();
     group->ensure_topology_cache();
+    if (group->has_available_link_cycle()) {
+      this->store_socket_value_fallback(socket);
+      this->report_error(node,
+                         TIP_("Node group contains a cyclic shader dependency"),
+                         NodeWarningType::Error);
+      return;
+    }
     const bNode *group_output_node = group->group_output_node();
     if (!group_output_node) {
       this->store_socket_value_fallback(socket);
@@ -1060,7 +1119,41 @@ class ShaderNodesInliner {
       this->store_socket_value_fallback(socket);
       return;
     }
-    this->forward_value_or_schedule(socket, {socket.context, origin_socket});
+    const SocketInContext origin = {socket.context, origin_socket};
+    if (const SocketValue *value = value_by_socket_.lookup_ptr(origin)) {
+      if (socket->type == origin->type) {
+        this->store_socket_value(socket, *value);
+      }
+      else {
+        this->store_socket_value(
+            socket, this->handle_portal_implicit_conversion(*value, *origin->typeinfo,
+                                                             *socket->typeinfo));
+      }
+      return;
+    }
+    this->schedule_socket(origin);
+  }
+
+  SocketValue handle_portal_implicit_conversion(const SocketValue &src_value,
+                                                const bke::bNodeSocketType &from_socket_type,
+                                                const bke::bNodeSocketType &to_socket_type)
+  {
+    if (const auto *linked = std::get_if<LinkedSocketValue>(&src_value.value)) {
+      bNode *output_node = linked->node;
+      if (bNodeSocket *output = add_shader_portal_conversion(dst_tree_,
+                                                           *linked->node,
+                                                           *linked->socket,
+                                                           from_socket_type.type,
+                                                           to_socket_type.type,
+                                                           [&](const UString type) -> bNode & {
+        output_node = this->add_node(type);
+        return *output_node;
+      }))
+      {
+        return {LinkedSocketValue{output_node, output}};
+      }
+    }
+    return this->handle_implicit_conversion(src_value, from_socket_type, to_socket_type);
   }
 
   /**

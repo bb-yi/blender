@@ -16,6 +16,8 @@
 #include "BLI_function_ref.hh"
 #include "BLI_listbase.hh"
 #include "BLI_stack.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 #include "BLI_task.hh"
 
 #include "NOD_geometry_nodes_lazy_function.hh"
@@ -166,6 +168,21 @@ static const bNodeSocket *find_shader_portal_source_socket_cached(const bNodeTre
       portal_out_node.identifier, nullptr);
 }
 
+static bool link_is_available_for_dependency(const bNodeTree &tree, const bNodeLink &link)
+{
+  if (link.is_muted() || !link.is_available()) {
+    return false;
+  }
+  /* Topology is rebuilt before NODE_LINK_VALID is refreshed. Apply the static type rule here so
+   * an invalid shader-to-value link cannot become an implicit portal dependency. */
+  if (tree.typeinfo->validate_link &&
+      !tree.typeinfo->validate_link(link.fromsock->type, link.tosock->type))
+  {
+    return false;
+  }
+  return true;
+}
+
 static void update_node_vector(const bNodeTree &ntree)
 {
   bNodeTreeRuntime &tree_runtime = *ntree.runtime;
@@ -268,7 +285,7 @@ static void update_directly_linked_links_and_sockets(const bNodeTree &ntree)
     link->fromsock->runtime->directly_linked_links.append(link);
     link->fromsock->runtime->directly_linked_sockets.append(link->tosock);
     link->tosock->runtime->directly_linked_links.append(link);
-    if (link->is_available()) {
+    if (link_is_available_for_dependency(ntree, *link)) {
       link->fromnode->runtime->has_available_linked_outputs = true;
       link->tonode->runtime->has_available_linked_inputs = true;
     }
@@ -309,10 +326,7 @@ static void find_logical_origins_for_socket_recursive(
     links_to_check = links_to_check.take_front(1);
   }
   for (bNodeLink *link : links_to_check) {
-    if (link->is_muted()) {
-      continue;
-    }
-    if (!link->is_available()) {
+    if (!link_is_available_for_dependency(input_socket.owner_tree(), *link)) {
       continue;
     }
     bNodeSocket &origin_socket = *link->fromsock;
@@ -422,7 +436,7 @@ static void update_shader_portal_cache(const bNodeTree &ntree)
   }
 
   for (const bNode *node : tree_runtime.nodes_by_id) {
-    if (!is_shader_portal_in_node(*node)) {
+    if (!is_shader_portal_in_node(*node) || node->is_muted()) {
       continue;
     }
     const StringRefNull name = shader_portal_name(*node);
@@ -438,7 +452,7 @@ static void update_shader_portal_cache(const bNodeTree &ntree)
   }
 
   for (const bNode *node : tree_runtime.nodes_by_id) {
-    if (!is_shader_portal_out_node(*node)) {
+    if (!is_shader_portal_out_node(*node) || node->is_muted()) {
       continue;
     }
     const StringRefNull name = shader_portal_name(*node);
@@ -509,7 +523,13 @@ static Vector<const bNode *> get_implicit_origin_nodes(const bNodeTree &ntree, b
   /* Portal In supplies Portal Out without an explicit bNodeLink. Use the cache built before
    * topological sorting; the public lookup would re-enter topology cache construction. */
   if (is_shader_portal_out_node(node)) {
+    if (node.is_muted()) {
+      return origin_nodes;
+    }
     if (const bNodeSocket *input = find_shader_portal_source_socket_cached(ntree, node)) {
+      if (input->owner_node().is_muted()) {
+        return origin_nodes;
+      }
       origin_nodes.append(input->runtime->owner_node);
     }
   }
@@ -526,9 +546,16 @@ static Vector<const bNode *> get_implicit_target_nodes(const bNodeTree &ntree, b
     }
   }
   if (is_shader_portal_in_node(node)) {
+    if (node.is_muted()) {
+      return target_nodes;
+    }
     for (const auto item : ntree.runtime->shader_portal_source_socket_by_out_node_id.items()) {
       if (item.value->runtime->owner_node == &node) {
-        target_nodes.append(ntree.node_by_id(item.key));
+        if (const bNode *portal_out = ntree.node_by_id(item.key);
+            portal_out != nullptr && !portal_out->is_muted())
+        {
+          target_nodes.append(portal_out);
+        }
       }
     }
   }
@@ -591,7 +618,7 @@ static void toposort_from_start_node(const bNodeTree &ntree,
         continue;
       }
       bNodeLink &link = *linked_links[item.link_index];
-      if (!link.is_available()) {
+      if (!link_is_available_for_dependency(ntree, link)) {
         /* Ignore unavailable links. */
         item.link_index++;
         continue;
@@ -822,6 +849,134 @@ const bNodeSocket *find_shader_portal_origin_socket(const bNodeTree &tree,
   return origins.is_empty() ? nullptr : origins.first();
 }
 
+Vector<const bNode *> shader_portal_output_nodes(const bNodeTree &tree, const bNode &portal_in)
+{
+  Vector<const bNode *> outputs;
+  if (!is_shader_portal_in_node(portal_in)) {
+    return outputs;
+  }
+  const StringRefNull name = shader_portal_name(portal_in);
+  if (name.is_empty()) {
+    return outputs;
+  }
+  for (const bNode *node : tree.nodes_by_type("ShaderNodePortalIn"_ustr)) {
+    if (node != &portal_in && shader_portal_name(*node) == name) {
+      return {};
+    }
+  }
+  for (const bNode *node : tree.nodes_by_type("ShaderNodePortalOut"_ustr)) {
+    if (node->storage && shader_portal_name(*node) == name &&
+        shader_portal_data_type(*node) == shader_portal_data_type(portal_in))
+    {
+      outputs.append(node);
+    }
+  }
+  return outputs;
+}
+
+bool rename_shader_portal_input(bNodeTree &tree,
+                                bNode &portal_in,
+                                const StringRefNull new_name,
+                                const char **r_error)
+{
+  BLI_assert(is_shader_portal_in_node(portal_in));
+  NodeShaderPortal &storage = *static_cast<NodeShaderPortal *>(portal_in.storage);
+  char name[sizeof(storage.name)];
+  STRNCPY_UTF8(name, new_name.c_str());
+  const auto reject = [&](const char *message) {
+    if (r_error) {
+      *r_error = message;
+    }
+    return false;
+  };
+  if (!name[0]) {
+    return reject("Portal name must not be empty");
+  }
+  if (shader_portal_name(portal_in) == name) {
+    return false;
+  }
+  tree.ensure_topology_cache();
+  for (const bNode *input : tree.nodes_by_type("ShaderNodePortalIn"_ustr)) {
+    if (input != &portal_in && shader_portal_name(*input) == name) {
+      return reject("Another Portal In already uses that name");
+    }
+  }
+  for (const bNode *output : tree.nodes_by_type("ShaderNodePortalOut"_ustr)) {
+    if (shader_portal_name(*output) == name &&
+        shader_portal_data_type(*output) == shader_portal_data_type(portal_in))
+    {
+      return reject("An unpaired Portal Out already uses that name");
+    }
+  }
+
+  const Vector<const bNode *> outputs = shader_portal_output_nodes(tree, portal_in);
+  STRNCPY(storage.name, name);
+  BKE_ntree_update_tag_node_property(&tree, &portal_in);
+  for (const bNode *output : outputs) {
+    auto &output_storage = *static_cast<NodeShaderPortal *>(output->storage);
+    STRNCPY(output_storage.name, name);
+    BKE_ntree_update_tag_node_property(&tree, const_cast<bNode *>(output));
+  }
+  return true;
+}
+
+float3 shader_portal_color(const bNodeTree &tree, const bNode &node)
+{
+  const bNode *color_source = &node;
+  if (is_shader_portal_out_node(node)) {
+    if (const bNodeSocket *source = find_shader_portal_source_socket(tree, node)) {
+      color_source = &source->owner_node();
+    }
+  }
+  if (color_source->flag & NODE_CUSTOM_COLOR) {
+    return float3(color_source->color);
+  }
+  return float3(0.15f, 0.36f, 0.40f);
+}
+
+void sync_shader_portal_output_types(bNodeTree &tree)
+{
+  tree.ensure_topology_cache();
+  bool links_changed = false;
+  for (bNode *output : tree.nodes_by_type("ShaderNodePortalOut"_ustr)) {
+    if (!is_shader_portal_out_node(*output)) {
+      continue;
+    }
+    auto &storage = *static_cast<NodeShaderPortal *>(output->storage);
+    const bNode *input = tree.runtime->shader_portal_inputs_by_name.lookup_default(
+        StringRefNull(storage.name), nullptr);
+    if (!input || storage.data_type == shader_portal_data_type(*input)) {
+      continue;
+    }
+    const eNodeSocketDatatype new_type = shader_portal_data_type(*input);
+    const bNodeSocket *old_socket = find_shader_portal_output_socket(*output);
+    auto *new_socket = const_cast<bNodeSocket *>(
+        find_shader_portal_socket_by_type(*output, SOCK_OUT, new_type));
+    if (!new_socket) {
+      continue;
+    }
+    if (old_socket && !old_socket->runtime->directly_linked_links.is_empty()) {
+      Set<bNodeSocket *> connected(new_socket->runtime->directly_linked_sockets.as_span());
+      for (bNodeLink *link : old_socket->runtime->directly_linked_links) {
+        if (tree.typeinfo->validate_link(new_type, link->tosock->type) &&
+            connected.add(link->tosock))
+        {
+          link->fromsock = new_socket;
+          links_changed = true;
+        }
+      }
+    }
+    storage.data_type = new_type;
+    for (bNodeSocket &socket : output->outputs) {
+      node_set_socket_availability(tree, socket, &socket == new_socket);
+    }
+    BKE_ntree_update_tag_node_property(&tree, output);
+  }
+  if (links_changed) {
+    BKE_ntree_update_tag_link_changed(&tree);
+  }
+}
+
 void materialize_shader_portals(bNodeTree &tree)
 {
   if (tree.type != NTREE_SHADER) {
@@ -896,8 +1051,11 @@ static void gather_shader_portal_successors(const bNodeTree &tree,
                                             Vector<const bNode *> &r_successors)
 {
   r_successors.clear();
+  if (portal_out.is_muted()) {
+    return;
+  }
   const bNodeSocket *input_socket = find_shader_portal_source_socket_cached(tree, portal_out);
-  if (input_socket == nullptr) {
+  if (input_socket == nullptr || input_socket->owner_node().is_muted()) {
     return;
   }
 
@@ -909,7 +1067,7 @@ static void gather_shader_portal_successors(const bNodeTree &tree,
     sockets_in_current_chain.append(&socket);
 
     for (bNodeLink *link : socket.runtime->directly_linked_links) {
-      if (link->is_muted() || !link->is_available()) {
+      if (!link_is_available_for_dependency(tree, *link)) {
         continue;
       }
       const bNodeSocket &origin_socket = *link->fromsock;
@@ -993,14 +1151,14 @@ void update_shader_portal_validation(bNodeTree &tree)
   Vector<const bNode *> portal_outputs;
 
   for (const bNode *node : tree.runtime->nodes_by_id) {
-    if (is_shader_portal_in_node(*node)) {
+    if (is_shader_portal_in_node(*node) && !node->is_muted()) {
       portal_inputs.append(node);
       const StringRefNull name = shader_portal_name(*node);
       if (!name.is_empty()) {
         portal_input_counts.lookup_or_add_default(name)++;
       }
     }
-    else if (is_shader_portal_out_node(*node)) {
+    else if (is_shader_portal_out_node(*node) && !node->is_muted()) {
       portal_outputs.append(node);
     }
   }

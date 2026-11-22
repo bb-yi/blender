@@ -18,6 +18,8 @@
 #include "BLI_math_vector_c.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_listbase.hh"
+#include "BLI_map.hh"
+#include "BLI_set.hh"
 #include "BLI_string.hh"
 #include "BLI_string_utf8.hh"
 #include "BLI_vector.hh"
@@ -31,6 +33,7 @@
 #include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_main_invariants.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_tree_update.hh"
 #include "BKE_report.hh"
@@ -632,6 +635,10 @@ enum eNodeGroupSeparateType {
   NODE_GS_MOVE,
 };
 
+static bool shader_portal_pairs_are_complete(const bNodeTree &tree,
+                                             const Span<const bNode *> selected,
+                                             ReportList *reports);
+
 /* Operator Property */
 static const EnumPropertyItem node_group_separate_types[] = {
     {NODE_GS_COPY, "COPY", 0, "Copy", "Copy to parent node tree, keep group intact"},
@@ -657,6 +664,12 @@ static wmOperatorStatus node_group_separate_exec(bContext *C, wmOperator *op)
   }
   /* get node tree offset */
   const float2 offset = space_node_group_offset(*snode);
+  {
+    const VectorSet<bNode *> selected = get_selected_nodes(*ngroup);
+    if (!shader_portal_pairs_are_complete(*ngroup, selected.as_span(), op->reports)) {
+      return OPERATOR_CANCELLED;
+    }
+  }
 
   switch (type) {
     case NODE_GS_COPY:
@@ -733,12 +746,61 @@ static VectorSet<bNode *> get_nodes_to_group(bNodeTree &node_tree, bNode *group_
   return nodes_to_group;
 }
 
+static bool shader_portal_pairs_are_complete(const bNodeTree &tree,
+                                             const Span<const bNode *> selected,
+                                             ReportList *reports)
+{
+  struct PairCounts {
+    int total_inputs = 0;
+    int total_outputs = 0;
+    int selected_inputs = 0;
+    int selected_outputs = 0;
+  };
+  const Set<const bNode *> selected_set(selected);
+  Map<StringRefNull, PairCounts> counts_by_name;
+  for (const bNode *node : tree.all_nodes()) {
+    if (!ELEM(node->type_legacy, SH_NODE_PORTAL_IN, SH_NODE_PORTAL_OUT) ||
+        node->storage == nullptr)
+    {
+      continue;
+    }
+    const StringRefNull name = static_cast<const NodeShaderPortal *>(node->storage)->name;
+    PairCounts &counts = counts_by_name.lookup_or_add_default(name);
+    const bool is_input = node->type_legacy == SH_NODE_PORTAL_IN;
+    (is_input ? counts.total_inputs : counts.total_outputs)++;
+    if (selected_set.contains(node)) {
+      (is_input ? counts.selected_inputs : counts.selected_outputs)++;
+    }
+  }
+  for (const auto &item : counts_by_name.items()) {
+    const PairCounts &counts = item.value;
+    if (counts.selected_inputs == 0 && counts.selected_outputs == 0) {
+      continue;
+    }
+    const bool complete = counts.total_inputs == 1 && counts.total_outputs > 0 &&
+                          counts.selected_inputs == counts.total_inputs &&
+                          counts.selected_outputs == counts.total_outputs;
+    if (complete) {
+      continue;
+    }
+    BKE_reportf(reports,
+                RPT_WARNING,
+                "Cannot move Portal nodes named \"%s\" without their complete pair",
+                item.key.c_str());
+    return false;
+  }
+  return true;
+}
+
 static bool node_group_make_test_selected(bNodeTree &ntree,
                                           const VectorSet<bNode *> &nodes_to_group,
                                           const StringRef ntree_idname,
                                           ReportList &reports)
 {
   if (nodes_to_group.is_empty()) {
+    return false;
+  }
+  if (!shader_portal_pairs_are_complete(ntree, nodes_to_group.as_span(), &reports)) {
     return false;
   }
   /* make a local pseudo node tree to pass to the node poll functions */

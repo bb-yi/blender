@@ -41,6 +41,7 @@ set(SRC
   node_gizmo.cc
   node_group.cc
   node_ops.cc
+  node_portal.cc
   node_relationships.cc
   node_select.cc
   node_shader_preview.cc

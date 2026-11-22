@@ -9,6 +9,7 @@
 #include <iostream>
 
 #include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_tree_zones.hh"
 
@@ -200,10 +201,10 @@ static void update_zone_border_links(const bNodeTree &tree, bNodeTreeZones &tree
 {
   tree.ensure_topology_cache();
   for (const bNodeLink *link : tree.all_links()) {
-    if (!link->is_available()) {
-      continue;
-    }
-    if (link->is_muted()) {
+    if (link->is_muted() || !link->is_available() ||
+        (tree.typeinfo->validate_link &&
+         !tree.typeinfo->validate_link(link->fromsock->type, link->tosock->type)))
+    {
       continue;
     }
     if (link->fromnode->is_dangling_reroute()) {
@@ -262,11 +263,26 @@ static std::unique_ptr<bNodeTreeZones> discover_tree_zones(const bNodeTree &tree
         continue;
       }
       for (const bNodeLink *link : input_socket->directly_linked_links()) {
-        if (link->is_muted()) {
+        if (link->is_muted() || !link->is_available() ||
+            (tree.typeinfo->validate_link &&
+             !tree.typeinfo->validate_link(link->fromsock->type, link->tosock->type)))
+        {
           continue;
         }
         const bNode &from_node = *link->fromnode;
         const int from_node_i = from_node.index();
+        depend_on_input_flags |= depend_on_input_flag_array[from_node_i];
+        depend_on_output_flags |= depend_on_output_flag_array[from_node_i];
+      }
+    }
+    /* Portal In supplies Portal Out through an implicit edge. Include that edge when computing
+     * zone relations so repeat/simulation contexts are derived from the same dependency graph as
+     * topology sorting and shader evaluation. */
+    if (node->type_legacy == SH_NODE_PORTAL_OUT) {
+      if (const bNodeSocket *portal_input = bke::node_tree_runtime::find_shader_portal_source_socket(
+              tree, *node))
+      {
+        const int from_node_i = portal_input->owner_node().index();
         depend_on_input_flags |= depend_on_input_flag_array[from_node_i];
         depend_on_output_flags |= depend_on_output_flag_array[from_node_i];
       }

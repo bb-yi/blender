@@ -667,6 +667,9 @@ class NodeTreeMainUpdater {
 
     this->update_socket_link_and_use(ntree);
     this->update_individual_nodes(ntree);
+    if (ntree.type == NTREE_SHADER) {
+      bke::node_tree_runtime::sync_shader_portal_output_types(ntree);
+    }
     this->update_internal_links(ntree);
     this->update_generic_callback(ntree);
     this->make_node_previews_dirty(ntree);
@@ -1032,7 +1035,8 @@ class NodeTreeMainUpdater {
       for (const UString idname : {"ShaderNodeOutputMaterial"_ustr,
                                    "ShaderNodeOutputLight"_ustr,
                                    "ShaderNodeOutputWorld"_ustr,
-                                   "ShaderNodeOutputAOV"_ustr})
+                                   "ShaderNodeOutputAOV"_ustr,
+                                   "ShaderNodeOutlineControl"_ustr})
       {
         const Span<const bNode *> nodes = ntree.nodes_by_type(idname);
         if (!nodes.is_empty()) {
@@ -1823,6 +1827,16 @@ class NodeTreeMainUpdater {
       return true;
     }
 
+    if (tree.runtime->changed_flag & NTREE_CHANGED_NODE_OUTPUT) {
+      for (const bNode *group_node : tree.group_nodes()) {
+        if ((group_node->runtime->changed_flag & NTREE_CHANGED_NODE_OUTPUT) &&
+            !group_node->is_muted() && this->is_output_node(*group_node))
+        {
+          return true;
+        }
+      }
+    }
+
     /* The topology hash can only be used when only topology-changing operations have been done.
      */
     if (tree.runtime->changed_flag ==
@@ -1859,7 +1873,7 @@ class NodeTreeMainUpdater {
   bool is_output_node(const bNode &node) const
   {
     if (node.typeinfo->nclass == NODE_CLASS_OUTPUT) {
-      return true;
+      return node.type_legacy != SH_NODE_OUTLINE_CONTROL || !node.is_muted();
     }
     if (node.is_group_output()) {
       return true;

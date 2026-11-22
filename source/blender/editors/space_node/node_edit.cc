@@ -37,11 +37,14 @@
 #include "BKE_text.h"
 
 #include "BLI_listbase.hh"
+#include "BLI_map.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_path_utils.hh"
 #include "BLI_math_vector_c.hh"
 #include "BLI_string.hh"
 #include "BLI_string_utf8.hh"
+#include "BLI_string_utils.hh"
+#include "BLI_set.hh"
 #include "BLI_utildefines.hh"
 
 #include "BLT_translation.hh"
@@ -978,6 +981,100 @@ void remap_node_pairing(bNodeTree &dst_tree, const Map<const bNode *, bNode *> &
   }
 }
 
+static bool is_shader_portal_in_node(const bNode &node)
+{
+  return node.type_legacy == SH_NODE_PORTAL_IN && node.storage != nullptr;
+}
+
+static bool is_shader_portal_out_node(const bNode &node)
+{
+  return node.type_legacy == SH_NODE_PORTAL_OUT && node.storage != nullptr;
+}
+
+static NodeShaderPortal &shader_portal_storage(bNode &node)
+{
+  return *static_cast<NodeShaderPortal *>(node.storage);
+}
+
+static const NodeShaderPortal &shader_portal_storage(const bNode &node)
+{
+  return *static_cast<const NodeShaderPortal *>(node.storage);
+}
+
+static StringRefNull shader_portal_name(const bNode &node)
+{
+  return StringRefNull(static_cast<const NodeShaderPortal *>(node.storage)->name);
+}
+
+void remap_shader_portal_pairing(bNodeTree &dst_tree,
+                                 const Map<const bNode *, bNode *> &node_map)
+{
+  /* Portal In names are the source-side identity. Every copied input must be unique in the
+   * destination tree, even when the user copied only one side of a pair. Otherwise the copied
+   * input would invalidate the original pair by creating a duplicate name. */
+  for (const auto &item : node_map.items()) {
+    if (!is_shader_portal_in_node(*item.key) || !is_shader_portal_in_node(*item.value)) {
+      continue;
+    }
+    const StringRefNull source_name = shader_portal_name(*item.key);
+    if (source_name.is_empty()) {
+      continue;
+    }
+    /* The Portal In copy callback may have assigned a generic name for a same-tree copy. */
+    NodeShaderPortal &storage = shader_portal_storage(*item.value);
+    STRNCPY(storage.name, source_name.c_str());
+    BLI_uniquename_cb(
+        [&](const StringRefNull name) {
+          for (const bNode &node : dst_tree.nodes) {
+            if (&node != item.value && is_shader_portal_in_node(node) &&
+                shader_portal_name(node) == name)
+            {
+              return true;
+            }
+          }
+          return false;
+        },
+        "Portal",
+        '.',
+        storage.name,
+        sizeof(storage.name));
+  }
+
+  for (const auto &item : node_map.items()) {
+    if (!is_shader_portal_out_node(*item.key) || !is_shader_portal_out_node(*item.value)) {
+      continue;
+    }
+    const NodeShaderPortal &source_storage = shader_portal_storage(*item.key);
+    NodeShaderPortal &destination_storage = shader_portal_storage(*item.value);
+    /* Do not query the destination topology cache here: while the copied nodes still have their
+     * authored names, duplicate names intentionally invalidate that cache. Match the source
+     * Portal Out to the copied Portal In by the source-name relation in the node map instead. */
+    const bNode *source_input = nullptr;
+    for (const auto &candidate : node_map.items()) {
+      if (!is_shader_portal_in_node(*candidate.key) ||
+          shader_portal_name(*candidate.key) != StringRefNull(source_storage.name))
+      {
+        continue;
+      }
+      if (source_input != nullptr) {
+        /* Multiple source inputs with the same name are already invalid, so do not guess which
+         * one a copied output should target. */
+        source_input = nullptr;
+        break;
+      }
+      source_input = candidate.key;
+    }
+    if (source_input != nullptr) {
+      if (bNode *destination_input = node_map.lookup_default(source_input, nullptr)) {
+        STRNCPY(destination_storage.name, shader_portal_name(*destination_input).c_str());
+        continue;
+      }
+    }
+    /* Keep an unmatched Portal Out's authored name and type. It will remain unresolved until the
+     * user supplies a matching Portal In. */
+  }
+}
+
 static wmOperatorStatus node_duplicate_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
@@ -1080,6 +1177,7 @@ static wmOperatorStatus node_duplicate_exec(bContext *C, wmOperator *op)
       const_node_map.add(item.key, item.value);
     }
     remap_node_pairing(*ntree, const_node_map);
+    remap_shader_portal_pairing(*ntree, const_node_map);
   }
 
   /* Deselect old nodes, select the copies instead. */

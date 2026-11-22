@@ -760,6 +760,7 @@ NodeSetCopy NodeSetCopy::from_nodes(Main &bmain,
   const Vector<bNode *> new_nodes(result.node_map_.values().begin(),
                                   result.node_map_.values().end());
   remap_pairing(dst_tree, new_nodes, result.node_identifier_map_);
+  remap_shader_portal_pairing(dst_tree, result.node_map_);
 
   /* Copy animation data of source nodes. */
   if (&src_tree != &dst_tree) {

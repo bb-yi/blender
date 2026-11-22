@@ -2834,6 +2834,10 @@ static ColorTheme4f node_header_color_get(const bNodeTree &ntree,
         TH_REDALERT, color_id, 1.0f - color_alert.a, -60, color_header);
     color_header.a = alpha;
   }
+  else if (ELEM(node.type_legacy, SH_NODE_PORTAL_IN, SH_NODE_PORTAL_OUT)) {
+    const float3 color = bke::node_tree_runtime::shader_portal_color(ntree, node);
+    rgba_float_args_set(color_header, color.x, color.y, color.z, alpha);
+  }
   else if ((node.flag & NODE_COLLAPSED) && (node.flag & NODE_CUSTOM_COLOR)) {
     rgba_float_args_set(color_header, node.color[0], node.color[1], node.color[2], alpha);
   }
@@ -3187,6 +3191,10 @@ static void node_draw_basis(const bContext &C,
     if (node_undefined_or_unsupported(ntree, node)) {
       ui::theme::get_color_blend_shade_3fv(
           TH_REDALERT, color_id, 1.0f - color_alert[3], -80, color);
+    }
+    else if (ELEM(node.type_legacy, SH_NODE_PORTAL_IN, SH_NODE_PORTAL_OUT)) {
+      const float3 portal_color = bke::node_tree_runtime::shader_portal_color(ntree, node);
+      rgba_float_args_set(color, portal_color.x, portal_color.y, portal_color.z, 1.0f);
     }
     else if (node.flag & NODE_CUSTOM_COLOR) {
       rgba_float_args_set(color, node.color[0], node.color[1], node.color[2], 1.0f);

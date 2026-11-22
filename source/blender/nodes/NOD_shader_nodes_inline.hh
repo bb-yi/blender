@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "BLI_function_ref.hh"
 #include "BLI_map.hh"
 #include "BLI_vector.hh"
 
@@ -21,6 +22,13 @@ struct bNodeTree;
 struct bNode;
 
 namespace nodes {
+
+bNodeSocket *add_shader_portal_conversion(bNodeTree &tree,
+                                         bNode &source,
+                                         bNodeSocket &socket,
+                                         eNodeSocketDatatype from,
+                                         eNodeSocketDatatype to,
+                                         FunctionRef<bNode &(UString)> add_node);
 
 /** Stable source identity. No evaluated data or compute-context pointers escape inlining. */
 struct ShaderUniformGroupStep {

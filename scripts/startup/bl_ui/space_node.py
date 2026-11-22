@@ -858,6 +858,7 @@ class NODE_MT_context_menu(Menu):
         parent_tree_index = len(snode.path) - 2
         is_geometrynodes = snode.tree_type == 'GeometryNodeTree'
         group = snode.edit_tree
+        is_shader = group and group.bl_idname == 'ShaderNodeTree'
 
         selected_nodes_len = len(context.selected_nodes)
         active_node = context.active_node
@@ -882,6 +883,8 @@ class NODE_MT_context_menu(Menu):
 
             layout.operator("node.links_cut")
             layout.operator("node.links_mute")
+            if is_shader:
+                layout.operator("node.shader_portal_from_link")
 
             if is_nested:
                 layout.separator()
@@ -919,6 +922,12 @@ class NODE_MT_context_menu(Menu):
             layout.operator("node.link_make").replace = False
             layout.operator("node.link_make", text="Make and Replace Links").replace = True
             layout.operator("node.links_detach")
+
+        if is_shader:
+            layout.separator()
+            layout.operator("node.shader_portal_from_link")
+            if any(node.bl_idname == 'ShaderNodePortalOut' for node in context.selected_nodes):
+                layout.operator("node.shader_portal_to_links")
 
         layout.separator()
 
