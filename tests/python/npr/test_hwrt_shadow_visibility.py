@@ -4,6 +4,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -13,16 +14,20 @@ from mathutils import Matrix
 import numpy as np
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--out", required=True, type=Path)
+parser.add_argument("--out", default=os.environ.get("BLENDER_TEST_OUTPUT_DIR"), type=Path)
 parser.add_argument("--legacy-overlap", action="store_true")
 args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
 out = args.out
+if out is None:
+    parser.error("--out or BLENDER_TEST_OUTPUT_DIR is required")
 out.mkdir(parents=True, exist_ok=True)
 gpu.init()
 assert gpu.platform.backend_type_get() == "VULKAN"
 s = bpy.context.scene
 e = s.eevee
-assert e.is_hardware_raytracing_supported
+if not e.is_hardware_raytracing_supported:
+    print("Skipping hardware shadow test: Vulkan ray queries are unavailable", flush=True)
+    sys.exit(0)
 s.render.engine = "BLENDER_EEVEE"
 s.render.resolution_x = s.render.resolution_y = 192
 s.render.resolution_percentage = 100
@@ -227,6 +232,17 @@ try:
     capture("blended_close_contact")
     opaque.hide_viewport = True
     capture("blended_lit_reference")
+    opaque.data.materials[0] = bpy.data.materials.new("Opaque linked blocker")
+    opaque.location.z = .5
+    opaque.hide_viewport = False
+    blockers = bpy.data.collections.new("Forward shadow blockers")
+    blockers.objects.link(opaque)
+    light.light_linking.blocker_collection = blockers
+    capture("blended_link_included")
+    blockers.objects.link(receiver)
+    blockers.objects.unlink(opaque)
+    capture("blended_link_excluded")
+    light.light_linking.blocker_collection = None
 finally:
     offscreen.free()
 
@@ -246,6 +262,7 @@ for name in (
     "material_subrange",
     "material_subrange_refit",
     "blended_close_contact",
+    "blended_link_included",
 ):
     assert values[name] < .05, (name, values)
 assert values["self_shadow_only"] > .95, values
@@ -257,6 +274,7 @@ assert values["caster_reference"] > .1, values
 assert abs(values["caster_disabled"] - values["caster_reference"]) < .02, values
 assert .47 < values["translucent_only"] < .53, values
 assert values["blended_lit_reference"] > .1, values
+assert abs(values["blended_link_excluded"] - values["blended_lit_reference"]) < .02, values
 
 
 def test_cast_overlap():

@@ -978,6 +978,7 @@ if(WITH_GPU_RENDER_TESTS)
     shader_info_shadow_methods
     hwrt_raycast_source_triangle
     hwrt_raycast_attributes
+    hwrt_shadow_visibility
     render_texture_updates
     render_texture_performance
     render_texture_layers
@@ -993,7 +994,7 @@ if(WITH_GPU_RENDER_TESTS)
     string(TOUPPER "${backend}" backend_upper)
     if(WITH_${backend_upper}_BACKEND AND (backend STREQUAL "opengl" OR WITH_GPU_RENDER_TESTS_VULKAN))
       foreach(test IN LISTS npr_material_tests)
-        if((test STREQUAL "vulkan_failure_recovery" OR test MATCHES "^hwrt_raycast_")
+        if((test STREQUAL "vulkan_failure_recovery" OR test MATCHES "^hwrt_")
            AND NOT backend STREQUAL "vulkan")
           continue()
         endif()
@@ -1035,6 +1036,11 @@ if(WITH_GPU_RENDER_TESTS)
         )
         if(test STREQUAL "instance_viewport_cache")
           set_tests_properties(${test_name} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
+        endif()
+        if(test STREQUAL "hwrt_shadow_visibility")
+          set_tests_properties(${test_name} PROPERTIES
+            SKIP_REGULAR_EXPRESSION "Skipping hardware shadow test: Vulkan ray queries are unavailable"
+          )
         endif()
         if(check_light_bindings)
           # GPU diagnostics can log missing resources even when the render completes.
