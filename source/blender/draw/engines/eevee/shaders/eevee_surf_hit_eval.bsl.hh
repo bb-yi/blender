@@ -8,7 +8,7 @@
 #include "eevee_raytrace_shared.hh"
 
 void hit_eval_material(KernelGlobals &kg, ShadingData &sd, int2 texel, ThicknessMode mode);
-void hit_eval_shadow_tint(KernelGlobals &kg, ShadingData &sd, uint hit_index);
+void hit_eval_shadow_tint(KernelGlobals &kg, ShadingData &sd, uint hit_index, float2 footprint);
 
 namespace eevee {
 
@@ -68,6 +68,7 @@ struct HitEvalVertexResources {
 
 struct ShadowTintInterp {
   [[flat]] uint hit_index;
+  [[smooth]] float2 footprint;
 };
 
 struct ShadowTintVertexResources {
@@ -88,6 +89,7 @@ struct ShadowTintVertexResources {
   float2 texel = float2(index % grid.x, (index / grid.x) % grid.y);
   /* The proxy covers one pixel center, even where the grid is reused for later records. */
   const float2 corner_offset = float2(corner == 1u ? 1.5f : 0.0f, corner == 2u ? 1.5f : 0.0f);
+  interp.footprint = corner_offset - 0.5f;
   out_position = float4((texel + corner_offset) * (2.0f / float2(grid)) - 1.0f, 0.0f, 1.0f);
 }
 
@@ -102,7 +104,7 @@ struct ShadowTintResources {
 {
   ShadingData sd = {};
   sd.frag_co = frag_co;
-  hit_eval_shadow_tint(kg, sd, interp.hit_index);
+  hit_eval_shadow_tint(kg, sd, interp.hit_index, interp.footprint);
 }
 
 }  // namespace eevee

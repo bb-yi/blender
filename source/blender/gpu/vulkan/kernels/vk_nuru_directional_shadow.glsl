@@ -36,7 +36,7 @@ layout(scalar, binding = 0) uniform NuruUniforms {
 } uniforms;
 
 layout(binding = 1) uniform accelerationStructureEXT scene;
-layout(scalar, binding = 2) readonly buffer B2 { vec4 world_sunlight_direction[]; };
+layout(scalar, binding = 2) readonly buffer B2 { float world_sunlight_direction[]; };
 layout(scalar, binding = 3) readonly buffer B3 { HardwareMaterialProxy material_proxies[]; };
 layout(scalar, binding = 4) readonly buffer B4 { vec4 triangle_normals[]; };
 layout(scalar, binding = 5) readonly buffer B5 { vec4 triangle_smooth_normals[]; };
@@ -48,6 +48,7 @@ layout(binding = 18) uniform sampler2DArray gbuf_normal_tx;
 layout(binding = 19) uniform sampler2D prepass_normal_tx;
 layout(binding = 20) uniform usampler2D receiver_id_tx;
 layout(binding = 43) uniform writeonly image2DArray shadow_visibility_img;
+layout(binding = 44) uniform writeonly image2DArray shadow_overlap_img;
 
 #include "vk_nuru_shadow_terminator_lib.glsl"
 
@@ -202,11 +203,12 @@ vec2 sample_directional_shadow_disk(uvec2 tid, int sample_index, int sample_coun
 vec3 directional_shadow_light_direction()
 {
   if (uniforms.world_sun_slot_pad.x >= 0) {
-    const vec4 packed_direction = world_sunlight_direction[uniforms.world_sun_slot_pad.x];
-    if (packed_direction.w > 0.0f && !any(isnan(packed_direction.xyz)) && !any(isinf(packed_direction.xyz)) &&
-        dot(packed_direction.xyz, packed_direction.xyz) > 1.0e-10f)
+    const int offset = uniforms.world_sun_slot_pad.x;
+    vec3 direction = vec3(world_sunlight_direction[offset], world_sunlight_direction[offset + 1],
+                          world_sunlight_direction[offset + 2]);
+    if (dot(direction, direction) > 1.0e-10f)
     {
-      return normalize(packed_direction.xyz);
+      return normalize(direction);
     }
   }
   return uniforms.light_direction_bias.xyz;
@@ -528,16 +530,21 @@ void main()
   const vec2 uv = (vec2(tid) + 0.5f) / vec2(uniforms.resolution_layer.xy);
   const float reverse_depth = textureLod(depth_tx, uv, 0.0f).r;
   const float depth = 1.0f - reverse_depth;
-  if (!depth_is_valid(depth)) {
+  const bool hit_receiver = uniforms.resolution_layer.w == 3;
+  const vec3 hit_normal = hit_receiver ? texelFetch(prepass_normal_tx, ivec2(tid), 0).xyz : vec3(0.0f);
+  if (hit_receiver ? !(dot(hit_normal, hit_normal) > 1.0e-10f) : !depth_is_valid(depth)) {
     imageStore(shadow_visibility_img,
                ivec3(ivec2(tid), int(uint(uniforms.resolution_layer.z))),
                vec4(1.0f));
     return;
   }
-  const vec3 P = point_screen_to_world(ivec2(tid), depth);
+  const vec3 P = hit_receiver ? texelFetch(depth_tx, ivec2(tid), 0).xyz : point_screen_to_world(ivec2(tid), depth);
   const int receiver_source = uniforms.resolution_layer.w;
   vec3 N = vec3(0.0f);
-  if (receiver_source != 0 ||
+  if (hit_receiver) {
+    N = normalize(hit_normal);
+  }
+  else if (receiver_source != 0 ||
       !load_gbuffer_receiver_normal(ivec2(tid), gbuf_header_tx, gbuf_normal_tx, N)) {
     N = estimate_world_normal(ivec2(tid), depth, depth_tx);
   }
@@ -551,22 +558,26 @@ void main()
   const vec3 toward_camera = is_orthographic ?
                                  normalize(uniforms.viewinv[2].xyz) :
                                  -to_receiver / receiver_distance;
-  N = dot(N, toward_camera) >= 0.0f ? N : -N;
+  N = hit_receiver || dot(N, toward_camera) >= 0.0f ? N : -N;
   const float position_scale = max(max(abs(P.x), abs(P.y)), abs(P.z));
   /* Keep the launch on the visible side at every scene scale. A fixed 5mm offset and
    * distance cutoff can cross an entire small wall or skip its neighboring face. */
   const float normal_bias = max(max(position_scale, receiver_distance) * 1.25e-6f, 1.0e-7f);
   const float ray_tmin = 0.0f;
-  const vec3 P_corrected = point_screen_to_world(
+  const vec3 P_corrected = hit_receiver ? P : point_screen_to_world(
       ivec2(tid), shadow_receiver_front_depth(reverse_depth, is_orthographic));
   const vec3 unshifted_origin = P_corrected + N * normal_bias;
   const float max_cutoff = uintBitsToFloat(uint(uniforms.world_sun_slot_pad.z));
-  const vec3 smooth_N = receiver_source == 0 ?
+  const vec3 smooth_N = hit_receiver ? N : receiver_source == 0 ?
       normal_unpack(texelFetch(gbuf_normal_tx, ivec3(tid, 0), 0).xy) :
       prepass_shadow_smooth_normal(prepass_normal_tx, ivec2(tid), receiver_source, N);
   TerminatorReceiver receiver = terminator_none();
   /* Include an angular margin for the G-buffer geometric-normal quantization. */
-  if (max_cutoff > 0.0 &&
+  if (hit_receiver) {
+    uvec4 identity = texelFetch(receiver_id_tx, ivec2(tid), 0);
+    receiver = terminator_receiver(P, N, identity.x, identity.y);
+  }
+  else if (max_cutoff > 0.0 &&
       min(dot(N, uniforms.light_direction_bias.xyz),
           dot(smooth_N, uniforms.light_direction_bias.xyz)) <
           max_cutoff + 0.25 + 2.0 * sin(0.5 * uniforms.shadow_params.x)) {
@@ -579,10 +590,16 @@ void main()
   const float photons_intensity = max(uniforms.shadow_params.w, 0.0f);
   const float transparent_shadows = uintBitsToFloat(uint(uniforms.world_sun_slot_pad.w));
   vec4 visibility = vec4(0.0f);
-  const bool detailed = shadow_needs_hit_details();
-  const uint receiver_id = uniforms.shadow_options.z != 0u ?
-                               texelFetch(receiver_id_tx, ivec2(tid), 0).r :
-                               SHADOW_UNKNOWN_RECEIVER_ID;
+  const bool detailed = !enable_caustics || shadow_needs_hit_details();
+  const uint packed_receiver = uniforms.shadow_options.z != 0u ?
+                                   texelFetch(receiver_id_tx, ivec2(tid), 0).r :
+                                   SHADOW_UNKNOWN_RECEIVER_ID;
+  const uint receiver_id = packed_receiver == SHADOW_UNKNOWN_RECEIVER_ID ?
+                               packed_receiver : packed_receiver & ~SHADOW_CAST_OVERLAP_BIT;
+  const bool include_overlap = (uniforms.shadow_options.z & 2u) != 0u &&
+                               receiver_id != SHADOW_UNKNOWN_RECEIVER_ID &&
+                               (hit_receiver || (packed_receiver & SHADOW_CAST_OVERLAP_BIT) != 0u);
+  float overlap = 0.0f;
   for (int sample_index = 0; sample_index < sample_count; sample_index++) {
     const vec3 sample_dir = sample_directional_shadow_direction(tid, sample_index);
     const vec3 offset = terminator_shadow_offset(receiver, unshifted_origin, sample_dir, normal_bias);
@@ -593,7 +610,8 @@ void main()
     if (detailed) {
       visibility += hardware_shadow_detailed_visibility(scene, origin, sample_dir, ray_tmin,
                                                          100000.0f, transparent_shadows,
-                                                         color_intensity, receiver_id);
+                                                         color_intensity, receiver_id,
+                                                         include_overlap, overlap);
     }
     else {
       visibility.rgb += hardware_shadow_visibility(scene, origin, sample_dir, ray_tmin, 100000.0f, transparent_shadows, enable_caustics, true, sample_dir, color_intensity, photons_intensity);
@@ -603,4 +621,9 @@ void main()
   imageStore(shadow_visibility_img,
              ivec3(ivec2(tid), int(uint(uniforms.resolution_layer.z))),
              visibility);
+  if (include_overlap && overlap > 0.0f) {
+    imageStore(shadow_overlap_img,
+               ivec3(ivec2(tid), uniforms.resolution_layer.z),
+               vec4(shadow_encode_overlap(overlap, sample_count)));
+  }
 }

@@ -481,7 +481,7 @@ void main()
   const float photons_intensity = max(uniforms.caustic_params.x, 0.0);
   const float transparent_shadows = uniforms.caustic_params.y;
   vec4 visibility = vec4(0.0f);
-  const bool detailed = shadow_needs_hit_details();
+  const bool detailed = !enable_caustics || shadow_needs_hit_details();
   for (int sample_index = 0; sample_index < sample_count; sample_index++) {
     const vec3 target = sample_local_shadow_target(tid, sample_index, P);
     vec3 sample_L = target - P;

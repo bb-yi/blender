@@ -238,6 +238,11 @@ std::optional<SphereProbeModule::UpdateInfo> SphereProbeModule::probe_update_inf
     if (!probe.do_render) {
       continue;
     }
+    if (instance_.raytracing.hardware_shadows_requested()) {
+      instance_.raytracing.report_hardware_shadow_error(
+          fmt::format("sphere reflection probe capture ({})", probe.profile_name).c_str());
+      return std::nullopt;
+    }
     return update_info_from_probe(probe);
   }
 

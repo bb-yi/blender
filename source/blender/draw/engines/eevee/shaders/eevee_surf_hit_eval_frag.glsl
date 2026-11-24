@@ -140,9 +140,10 @@ void hit_eval_surface_at_triangle(KernelGlobals kg,
                                   float2 barycentric_coords,
                                   float3 object_P,
                                   float3 traced_world_P,
-                                  bool interpolate_position)
+                                  bool interpolate_position,
+                                  float2 footprint)
 {
-  const float3 barycentric = hit_eval_barycentric_expand(barycentric_coords);
+  float3 barycentric = hit_eval_barycentric_expand(barycentric_coords);
   const uint primitive_index = primitive_id * 3u + uint(max(hit_eval_index_start, 0));
   const uint i0 = gpu_index_load(primitive_index + 0u);
   const uint i1 = gpu_index_load(primitive_index + 1u);
@@ -157,6 +158,26 @@ void hit_eval_surface_at_triangle(KernelGlobals kg,
 
   const ObjectMatrices obj = kg.object_matrices_get(sd);
   const ObjectInfos ob_infos = kg.object_infos_get(sd);
+#ifdef MAT_SHADOW_TINT
+  [[resource_table]] const eevee::Uniform &shadow_uniform = resource_table_get(eevee::Uniform);
+  const ViewMatrices view = kg.view_matrices_get(sd);
+  const float4 clip0 = view.point_world_to_homogenous(obj.point_object_to_world(pos0));
+  const float4 clip1 = view.point_world_to_homogenous(obj.point_object_to_world(pos1));
+  const float4 clip2 = view.point_world_to_homogenous(obj.point_object_to_world(pos2));
+  const float4 center = clip0 * barycentric.x + clip1 * barycentric.y + clip2 * barycentric.z;
+  if (abs(center.w) > 1.e-8f) {
+    const float2 ndc = center.xy / center.w;
+    const float2 scale = 0.5f * float2(shadow_uniform.uniform_buf.film.render_extent) / center.w;
+    const float2 edge1 = ((clip1.xy - clip0.xy) - ndc * (clip1.w - clip0.w)) * scale;
+    const float2 edge2 = ((clip2.xy - clip0.xy) - ndc * (clip2.w - clip0.w)) * scale;
+    const float determinant = edge1.x * edge2.y - edge1.y * edge2.x;
+    if (abs(determinant) > 1.e-8f) {
+      const float2 delta = float2(footprint.x * edge2.y - footprint.y * edge2.x,
+                                  edge1.x * footprint.y - edge1.y * footprint.x) / determinant;
+      barycentric += float3(-delta.x - delta.y, delta);
+    }
+  }
+#endif
   if (interpolate_position) {
     object_P = pos0 * barycentric.x + pos1 * barycentric.y + pos2 * barycentric.z;
   }
@@ -172,6 +193,12 @@ void hit_eval_surface_at_triangle(KernelGlobals kg,
   hit_eval_init_globals(sd, world_P, safe_normalize(obj.normal_object_to_world(object_N)));
 #ifdef MAT_SHADOW_TINT
   sd.ray_type = RAY_TYPE_SHADOW;
+  const float4 clip = kg.view_matrices_get(sd).point_world_to_homogenous(world_P);
+  if (abs(clip.w) > 1.e-8f) {
+    const float3 screen = kg.view_matrices_get(sd).point_world_to_screen(world_P);
+    sd.frag_co = float4(screen.xy * float2(shadow_uniform.uniform_buf.film.render_extent),
+                        1.0f - screen.z, 1.0f / clip.w);
+  }
 #endif
   HitMeshVertex domain = HitMeshVertex{
       MeshVertex{object_P, to_float3x3(obj.model_inverse),
@@ -184,7 +211,7 @@ void hit_eval_surface_at_triangle(KernelGlobals kg,
 }
 
 #ifdef MAT_SHADOW_TINT
-void hit_eval_shadow_tint(KernelGlobals kg, ShadingData &sd, uint hit_index)
+void hit_eval_shadow_tint(KernelGlobals kg, ShadingData &sd, uint hit_index, float2 footprint)
 {
   const HardwareShadowTintHit hit = shadow_tint_hits[hit_index];
   /* The direct order includes rays that were fully blocked later in the walk. */
@@ -195,12 +222,20 @@ void hit_eval_shadow_tint(KernelGlobals kg, ShadingData &sd, uint hit_index)
   sd.front_facing = (hit.identity.z & SHADOW_TINT_HIT_FRONT_FACING) != 0u;
   sd.hit_view_origin = hit.origin.xyz;
   hit_eval_surface_at_triangle(
-      kg, sd, hit.identity.y, hit.barycentric.xy, float3(0.0f), float3(0.0f), true);
+      kg, sd, hit.identity.y, hit.barycentric.xy, float3(0.0f), float3(0.0f), true, footprint);
 
   ClosureUndetermined transmission = hit_eval_closure_select_type(
       sd, CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID);
   if (transmission.type == CLOSURE_NONE_ID) {
     transmission = hit_eval_closure_select_type(sd, CLOSURE_BSDF_TRANSLUCENT_ID);
+  }
+  if (hit.barycentric.w < 0.0f) {
+    float3 visibility = saturate(float3(sd.transmittance));
+    if (transmission.type != CLOSURE_NONE_ID) {
+      visibility += (-1.0f - hit.barycentric.w) * transmission.color;
+    }
+    shadow_tint_hits[hit_index].transmission = float4(saturate(visibility), 0.0f);
+    return;
   }
   float3 tint = (transmission.type == CLOSURE_NONE_ID) ?
                     float3(sd.transmittance) : transmission.color;
@@ -338,7 +373,7 @@ void hit_eval_material(KernelGlobals kg, ShadingData &sd, int2 texel, ThicknessM
   const float3 object_P = imageLoadFast(hit_position_img, texel).xyz;
   const float3 traced_world_P = texelFetch(hit_world_position_tx, texel, 0).xyz;
   hit_eval_surface_at_triangle(
-      kg, sd, primitive_id, barycentric_coords, object_P, traced_world_P, false);
+      kg, sd, primitive_id, barycentric_coords, object_P, traced_world_P, false, float2(0.0f));
 
   Thickness thickness = Thickness::from(nodetree_thickness(kg, sd), mode);
   eObjectInfoFlag ob_flag = ob_infos.flag;

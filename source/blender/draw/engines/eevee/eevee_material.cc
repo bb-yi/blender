@@ -562,6 +562,12 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     case GPU_MAT_FAILED:
     default:
       material_failed = true;
+      if (GPU_material_flag_get(matpass.gpumat, GPU_MATFLAG_RAW_SHADOW_MAP) &&
+          ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD) &&
+          probe_capture == MAT_PROBE_NONE && !(ob->visibility_flag & OB_HIDE_CAMERA))
+      {
+        inst_.pipelines.require_native_shadows("custom shader reads shadow-map texels", blender_mat->id.name + 2);
+      }
       if (!GPU_material_stencil_marker_error(matpass.gpumat).is_empty()) {
         inst_.info_append("Material {}: {}",
                           blender_mat->id.name + 2,
@@ -704,6 +710,15 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                MAT_PIPE_CAPTURE))
       {
         matpass.sub_pass->push_constant("surface_cull_mode", int(state.cull_method));
+      }
+      if (ELEM(pipeline_type,
+               MAT_PIPE_PREPASS_DEFERRED,
+               MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+               MAT_PIPE_PREPASS_FORWARD,
+               MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+               MAT_PIPE_PREPASS_PLANAR))
+      {
+        matpass.sub_pass->push_constant("hwrt_cast_shadow_overlap", false);
       }
       material_surface_stencil_state_set(
           *matpass.sub_pass, blender_mat, pipeline_type, probe_capture, state.is_outline_shell);
@@ -950,6 +965,19 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
         inst_.raytracing.bind_hardware_material_scene(*mat.prepass.sub_pass, mat.prepass.gpumat);
         mat.prepass.sub_pass->push_constant(
             "surface_cull_mode", int(surface_draw_state_body(*blender_mat).cull_method));
+        mat.prepass.sub_pass->push_constant("hwrt_cast_shadow_overlap", false);
+      }
+      if (mat.prepass.sub_pass && !use_forward_pipeline && color_write && depth_write &&
+          ob->type == OB_MESH && inst_.raytracing.use_hardware_shadows() &&
+          !material_has_flag(mat.shading, GPU_MATFLAG_TRANSPARENT) &&
+          !material_has_flag(mat.npr, GPU_MATFLAG_TRANSPARENT) &&
+          !GPU_material_has_depth_offset_output(mat.shading.gpumat) &&
+          !(blender_mat->blend_flag & MA_BL_SS_REFRACTION) &&
+          (GPU_material_has_shader_info_cast_shadow(mat.shading.gpumat) ||
+           GPU_material_has_shader_info_cast_shadow(mat.npr.gpumat)))
+      {
+        mat.prepass.sub_pass->push_constant("hwrt_cast_shadow_overlap", true);
+        inst_.pipelines.has_hardware_cast_shadow_overlap = true;
       }
       if (hide_on_camera || !color_write) {
         /* Only null the sub_pass.

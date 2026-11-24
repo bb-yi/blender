@@ -14,7 +14,9 @@ import numpy as np
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--out", required=True, type=Path)
-out = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []).out
+parser.add_argument("--legacy-overlap", action="store_true")
+args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
+out = args.out
 out.mkdir(parents=True, exist_ok=True)
 gpu.init()
 assert gpu.platform.backend_type_get() == "VULKAN"
@@ -255,4 +257,122 @@ assert values["caster_reference"] > .1, values
 assert abs(values["caster_disabled"] - values["caster_reference"]) < .02, values
 assert .47 < values["translucent_only"] < .53, values
 assert values["blended_lit_reference"] > .1, values
+
+
+def test_cast_overlap():
+    for obj in list(s.objects):
+        if obj.type == "MESH":
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+    def quad(x, y, z, size):
+        return [(x - size, y - size, z), (x + size, y - size, z),
+                (x + size, y + size, z), (x - size, y + size, z)]
+
+    rows = (-1.2, -.4, .4, 1.2)
+    vertices = quad(0, 0, 0, 1.5)
+    for y in (rows[1], rows[3]):
+        vertices += quad(1.6, y, .8, .24)
+    mesh = bpy.data.meshes.new("Receiver and self blockers")
+    mesh.from_pydata(vertices, [], [(i, i + 1, i + 2, i + 3) for i in range(0, len(vertices), 4)])
+    mesh.materials.append(receiver_mat)
+    own = bpy.data.objects.new(mesh.name, mesh)
+    s.collection.objects.link(own)
+    own.shadow_terminator_geometry_offset = 0
+    external_mat = bpy.data.materials.new("External opaque blocker")
+    external_own = plane("External only", .48, 1.2, external_mat, False)
+    external_own.location.xy = (2.4, rows[2])
+    external_overlap = bpy.data.objects.new("External overlap instance", external_own.data)
+    s.collection.objects.link(external_overlap)
+    external_overlap.location = (2.4, rows[3], 1.2)
+    external_overlap.visible_camera = False
+    sun = bpy.data.lights.new("Overlap sun", "SUN")
+    sun.angle = 0
+    light.data = sun
+    light.rotation_euler = (0, np.arctan(2.0), 0)
+    e.ray_tracing_method = "HARDWARE"
+    tree = receiver_mat.node_tree
+    tree.nodes.clear()
+    info = tree.nodes.new("ShaderNodeShaderInfo")
+    channels = tree.nodes.new("ShaderNodeCombineColor")
+    emission = tree.nodes.new("ShaderNodeEmission")
+    output = tree.nodes.new("ShaderNodeOutputMaterial")
+    for index, name in enumerate(("Shadow", "Self Shadow", "Cast Shadow")):
+        tree.links.new(info.outputs[name], channels.inputs[index])
+    tree.links.new(channels.outputs[0], emission.inputs["Color"])
+    tree.links.new(emission.outputs[0], output.inputs["Surface"])
+    target = gpu.types.GPUOffScreen(192, 192, format="RGBA16F")
+    report = {}
+
+    def check(name, expected=None):
+        bpy.context.view_layer.update()
+        projection = camera.calc_matrix_camera(bpy.context.evaluated_depsgraph_get(), x=192, y=192)
+        target.draw_view3d(s, bpy.context.view_layer, space, region, camera.matrix_world.inverted(),
+                           projection, do_color_management=False, draw_background=True)
+        pixels = np.asarray(target.texture_color.read(), dtype=np.float32).reshape(192, 192, 4)
+        samples = []
+        for y in rows:
+            row = int((y / 3 + .5) * 192)
+            samples.append(pixels[row - 2:row + 3, 94:99, :3].mean(axis=(0, 1)))
+        samples = np.asarray(samples)
+        assert np.isfinite(samples).all(), (name, samples)
+        report[name] = samples.tolist()
+        if expected is not None:
+            assert np.allclose(samples, expected, atol=.02), (name, samples, expected)
+        return samples
+
+    legacy_expected = [[1, 1, 1], [0, 0, 1], [0, 1, 0], [0, 0, 1]]
+    expected = [row[:] for row in legacy_expected]
+    if not args.legacy_overlap:
+        expected[3][2] = 0
+    try:
+        check("sun", expected)
+        e.ray_tracing_method = 'SCREEN'
+        receiver_mat.surface_render_method = 'BLENDED'
+        check("forward_sun", expected)
+        receiver_mat.surface_render_method = 'DITHERED'
+        e.ray_tracing_method = 'HARDWARE'
+        link = bpy.data.collections.new("Only self blocks this light")
+        link.objects.link(own)
+        light.light_linking.blocker_collection = link
+        check("shadow_link", [[1, 1, 1], [0, 0, 1], [1, 1, 1], [0, 0, 1]])
+        light.light_linking.blocker_collection = None
+
+        external_overlap.hide_viewport = True
+        shared_instance = bpy.data.objects.new("Blocker sharing the receiver mesh", own.data)
+        s.collection.objects.link(shared_instance)
+        shared_instance.location = (4, 2.4, .4)
+        shared_instance.rotation_euler.z = np.pi
+        shared_instance.visible_camera = False
+        check("shared_receiver_mesh", expected)
+        shared_instance.hide_viewport = True
+
+        transparent = plane("Translucent overlap", .48, 1.2, mat("Overlap alpha", .5), False)
+        transparent.location.xy = (2.4, rows[3])
+        check("transparent", legacy_expected)
+        transparent.hide_viewport = True
+        external_overlap.hide_viewport = False
+
+        e.use_hardware_raytracing_shadows = False
+        check("native")
+        e.use_hardware_raytracing_shadows = True
+
+        area_data = bpy.data.lights.new("Overlap area", "AREA")
+        area_data.energy = 1500
+        area_data.size = 0
+        light.data = area_data
+        light.location = (20, 0, 10)
+        light.rotation_euler = (0, np.arctan(2.0), 0)
+        area = check("area")
+        assert np.allclose(area[:, 0], [1, 0, 0, 0], atol=.02), area
+        assert np.allclose(area[[0, 2], 1], [1, 1], atol=.02), area
+        assert np.all(area[[1, 3], 1] < .5), area
+        assert np.allclose(area[[0, 1], 2], [1, 1], atol=.02), area
+        assert area[2, 2] < .5, area
+        assert abs(area[3, 2] - (1 if args.legacy_overlap else area[3, 1])) < .02, area
+    finally:
+        target.free()
+        (out / "overlap.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+
+test_cast_overlap()
 print("HWRT_REVIEW_OK", flush=True)

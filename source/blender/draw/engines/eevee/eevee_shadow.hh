@@ -156,6 +156,7 @@ struct ShadowTileMapPool {
 
  public:
   ShadowTileMapPool();
+  void ensure_texture();
 
   ShadowTileMap *acquire();
 
@@ -291,6 +292,8 @@ class ShadowModule {
   static constexpr gpu::TextureFormat atlas_type = gpu::TextureFormat::UINT_32;
   /** Atlas containing all physical pages. */
   Texture atlas_tx_ = {"shadow_atlas_tx_"};
+  gpu::Texture *depth_atlas_ref_ = nullptr;
+  gpu::Texture *tilemap_ref_ = nullptr;
   Texture moment_sat_tx_ = {"Shadow.MomentSAT"};
   PassSimple moment_sat_ps_ = {"Shadow.MomentSAT.Update"};
   bool moment_sat_requested_ = false;
@@ -400,6 +403,7 @@ class ShadowModule {
   int shadow_pool_size_requested_ = 0;
   int shadow_pool_size_allocated_ = 0;
   int shadow_pool_retry_countdown_ = 0;
+  uint64_t atlas_draw_submissions_ = 0;
   /** Global switch. */
   bool enabled_ = true;
   bool viewport_history_invalidated_ = false;
@@ -415,6 +419,7 @@ class ShadowModule {
   }
 
   void init();
+  void log_consumer(const View &view, const char *stage, const char *source) const;
 
   void begin_sync();
   /**
@@ -508,8 +513,8 @@ class ShadowModule {
 
   template<typename PassType> void bind_resources(PassType &pass)
   {
-    pass.bind_texture(SHADOW_ATLAS_TEX_SLOT, &atlas_tx_);
-    pass.bind_texture(SHADOW_TILEMAPS_TEX_SLOT, &tilemap_pool.tilemap_tx);
+    pass.bind_texture(SHADOW_ATLAS_TEX_SLOT, &depth_atlas_ref_);
+    pass.bind_texture(SHADOW_TILEMAPS_TEX_SLOT, &tilemap_ref_);
     pass.bind_texture(SHADOW_CASTER_ATLAS_TEX_SLOT, &caster_atlas_ref_);
     pass.bind_texture(SHADOW_MOMENT_SAT_TEX_SLOT, &moment_sat_tx_);
   }

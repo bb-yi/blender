@@ -272,6 +272,38 @@ void shadow_tint_resolve([[resource_table]] ShadowTintResolve &srt,
   }
 }
 
+struct ForwardReceivers {
+  [[storage(0, read)]] const uint (&receiver_words)[];
+  [[storage(1, read)]] const uint (&receiver_header)[];
+  [[image(0, write, SFLOAT_32_32_32_32)]] image2D receiver_position;
+  [[image(1, write, SFLOAT_16_16_16_16)]] image2D receiver_normal;
+  [[image(2, write, UINT_32_32_32_32)]] uimage2D receiver_identity;
+};
+
+[[compute, local_size(8, 8)]]
+void forward_receivers([[resource_table]] ForwardReceivers &srt,
+                       [[global_invocation_id]] const uint3 global_id)
+{
+  int2 pixel = int2(global_id.xy);
+  if (!in_image_range(pixel, srt.receiver_position)) {
+    return;
+  }
+  uint index = global_id.y * uint(imageSize(srt.receiver_position).x) + global_id.x;
+  if (index >= srt.receiver_header[0]) {
+    imageStoreFast(srt.receiver_normal, pixel, float4(0.0f));
+    return;
+  }
+  uint base = srt.receiver_header[2] + index * 8u;
+  float3 position, normal;
+  for (uint axis = 0u; axis < 3u; axis++) {
+    position[axis] = uintBitsToFloat(srt.receiver_words[base + 2u + axis]);
+    normal[axis] = uintBitsToFloat(srt.receiver_words[base + 5u + axis]);
+  }
+  imageStoreFast(srt.receiver_position, pixel, float4(position, 1.0f));
+  imageStoreFast(srt.receiver_normal, pixel, float4(normal, 0.0f));
+  imageStoreFast(srt.receiver_identity, pixel, uint4(srt.receiver_words[base + 1u], 0xffffffffu, 0u, 0u));
+}
+
 struct HitDenoiseGuides {
   [[image(0, read, SFLOAT_16_16_16_16)]] image2D hit_albedo_img;
   [[image(1, read, SFLOAT_16_16_16_16)]] image2D hit_normal_img;
@@ -304,4 +336,5 @@ PipelineCompute eevee_ray_hit_eval_compact(eevee::raytracing::hit_eval_compact);
 PipelineCompute eevee_ray_shadow_tint_count(eevee::raytracing::shadow_tint_count);
 PipelineCompute eevee_ray_shadow_tint_compact(eevee::raytracing::shadow_tint_compact);
 PipelineCompute eevee_ray_shadow_tint_resolve(eevee::raytracing::shadow_tint_resolve);
+PipelineCompute eevee_ray_forward_receivers(eevee::raytracing::forward_receivers);
 PipelineCompute eevee_ray_hit_denoise_guides(eevee::raytracing::hit_denoise_guides);

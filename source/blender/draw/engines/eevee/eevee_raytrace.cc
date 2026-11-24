@@ -71,6 +71,11 @@ void RayTraceModule::init()
   data_.thickness = ray_tracing_options_.screen_trace_thickness;
 
   tracing_method_ = RaytraceEEVEE_Method(sce_eevee.ray_tracing_method);
+  hardware_shadows_requested_ = (sce_eevee.flag & SCE_EEVEE_SSR_ENABLED) &&
+                                (sce_eevee.flag & SCE_EEVEE_SHADOW_ENABLED) &&
+                                (tracing_method_ == RAYTRACE_EEVEE_METHOD_HARDWARE ?
+                                     (sce_eevee.hardware_raytracing_features & RAYTRACE_EEVEE_HARDWARE_SHADOWS) :
+                                     (ray_tracing_options_.flag & RAYTRACE_EEVEE_SCREEN_HARDWARE_SHADOWS));
   hardware_feature_mask_ = 0;
   data_.hardware_trace_phase = HWRT_TRACE_PHASE_FULL;
   data_.hardware_feature_mask = 0;
@@ -92,7 +97,7 @@ void RayTraceModule::init()
   if (!(sce_eevee.flag & SCE_EEVEE_SHADOW_ENABLED)) {
     hardware_feature_mask_ &= ~uint32_t(RAYTRACE_EEVEE_HARDWARE_SHADOWS);
   }
-  hardware_shadows_require_native_ = false;
+  hardware_shadow_error_.clear();
   fast_gi_ray_count_ = sce_eevee.fast_gi_ray_count;
   fast_gi_step_count_ = sce_eevee.fast_gi_step_count;
   fast_gi_ao_only_ = (sce_eevee.fast_gi_method == FAST_GI_AO_ONLY);
@@ -106,6 +111,12 @@ void RayTraceModule::init()
   hardware_shadow_ready_ = false;
   if (!use_hardware_shadows()) {
     hardware_shadow_visibility_tx_.free();
+    hardware_shadow_overlap_tx_.free();
+  }
+  if (!hardware_shadow_overlap_tx_.is_valid()) {
+    const float zero = 0.0f;
+    hardware_shadow_overlap_tx_.ensure_2d_array(
+        gpu::TextureFormat::SFLOAT_16, int2(1), 1, GPU_TEXTURE_USAGE_SHADER_READ, &zero);
   }
   if (!hardware_shadow_visibility_tx_.is_valid()) {
     const float visibility[4] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -122,9 +133,11 @@ void RayTraceModule::init()
 void RayTraceModule::sync()
 {
   hardware_material_passes_.clear();
+  forward_receivers_ps_.init();
   hardware_raycast_attribute_names_.clear();
   has_hardware_raycast_ = false;
   has_forward_hardware_shadows_ = false;
+  forward_material_replay_ = false;
   Texture &depth_tx = inst_.render_buffers.depth_tx;
 
   if (!use_raytracing_) {
@@ -500,10 +513,17 @@ void RayTraceModule::sync()
   }
 }
 
+void RayTraceModule::report_hardware_shadow_error(const char *reason)
+{
+  if (hardware_shadow_error_.empty()) {
+    hardware_shadow_error_ = fmt::format("Hardware shadows: {}", reason);
+  }
+}
+
 void RayTraceModule::resolve_shadow_backend()
 {
-  hardware_shadows_require_native_ = false;
-  if (!use_hardware_shadows()) {
+  hardware_shadow_error_.clear();
+  if (!hardware_shadows_requested_) {
     if (!use_hardware_scene()) {
       free_hardware_rt_scene_cache();
     }
@@ -511,14 +531,21 @@ void RayTraceModule::resolve_shadow_backend()
   }
 
   const char *reason = inst_.pipelines.native_shadow_requirement;
-  if (inst_.is_baking() || inst_.is_color_bake) {
+  if (!GPU_viewport_hardware_raytracing_support()) {
+    reason = "the active GPU backend does not support Vulkan hardware shadows";
+  }
+  else if (inst_.camera.is_panoramic()) {
+    reason = "panoramic camera projection is unsupported";
+  }
+  else if (inst_.is_baking() || inst_.is_color_bake) {
     reason = "the scene is baking lighting";
   }
   else if (inst_.volume.needs_shadow_tagging()) {
     reason = "the scene uses lit volumes";
   }
-  else if (inst_.sync.has_untraced_shadow_caster()) {
-    reason = "curves, point clouds, or tessellated surfaces cast shadows";
+  else if (const Object *caster = inst_.sync.untraced_shadow_caster()) {
+    report_hardware_shadow_error(fmt::format("unsupported shadow caster geometry ({})", caster->id.name + 2).c_str());
+    return;
   }
   if (reason == nullptr) {
     reason = inst_.lights.hardware_shadow_unsupported_reason();
@@ -527,15 +554,11 @@ void RayTraceModule::resolve_shadow_backend()
     return;
   }
 
-  hardware_shadows_require_native_ = true;
-  if (!use_hardware_scene()) {
-    free_hardware_rt_scene_cache();
-  }
-  if (inst_.is_viewport()) {
-    inst_.info_append_i18n("Using shadow maps for the whole scene: {}", reason);
+  if (reason == inst_.pipelines.native_shadow_requirement && inst_.pipelines.native_shadow_subject) {
+    report_hardware_shadow_error(fmt::format("{} ({})", reason, inst_.pipelines.native_shadow_subject).c_str());
   }
   else {
-    CLOG_WARN(&Instance::log, "Using shadow maps for the whole scene: %s", reason);
+    report_hardware_shadow_error(reason);
   }
 }
 

@@ -51,7 +51,7 @@ void RayTraceModule::bind_hardware_material_scene(PassMain::Sub &pass, GPUMateri
   const bool uses_shadows = GPU_shader_get_uniform(shader, "forward_shadow_options") >= 0;
   const bool uses_attributes = GPU_shader_get_ssbo_binding(shader, "hardware_raycast_attributes") >= 0;
   hardware_material_passes_.append(
-      {&pass, uses_raycast, uses_shadows,
+      {&pass, uses_raycast, uses_shadows, uses_shadows && GPU_material_has_shader_info_cast_shadow(material),
        uses_attributes ? GPU_material_raycast_attributes(material) : Span<UString>()});
   if (uses_attributes) {
     pass.bind_ssbo("hardware_raycast_attributes", &hardware_raycast_attributes_);
@@ -72,16 +72,24 @@ void RayTraceModule::bind_hardware_material_scene(PassMain::Sub &pass, GPUMateri
     pass.bind_ssbo("forward_shadow_proxies", &hardware_forward_bindings_.proxies);
     pass.push_constant("forward_shadow_options", &hardware_forward_shadow_options_);
     pass.push_constant("forward_shadow_samples", &hardware_forward_shadow_samples_);
+    pass.bind_ssbo("forward_receiver_words", &forward_receiver_words_);
+    pass.bind_ssbo("forward_receiver_header", &forward_receiver_header_);
+    pass.bind_texture("forward_receiver_visibility", &forward_visibility_ref_);
+    if (GPU_shader_get_sampler_binding(shader, "forward_receiver_overlap") >= 0) {
+      pass.bind_texture("forward_receiver_overlap", &forward_overlap_ref_);
+    }
   }
 }
 
 void RayTraceModule::resolve_hardware_material_demand()
 {
+  forward_cast_overlap_ = false;
   /* Shared material sub-passes can be registered without any geometry using them. */
   for (const HardwareMaterialPass &material : hardware_material_passes_) {
     if (!material.pass->is_empty()) {
       has_hardware_raycast_ |= material.uses_raycast;
       has_forward_hardware_shadows_ |= material.uses_shadows;
+      forward_cast_overlap_ |= material.uses_cast_shadow;
       for (UString name : material.raycast_attributes) {
         if (!name.is_empty()) {
           hardware_raycast_attribute_names_.append_non_duplicates(name);
@@ -140,8 +148,20 @@ void RayTraceModule::prepare_hardware_material_scene()
   if (hardware_material_passes_.is_empty()) {
     return;
   }
+  forward_visibility_dummy_.ensure_2d_array(gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1);
+  forward_visibility_ref_ = forward_visibility_dummy_;
+  forward_overlap_ref_ = forward_visibility_dummy_;
+  forward_material_replay_ = hardware_shadows && has_forward_hardware_shadows_ &&
+      (forward_cast_overlap_ || std::ranges::any_of(inst_.sync.hardware_raytrace_scene_entries(), [](const auto &entry) {
+        return entry.casts_shadow && entry.shadow_tint_material != nullptr;
+      }));
   const bool ready = GPU_hardware_raytrace_forward_bindings(scene, hardware_forward_bindings_);
   if (!ready) {
+    if (hardware_shadows && has_forward_hardware_shadows_ &&
+        !inst_.sync.hardware_raytrace_scene_entries().is_empty())
+    {
+      report_hardware_shadow_error("unable to bind the forward shadow acceleration structure");
+    }
     /* Submission can still execute binding commands in sub-passes without draws. */
     if (!hardware_forward_empty_scene_) {
       hardware_forward_empty_scene_ = GPU_hardware_raytrace_empty_scene();
@@ -157,6 +177,134 @@ void RayTraceModule::prepare_hardware_material_scene()
                                            options.hardware_raytracing_shadow_transparency,
                                            options.hardware_raytracing_shadow_color_intensity);
   hardware_forward_shadow_samples_ = clamp_i(options.hardware_raytracing_shadow_samples, 1, 16);
+}
+
+void RayTraceModule::add_forward_receiver(GPUMaterial *material, gpu::Batch *batch, ResourceHandleRange range)
+{
+  if (!hardware_shadows_requested() || !material) {
+    return;
+  }
+  gpu::Shader *shader = GPU_material_get_shader(material);
+  if (!shader || GPU_shader_get_ssbo_binding(shader, "forward_receiver_words") < 0) {
+    return;
+  }
+  if (forward_receivers_ps_.is_empty()) {
+    ForwardLayer::bind_surface_resources(inst_, forward_receivers_ps_);
+    forward_receivers_ps_.bind_texture(RAYCAST_DEPTH_TEX_SLOT, &inst_.render_buffers.raycast_depth_tx);
+  }
+  PassMain::Sub &pass = forward_receivers_ps_.sub(GPU_material_get_name(material));
+  pass.state_set(DRW_STATE_CLIP_CONTROL_UNIT_RANGE);
+  pass.material_set(*inst_.manager, material, true, inst_.anisotropic_filtering);
+  pass.push_constant("surface_cull_mode", 0);
+  bind_hardware_material_scene(pass, material);
+  pass.draw(batch, range);
+}
+
+void RayTraceModule::prepare_forward_shadows(View &view, gpu::Texture *depth, int2 extent)
+{
+  if (!forward_material_replay_ || !inst_.lights.hardware_shadow_layer_count()) {
+    return;
+  }
+  const int64_t pixels = int64_t(extent.x) * extent.y;
+  const int64_t budget_words = std::min<size_t>(128ull << 20, GPU_max_storage_buffer_size()) / sizeof(uint);
+  const int64_t max_records = (budget_words - pixels) / 8;
+  if (max_records < 1 || forward_receivers_ps_.is_empty()) {
+    report_hardware_shadow_error("unable to collect forward receiver fragments within the replay budget");
+    return;
+  }
+  gpu::FrameBuffer *previous = GPU_framebuffer_active_get();
+  forward_receivers_fb_.ensure(extent);
+  forward_receivers_fb_.bind();
+  hardware_forward_shadow_options_.x = 2;
+  forward_header_dummy_.ensure_2d_array(gpu::TextureFormat::UINT_32, int2(1), 1);
+  uint capacity = uint(std::min(pixels, max_records)), count;
+  do {
+    forward_receiver_words_.resize(pixels + int64_t(capacity) * 8);
+    forward_receiver_words_.clear_to_zero();
+    forward_receiver_header_[0] = 0;
+    forward_receiver_header_[1] = uint(extent.x);
+    forward_receiver_header_[2] = uint(pixels);
+    forward_receiver_header_[3] = capacity;
+    forward_receiver_header_.push_update();
+    inst_.manager->submit(forward_receivers_ps_, view);
+    GPU_memory_barrier(GPU_BARRIER_SHADER_STORAGE | GPU_BARRIER_BUFFER_UPDATE);
+    forward_receiver_header_.read();
+    count = forward_receiver_header_[0];
+    if (count > max_records) {
+      report_hardware_shadow_error("forward receiver fragments exceed the replay memory budget");
+      break;
+    }
+    if (count <= capacity) {
+      break;
+    }
+    capacity = count;
+  } while (true);
+  if (previous) {
+    GPU_framebuffer_bind(previous);
+  }
+  hardware_forward_shadow_options_.x = 1;
+  if (!hardware_shadow_error_.empty() || count == 0) {
+    return;
+  }
+  const int width = std::min(extent.x, int(count));
+  const int2 packed(width, int(divide_ceil_u(count, width)));
+  if (packed.y > GPU_max_texture_size()) {
+    report_hardware_shadow_error("forward receiver texture exceeds device limits");
+    return;
+  }
+  constexpr auto usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
+  auto &hit = forward_hit_;
+  hit.world_position.acquire_2d(packed, gpu::TextureFormat::SFLOAT_32_32_32_32, usage);
+  hit.normal.acquire_2d(packed, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
+  hit.identity.acquire_2d(packed, gpu::TextureFormat::UINT_32_32_32_32, usage);
+  if (hit.world_position.is_valid() && hit.normal.is_valid() && hit.identity.is_valid()) {
+    PassSimple unpack("Forward.UnpackReceivers");
+    unpack.init();
+    unpack.shader_set(inst_.shaders.static_shader_get(RAY_FORWARD_RECEIVERS));
+    unpack.bind_ssbo("receiver_words", &forward_receiver_words_);
+    unpack.bind_ssbo("receiver_header", &forward_receiver_header_);
+    unpack.bind_image("receiver_position", &hit.world_position);
+    unpack.bind_image("receiver_normal", &hit.normal);
+    unpack.bind_image("receiver_identity", &hit.identity);
+    unpack.dispatch(int3(math::divide_ceil(packed, int2(8)), 1));
+    unpack.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+    inst_.manager->submit(unpack);
+    render_hardware_shadows(view, depth, packed, false, &hit);
+  }
+  hit.world_position.release();
+  hit.normal.release();
+  hit.identity.release();
+  if (!hit.shadows_valid) {
+    report_hardware_shadow_error("failed to resolve forward receiver visibility");
+    return;
+  }
+  forward_visibility_ref_ = hit.shadow_visibility;
+  if (forward_cast_overlap_) {
+    forward_overlap_ref_ = forward_overlap_tx_;
+  }
+  hardware_forward_shadow_options_.x = 3;
+}
+
+void RayTraceModule::finish_forward_shadows(View &view)
+{
+  if (hardware_forward_shadow_options_.x == 3) {
+    GPU_memory_barrier(GPU_BARRIER_SHADER_STORAGE | GPU_BARRIER_BUFFER_UPDATE);
+    forward_receiver_header_.read();
+    const uint count = forward_receiver_header_[0];
+    if ((count & 0x80000000u) != 0u) {
+      report_hardware_shadow_error("a forward fragment was missing from the receiver pass");
+    }
+    if ((count & 0x40000000u) != 0u) {
+      report_hardware_shadow_error("a forward material requests shadows at a displaced receiver position or normal");
+    }
+    inst_.shadows.log_consumer(view, "forward", "per_fragment_ray_visibility");
+    hardware_forward_shadow_options_.x = 1;
+  }
+  forward_visibility_ref_ = forward_visibility_dummy_;
+  forward_overlap_ref_ = forward_visibility_dummy_;
+  forward_overlap_tx_.free();
+  forward_hit_.shadow_visibility.release();
+  forward_hit_.shadows_valid = false;
 }
 
 static Vector<GPUHardwareRaytraceSceneEntry> build_hardware_rt_scene_entries(
@@ -822,6 +970,7 @@ void RayTraceModule::merge_specular_result(RayTraceBuffer &rt_buffer,
 void RayTraceModule::evaluate_shadow_tint(
     View &view,
     gpu::Texture *depth,
+    gpu::Texture *visibility,
     int2 full_extent,
     Span<int> entries,
     const GPUHardwareRaytraceShadowTintCapture &capture,
@@ -886,7 +1035,13 @@ void RayTraceModule::evaluate_shadow_tint(
   GPU_storagebuf_sync_as_indirect_buffer(hit_eval_indirect_buf_);
 
   gpu::FrameBuffer *previous_fb = GPU_framebuffer_active_get();
-  hit_eval_fb_.ensure(GPU_ATTACHMENT_TEXTURE(depth));
+  if (depth && GPU_texture_width(depth) == full_extent.x && GPU_texture_height(depth) == full_extent.y) {
+    hit_eval_fb_.ensure(GPU_ATTACHMENT_TEXTURE(depth));
+  }
+  else {
+    hit_eval_fb_.ensure(GPU_ATTACHMENT_NONE);
+    hit_eval_fb_.ensure(full_extent);
+  }
   hit_eval_fb_.bind();
   GPU_framebuffer_viewport_set(hit_eval_fb_, 0, 0, UNPACK2(full_extent));
   hit_eval_ps_.init();
@@ -929,7 +1084,7 @@ void RayTraceModule::evaluate_shadow_tint(
   shadow_tint_resolve_ps_.push_constant("shadow_tint_saturation", saturation);
   shadow_tint_resolve_ps_.bind_ssbo("shadow_tint_hits", &shadow_tint_hits_);
   shadow_tint_resolve_ps_.bind_ssbo("shadow_tint_rays", &shadow_tint_rays_);
-  shadow_tint_resolve_ps_.bind_image("shadow_tint_visibility", &hardware_shadow_visibility_tx_);
+  shadow_tint_resolve_ps_.bind_image("shadow_tint_visibility", visibility);
   shadow_tint_resolve_ps_.dispatch(int3(math::divide_ceil(capture.extent, int2(8)), 1));
   shadow_tint_resolve_ps_.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
   inst_.manager->submit(shadow_tint_resolve_ps_);
@@ -938,15 +1093,36 @@ void RayTraceModule::evaluate_shadow_tint(
 void RayTraceModule::render_hardware_shadows(View &view,
                                              gpu::Texture *depth_tx,
                                              int2 extent,
-                                             bool from_prepass)
+                                             bool from_prepass,
+                                             HardwareHitBuffers *hit)
 {
-  hardware_shadow_ready_ = false;
+  bool &ready = hit ? hit->shadows_valid : hardware_shadow_ready_;
+  ready = false;
   const int lights_len = inst_.lights.light_count();
   const int layers = inst_.lights.hardware_shadow_layer_count();
+  const bool request_overlap = hit == &forward_hit_ ? forward_cast_overlap_ :
+                               !hit && inst_.pipelines.hardware_shadow_classifies_receivers() &&
+                                   inst_.pipelines.has_hardware_cast_shadow_overlap;
+  Texture &overlap = hit == &forward_hit_ ? forward_overlap_tx_ : hardware_shadow_overlap_tx_;
+  eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
+  if (hit && std::getenv("BLENDER_EEVEE_HWRT_HIT_READBACK")) {
+    usage |= GPU_TEXTURE_USAGE_HOST_READ;
+  }
+  auto reset_overlap = [&]() {
+    const float zero = 0.0f;
+    hardware_shadow_overlap_tx_.ensure_2d_array(
+        gpu::TextureFormat::SFLOAT_16, int2(1), 1, GPU_TEXTURE_USAGE_SHADER_READ, &zero);
+  };
   const float unoccluded[4] = {1.0f, 1.0f, 1.0f, 1.0f};
   if (!use_hardware_shadows() || layers == 0 ||
       inst_.sync.hardware_raytrace_scene_entries().is_empty())
   {
+    if (hit) {
+      hit->shadow_visibility.acquire_2d_array(int2(1), 1, gpu::TextureFormat::SFLOAT_16_16_16_16);
+      hit->shadow_visibility.clear(float4(1.0f));
+      return;
+    }
+    reset_overlap();
     hardware_shadow_visibility_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1,
         GPU_TEXTURE_USAGE_SHADER_READ, unoccluded);
@@ -956,21 +1132,46 @@ void RayTraceModule::render_hardware_shadows(View &view,
   GPUHardwareRaytraceSceneStats stats;
   GPUHardwareRaytraceScene *scene = acquire_hardware_rt_scene(&stats);
   if (!scene || !stats.built_scene) {
-    inst_.info_append_i18n("Could not build the hardware shadow scene");
+    reset_overlap();
+    report_hardware_shadow_error("could not build the hardware shadow scene");
     return;
   }
 
-  constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
-  hardware_shadow_visibility_tx_.ensure_2d_array(
-      gpu::TextureFormat::SFLOAT_16_16_16_16, extent, layers, usage);
-  if (!hardware_shadow_visibility_tx_.is_valid()) {
-    inst_.info_append_i18n("Insufficient memory for hardware shadows");
+  if (!hit && !request_overlap) {
+    reset_overlap();
+  }
+  if (hit) {
+    hit->shadow_visibility.acquire_2d_array(extent, layers, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
+  }
+  else {
+    hardware_shadow_visibility_tx_.ensure_2d_array(gpu::TextureFormat::SFLOAT_16_16_16_16, extent, layers, usage);
+  }
+  Texture &visibility = hit ? static_cast<Texture &>(hit->shadow_visibility) : hardware_shadow_visibility_tx_;
+  if (!visibility.is_valid()) {
+    if (request_overlap) {
+      reset_overlap();
+    }
+    report_hardware_shadow_error("insufficient memory for the shadow visibility buffer");
     hardware_shadow_visibility_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1,
         GPU_TEXTURE_USAGE_SHADER_READ, unoccluded);
     return;
   }
-  hardware_shadow_visibility_tx_.clear(float4(1.0f));
+  visibility.clear(float4(1.0f));
+  bool write_overlap = false;
+  if (request_overlap) {
+    overlap.ensure_2d_array(
+        gpu::TextureFormat::UNORM_8, extent, layers, usage);
+    write_overlap = overlap.is_valid();
+    if (write_overlap) {
+      overlap.clear(float4(0.0f));
+    }
+    else {
+      reset_overlap();
+      report_hardware_shadow_error("insufficient memory for self/cast shadow classification");
+      return;
+    }
+  }
   GPU_flush();
 
   const SceneEEVEE &options = inst_.scene->eevee;
@@ -984,7 +1185,7 @@ void RayTraceModule::render_hardware_shadows(View &view,
                                      inst_.render_buffers.prepass_normal_tx.gpu_texture() : nullptr;
   Vector<int> tint_entries;
   int hits_per_ray = 0;
-  if (options.hardware_raytracing_shadow_transparency > 0.0f) {
+  {
     const Span<HardwareRaytraceSceneEntry> entries = hardware_rt_scene_entries_cache_;
     for (const int i : entries.index_range()) {
       const HardwareRaytraceSceneEntry &entry = entries[i];
@@ -992,7 +1193,6 @@ void RayTraceModule::render_hardware_shadows(View &view,
         continue;
       }
       tint_entries.append(i);
-      /* A straight ray can cross each triangle once, and the shadow walk has eight steps. */
       const int triangles = entry.batch->elem ? int(entry.batch->elem->index_len_get() / 3u) : 8;
       hits_per_ray = std::min(8, hits_per_ray + std::min(triangles, 8));
     }
@@ -1006,18 +1206,25 @@ void RayTraceModule::render_hardware_shadows(View &view,
     }
   }
 
-  auto trace_light = [&](const LightData &light, const GPUHardwareRaytraceShadowTintCapture &tint) {
+  auto trace_light = [&](int index, const GPUHardwareRaytraceShadowTintCapture &tint) {
+    const LightData &light = inst_.lights.sync_light(index);
     if (is_sun_light(light.type)) {
       GPUHardwareRaytraceDirectionalShadowParams p;
-      p.receiver_id_tx = inst_.render_buffers.hwrt_receiver_id_tx;
+      if (light.color.x < 0.0f) {
+        p.world_sunlight_direction_buf = inst_.lights.culled_lights_for_shadows();
+        p.world_sun_slot = inst_.lights.world_sun_direction_offset(index);
+      }
+      p.shadow_overlap_tx = write_overlap ? overlap.gpu_texture() : nullptr;
+      p.receiver_id_tx = hit ? hit->identity.gpu_texture() : inst_.render_buffers.hwrt_receiver_id_tx.gpu_texture();
       p.shadow_link_mask = light.shadow_set_membership;
-      p.classify_shadow = inst_.pipelines.hardware_shadow_classifies_receivers();
-      p.depth_tx = depth_tx;
-      p.gbuf_header_tx = inst_.gbuffer.header_tx;
-      p.gbuf_normal_tx = inst_.gbuffer.normal_tx;
-      p.prepass_normal_tx = prepass_normal;
+      p.classify_shadow = hit == &forward_hit_ || (!hit && inst_.pipelines.hardware_shadow_classifies_receivers());
+      p.world_position_receiver = hit != nullptr;
+      p.depth_tx = hit ? hit->world_position.gpu_texture() : depth_tx;
+      p.gbuf_header_tx = hit == &forward_hit_ ? forward_header_dummy_.gpu_texture() : inst_.gbuffer.header_tx.gpu_texture();
+      p.gbuf_normal_tx = hit == &forward_hit_ ? forward_visibility_dummy_.gpu_texture() : inst_.gbuffer.normal_tx.gpu_texture();
+      p.prepass_normal_tx = hit ? hit->normal.gpu_texture() : prepass_normal;
       p.use_prepass_receiver = from_prepass;
-      p.shadow_visibility_tx = hardware_shadow_visibility_tx_;
+      p.shadow_visibility_tx = visibility;
       p.viewinv = view.viewinv();
       p.wininv = view.wininv();
       p.full_resolution = extent;
@@ -1036,15 +1243,17 @@ void RayTraceModule::render_hardware_shadows(View &view,
     }
     else {
       GPUHardwareRaytraceLocalShadowParams p;
-      p.receiver_id_tx = inst_.render_buffers.hwrt_receiver_id_tx;
+      p.shadow_overlap_tx = write_overlap ? overlap.gpu_texture() : nullptr;
+      p.receiver_id_tx = hit ? hit->identity.gpu_texture() : inst_.render_buffers.hwrt_receiver_id_tx.gpu_texture();
       p.shadow_link_mask = light.shadow_set_membership;
-      p.classify_shadow = inst_.pipelines.hardware_shadow_classifies_receivers();
-      p.depth_tx = depth_tx;
-      p.gbuf_header_tx = inst_.gbuffer.header_tx;
-      p.gbuf_normal_tx = inst_.gbuffer.normal_tx;
-      p.prepass_normal_tx = prepass_normal;
+      p.classify_shadow = hit == &forward_hit_ || (!hit && inst_.pipelines.hardware_shadow_classifies_receivers());
+      p.world_position_receiver = hit != nullptr;
+      p.depth_tx = hit ? hit->world_position.gpu_texture() : depth_tx;
+      p.gbuf_header_tx = hit == &forward_hit_ ? forward_header_dummy_.gpu_texture() : inst_.gbuffer.header_tx.gpu_texture();
+      p.gbuf_normal_tx = hit == &forward_hit_ ? forward_visibility_dummy_.gpu_texture() : inst_.gbuffer.normal_tx.gpu_texture();
+      p.prepass_normal_tx = hit ? hit->normal.gpu_texture() : prepass_normal;
       p.use_prepass_receiver = from_prepass;
-      p.shadow_visibility_tx = hardware_shadow_visibility_tx_;
+      p.shadow_visibility_tx = visibility;
       p.viewinv = view.viewinv();
       p.wininv = view.wininv();
       p.full_resolution = extent;
@@ -1083,7 +1292,7 @@ void RayTraceModule::render_hardware_shadows(View &view,
     }
     traced++;
     if (hits_per_ray == 0) {
-      success &= trace_light(light, {});
+      success &= trace_light(i, {});
       continue;
     }
 
@@ -1091,8 +1300,6 @@ void RayTraceModule::render_hardware_shadows(View &view,
                              math::reduce_max(light.area.hwrt_shadow_half_size) :
                              light.hwrt_shadow_size;
     const int samples = radius > 1.0e-6f ? sample_count : 1;
-    /* Reuse the buffers across lights and tiles. Each tile has capacity for every possible
-     * encounter, so the result is independent of the order in which GPU threads append hits. */
     const size_t record_bytes = sizeof(HardwareShadowTintHit) + sizeof(uint);
     const size_t bytes_per_pixel =
         samples * (sizeof(HardwareShadowTintRay) + hits_per_ray * record_bytes);
@@ -1101,34 +1308,69 @@ void RayTraceModule::render_hardware_shadows(View &view,
     const int tile_width = std::min(extent.x, tile_pixels);
     const int tile_height = std::min(extent.y, std::max(tile_pixels / tile_width, 1));
     const int ray_capacity = tile_width * tile_height * samples;
-    const int hit_capacity = ray_capacity * hits_per_ray;
+    int hit_capacity = ray_capacity * hits_per_ray;
     shadow_tint_hits_.resize(hit_capacity);
     shadow_tint_rays_.resize(ray_capacity);
     shadow_tint_order_.resize(tint_entries.size() > 1 ? hit_capacity : 4);
+    Vector<int4> tiles;
     for (int y = 0; y < extent.y; y += tile_height) {
       for (int x = 0; x < extent.x; x += tile_width) {
+        tiles.append(int4(x, y, std::min(tile_width, extent.x - x), std::min(tile_height, extent.y - y)));
+      }
+    }
+    while (!tiles.is_empty() && success) {
+        const int4 tile = tiles.pop_last();
         GPUHardwareRaytraceShadowTintCapture capture;
         capture.hits = shadow_tint_hits_;
         capture.rays = shadow_tint_rays_;
         capture.count = shadow_tint_count_;
         capture.samples = samples;
-        capture.offset = int2(x, y);
-        capture.extent = math::min(int2(tile_width, tile_height), extent - capture.offset);
-        capture.hit_capacity = capture.extent.x * capture.extent.y * samples * hits_per_ray;
+        capture.offset = tile.xy();
+        capture.extent = int2(tile.z, tile.w);
+        capture.hit_capacity = hit_capacity;
         shadow_tint_count_.clear_to_zero();
         GPU_flush();
-        if (!trace_light(light, capture)) {
+        if (!trace_light(i, capture)) {
           success = false;
           continue;
         }
+        GPU_memory_barrier(GPU_BARRIER_SHADER_STORAGE);
+        shadow_tint_count_.read();
+        const uint hit_count = shadow_tint_count_[0];
+        if (hit_count == 0) {
+          continue;
+        }
+        if (hit_count > uint(hit_capacity)) {
+          if (tile.z > 1 || tile.w > 1) {
+            const int axis = tile.z >= tile.w ? 0 : 1;
+            int4 first = tile, second = tile;
+            first[axis + 2] /= 2;
+            second[axis] += first[axis + 2];
+            second[axis + 2] -= first[axis + 2];
+            tiles.append(second);
+            tiles.append(first);
+          }
+          else if (hit_count <= budget / record_bytes) {
+            hit_capacity = int(hit_count);
+            shadow_tint_hits_.resize(hit_capacity);
+            shadow_tint_order_.resize(tint_entries.size() > 1 ? hit_capacity : 4);
+            tiles.append(tile);
+          }
+          else {
+            report_hardware_shadow_error("a single pixel exceeds the shadow material replay memory budget");
+            success = false;
+          }
+          continue;
+        }
+        capture.hit_capacity = int(hit_count);
         evaluate_shadow_tint(view,
                              depth_tx,
+                             visibility,
                              extent,
                              tint_entries,
                              capture,
                              light.hwrt_shadow_layer,
                              options.hardware_raytracing_shadow_color_intensity);
-      }
     }
   }
   if (batched) {
@@ -1136,15 +1378,15 @@ void RayTraceModule::render_hardware_shadows(View &view,
   }
   GPU_debug_group_end();
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
-  hardware_shadow_ready_ = success;
+  ready = success;
   if (!success) {
-    inst_.info_append_i18n("Hardware ray-traced shadows failed");
+    report_hardware_shadow_error("hardware shadow dispatch failed");
   }
   if (log_perf) {
     std::fprintf(stderr,
                  "EEVEE HWRT primary_shadows lights=%d samples=%d success=%d submit_ms=%.3f receiver=%s\n",
                  traced, sample_count, int(success), (BLI_time_now_seconds() - start) * 1000.0,
-                 from_prepass ? "prepass" : "gbuffer");
+                 hit ? "secondary" : from_prepass ? "prepass" : "gbuffer");
   }
 }
 
@@ -1457,15 +1699,22 @@ void RayTraceModule::render_hardware_hit_shadows(GPUHardwareRaytraceScene *scene
                  "EEVEE HWRT hit_shadows lights=%d samples=%d success=%d submit_ms=%.3f\n",
                  traced, sample_count, int(success), (BLI_time_now_seconds() - start) * 1000.0);
   }
-  if (std::getenv("BLENDER_EEVEE_HWRT_HIT_READBACK") != nullptr) {
+}
+
+void RayTraceModule::debug_hit_shadows(HardwareHitBuffers &hit)
+{
+  if (hit.shadows_valid && std::getenv("BLENDER_EEVEE_HWRT_HIT_READBACK")) {
+    const int2 extent = hit.time.size().xy();
     GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
     float *time = static_cast<float *>(GPU_texture_read(hit.time, GPU_DATA_FLOAT, 0));
     float4 *visibility = static_cast<float4 *>(
         GPU_texture_read(hit.shadow_visibility, GPU_DATA_FLOAT, 0));
     const int pixel_count = extent.x * extent.y;
-    for (int layer = 0; layer < lights_len; layer++) {
-      if (inst_.lights.sync_light(layer).hwrt_shadow_layer < 0) {
-        continue; /* World-extracted lights still use VSM, not this visibility array. */
+    for (int index : IndexRange(inst_.lights.light_count())) {
+      const LightData &light = inst_.lights.sync_light(index);
+      const int layer = light.hwrt_shadow_layer;
+      if (layer < 0 || light.color.x < 0.0f) {
+        continue;
       }
       int hits = 0;
       float3 sum(0.0f), minimum(1.0f), maximum(0.0f);
@@ -1752,7 +2001,13 @@ bool RayTraceModule::submit_hardware_tracing(View &render_view, int trace_phase)
     submit_hardware_hit_evaluation(
         render_view, payload, raytrace_tracing_dispatch_buf_, raytrace_tracing_tiles_buf_);
     debug_hardware_hit_payload(payload, trace_phase, payload_index++, "replay");
-    render_hardware_hit_shadows(scene, *hit);
+    if (hardware_shadows_requested()) {
+      render_hardware_shadows(render_view, renderbuf_depth_view_, extent, false, hit);
+    }
+    else {
+      render_hardware_hit_shadows(scene, *hit);
+    }
+    debug_hit_shadows(*hit);
   }
   return true;
 }
@@ -1886,6 +2141,9 @@ bool RayTraceModule::submit_hardware_hit_lighting(View &render_view, int trace_p
   pass.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
   inst_.manager->submit(pass, render_view);
   debug_hardware_hit_payload(hardware_hit_.payload(), trace_phase, 0, "lighting");
+  if (hardware_hit_.shadows_valid) {
+    inst_.shadows.log_consumer(render_view, "hit_lighting", "ray_visibility");
+  }
   neutral.release();
   environment.release();
   hit_environment.release();

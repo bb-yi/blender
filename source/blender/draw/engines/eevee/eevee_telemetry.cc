@@ -677,6 +677,7 @@ void TelemetryModule::frame_begin(const TelemetryRuntimeMode mode)
   frame_start_time_ = BLI_time_now_seconds();
   if (mode == TelemetryRuntimeMode::FinalRender && (inst_.scene->eevee.performance_profiler_viewport_pause & 2)) {
     gpu_queries_ = gpu::TimestampPool::create();
+    gpu_frame_begin_ = gpu_queries_ ? gpu_queries_->timestamp_write() : -1;
   }
   frame_active_ = true;
 }
@@ -1218,6 +1219,10 @@ void TelemetryModule::draw_performance_end(const blender::DrawPerformanceMetrics
 
 int TelemetryModule::gpu_begin(const TelemetryStageId stage)
 {
+  if (stage == TelemetryStageId::ReadResult && gpu_frame_begin_ >= 0) {
+    gpu_end(0, gpu_frame_begin_);
+    gpu_frame_begin_ = -1;
+  }
   if (gpu_queries_ && ELEM(stage, TelemetryStageId::PlanarCapture, TelemetryStageId::ShadowSurface,
                            TelemetryStageId::MainDeferred, TelemetryStageId::MainForward,
                            TelemetryStageId::MainVolumeCompute, TelemetryStageId::MainFilmAccumulate))
@@ -1531,6 +1536,8 @@ std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> TelemetryModule::build
   snapshot->root.active = true;
 
   if (!record.scope_nodes.is_empty()) {
+    snapshot->root.gpu_ms = record.scope_nodes[0].gpu_ms;
+    snapshot->root.gpu_calls = record.scope_nodes[0].gpu_calls;
     double child_ms = 0.0;
     for (const int child_index : record.scope_nodes[0].children) {
       bke::SceneEeveePerformanceNode child = snapshot_scope_node(

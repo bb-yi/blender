@@ -2315,7 +2315,7 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       add_range(8, 2, BK::SSBO); /* Terminator positions and object matrices. */
       add_range(10, 3, BK::SSBO); /* Caster metadata, UVs and packed Alpha. */
       add_range(16, 5, BK::SAMPLED); /* Depth, GBuffer header/normals, prepass normal/ID. */
-      specs.push_back({40 + 3, BK::STORAGE_IMAGE});
+      add_range(43, 2, BK::STORAGE_IMAGE);
       break;
     case NuruKernel::DIRECTIONAL_HIT_SHADOW:
       specs.push_back({0, BK::UBO});
@@ -2347,7 +2347,7 @@ static std::vector<BindingSpec> kernel_binding_specs(const NuruKernel kernel)
       add_range(8, 2, BK::SSBO);
       add_range(10, 3, BK::SSBO);
       add_range(16, 5, BK::SAMPLED);
-      specs.push_back({40 + 3, BK::STORAGE_IMAGE});
+      add_range(43, 2, BK::STORAGE_IMAGE);
       break;
     case NuruKernel::LOCAL_HIT_SHADOW:
       specs.push_back({0, BK::UBO});
@@ -4640,7 +4640,7 @@ bool raytrace_scene_trace_directional_shadow(
   uniforms.wininv = params.wininv;
   uniforms.resolution_layer = int4(
       params.full_resolution.x, params.full_resolution.y, std::max(params.shadow_layer, 0),
-      params.use_prepass_receiver ? (params.prepass_normal_tx ? 1 : 2) : 0);
+      params.world_position_receiver ? 3 : params.use_prepass_receiver ? (params.prepass_normal_tx ? 1 : 2) : 0);
   uniforms.light_direction_bias = float4(params.light_direction,
                                          std::max(params.normal_bias, 0.0f));
   /* Nuru: `shadow_params.z` = Color Intensity (0..1), `.w` = Photons intensity (0..10). */
@@ -4655,7 +4655,9 @@ bool raytrace_scene_trace_directional_shadow(
       gpu_vulkan_shadow_transparency_bits(scene->shadow_terminator_max_cutoff),
       gpu_vulkan_shadow_transparency_bits(params.shadow_transparency));
   uniforms.sampling_rand = params.sampling_rand;
-  uniforms.shadow_options = uint4(params.shadow_link_mask, uint32_t(params.classify_shadow),
+  const uint32_t classify_flags = uint32_t(params.classify_shadow) |
+                                  (params.shadow_overlap_tx != nullptr ? 2u : 0u);
+  uniforms.shadow_options = uint4(params.shadow_link_mask, classify_flags,
                                   uint32_t(scene->has_shadow_alpha));
 
   KernelArgs args;
@@ -4694,6 +4696,8 @@ bool raytrace_scene_trace_directional_shadow(
                                                                       params.depth_tx));
   args.images.push_back(sampled_binding(20, params.receiver_id_tx));
   args.images.push_back(storage_binding(40 + 3, params.shadow_visibility_tx, /*arrayed=*/true));
+  args.images.push_back(storage_binding(
+      44, params.shadow_overlap_tx ? params.shadow_overlap_tx : params.shadow_visibility_tx, true));
 
   const bool capture_tint = params.tint.hits != nullptr;
   const int2 extent = capture_tint ? params.tint.extent : params.full_resolution;
@@ -4920,12 +4924,14 @@ bool raytrace_scene_trace_local_shadow(GPUHardwareRaytraceScene *scene,
                                     params.use_caustics ? 1.0f : 0.0f,
                                     std::clamp(params.color_intensity, 0.0f, 1.0f));
   uniforms.sampling_rand = params.sampling_rand;
-  uniforms.shadow_options = uint4(params.shadow_link_mask, uint32_t(params.classify_shadow),
+  const uint32_t classify_flags = uint32_t(params.classify_shadow) |
+                                  (params.shadow_overlap_tx != nullptr ? 2u : 0u);
+  uniforms.shadow_options = uint4(params.shadow_link_mask, classify_flags,
                                   uint32_t(scene->has_shadow_alpha));
   uniforms.caustic_params = float4(std::max(params.photons_intensity, 0.0f),
                                    std::clamp(params.shadow_transparency, 0.0f, 1.0f),
                                    scene->shadow_terminator_max_cutoff,
-                                   params.use_prepass_receiver ? (params.prepass_normal_tx ? 1.0f : 2.0f) : 0.0f);
+                                   params.world_position_receiver ? 3.0f : params.use_prepass_receiver ? (params.prepass_normal_tx ? 1.0f : 2.0f) : 0.0f);
 
   KernelArgs args;
   args.uniforms_data = &uniforms;
@@ -4950,6 +4956,8 @@ bool raytrace_scene_trace_local_shadow(GPUHardwareRaytraceScene *scene,
                                                                       params.depth_tx));
   args.images.push_back(sampled_binding(20, params.receiver_id_tx));
   args.images.push_back(storage_binding(40 + 3, params.shadow_visibility_tx, /*arrayed=*/true));
+  args.images.push_back(storage_binding(
+      44, params.shadow_overlap_tx ? params.shadow_overlap_tx : params.shadow_visibility_tx, true));
 
   const bool capture_tint = params.tint.hits != nullptr;
   const int2 extent = capture_tint ? params.tint.extent : params.full_resolution;

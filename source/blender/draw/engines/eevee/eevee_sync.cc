@@ -624,6 +624,11 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
 
     capture_hardware_raytrace_scene_entry(
         ob_handle, ob_ref.get_blocker_shadow_set(), material, geom, i, false);
+    if (!(ob_handle.object->visibility_flag & OB_HIDE_CAMERA) &&
+        (material.shading.sub_pass || material.is_alpha_blend_transparent))
+    {
+      inst_.raytracing.add_forward_receiver(material.shading.gpumat, geom, ob_handle.res_handle);
+    }
 
     for (const MaterialPass &pass : {material.outline_shell_prepass, material.outline_shell_shading})
     {
@@ -809,7 +814,9 @@ void SyncModule::sync_pointcloud(const ObjectRef &ob_ref)
   }
 
   /* The hardware scene only contains triangle batches. Keep native shadows for these casters. */
-  has_untraced_shadow_caster_ |= material.shadow.sub_pass != nullptr;
+  if (material.shadow.sub_pass) {
+    untraced_shadow_caster_ = ob_handle.object;
+  }
   sync_common_passes(material, [&](const MaterialPass &pass) {
     drawcall_add(pass, ob_handle.res_handle);
   });
@@ -954,7 +961,9 @@ void SyncModule::sync_curves(const ObjectRef &ob_ref, HairParticleInfo const *ha
     }
   }
 
-  has_untraced_shadow_caster_ |= material.shadow.sub_pass != nullptr;
+  if (material.shadow.sub_pass) {
+    untraced_shadow_caster_ = ob_handle.object;
+  }
   sync_common_passes(
       material, [&](const MaterialPass &pass) { drawcall_add(pass, ob_handle.res_handle); });
 

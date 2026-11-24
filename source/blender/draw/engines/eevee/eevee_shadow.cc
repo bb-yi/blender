@@ -216,15 +216,19 @@ ShadowTileMapPool::ShadowTileMapPool()
   /* The initial free-list has never owned pages. Only later growth relative to this baseline
    * represents released tile-maps that need GPU-side page cleanup. */
   last_free_len = free_indices.size();
+}
 
+void ShadowTileMapPool::ensure_texture()
+{
   int2 extent;
   extent.x = min_ii(SHADOW_MAX_TILEMAP, maps_per_row) * ShadowTileMap::tile_map_resolution;
   extent.y = (SHADOW_MAX_TILEMAP / maps_per_row) * ShadowTileMap::tile_map_resolution;
 
   eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE |
                            GPU_TEXTURE_USAGE_ATTACHMENT;
-  tilemap_tx.ensure_2d(gpu::TextureFormat::UINT_32, extent, usage);
-  tilemap_tx.clear(uint4(0));
+  if (tilemap_tx.ensure_2d(gpu::TextureFormat::UINT_32, extent, usage)) {
+    tilemap_tx.clear(uint4(0));
+  }
 }
 
 ShadowTileMap *ShadowTileMapPool::acquire()
@@ -936,19 +940,25 @@ void ShadowModule::ensure_shadow_atlas(bool enabled_changed)
   }
 
   if (!enabled_) {
-    if (shadow_page_len_ != 1 || shadow_pool_size_allocated_ != 0) {
+    const int pages = inst_.raytracing.hardware_shadows_requested() ? 0 : 1;
+    if (shadow_page_len_ != pages || shadow_pool_size_allocated_ != 0) {
       do_full_update_ = true;
     }
-    shadow_page_len_ = 1;
+    shadow_page_len_ = pages;
     shadow_pool_size_allocated_ = 0;
     shadow_pool_retry_countdown_ = 0;
-    if (atlas_tx_.ensure_2d_array(ShadowModule::atlas_type, int2(1), 1)) {
+    if (inst_.raytracing.hardware_shadows_requested()) {
+      atlas_tx_.free();
+      shadow_depth_fb_tx_.free();
+      shadow_depth_accum_tx_.free();
+    }
+    else if (atlas_tx_.ensure_2d_array(ShadowModule::atlas_type, int2(1), 1)) {
       do_full_update_ = true;
     }
   }
 
   /* Make allocation safe. Avoids crashes later on. */
-  if (!atlas_tx_.is_valid()) {
+  if (!atlas_tx_.is_valid() && !inst_.raytracing.hardware_shadows_requested()) {
     atlas_tx_.free();
     do_full_update_ = true;
     shadow_page_len_ = 0;
@@ -1010,7 +1020,9 @@ void ShadowModule::ensure_shadow_atlas(bool enabled_changed)
     }
   }
 
-  atlas_tx_.filter_mode(false);
+  if (atlas_tx_.is_valid()) {
+    atlas_tx_.filter_mode(false);
+  }
   if (caster_atlas_tx_.is_valid()) {
     caster_atlas_tx_.filter_mode(false);
   }
@@ -1159,6 +1171,7 @@ void ShadowModule::render_node_cache(View &view, int2 extent)
 
 void ShadowModule::begin_sync()
 {
+  atlas_draw_submissions_ = 0;
   moment_sat_requested_ = false;
   use_caster_atlas_next_ = false;
   node_soft_shadow_next_ = false;
@@ -1321,7 +1334,7 @@ void ShadowModule::sync_bake_receiver_bounds(const ResourceHandleRange &resource
 void ShadowModule::end_sync()
 {
   const bool use_maps = (inst_.scene->eevee.flag & SCE_EEVEE_SHADOW_ENABLED) &&
-                        !inst_.raytracing.use_hardware_shadows();
+                        !inst_.raytracing.hardware_shadows_requested();
   const bool enabled_changed = assign_if_different(enabled_, use_maps);
   if (enabled_changed) {
     do_full_update_ = true;
@@ -1352,6 +1365,17 @@ void ShadowModule::end_sync()
   do_full_update_ |= previous_use_caster_atlas != use_caster_atlas_;
   ensure_caster_atlas();
   update_caster_atlas_ref();
+  depth_atlas_ref_ = atlas_tx_.is_valid() ? atlas_tx_.gpu_texture() : caster_atlas_dummy_tx_.gpu_texture();
+  const bool strict = inst_.raytracing.hardware_shadows_requested();
+  if (strict) {
+    tilemap_pool.tilemap_tx.free();
+    caster_atlas_dummy_tx_.ensure_layer_views();
+    tilemap_ref_ = caster_atlas_dummy_tx_.layer_view(0);
+  }
+  else {
+    tilemap_pool.ensure_texture();
+    tilemap_ref_ = tilemap_pool.tilemap_tx.gpu_texture();
+  }
   data_.use_caster_atlas = bool32_t(use_caster_atlas_);
 
   /* Derive filter data only after pages have received their current shadow depths. A new
@@ -1435,9 +1459,7 @@ void ShadowModule::end_sync()
       light.tilemap_index = LIGHT_NO_SHADOW;
     }
   }
-  tilemap_pool.end_sync(*this);
   inst_.lights.update_shadow_light_costs();
-
   /* Search for deleted or updated shadow casters */
   auto discard_unused = [&](auto &casters) {
     casters.remove_if([&](const auto &item) {
@@ -1456,6 +1478,12 @@ void ShadowModule::end_sync()
   };
   discard_unused(objects_);
   discard_unused(instance_batches_);
+  if (strict) {
+    tilemap_pool.last_free_len = tilemap_pool.free_indices.size();
+    debug_draw_ready_ = false;
+    return;
+  }
+  tilemap_pool.end_sync(*this);
   past_casters_updated_.push_update();
   curr_casters_updated_.push_update();
   jittered_transparent_casters_.push_update();
@@ -2053,6 +2081,25 @@ void ShadowModule::set_view(View &view, int2 extent, const TelemetryShadowContex
   data_.film_pixel_radius = view.screen_pixel_radius(extent);
 }
 
+void ShadowModule::log_consumer(const View &view, const char *stage, const char *source) const
+{
+  if (!std::getenv("BLENDER_EEVEE_HWRT_PERF_LOG")) {
+    return;
+  }
+  const int3 size = atlas_tx_.is_valid() ? atlas_tx_.size() : int3(0);
+  const uint64_t bytes = uint64_t(size.x) * size.y * size.z * sizeof(uint32_t);
+  const uint64_t sample = inst_.is_viewport() ? inst_.sampling.viewport_sample_index() :
+                                               inst_.sampling.sample_index();
+  std::fprintf(stderr,
+               "EEVEE shadow instance=%p view=%p sample=%llu requested=%s consumer=%s "
+               "source=%s depth_atlas_bytes=%llu atlas_pass_submits=%llu tilemap_allocated=%d\n",
+               static_cast<const void *>(&inst_), static_cast<const void *>(&view),
+               (unsigned long long)sample,
+               inst_.raytracing.hardware_shadows_requested() ? "hardware" : "native",
+               stage, source, (unsigned long long)bytes, (unsigned long long)atlas_draw_submissions_,
+               int(tilemap_pool.tilemap_tx.is_valid()));
+}
+
 void ShadowModule::render(View &view, int2 extent)
 {
   if (enabled_ == false) {
@@ -2209,6 +2256,7 @@ void ShadowModule::render(View &view, int2 extent)
         }
 
         inst_.pipelines.shadow.render(shadow_multi_view_);
+        atlas_draw_submissions_++;
 
         if (use_flush) {
           GPU_flush();

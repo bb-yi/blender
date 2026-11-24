@@ -933,6 +933,12 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
                                    const char *error_message) {
     GPUMaterial *gpumat = inst_.shaders.light_shader_get(
         const_cast<blender::Light *>(&la), la.nodetree, pipeline_type, false);
+    if (gpumat && GPU_material_flag_get(gpumat, GPU_MATFLAG_RAW_SHADOW_MAP) &&
+        pipeline_type != eLightShaderPipeline::Volume)
+    {
+      inst_.pipelines.require_native_shadows("light shader requires shadow-map data",
+                                           ob_ref.object->id.name + 2);
+    }
     inst_.render_textures.material_sync(gpumat);
     inst_.materials.expression_diagnostics_publish(gpumat);
     if (gpumat != nullptr && GPU_material_status(gpumat) == GPU_MAT_SUCCESS &&
@@ -1078,7 +1084,7 @@ const char *LightModule::hardware_shadow_unsupported_reason() const
 {
   int caster_lights = 0;
   for (const Light &light : light_map_.values()) {
-    if (!light.used || light.color.x < 0.0f || !(light.flags & LIGHT_CAST_SHADOW)) {
+    if (!light.used || !(light.flags & LIGHT_CAST_SHADOW)) {
       continue;
     }
     if (GPU_backend_get_type() != GPU_BACKEND_VULKAN &&
@@ -1109,7 +1115,11 @@ void LightModule::end_sync()
 
   /* Track light deletion. */
   /* Indices inside GPU data array. */
-  int sun_lights_idx = 0;
+  int world_suns_len = 0;
+  for (const Light &light : light_map_.values()) {
+    world_suns_len += light.used && is_sun_light(light.type) && light.color.x < 0.0f;
+  }
+  int sun_lights_idx = world_suns_len;
   int local_lights_idx = sun_lights_len_;
   const bool hardware_shadows = inst_.raytracing.use_hardware_shadows();
   const bool screen_shadows = hardware_shadows &&
@@ -1126,12 +1136,12 @@ void LightModule::end_sync()
       continue;
     }
 
-    int dst_idx = is_sun_light(light.type) ? sun_lights_idx++ : local_lights_idx++;
+    const bool world_sun = is_sun_light(light.type) && light.color.x < 0.0f;
+    int dst_idx = world_sun ? int((*it).key == world_sunlight_key_[WORLD_SUN_GLOSSY]) :
+                  is_sun_light(light.type) ? sun_lights_idx++ : local_lights_idx++;
     /* Put all light data into global data SSBO. */
     light_buf_[dst_idx] = light;
-    /* The GPU-extracted world sun has no camera hardware visibility layer. */
-    const bool trace_shadow = hardware_shadows && light.color.x >= 0.0f &&
-                              (light.flags & LIGHT_CAST_SHADOW);
+    const bool trace_shadow = hardware_shadows && (light.flags & LIGHT_CAST_SHADOW);
     light_buf_[dst_idx].hwrt_shadow_layer = trace_shadow ? dst_idx : -1;
     light_buf_[dst_idx].hwrt_cluster_id = 0;
     const int uniform_encoded_index = (light.uniform_light_shader_index >= 0) ?

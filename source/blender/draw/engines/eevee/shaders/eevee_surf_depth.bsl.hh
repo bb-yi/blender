@@ -33,6 +33,10 @@ struct StencilWriterSurfaceData {
   [[push_constant]] int stencil_writer_reference;
 };
 
+struct HardwareShadowReceiverData {
+  [[push_constant]] bool hwrt_cast_shadow_overlap;
+};
+
 /* WORKAROUND(fclem): This is not supposed to be needed.
  * But Metal still writes to the velocity buffer if the frag output is defined. And conditions are
  * not yet supported on in/out. */
@@ -56,6 +60,7 @@ template<bool with_velocity>
 [[fragment]]
 void surf_depth([[resource_table]] KernelGlobals &kg,
                 [[resource_table]] PipelineConstants &pipe,
+                [[resource_table]] const HardwareShadowReceiverData &hwrt_receiver,
                 [[resource_table]] const Uniform &uni,
                 [[resource_table]] const Sampling &sampling,
                 [[resource_table]] const UtilityTexture &util_tx,
@@ -174,7 +179,8 @@ void surf_depth([[resource_table]] KernelGlobals &kg,
 #ifdef MAT_NODE_SHADOW_CACHE_RECEIVER
   frag_out.normal.a = 1.0f;
 #endif
-  frag_out.hwrt_receiver_id = interp.resource_id_raw & 0x7FFFFFFFu;
+  frag_out.hwrt_receiver_id = (interp.resource_id_raw & 0x7FFFFFFFu) |
+                              (hwrt_receiver.hwrt_cast_shadow_overlap ? 0x80000000u : 0u);
   frag_out.object_id = interp.resource_id_raw & 0xFFFFu;
   if (pipe.is_stencil_writer_surface) [[static_branch]] {
     frag_out.object_id = uint(stencil_writer.stencil_writer_reference) & 15u;
@@ -304,6 +310,7 @@ void surf_depth_offset([[resource_table]] KernelGlobals &kg,
 
 template void surf_depth<true>(KernelGlobals &,
                                PipelineConstants &,
+                               const HardwareShadowReceiverData &,
                                const Uniform &,
                                const Sampling &,
                                const UtilityTexture &,
@@ -322,6 +329,7 @@ template void surf_depth<true>(KernelGlobals &,
                                const bool);
 template void surf_depth<false>(KernelGlobals &,
                                 PipelineConstants &,
+                                const HardwareShadowReceiverData &,
                                 const Uniform &,
                                 const Sampling &,
                                 const UtilityTexture &,

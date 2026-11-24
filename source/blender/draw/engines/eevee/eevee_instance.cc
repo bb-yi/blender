@@ -17,6 +17,7 @@
 #include "BKE_camera.h"
 #include "BKE_global.hh"
 #include "BKE_object.hh"
+#include "BKE_report.hh"
 #include "BKE_scene.hh"
 
 #include "BLI_memory_utils.hh"
@@ -653,11 +654,6 @@ void Instance::object_sync(ObjectRef &ob_ref, Manager & /*manager*/)
         break;
       case OB_LIGHTPROBE:
         light_probes.sync_probe(ob_ref);
-        if (DRW_object_get_data_for_drawing<const blender::LightProbe>(*ob).type !=
-            LIGHTPROBE_TYPE_VOLUME)
-        {
-          pipelines.require_native_shadows("the scene captures sphere or planar reflection probes");
-        }
         break;
       default:
         break;
@@ -854,6 +850,10 @@ void Instance::render_sample()
        * same step can cause mismatching `has_motion` values between sync. */
       render_sync();
     }
+  }
+
+  if (!raytracing.hardware_shadow_error().empty()) {
+    return;
   }
 
   /* Camera/object changes can request a reset after RayTraceModule::sync(). Observe
@@ -1095,6 +1095,15 @@ bool Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, con
     }
     this->render_sample();
 
+    if (!raytracing.hardware_shadow_error().empty()) {
+      samples_in_flight->end_work();
+      const char *error = raytracing.hardware_shadow_error().c_str();
+      RE_engine_report(engine, RPT_ERROR, error);
+      RE_engine_set_error_message(engine, error);
+      telemetry.reset();
+      return false;
+    }
+
     if (dlss_sr.active() && dlss_sr.failed() && !native_retry) {
       samples_in_flight->end_work();
       native_retry = true;
@@ -1198,7 +1207,7 @@ bool Instance::render_frame(RenderEngine *engine, RenderLayer *render_layer, con
 
 void Instance::draw_viewport()
 {
-  if (skip_render_ || !is_loaded(needed_shaders)) {
+  if (skip_render_ || !is_loaded(needed_shaders) || !raytracing.hardware_shadow_error().empty()) {
     GPU_viewport_capture_shading_set(draw_ctx->viewport, -1);
     DefaultFramebufferList *dfbl = draw_ctx->viewport_framebuffer_list_get();
     GPU_framebuffer_clear_color_depth(dfbl->default_fb, double4(0.0), 1.0f);
@@ -1283,7 +1292,7 @@ void Instance::draw_viewport_image_render()
     this->render_sample();
     samples_in_flight->end_work();
     sampling.update_time();
-  } while (!sampling.finished_viewport());
+  } while (!sampling.finished_viewport() && raytracing.hardware_shadow_error().empty());
   velocity.step_swap();
 
   if (is_viewport_compositor_used) {

@@ -155,6 +155,7 @@ void LightProbeModule::sync_volume(const ObjectRef &ob_ref)
 void LightProbeModule::sync_sphere(const ObjectRef &ob_ref)
 {
   SphereProbe &cube = sphere_map_.lookup_or_add_default(ObjectKey(ob_ref));
+  cube.profile_name = ob_ref.object->id.name + 2;
   cube.used = true;
   if (inst_.get_recalc_flags(ob_ref) != 0 || cube.initialized == false) {
     const blender::LightProbe &light_probe = DRW_object_get_data_for_drawing<blender::LightProbe>(
@@ -214,7 +215,7 @@ void LightProbeModule::sync_planar(const ObjectRef &ob_ref)
   plane.selection_key = ObjectKey(ob_ref);
   const ID &original = ob_ref.object->id.orig_id ? *ob_ref.object->id.orig_id : ob_ref.object->id;
   plane.object_uid = original.session_uid;
-  if (inst_.telemetry.enabled()) {
+  if (inst_.telemetry.enabled() || inst_.raytracing.hardware_shadows_requested()) {
     plane.profile_name = original.name + 2;
   }
   plane.is_instance = uint(ob_ref.is_dupli());

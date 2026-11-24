@@ -108,6 +108,13 @@ void PlanarProbeModule::set_view(const draw::View &main_view, int2 main_view_ext
   GBuffer &gbuf = inst_.gbuffer;
 
   const int64_t num_probes = inst_.light_probes.planar_map_.size();
+  if (num_probes && inst_.raytracing.hardware_shadows_requested()) {
+    const PlanarProbe &probe = *inst_.light_probes.planar_map_.values().begin();
+    inst_.raytracing.report_hardware_shadow_error(
+        fmt::format("planar reflection probe capture ({})", probe.profile_name).c_str());
+    ensure_resources();
+    return;
+  }
   CLOG_INFO(&Instance::log,
             "PlanarProbe render extent=%dx%d count=%d",
             main_view_extent.x,

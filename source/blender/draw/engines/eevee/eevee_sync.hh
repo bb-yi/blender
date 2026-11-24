@@ -96,7 +96,7 @@ class SyncModule {
   Vector<HardwareRaytraceSceneEntry> hardware_raytrace_scene_entries_;
   uint64_t hardware_raytrace_scene_signature_ = 0;
   uint64_t hardware_raytrace_sync_generation_ = 0;
-  bool has_untraced_shadow_caster_ = false;
+  const Object *untraced_shadow_caster_ = nullptr;
   /* Keep draws sharing a material and expansion budget batched together. */
   Map<std::pair<PassMain::Sub *, int>, PassMain::Sub *> tessellation_passes_;
   Map<gpu::Batch *, int> raycast_batch_ids_;
@@ -124,9 +124,9 @@ class SyncModule {
   {
     return hardware_raytrace_scene_signature_;
   }
-  bool has_untraced_shadow_caster() const
+  const Object *untraced_shadow_caster() const
   {
-    return has_untraced_shadow_caster_;
+    return untraced_shadow_caster_;
   }
 
   int64_t object_attribute_request_count() const

@@ -150,6 +150,9 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
   if (out[5].hasoutput || out[6].hasoutput) {
     GPU_material_shader_info_shadow_classification_set(mat);
   }
+  if (out[6].hasoutput && default_surface) {
+    GPU_material_shader_info_cast_shadow_set(mat);
+  }
   if (shadow_outputs && !default_surface) {
     GPU_material_flag_set(mat, GPU_MATFLAG_SHADER_INFO_SHADOW_OFFSET);
   }

@@ -344,6 +344,7 @@ class TelemetryModule {
   double profiler_accounting_start_time_ = 0.0;
   TelemetryFrameRecord current_frame_;
   std::unique_ptr<gpu::TimestampPool> gpu_queries_;
+  int gpu_frame_begin_ = -1;
   struct GpuInterval { int node, begin, end; };
   Vector<GpuInterval> gpu_intervals_;
   Vector<int> scope_stack_;

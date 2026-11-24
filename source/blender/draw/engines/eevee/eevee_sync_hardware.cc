@@ -679,7 +679,13 @@ static HardwareMaterialProxy material_hardware_proxy(const blender::Material *bl
             GPU_backend_get_type() == GPU_BACKEND_VULKAN)
         {
           proxy.dynamic_shadow_alpha = true;
-          proxy.shadow_alpha = shadow_alpha_texture(alpha_socket);
+          const bNodeLink *surface = shadow_alpha_input_link(material_output_surface_socket(blender_mat));
+          if (surface && surface->fromnode == node && !(node->flag & NODE_MUTED)) {
+            proxy.shadow_alpha = shadow_alpha_texture(alpha_socket);
+            if (!proxy.shadow_alpha.nearest) {
+              proxy.shadow_alpha = {};
+            }
+          }
         }
         const float alpha = alpha_textured ?
                                 0.5f :
@@ -740,6 +746,12 @@ static HardwareMaterialProxy material_hardware_proxy(const blender::Material *bl
         proxy.reflection_ior = (coat_weight > 1.0e-3f) ? std::max(1.0e-3f, coat_ior) : ior;
         proxy.refraction_ior = ior;
         proxy.alpha = alpha;
+        if (!alpha_textured && (blender_mat->blend_flag & MA_BL_TRANSPARENT_SHADOW)) {
+          const bNodeLink *surface = shadow_alpha_input_link(material_output_surface_socket(blender_mat));
+          if (surface && surface->fromnode == node && !(node->flag & NODE_MUTED)) {
+            proxy.flags |= GPU_HARDWARE_RAYTRACE_CONSTANT_SHADOW_ALPHA;
+          }
+        }
         if (alpha < 1.0f - 1.0e-3f) {
           /* Partial coverage (textured estimate above, or a constant Alpha below 1): shadow and
            * continuation rays scale throughput by `1 - alpha` and keep going instead of treating
@@ -952,7 +964,7 @@ void SyncModule::begin_sync()
   hardware_raytrace_sync_generation_++;
   hardware_raytrace_scene_entries_.clear();
   hardware_raytrace_scene_signature_ = 0;
-  has_untraced_shadow_caster_ = false;
+  untraced_shadow_caster_ = nullptr;
 }
 
 void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_handle,
@@ -968,7 +980,9 @@ void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_ha
   const bool casts_shadow = material.shadow.sub_pass != nullptr;
   const bool hardware_shadow_caster = inst_.raytracing.use_hardware_shadows() && casts_shadow;
   const bool use_proxy = inst_.raytracing.use_hardware_tracing() || hardware_shadow_caster;
-  has_untraced_shadow_caster_ |= hardware_shadow_caster && material.tessellation_level > 0;
+  if (hardware_shadow_caster && material.tessellation_level > 0) {
+    untraced_shadow_caster_ = ob_handle.object;
+  }
   GPUMaterial *gpumat = material.shading.gpumat;
   blender::Material *blender_mat = gpumat ? GPU_material_get_material(gpumat) : nullptr;
   const bool visible_raycast = material.has_surface &&
@@ -983,18 +997,22 @@ void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_ha
   if (use_proxy) {
     proxy = material_hardware_proxy(blender_mat, ob_handle.object);
   }
-  if (hardware_shadow_caster && proxy.dynamic_shadow_alpha &&
-      (is_sculpt || proxy.shadow_alpha.image == nullptr))
-  {
-    inst_.pipelines.require_native_shadows("a shadow caster uses an unsupported Alpha node graph");
-  }
+  const bool material_alpha = hardware_shadow_caster && blender_mat &&
+                              (blender_mat->blend_flag & MA_BL_TRANSPARENT_SHADOW) &&
+                              !proxy.shadow_alpha.image &&
+                              !(proxy.flags & GPU_HARDWARE_RAYTRACE_CONSTANT_SHADOW_ALPHA) &&
+                              (proxy.dynamic_shadow_alpha ||
+                               GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT));
   if (!casts_shadow) {
     proxy.shadow_alpha = {};
   }
   GPUMaterial *shadow_tint_material = nullptr;
-  if (casts_shadow && proxy.dynamic_shadow_tint && !is_sculpt &&
-      ob_handle.object->type == OB_MESH && inst_.raytracing.use_hardware_shadows() &&
-      inst_.scene->eevee.hardware_raytracing_shadow_transparency > 0.0f)
+  const bool material_tint = hardware_shadow_caster && proxy.dynamic_shadow_tint &&
+                             inst_.scene->eevee.hardware_raytracing_shadow_transparency > 0.0f;
+  if ((material_alpha || material_tint) && (is_sculpt || ob_handle.object->type != OB_MESH)) {
+    inst_.pipelines.require_native_shadows("shadow material replay requires a mesh", blender_mat->id.name + 2);
+  }
+  else if (material_alpha || material_tint)
   {
     shadow_tint_material = inst_.shaders.material_shader_get(blender_mat,
                                                              blender_mat->nodetree,
@@ -1009,6 +1027,9 @@ void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_ha
     {
       inst_.manager->register_material_resources(shadow_tint_material);
       proxy.flags |= GPU_HARDWARE_RAYTRACE_DYNAMIC_SHADOW_TINT;
+      if (material_alpha) {
+        proxy.flags |= GPU_HARDWARE_RAYTRACE_MATERIAL_SHADOW_ALPHA;
+      }
     }
     else {
       if (shadow_tint_material && std::getenv("BLENDER_EEVEE_HWRT_CACHE_LOG") != nullptr) {
@@ -1017,6 +1038,7 @@ void SyncModule::capture_hardware_raytrace_scene_entry(const ObjectHandle &ob_ha
                      std::string(GPU_material_error_message(shadow_tint_material)).c_str());
       }
       shadow_tint_material = nullptr;
+      inst_.pipelines.require_native_shadows("unable to compile the shadow material", blender_mat->id.name + 2);
     }
   }
   const uint64_t material_hash = use_proxy ? gpu_material_runtime_hash(gpumat) : 0;

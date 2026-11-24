@@ -468,6 +468,24 @@ float glsl_light_shadow_raw(KernelGlobals &kg, ShadingData &sd, uint light_index
   }
 
   ObjectInfos object_infos = kg.object_infos_get(sd);
+#  if defined(MAT_SHADER_INFO_FORWARD_HARDWARE_SHADOW)
+  [[resource_table]] const eevee::LightEvalData &light_eval = resource_table_get(eevee::LightEvalData);
+  float4 result = eevee::forward_shadow_classified(light_eval, light, light_vector, is_directional,
+                                                  sd.P, sd.Ng, kg.resource_id_get(sd));
+  if (result.x >= 0.0f) {
+    return dot(result.rgb, float3(0.2126f, 0.7152f, 0.0722f));
+  }
+#  endif
+#  if defined(MAT_SHADER_INFO_HARDWARE_SHADOW) && defined(GPU_FRAGMENT_SHADER)
+  if (shader_info_hardware_shadow_layers > 0) {
+    if (light.hwrt_shadow_layer < 0 || light.hwrt_shadow_layer >= shader_info_hardware_shadow_layers) {
+      return 1.0f;
+    }
+    float3 visibility = texelFetch(shader_info_hardware_visibility_tx,
+                                  int3(int2(sd.frag_co.xy), light.hwrt_shadow_layer), 0).rgb;
+    return dot(visibility, float3(0.2126f, 0.7152f, 0.0722f));
+  }
+#  endif
   float3 geometry_normal = glsl_light_resolve_normal(kg, sd, sd.Ng);
   float3 resolved_shading_normal = glsl_light_resolve_normal(kg, sd, shading_normal);
 
@@ -511,6 +529,31 @@ float glsl_light_cast_shadow_raw(KernelGlobals &kg, ShadingData &sd, uint light_
   if (!glsl_light_lookup(kg, sd, light_index, is_local, light, light_vector, is_directional)) {
     return 1.0f;
   }
+#  if defined(MAT_SHADER_INFO_FORWARD_HARDWARE_SHADOW)
+  [[resource_table]] const eevee::LightEvalData &light_eval = resource_table_get(eevee::LightEvalData);
+  float4 result = eevee::forward_shadow_classified(light_eval, light, light_vector, is_directional,
+                                                  sd.P, sd.Ng, kg.resource_id_get(sd));
+  if (result.x >= 0.0f) {
+    return saturate(dot(result.rgb, float3(0.2126f, 0.7152f, 0.0722f)) + result.a -
+                    light_eval.forward_shadow.cast_overlap(light.hwrt_shadow_layer));
+  }
+#  elif defined(MAT_SHADER_INFO_HARDWARE_SHADOW)
+  if (shader_info_hardware_shadow_layers > 0) {
+    if (light.hwrt_shadow_layer < 0 || light.hwrt_shadow_layer >= shader_info_hardware_shadow_layers) {
+      return 1.0f;
+    }
+    int3 pixel = int3(int2(sd.frag_co.xy), light.hwrt_shadow_layer);
+    float4 result = texelFetch(shader_info_hardware_visibility_tx, pixel, 0);
+    float visibility = dot(result.rgb, float3(0.2126f, 0.7152f, 0.0722f)) + result.a;
+#    if defined(MAT_SHADER_INFO_HARDWARE_CAST_OVERLAP)
+    if (all(lessThan(pixel, textureSize(shader_info_hardware_overlap_tx, 0)))) {
+      uint code = uint(round(texelFetch(shader_info_hardware_overlap_tx, pixel, 0).r * 255.0f));
+      visibility -= code == 1u ? 1.0f : float(code & 15u) / float((code >> 4u) + 1u);
+    }
+#    endif
+    return saturate(visibility);
+  }
+#  endif
   if (light.tilemap_index == LIGHT_NO_SHADOW) {
     return 1.0f;
   }

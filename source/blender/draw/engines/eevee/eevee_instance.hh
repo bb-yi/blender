@@ -420,6 +420,9 @@ namespace blender::eevee
     const char* info_get()
     {
       display_info_ = info_;
+      if (!raytracing.hardware_shadow_error().empty()) {
+        display_info_ += raytracing.hardware_shadow_error() + "\n";
+      }
       if (geometry_lines.is_quick_preview()) {
         display_info_ += RPT_("Geometry Lines: Quick Preview (approximate depth, no intersections or joining)");
       }

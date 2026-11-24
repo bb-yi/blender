@@ -135,6 +135,7 @@ enum eGPUMaterialFlag : uint64_t {
   GPU_MATFLAG_GLSL_SHADOW_ACCESS = (1ull << 38),
   GPU_MATFLAG_HARDWARE_RAYCAST = (1ull << 39),
   GPU_MATFLAG_SHADER_INFO_SHADOW_OFFSET = (1ull << 40),
+  GPU_MATFLAG_RAW_SHADOW_MAP = (1ull << 41),
 
   GPU_MATFLAG_VOLUME_SCATTER = (1 << 16),
   GPU_MATFLAG_VOLUME_ABSORPTION = (1 << 17),
@@ -346,6 +347,7 @@ bool GPU_material_has_filter_output(GPUMaterial *mat);
 bool GPU_material_has_light_shader_output(GPUMaterial *mat);
 bool GPU_material_has_glsl_light_shader_eval(const GPUMaterial *mat);
 bool GPU_material_has_shader_info_shadow_classification(const GPUMaterial *mat);
+bool GPU_material_has_shader_info_cast_shadow(const GPUMaterial *mat);
 bool GPU_material_has_node_soft_shadow(const GPUMaterial *mat);
 bool GPU_material_has_node_shadow_cache(const GPUMaterial *mat);
 int GPU_material_node_shadow_cache_quality(const GPUMaterial *mat);
@@ -972,6 +974,7 @@ void GPU_material_output_filter_item(GPUMaterial *material, int identifier, GPUN
 void GPU_material_output_light_shader(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_glsl_light_shader_eval_set(GPUMaterial *material);
 void GPU_material_shader_info_shadow_classification_set(GPUMaterial *material);
+void GPU_material_shader_info_cast_shadow_set(GPUMaterial *material);
 void GPU_material_node_soft_shadow_set(GPUMaterial *material);
 void GPU_material_node_shadow_cache_set(GPUMaterial *material, int quality);
 void GPU_material_principled_npr_v2_set(GPUMaterial *material);

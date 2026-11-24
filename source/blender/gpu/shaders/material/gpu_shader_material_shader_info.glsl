@@ -276,6 +276,9 @@ void shader_info_eval_light(KernelGlobals &kg, ShadingData &sd, uint l_idx,
         }
 #  endif
         hardware_shadow = shader_info_decode_hardware_shadow(result);
+#  if defined(SHADOW_CASTER_CLASSIFY)
+        hardware_shadow.z = saturate(hardware_shadow.z + light_eval.forward_shadow.cast_overlap(light.hwrt_shadow_layer));
+#  endif
       }
     }
 #else
@@ -288,6 +291,18 @@ void shader_info_eval_light(KernelGlobals &kg, ShadingData &sd, uint l_idx,
       shadow_weight_sum += diffuse_weight;
 #if defined(SHADOW_CASTER_CLASSIFY)
       self_shadow_sum += hardware_shadow.y * surface_attenuation * diffuse_weight;
+#  if defined(MAT_SHADER_INFO_HARDWARE_CAST_OVERLAP) && defined(GPU_FRAGMENT_SHADER)
+      int3 overlap_coord = int3(int2(sd.frag_co.xy), light.hwrt_shadow_layer);
+      if (all(lessThan(overlap_coord, textureSize(shader_info_hardware_overlap_tx, 0)))) {
+        float encoded_coverage = texelFetch(shader_info_hardware_overlap_tx, overlap_coord, 0).r;
+        uint code = uint(round(encoded_coverage * 255.0f));
+        uint hits = code & 15u;
+        uint sample_count = (code >> 4u) + 1u;
+        float overlap = code == 1u ? 1.0f : float(hits) / float(sample_count);
+        overlap = unpackHalf2x16(packHalf2x16(float2(overlap, 0.0f))).x;
+        hardware_shadow.z = saturate(hardware_shadow.z + overlap);
+      }
+#  endif
       cast_shadow_sum += hardware_shadow.z * surface_attenuation * diffuse_weight;
 #endif
       return;

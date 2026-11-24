@@ -32,6 +32,7 @@
 #include "BLI_math_bits.hh"
 #include "BLI_set.hh"
 #include "BLI_string.hh"
+#include <cctype>
 #include <fmt/format.h>
 
 namespace blender::eevee {
@@ -213,8 +214,17 @@ static bool material_dependency_tree_source_contains(const GPUMaterial *gpumat,
   if (generated_source == nullptr) {
     return false;
   }
-  if (generated_source->content.find(needle.c_str()) != std::string::npos) {
-    return true;
+  const std::string &source = generated_source->content;
+  const auto is_identifier_char = [](unsigned char ch) { return ch == '_' || std::isalnum(ch); };
+  for (size_t pos = source.find(needle.c_str()); pos != std::string::npos;
+       pos = source.find(needle.c_str(), pos + needle.size()))
+  {
+    const size_t end = pos + needle.size();
+    if ((pos == 0 || !is_identifier_char(source[pos - 1])) &&
+        (end == source.size() || !is_identifier_char(source[end])))
+    {
+      return true;
+    }
   }
   for (const std::string &dependency : generated_source->dependencies) {
     if (material_dependency_tree_source_contains(
@@ -244,6 +254,23 @@ static bool material_graph_uses_glsl_light_access(const GPUMaterial *gpumat,
 {
   return material_graph_dependency_tree_contains(
       gpumat, graph, "gpu_shader_material_glsl_light_access.glsl");
+}
+
+static bool material_graph_uses_light_shadow(const GPUMaterial *gpumat, const GPUGraphOutput &graph)
+{
+  return material_graph_dependency_source_contains(gpumat, graph, "glsl_light_shadow") ||
+         material_graph_dependency_source_contains(gpumat, graph, "glsl_light_shadow_raw");
+}
+
+static bool material_graph_uses_shadow_map(const GPUMaterial *gpumat, const GPUGraphOutput &graph)
+{
+  for (StringRefNull name : {"shadow_atlas_tx", "shadow_tilemaps_tx", "shadow_caster_atlas_tx",
+                             "moment_sat_tx", "eevee_shadow_filter_material"}) {
+    if (material_graph_dependency_source_contains(gpumat, graph, name)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static bool material_graph_uses_hiz_data(const GPUMaterial *gpumat, const GPUGraphOutput &graph)
@@ -339,7 +366,7 @@ static bool material_depth_offset_graph_has_unsupported_dependencies(const GPUMa
          material_graph_serialized_contains(graph, "node_screenspace_info(") ||
          material_graph_serialized_contains(graph, "node_light_probe_color(") ||
          material_graph_dependency_source_contains(gpumat, graph, "glsl_ambient_lighting") ||
-         material_graph_dependency_source_contains(gpumat, graph, "glsl_light_shadow");
+         material_graph_uses_light_shadow(gpumat, graph);
 }
 
 /* -------------------------------------------------------------------- */
@@ -616,7 +643,7 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
   {
     const eShaderType shader_list[] = {
         RAY_HIT_EVAL_COUNT, RAY_HIT_EVAL_PREFIX, RAY_HIT_EVAL_COMPACT, RAY_HIT_DENOISE_GUIDES,
-        RAY_SHADOW_TINT_COUNT, RAY_SHADOW_TINT_COMPACT, RAY_SHADOW_TINT_RESOLVE,
+        RAY_SHADOW_TINT_COUNT, RAY_SHADOW_TINT_COMPACT, RAY_SHADOW_TINT_RESOLVE, RAY_FORWARD_RECEIVERS,
         RAY_SHARED_INDIRECT_ACCUM, RAY_SHARED_INDIRECT_RECONSTRUCT, RAY_MERGE_SPECULAR,
         RAY_SCENE_FINAL_SPECULAR,
         RAY_TRACE_HARDWARE_LIGHTING, RAY_HW_DIRECT_TILE_COMPACT, RAY_HW_DIRECT_VISIBILITY,
@@ -1010,6 +1037,8 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_ray_shadow_tint_compact";
     case RAY_SHADOW_TINT_RESOLVE:
       return "eevee_ray_shadow_tint_resolve";
+    case RAY_FORWARD_RECEIVERS:
+      return "eevee_ray_forward_receivers";
     case RAY_HIT_DENOISE_GUIDES:
       return "eevee_ray_hit_denoise_guides";
     case RAY_SHARED_INDIRECT_ACCUM:
@@ -2169,7 +2198,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       GPU_viewport_hardware_raytracing_support())
   {
     info.compilation_constant(gpu::shader::Type::bool_t, "use_hardware_forward_shadow", true);
-    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO)) {
+    info.define("MAT_FORWARD_RECEIVER_REPLAY");
+    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO | GPU_MATFLAG_GLSL_LIGHT_ACCESS)) {
       info.define("MAT_SHADER_INFO_FORWARD_HARDWARE_SHADOW");
       if (!GPU_material_has_depth_offset_output(gpumat) && !use_shader_to_rgba &&
           material_graph_serialized_contains(codegen.surface, "node_shader_info_hardware_shadow("))
@@ -2180,6 +2210,24 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   const bool depth_offset_uses_light_access =
       depth_offset_supported && material_graph_uses_glsl_light_access(gpumat, *codegen.depth_offset);
+  const auto check_shadow_dependencies = [&](const GPUGraphOutput &graph) {
+    if (material_graph_uses_shadow_map(gpumat, graph)) {
+      GPU_material_flag_set(gpumat, GPU_MATFLAG_RAW_SHADOW_MAP);
+    }
+    if (material_graph_dependency_source_contains(gpumat, graph, "glsl_light_cast_shadow_raw")) {
+      GPU_material_shader_info_shadow_classification_set(gpumat);
+      GPU_material_shader_info_cast_shadow_set(gpumat);
+    }
+  };
+  check_shadow_dependencies(codegen.surface);
+  check_shadow_dependencies(codegen.npr);
+  check_shadow_dependencies(codegen.thickness);
+  if (depth_offset_supported) {
+    check_shadow_dependencies(*codegen.depth_offset);
+  }
+  for (const GPUGraphOutput &graph : codegen.material_functions) {
+    check_shadow_dependencies(graph);
+  }
   const bool supports_surface_light_access = geometry_type_has_surface(geometry_type) &&
                                              ELEM(pipeline_type,
                                                   MAT_PIPE_DEFERRED,
@@ -2210,7 +2258,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
     if (material_pass_uses_glsl_light_access) {
       const auto uses_shadow_helper = [&](const GPUGraphOutput &graph) {
-        return material_graph_dependency_source_contains(gpumat, graph, "glsl_light_shadow") ||
+        return material_graph_uses_light_shadow(gpumat, graph) ||
                material_graph_dependency_source_contains(gpumat, graph, "glsl_light_cast_shadow_raw");
       };
       bool uses_glsl_shadow = uses_shadow_helper(pipeline_type == MAT_PIPE_DEFERRED_NPR ?
@@ -2698,7 +2746,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     const bool npr_shadows = (npr_features & (GPU_MAT_NPR_SHADOW_STABLE |
                                              GPU_MAT_NPR_SHADOW_TEMPORAL |
                                              GPU_MAT_NPR_SHADOW_SOFT)) != 0;
-    bool uses_hardware_shadow = npr_shadows ||
+    bool uses_hardware_shadow = npr_shadows || GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_SHADOW_ACCESS) ||
                                 material_graph_serialized_contains(graph, shadow_request);
     for (const GPUGraphOutput &graph : codegen.material_functions) {
       uses_hardware_shadow |= material_graph_serialized_contains(graph, shadow_request);
@@ -2708,6 +2756,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       slots.reserve_slots(info);
       info.sampler(slots.get_next_sampler(), ImageType::Float2DArray,
                    "shader_info_hardware_visibility_tx");
+      if (GPU_material_has_shader_info_cast_shadow(gpumat) &&
+          GPU_backend_get_type() == GPU_BACKEND_VULKAN)
+      {
+        info.define("MAT_SHADER_INFO_HARDWARE_CAST_OVERLAP");
+        info.sampler(slots.get_next_sampler(), ImageType::Float2DArray,
+                     "shader_info_hardware_overlap_tx");
+      }
       info.push_constant(gpu::shader::Type::int_t, "shader_info_hardware_shadow_layers");
     }
   }
@@ -3548,8 +3603,12 @@ static void light_create_info_amend(GPUMaterial *gpumat,
                                       material_graph_uses_glsl_light_access(gpumat,
                                                                             *codegen.light_shader);
   const bool uses_glsl_light_shadow = uses_glsl_light_access &&
-                                      material_graph_dependency_source_contains(
-                                          gpumat, *codegen.light_shader, "glsl_light_shadow");
+                                      material_graph_uses_light_shadow(gpumat, *codegen.light_shader);
+  if (uses_glsl_light_shadow ||
+      (codegen.light_shader && material_graph_uses_shadow_map(gpumat, *codegen.light_shader)))
+  {
+    GPU_material_flag_set(gpumat, GPU_MATFLAG_RAW_SHADOW_MAP);
+  }
   if (uses_glsl_light_access) {
     info.define("MAT_GLSL_LIGHT_ACCESS");
   }

@@ -155,6 +155,7 @@ struct VolumeProbe : public LightProbe, VolumeProbeData {
 };
 
 struct SphereProbe : public LightProbe, SphereProbeData {
+  std::string profile_name;
   /** Used to sort the probes by priority. */
   float volume;
   /** True if the area in the atlas needs to be updated. */

@@ -335,6 +335,7 @@ class ForwardLayer {
 
  public:
   ForwardLayer(Instance &inst, ForwardShared &shared) : inst_(inst), shared_(shared) {}
+  static void bind_surface_resources(Instance &inst, PassMain::Sub &pass);
   bool rendered = false;
 
   void sync();
@@ -1264,7 +1265,9 @@ class PipelineModule {
   bool has_raycast = false;
   bool needs_npr_emission = false;
   bool has_hardware_shadow_classification = false;
+  bool has_hardware_cast_shadow_overlap = false;
   const char *native_shadow_requirement = nullptr;
+  const char *native_shadow_subject = nullptr;
 
   PipelineModule(Instance &inst, PipelineInfoData &data)
       : inst_(inst),
@@ -1284,6 +1287,7 @@ class PipelineModule {
   void begin_sync()
   {
     native_shadow_requirement = nullptr;
+    native_shadow_subject = nullptr;
     data.ray_type = RAY_TYPE_CAMERA;
     data.can_raycast = true;
     probe.begin_sync();
@@ -1298,14 +1302,16 @@ class PipelineModule {
     has_raycast = false;
     needs_npr_emission = false;
     has_hardware_shadow_classification = false;
+    has_hardware_cast_shadow_overlap = false;
   }
 
   bool hardware_shadow_classifies_receivers() const;
 
-  void require_native_shadows(const char *reason)
+  void require_native_shadows(const char *reason, const char *subject = nullptr)
   {
     if (native_shadow_requirement == nullptr) {
       native_shadow_requirement = reason;
+      native_shadow_subject = subject;
     }
   }
 

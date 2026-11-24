@@ -459,7 +459,7 @@ void main()
   const float photons_intensity = max(uniforms.shadow_params.w, 0.0f);
   const float transparent_shadows = uintBitsToFloat(uint(uniforms.world_sun_slot_pad.w));
   vec4 visibility = vec4(0.0f);
-  const bool detailed = shadow_needs_hit_details();
+  const bool detailed = !enable_caustics || shadow_needs_hit_details();
   for (int sample_index = 0; sample_index < sample_count; sample_index++) {
     const vec3 sample_dir = sample_directional_shadow_direction(tid, sample_index);
     const vec3 unshifted_origin = P + shadow_N * normal_bias;

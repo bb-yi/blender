@@ -51,6 +51,7 @@ layout(binding = 18) uniform sampler2DArray gbuf_normal_tx;
 layout(binding = 19) uniform sampler2D prepass_normal_tx;
 layout(binding = 20) uniform usampler2D receiver_id_tx;
 layout(binding = 43) uniform writeonly image2DArray shadow_visibility_img;
+layout(binding = 44) uniform writeonly image2DArray shadow_overlap_img;
 
 #include "vk_nuru_shadow_terminator_lib.glsl"
 
@@ -534,11 +535,13 @@ void main()
   const vec2 uv = (vec2(tid) + 0.5) / vec2(uniforms.resolution_layer_type.xy);
   const float reverse_depth = textureLod(depth_tx, uv, 0.0).r;
   const float depth = 1.0f - reverse_depth;
-  if (!depth_is_valid(depth)) {
+  const bool hit_receiver = uniforms.caustic_params.w == 3.0f;
+  const vec3 hit_normal = hit_receiver ? texelFetch(prepass_normal_tx, ivec2(tid), 0).xyz : vec3(0.0f);
+  if (hit_receiver ? !(dot(hit_normal, hit_normal) > 1.0e-10f) : !depth_is_valid(depth)) {
     imageStore(shadow_visibility_img, ivec3(ivec2(tid), int(uint(uniforms.resolution_layer_type.z))), vec4(1.0));
     return;
   }
-  const vec3 P = point_screen_to_world(ivec2(tid), depth);
+  const vec3 P = hit_receiver ? texelFetch(depth_tx, ivec2(tid), 0).xyz : point_screen_to_world(ivec2(tid), depth);
   vec3 center = uniforms.light_position_radius.xyz + uniforms.shadow_offset_scale.xyz;
   vec3 L = center - P;
   const float light_distance = length(L);
@@ -549,7 +552,10 @@ void main()
   L /= light_distance;
   vec3 N = vec3(0.0);
   const int receiver_source = int(uniforms.caustic_params.w);
-  if (receiver_source != 0 ||
+  if (hit_receiver) {
+    N = normalize(hit_normal);
+  }
+  else if (receiver_source != 0 ||
       !load_gbuffer_receiver_normal(ivec2(tid), gbuf_header_tx, gbuf_normal_tx, N)) {
     N = estimate_world_normal(ivec2(tid), depth, depth_tx);
   }
@@ -563,20 +569,24 @@ void main()
   const vec3 toward_camera = is_orthographic ?
                                  normalize(uniforms.viewinv[2].xyz) :
                                  -to_receiver / receiver_distance;
-  N = dot(N, toward_camera) >= 0.0f ? N : -N;
+  N = hit_receiver || dot(N, toward_camera) >= 0.0f ? N : -N;
   const float normal_bias = max(max(max(abs(P.x), abs(P.y)),
                                     max(abs(P.z), receiver_distance)) * 1.25e-6f, 1.0e-7f);
   const float ray_tmin = 0.0f;
-  const vec3 P_corrected = point_screen_to_world(
+  const vec3 P_corrected = hit_receiver ? P : point_screen_to_world(
       ivec2(tid), shadow_receiver_front_depth(reverse_depth, is_orthographic));
   const vec3 unshifted_origin = P_corrected + N * normal_bias;
-  const vec3 smooth_N = receiver_source == 0 ?
+  const vec3 smooth_N = hit_receiver ? N : receiver_source == 0 ?
       normal_unpack(texelFetch(gbuf_normal_tx, ivec3(tid, 0), 0).xy) :
       prepass_shadow_smooth_normal(prepass_normal_tx, ivec2(tid), receiver_source, N);
   const vec3 center_L = normalize(uniforms.light_position_radius.xyz +
                                   uniforms.shadow_offset_scale.xyz - P);
   TerminatorReceiver receiver = terminator_none();
-  if (uniforms.caustic_params.z > 0.0 &&
+  if (hit_receiver) {
+    uvec4 identity = texelFetch(receiver_id_tx, ivec2(tid), 0);
+    receiver = terminator_receiver(P, N, identity.x, identity.y);
+  }
+  else if (uniforms.caustic_params.z > 0.0 &&
       min(dot(N, center_L), dot(smooth_N, center_L)) < uniforms.caustic_params.z + 0.25) {
     const float recovery_distance = max(normal_bias * 16.0, length(P_corrected - P) * 2.0);
     receiver = terminator_raster_receiver(P, toward_camera, recovery_distance);
@@ -589,10 +599,16 @@ void main()
   const float photons_intensity = max(uniforms.caustic_params.x, 0.0);
   const float transparent_shadows = uniforms.caustic_params.y;
   vec4 visibility = vec4(0.0f);
-  const bool detailed = shadow_needs_hit_details();
-  const uint receiver_id = uniforms.shadow_options.z != 0u ?
-                               texelFetch(receiver_id_tx, ivec2(tid), 0).r :
-                               SHADOW_UNKNOWN_RECEIVER_ID;
+  const bool detailed = !enable_caustics || shadow_needs_hit_details();
+  const uint packed_receiver = uniforms.shadow_options.z != 0u ?
+                                   texelFetch(receiver_id_tx, ivec2(tid), 0).r :
+                                   SHADOW_UNKNOWN_RECEIVER_ID;
+  const uint receiver_id = packed_receiver == SHADOW_UNKNOWN_RECEIVER_ID ?
+                               packed_receiver : packed_receiver & ~SHADOW_CAST_OVERLAP_BIT;
+  const bool include_overlap = (uniforms.shadow_options.z & 2u) != 0u &&
+                               receiver_id != SHADOW_UNKNOWN_RECEIVER_ID &&
+                               (hit_receiver || (packed_receiver & SHADOW_CAST_OVERLAP_BIT) != 0u);
+  float overlap = 0.0f;
   for (int sample_index = 0; sample_index < sample_count; sample_index++) {
     const vec3 target = sample_local_shadow_target(tid, sample_index, P);
     vec3 sample_L = target - unshifted_origin;
@@ -621,7 +637,8 @@ void main()
     if (detailed) {
       visibility += hardware_shadow_detailed_visibility(scene, origin, sample_L, ray_tmin,
                                                          ray_tmax, transparent_shadows,
-                                                         color_intensity, receiver_id);
+                                                         color_intensity, receiver_id,
+                                                         include_overlap, overlap);
     }
     else {
       visibility.rgb += hardware_shadow_visibility(scene, origin, sample_L, ray_tmin, ray_tmax, transparent_shadows, enable_caustics, false, target, color_intensity, photons_intensity);
@@ -629,4 +646,9 @@ void main()
   }
   visibility /= float(sample_count);
   imageStore(shadow_visibility_img, ivec3(ivec2(tid), int(uint(uniforms.resolution_layer_type.z))), visibility);
+  if (include_overlap && overlap > 0.0f) {
+    imageStore(shadow_overlap_img,
+               ivec3(ivec2(tid), uniforms.resolution_layer_type.z),
+               vec4(shadow_encode_overlap(overlap, sample_count)));
+  }
 }

@@ -305,6 +305,12 @@ class LightModule {
   }
 
   const char *hardware_shadow_unsupported_reason() const;
+  gpu::StorageBuf *culled_lights_for_shadows() { return culling_light_buf_; }
+  int world_sun_direction_offset(int index) const
+  {
+    return ((local_lights_len_ + index) * sizeof(LightData) + offsetof(LightData, sun) +
+            offsetof(LightSunData, direction)) / sizeof(float);
+  }
 
   const LightData &sync_light(int index) const
   {

@@ -60,6 +60,8 @@ struct GPUHardwareRaytraceShadowAlpha {
 
 /** The primary shadow pass can replay the GPU material at this transmissive hit. */
 static constexpr uint32_t GPU_HARDWARE_RAYTRACE_DYNAMIC_SHADOW_TINT = 1u << 8;
+static constexpr uint32_t GPU_HARDWARE_RAYTRACE_MATERIAL_SHADOW_ALPHA = 1u << 9;
+static constexpr uint32_t GPU_HARDWARE_RAYTRACE_CONSTANT_SHADOW_ALPHA = 1u << 10;
 
 struct GPUHardwareRaytraceSceneEntry {
   gpu::Batch *batch = nullptr;
@@ -216,7 +218,9 @@ struct GPUHardwareRaytraceShadowTintCapture {
 };
 
 struct GPUHardwareRaytraceDirectionalShadowParams {
+  bool world_position_receiver = false;
   gpu::Texture *receiver_id_tx = nullptr;
+  gpu::Texture *shadow_overlap_tx = nullptr;
   uint2 shadow_link_mask = uint2(0xFFFFFFFFu);
   bool classify_shadow = false;
   gpu::Texture *depth_tx = nullptr;
@@ -271,7 +275,9 @@ struct GPUHardwareRaytraceDirectionalHitShadowParams {
 };
 
 struct GPUHardwareRaytraceLocalShadowParams {
+  bool world_position_receiver = false;
   gpu::Texture *receiver_id_tx = nullptr;
+  gpu::Texture *shadow_overlap_tx = nullptr;
   uint2 shadow_link_mask = uint2(0xFFFFFFFFu);
   bool classify_shadow = false;
   gpu::Texture *depth_tx = nullptr;

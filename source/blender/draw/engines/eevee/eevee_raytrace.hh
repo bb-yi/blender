@@ -290,11 +290,13 @@ class RayTraceModule {
 
   uint32_t hardware_feature_mask_ = 0;
   uint32_t current_hardware_feature_mask_ = 0;
-  bool hardware_shadows_require_native_ = false;
+  bool hardware_shadows_requested_ = false;
+  std::string hardware_shadow_error_;
   struct HardwareMaterialPass {
     const PassMain::Sub *pass;
     bool uses_raycast;
     bool uses_shadows;
+    bool uses_cast_shadow;
     Span<UString> raycast_attributes;
   };
   Vector<HardwareMaterialPass> hardware_material_passes_;
@@ -308,6 +310,17 @@ class RayTraceModule {
   GPUHardwareRaytraceForwardBindings hardware_forward_bindings_;
   float4 hardware_forward_shadow_options_ = float4(0);
   int hardware_forward_shadow_samples_ = 1;
+  draw::StorageArrayBuffer<uint, 4> forward_receiver_words_{"Forward.ShadowReceivers"};
+  draw::StorageArrayBuffer<uint, 4> forward_receiver_header_{"Forward.ShadowReceiverHeader"};
+  Texture forward_visibility_dummy_{"Forward.ShadowDummy"};
+  Texture forward_header_dummy_{"Forward.HeaderDummy"};
+  gpu::Texture *forward_visibility_ref_ = nullptr;
+  gpu::Texture *forward_overlap_ref_ = nullptr;
+  Texture forward_overlap_tx_{"Forward.ShadowOverlap"};
+  bool forward_cast_overlap_ = false;
+  bool forward_material_replay_ = false;
+  PassMain forward_receivers_ps_{"Forward.ShadowReceivers"};
+  Framebuffer forward_receivers_fb_{"Forward.ShadowReceivers"};
   GPUHardwareRaytraceScene *hardware_rt_scene_cache_ = nullptr;
   GPUHardwareRaytraceSceneStats hardware_rt_scene_stats_cache_ = {};
   Vector<HardwareRaytraceSceneEntry> hardware_rt_scene_entries_cache_;
@@ -321,6 +334,7 @@ class RayTraceModule {
   int hardware_scene_entry_count_ = 0;
   int hardware_scene_instance_count_ = 0;
   Texture hardware_shadow_visibility_tx_ = {"hardware_shadow_visibility_tx"};
+  Texture hardware_shadow_overlap_tx_ = {"hardware_shadow_overlap_tx"};
   bool hardware_shadow_ready_ = false;
   bool hardware_direct_ready_ = false;
   bool hardware_direct_replace_ = false;
@@ -379,6 +393,7 @@ class RayTraceModule {
   };
   /* The traced surface and Nuru's separate layered/transmission receiver payloads. */
   HardwareHitBuffers hardware_hit_, hardware_layered_hit_, hardware_transmission_hit_;
+  HardwareHitBuffers forward_hit_;
   TextureFromPool hardware_screen_continuation_tx_ = {"hardware_screen_continuation_tx"};
   draw::StorageArrayBuffer<GPUHardwareRaytraceFastGILightRecord, 16> hardware_light_records_ = {
       "hardware_light_records"};
@@ -416,6 +431,7 @@ class RayTraceModule {
 
   void evaluate_shadow_tint(View &view,
                             gpu::Texture *depth,
+                            gpu::Texture *visibility,
                             int2 full_extent,
                             Span<int> entries,
                             const GPUHardwareRaytraceShadowTintCapture &capture,
@@ -444,10 +460,11 @@ class RayTraceModule {
   }
   uint32_t active_hardware_feature_mask() const
   {
-    return hardware_shadows_require_native_ ?
-               hardware_feature_mask_ & ~uint32_t(RAYTRACE_EEVEE_HARDWARE_SHADOWS) :
-               hardware_feature_mask_;
+    return hardware_feature_mask_;
   }
+  bool hardware_shadows_requested() const { return hardware_shadows_requested_; }
+  const std::string &hardware_shadow_error() const { return hardware_shadow_error_; }
+  void report_hardware_shadow_error(const char *reason);
   bool use_hardware_shadows() const
   {
     return use_raytracing_ && (active_hardware_feature_mask() & RAYTRACE_EEVEE_HARDWARE_SHADOWS) != 0;
@@ -456,6 +473,9 @@ class RayTraceModule {
   void bind_hardware_material_scene(PassMain::Sub &pass, GPUMaterial *material);
   void resolve_hardware_material_demand();
   void prepare_hardware_material_scene();
+  void add_forward_receiver(GPUMaterial *material, gpu::Batch *batch, ResourceHandleRange range);
+  void prepare_forward_shadows(View &view, gpu::Texture *depth, int2 extent);
+  void finish_forward_shadows(View &view);
   const bool *hardware_shadow_ready() const
   {
     return &hardware_shadow_ready_;
@@ -464,10 +484,15 @@ class RayTraceModule {
   {
     return &hardware_shadow_visibility_tx_;
   }
+  gpu::Texture **hardware_shadow_overlap_tx()
+  {
+    return &hardware_shadow_overlap_tx_;
+  }
   void render_hardware_shadows(View &view,
                                gpu::Texture *depth_tx,
                                int2 extent,
-                               bool from_prepass = false);
+                               bool from_prepass = false,
+                               HardwareHitBuffers *hit = nullptr);
   void render_hardware_direct_light(View &view, gpu::Texture *depth_tx, int2 extent);
   const bool *hardware_direct_replace() const
   {
@@ -568,6 +593,7 @@ class RayTraceModule {
   RayTraceResultTexture resolve_hardware_shared_indirect(RayTraceBuffer &rt_buffer,
                                                          View &render_view);
   void render_hardware_hit_shadows(GPUHardwareRaytraceScene *scene, HardwareHitBuffers &hit);
+  void debug_hit_shadows(HardwareHitBuffers &hit);
   void release_hardware_hit_buffers();
   void debug_hardware_hit_payload(const HardwareHitEvalPayload &payload,
                                   int trace_phase,

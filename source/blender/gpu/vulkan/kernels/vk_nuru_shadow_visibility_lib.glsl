@@ -22,7 +22,15 @@ layout(scalar, binding = 12) readonly buffer ShadowAlphaImages {
 };
 
 const uint SHADOW_UNKNOWN_RECEIVER_ID = 0xFFFFFFFFu;
+const uint SHADOW_CAST_OVERLAP_BIT = 0x80000000u;
 const vec3 SHADOW_LUMA = vec3(0.2126f, 0.7152f, 0.0722f);
+
+float shadow_encode_overlap(float hits, int sample_count)
+{
+  const uint partial_coverage = (uint(sample_count - 1) << 4u) | uint(hits);
+  const uint encoded_coverage = hits == float(sample_count) ? 1u : partial_coverage;
+  return float(encoded_coverage) / 255.0f;
+}
 
 #ifdef NURU_SHADOW_TINT
 /* Layout matches eevee_raytrace_shared.hh. Only the tint kernel variants use this storage. */
@@ -92,7 +100,6 @@ void shadow_tint_record(uint entry,
   uint index = atomicAdd(tint_count, 1u);
   const uint capacity = min(uint(uniforms.tint_params.y), uint(tint_hits.length()));
   if (index >= capacity) {
-    atomicMin(tint_count, capacity);
     tint_overflow = true;
     return;
   }
@@ -203,6 +210,46 @@ float shadow_alpha_sample(ShadowCasterRecord caster, uint primitive, vec2 baryce
   return mix(mix(a, b, weight.x), mix(c, d, weight.x), weight.y);
 }
 
+bool shadow_is_opaque_caster(uint caster_id)
+{
+  const HardwareMaterialProxy proxy = material_proxies[caster_id];
+  const uint flags = uint(proxy.ior_closure_type.w);
+  return shadow_casters[caster_id].identity.z == 0u &&
+         uint(proxy.ior_closure_type.z) != HWRT_CLOSURE_REFRACTION &&
+         (flags & (HWRT_PROXY_FLAG_ALPHA_BLEND_TRANSPARENT | HWRT_PROXY_FLAG_THIN_GLASS)) == 0u;
+}
+
+bool shadow_has_external_blocker(accelerationStructureEXT scene_as,
+                                 vec3 origin,
+                                 vec3 direction,
+                                 float tmin,
+                                 float tmax,
+                                 uint receiver_id,
+                                 bool restricted)
+{
+  if (tmin >= tmax) {
+    return false;
+  }
+  rayQueryEXT query;
+  rayQueryInitializeEXT(query,
+                       scene_as,
+                       gl_RayFlagsNoOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+                       HWRT_SHADOW_CASTER_MASK,
+                       origin,
+                       tmin,
+                       direction,
+                       tmax);
+  while (rayQueryProceedEXT(query)) {
+    const uint candidate = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(query, false));
+    if (shadow_casters[candidate].identity.x != receiver_id &&
+        (!restricted || shadow_link_includes(candidate)) && shadow_is_opaque_caster(candidate))
+    {
+      rayQueryConfirmIntersectionEXT(query);
+    }
+  }
+  return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT;
+}
+
 /* RGB is visibility. A is the share of occlusion caused by the receiver's own instance. */
 vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
                                          vec3 origin,
@@ -211,7 +258,9 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
                                          float tmax,
                                          float transparency,
                                          float color_intensity,
-                                         uint receiver_id)
+                                         uint receiver_id,
+                                         bool include_overlap,
+                                         inout float overlap)
 {
   const bool restricted = shadow_link_is_restricted();
   const bool textured = uniforms.shadow_options.w != 0u;
@@ -224,11 +273,10 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
   float self_shadow = 0.0f;
   bool transmitted = false;
 
-  for (int layer = 0; layer < 8 && tmin < tmax; layer++) {
+  for (int layer = 0; tmin < tmax; layer++) {
     rayQueryEXT query;
     rayQueryInitializeEXT(query, scene_as, flags, HWRT_SHADOW_CASTER_MASK, origin, tmin, direction, tmax);
-    int remaining = 4096;
-    while (remaining-- > 0 && rayQueryProceedEXT(query)) {
+    while (rayQueryProceedEXT(query)) {
       const uint candidate_id = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(query, false));
       if (restricted && !shadow_link_includes(candidate_id)) {
         continue;
@@ -251,7 +299,8 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
     tmin = shadow_ray_after_hit(rayQueryGetIntersectionTEXT(query, true));
     const HardwareMaterialProxy proxy = material_proxies[user_id];
     const uint proxy_flags = uint(proxy.ior_closure_type.w);
-    if ((proxy_flags & HWRT_PROXY_FLAG_THIN_GLASS) != 0u) {
+    bool material_alpha = (proxy_flags & (1u << 9u)) != 0u;
+    if (!material_alpha && (proxy_flags & HWRT_PROXY_FLAG_THIN_GLASS) != 0u) {
       continue;
     }
 
@@ -259,8 +308,11 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
     vec3 transmission = vec3(0.0f);
     float uncovered = 0.0f;
     float tint_weight = 0.0f;
-    if (caster.identity.z != 0u && caster.uv_y.w < 2.0f) {
-      const float opacity = shadow_alpha_sample(
+    if (material_alpha) {
+      transmission = vec3(1.0f);
+    }
+    else if ((proxy_flags & (1u << 10u)) != 0u || (caster.identity.z != 0u && caster.uv_y.w < 2.0f)) {
+      const float opacity = (proxy_flags & (1u << 10u)) != 0u ? proxy.packed_thickness.y : shadow_alpha_sample(
           caster,
           uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true)),
           rayQueryGetIntersectionBarycentricsEXT(query, true));
@@ -288,20 +340,25 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
     const vec3 next_visibility = visibility * transmission;
     const bool self = receiver_id != SHADOW_UNKNOWN_RECEIVER_ID &&
                       caster.identity.x == receiver_id;
+    if (include_overlap && layer == 0 && self && shadow_is_opaque_caster(user_id) &&
+        shadow_has_external_blocker(scene_as, origin, direction, tmin, tmax, receiver_id, restricted))
+    {
+      overlap += 1.0f;
+    }
     if (self) {
       self_shadow += dot(visibility - next_visibility, SHADOW_LUMA);
     }
     visibility = next_visibility;
 #ifdef NURU_SHADOW_TINT
-    const bool dynamic_tint = tint_weight > 0.0f && (proxy_flags & (1u << 8u)) != 0u;
+    const bool dynamic_tint = material_alpha || (tint_weight > 0.0f && (proxy_flags & (1u << 8u)) != 0u);
     if (dynamic_tint) {
       shadow_tint_record(user_id,
                          uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true)),
                          rayQueryGetIntersectionBarycentricsEXT(query, true),
                          rayQueryGetIntersectionFrontFaceEXT(query, true),
-                         origin, transmission, uncovered, tint_weight, self);
+                         origin, transmission, uncovered, material_alpha ? -1.0f - transparency : tint_weight, self);
       /* Dynamic color could be brighter than its proxy, so use a conservative early-out. */
-      upper_visibility *= uncovered + tint_weight;
+      upper_visibility *= material_alpha ? 1.0f : uncovered + tint_weight;
     }
     else {
       vec3 next_segment = tint_segment_visibility * transmission;
@@ -323,4 +380,18 @@ vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
   shadow_tint_finish(result, upper_visibility, receiver_id);
 #endif
   return result;
+}
+
+vec4 hardware_shadow_detailed_visibility(accelerationStructureEXT scene_as,
+                                         vec3 origin,
+                                         vec3 direction,
+                                         float tmin,
+                                         float tmax,
+                                         float transparency,
+                                         float color_intensity,
+                                         uint receiver_id)
+{
+  float overlap = 0.0f;
+  return hardware_shadow_detailed_visibility(
+      scene_as, origin, direction, tmin, tmax, transparency, color_intensity, receiver_id, false, overlap);
 }

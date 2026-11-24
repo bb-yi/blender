@@ -109,12 +109,69 @@ struct HardwareTriangleScene {
   }
 };
 
+#if defined(MAT_FORWARD_RECEIVER_REPLAY) && defined(GPU_FRAGMENT_SHADER)
+uint forward_receiver_index;
+#endif
+
 struct ForwardHardwareShadow {
   [[resource_table]] HardwareTriangleScene scene;
   [[storage(23, read)]] const ForwardShadowProxy (&forward_shadow_proxies)[];
   /* Ready, texture Alpha, transmission strength, color intensity. */
   [[push_constant]] float4 forward_shadow_options;
   [[push_constant]] int forward_shadow_samples;
+  [[storage(27, read_write)]] uint (&forward_receiver_words)[];
+  [[storage(28, read_write)]] uint (&forward_receiver_header)[];
+  [[sampler(21)]] sampler2DArray forward_receiver_visibility;
+  [[sampler(22)]] sampler2DArray forward_receiver_overlap;
+
+  float cast_overlap(int layer) const
+  {
+#if defined(MAT_FORWARD_RECEIVER_REPLAY) && defined(GPU_FRAGMENT_SHADER)
+    if (forward_shadow_options.x == 3.0f) {
+      uint width = uint(textureSize(forward_receiver_visibility, 0).x);
+      int3 pixel = int3(forward_receiver_index % width, forward_receiver_index / width, layer);
+      if (all(lessThan(pixel, textureSize(forward_receiver_overlap, 0)))) {
+        uint code = uint(round(texelFetch(forward_receiver_overlap, pixel, 0).r * 255.0f));
+        return code == 1u ? 1.0f : float(code & 15u) / float((code >> 4u) + 1u);
+      }
+    }
+#endif
+    return 0.0f;
+  }
+
+  uint find_receiver(int2 pixel, float3 position, float3 normal, uint id, bool collect) const
+  {
+    uint head = uint(pixel.y) * forward_receiver_header[1] + uint(pixel.x);
+    uint base = forward_receiver_header[2];
+    if (collect) {
+      uint index = atomicAdd(forward_receiver_header[0], 1u);
+      if (index < forward_receiver_header[3]) {
+        uint offset = base + index * 8u;
+        forward_receiver_words[offset] = atomicExchange(forward_receiver_words[head], index + 1u);
+        forward_receiver_words[offset + 1u] = id;
+        for (uint axis = 0u; axis < 3u; axis++) {
+          forward_receiver_words[offset + 2u + axis] = floatBitsToUint(position[axis]);
+          forward_receiver_words[offset + 5u + axis] = floatBitsToUint(normal[axis]);
+        }
+      }
+      return 0u;
+    }
+    uint next = forward_receiver_words[head];
+    while (next != 0u) {
+      uint offset = base + (next - 1u) * 8u;
+      bool match = forward_receiver_words[offset + 1u] == id;
+      for (uint axis = 0u; axis < 3u; axis++) {
+        match = match && forward_receiver_words[offset + 2u + axis] == floatBitsToUint(position[axis]) &&
+                forward_receiver_words[offset + 5u + axis] == floatBitsToUint(normal[axis]);
+      }
+      if (match) {
+        return next - 1u;
+      }
+      next = forward_receiver_words[offset];
+    }
+    atomicOr(forward_receiver_header[0], 0x80000000u);
+    return 0u;
+  }
 
   /* RGB is visibility. Alpha is the occlusion attributed to the receiver's own instance. */
   float4 visibility_ray(float3 origin,
@@ -133,11 +190,10 @@ struct ForwardHardwareShadow {
     float self_shadow = 0.0f;
     const float3 luma_weights = float3(0.2126f, 0.7152f, 0.0722f);
     bool transmitted = false;
-    for (int layer = 0; layer < 8 && tmin < tmax; layer++) {
+    while (tmin < tmax) {
       rayQuery query;
       rayQueryInitialize(query, this->scene.hardware_scene_as, flags, 0x01u, origin, tmin, L, tmax);
-      int remaining = 4096;
-      while (remaining-- > 0 && rayQueryProceed(query)) {
+      while (rayQueryProceed(query)) {
         const uint candidate = rayQueryGetIntersectionInstanceCustomIndex(query, false);
         const ForwardShadowCaster caster = this->scene.hardware_scene_instances[candidate];
         const uint blocker_set = caster.identity.y;
@@ -169,8 +225,8 @@ struct ForwardHardwareShadow {
       }
       float3 T = float3(0.0f);
       const bool refracts = uint(proxy.ior_closure_type.z) == 12u;
-      if (caster.identity.z != 0u && caster.uv_y.w < 2.0f) {
-        const float a = this->scene.opacity(caster,
+      if ((proxy_flags & (1u << 10u)) != 0u || (caster.identity.z != 0u && caster.uv_y.w < 2.0f)) {
+        const float a = (proxy_flags & (1u << 10u)) != 0u ? proxy.packed_thickness.y : this->scene.opacity(caster,
                                        rayQueryGetIntersectionPrimitiveIndex(query, true),
                                        rayQueryGetIntersectionBarycentrics(query, true));
         T = float3(1.0f - a);
@@ -210,6 +266,21 @@ struct ForwardHardwareShadow {
                              float3 Ng,
                              uint receiver_id) const
   {
+#if defined(MAT_FORWARD_RECEIVER_REPLAY) && defined(GPU_FRAGMENT_SHADER)
+    if (forward_shadow_options.x == 3.0f) {
+      uint base = forward_receiver_header[2] + forward_receiver_index * 8u;
+      for (uint axis = 0u; axis < 3u; axis++) {
+        if (uintBitsToFloat(forward_receiver_words[base + 2u + axis]) != P[axis] ||
+            abs(uintBitsToFloat(forward_receiver_words[base + 5u + axis]) - Ng[axis]) > 1.e-4f)
+        {
+          atomicOr(forward_receiver_header[0], 0x40000000u);
+        }
+      }
+      uint width = uint(textureSize(forward_receiver_visibility, 0).x);
+      int2 pixel = int2(forward_receiver_index % width, forward_receiver_index / width);
+      return texelFetch(forward_receiver_visibility, int3(pixel, light.hwrt_shadow_layer), 0);
+    }
+#endif
     const float3 origin = forward_shadow_origin(P, Ng);
     const float radius = max(light.hwrt_shadow_size, 0.0f);
     const int samples = radius > 1.0e-6f ? this->forward_shadow_samples : 1;

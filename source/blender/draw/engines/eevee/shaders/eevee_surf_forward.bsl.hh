@@ -81,6 +81,21 @@ struct SurfaceForwardFragOut {
   [[frag_color(3)]] float4 combined_a;
 };
 
+#if defined(MAT_FORWARD_RECEIVER_REPLAY) && defined(GPU_FRAGMENT_SHADER)
+bool forward_collect_receiver(LightEvalData &light_eval, float4 frag_co, ShadingData &sd, uint resource_id)
+{
+  if (light_eval.constants.use_hardware_forward_shadow) [[static_branch]] {
+    const ForwardHardwareShadow &rt = light_eval.forward_shadow;
+    if (rt.forward_shadow_options.x >= 2.0f) {
+      bool collect = rt.forward_shadow_options.x == 2.0f;
+      forward_receiver_index = rt.find_receiver(int2(frag_co.xy), sd.P, sd.Ng, resource_id, collect);
+      return collect;
+    }
+  }
+  return false;
+}
+#endif
+
 void surf_forward_impl([[resource_table]] KernelGlobals &kg,
                        [[resource_table]] PipelineConstants &pipe,
                        [[resource_table]] LightEvalIterator &lights,
@@ -108,6 +123,13 @@ void surf_forward_impl([[resource_table]] KernelGlobals &kg,
   draw::ID id{interp.resource_id_raw};
   const uint resource_id = id.resource_id<1>();
   const ViewMatrices view = views.get(0);
+
+#if defined(MAT_FORWARD_RECEIVER_REPLAY) && defined(GPU_FRAGMENT_SHADER)
+  if (forward_collect_receiver(lights.inner, frag_co, sd, resource_id)) {
+    gpu_discard_fragment();
+    return;
+  }
+#endif
 
 #if defined(MAT_FORWARD_HWRT_SHADOW_REUSE) && defined(GPU_FRAGMENT_SHADER)
   forward_shadow_cache_valid = 0u;

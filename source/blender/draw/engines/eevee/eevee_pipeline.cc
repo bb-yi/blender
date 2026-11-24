@@ -1313,6 +1313,30 @@ void ForwardPipeline::filter_volume_end(View &view, Framebuffer &fb)
   }
 }
 
+void ForwardLayer::bind_surface_resources(Instance &inst, PassMain::Sub &pass)
+{
+  pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst.pipelines.utility_tx);
+  pass.bind_texture(HIZ_PREVIOUS_LAYER_TEX_SLOT, &inst.hiz_buffer.back.ref_tx_);
+  pass.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst.render_buffers.combined_tx);
+  pass.bind_texture(OBJECT_ID_TEX_SLOT, &inst.render_buffers.object_id_tx);
+  pass.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst.render_buffers.prepass_normal_tx);
+  pass.bind_image(RBUFS_COLOR_SLOT, &inst.render_buffers.rp_color_tx);
+  pass.bind_image(RBUFS_VALUE_SLOT, &inst.render_buffers.rp_value_tx);
+  pass.bind_image(OUTLINE_COLOR_SLOT, &inst.render_buffers.outline_color_tx);
+  pass.bind_image(OUTLINE_INFO_SLOT, &inst.render_buffers.outline_info_tx);
+  pass.bind_resources(inst.uniform_data);
+  pass.bind_resources(inst.lights);
+  inst.lights.bind_front_light_shader_resources(pass);
+  pass.bind_resources(inst.shadows);
+  pass.bind_resources(inst.volume.result);
+  pass.bind_resources(inst.sampling);
+  pass.bind_resources(inst.render_textures);
+  pass.bind_resources(inst.hiz_buffer.front);
+  pass.bind_resources(inst.volume_probes);
+  pass.bind_resources(inst.sphere_probes);
+  pass.bind_resources(inst.planar_probes);
+}
+
 void ForwardLayer::sync()
 {
   camera_forward_ = inst_.camera.forward();
@@ -1332,30 +1356,7 @@ void ForwardLayer::sync()
   {
     opaque_ps_.init();
 
-    {
-      /* Common resources. */
-      opaque_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
-      opaque_ps_.bind_texture(HIZ_PREVIOUS_LAYER_TEX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
-      opaque_ps_.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
-      opaque_ps_.bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
-      opaque_ps_.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
-      opaque_ps_.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
-      opaque_ps_.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
-      opaque_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
-      opaque_ps_.bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
-
-      opaque_ps_.bind_resources(inst_.uniform_data);
-      opaque_ps_.bind_resources(inst_.lights);
-      inst_.lights.bind_front_light_shader_resources(opaque_ps_);
-      opaque_ps_.bind_resources(inst_.shadows);
-      opaque_ps_.bind_resources(inst_.volume.result);
-      opaque_ps_.bind_resources(inst_.sampling);
-      opaque_ps_.bind_resources(inst_.render_textures);
-      opaque_ps_.bind_resources(inst_.hiz_buffer.front);
-      opaque_ps_.bind_resources(inst_.volume_probes);
-      opaque_ps_.bind_resources(inst_.sphere_probes);
-      opaque_ps_.bind_resources(inst_.planar_probes);
-    }
+    bind_surface_resources(inst_, opaque_ps_);
 
     const DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                            DRW_STATE_DEPTH_EQUAL;
@@ -1384,54 +1385,12 @@ void ForwardLayer::sync()
      * circumstances. */
     PassMain::Sub &sub = transparent_ps_.sub("ResourceBind", -FLT_MAX);
 
-    /* Common resources. */
-
-    /* Textures. */
-    sub.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
-    sub.bind_texture(HIZ_PREVIOUS_LAYER_TEX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
-    sub.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
-    sub.bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
-    sub.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
-    sub.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
-    sub.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
-    sub.bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
-    sub.bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
-
-    sub.bind_resources(inst_.uniform_data);
-    sub.bind_resources(inst_.lights);
-    inst_.lights.bind_front_light_shader_resources(sub);
-    sub.bind_resources(inst_.shadows);
-    sub.bind_resources(inst_.volume.result);
-    sub.bind_resources(inst_.sampling);
-    sub.bind_resources(inst_.render_textures);
-    sub.bind_resources(inst_.hiz_buffer.front);
-    sub.bind_resources(inst_.volume_probes);
-    sub.bind_resources(inst_.sphere_probes);
-    sub.bind_resources(inst_.planar_probes);
+    bind_surface_resources(inst_, sub);
   }
   {
     no_depth_ps_.init();
     PassMain::Sub &sub = no_depth_ps_.sub("ResourceBind", -FLT_MAX);
-    sub.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
-    sub.bind_texture(HIZ_PREVIOUS_LAYER_TEX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
-    sub.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
-    sub.bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
-    sub.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
-    sub.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
-    sub.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
-    sub.bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
-    sub.bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
-    sub.bind_resources(inst_.uniform_data);
-    sub.bind_resources(inst_.lights);
-    inst_.lights.bind_front_light_shader_resources(sub);
-    sub.bind_resources(inst_.shadows);
-    sub.bind_resources(inst_.volume.result);
-    sub.bind_resources(inst_.sampling);
-    sub.bind_resources(inst_.render_textures);
-    sub.bind_resources(inst_.hiz_buffer.front);
-    sub.bind_resources(inst_.volume_probes);
-    sub.bind_resources(inst_.sphere_probes);
-    sub.bind_resources(inst_.planar_probes);
+    bind_surface_resources(inst_, sub);
   }
   {
     outline_occlusion_ps_.init();
@@ -1577,7 +1536,10 @@ static bool material_needs_native_shadows(GPUMaterial *material,
                                              GPU_MAT_NPR_SHADOW_SOFT;
   return GPU_material_flag_get(material,
                                GPU_MATFLAG_SHADOW_OFFSET | GPU_MATFLAG_LIGHTING |
-                                   GPU_MATFLAG_NPR_FOREACH_LIGHT | GPU_MATFLAG_GLSL_SHADOW_ACCESS) ||
+                                   GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
+         (GPU_material_flag_get(material, GPU_MATFLAG_GLSL_SHADOW_ACCESS) &&
+          !forward_hardware_shadow &&
+          (forward || GPU_material_flag_get(material, GPU_MATFLAG_TRANSPARENT))) ||
          (!forward_hardware_shadow &&
           GPU_material_flag_get(material, GPU_MATFLAG_SHADER_INFO_SHADOW_OFFSET)) ||
          (forward && (GPU_material_npr_features_get(material) & npr_shadows) != 0) ||
@@ -1610,10 +1572,13 @@ void ForwardLayer::transparent_add(const Object *ob,
 
   has_transparent_ = true;
   const bool hardware_shadows = forward_material_has_hardware_shadow(gpumat);
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAW_SHADOW_MAP)) {
+    inst_.pipelines.require_native_shadows("custom shader reads shadow-map texels", blender_mat->id.name + 2);
+  }
   if ((forward_material_needs_lighting(gpumat) && !hardware_shadows) ||
       material_needs_native_shadows(gpumat, *blender_mat, true, hardware_shadows))
   {
-    inst_.pipelines.require_native_shadows("a blended material needs unsupported shadow lighting");
+    inst_.pipelines.require_native_shadows("a blended material needs unsupported shadow lighting", blender_mat->id.name + 2);
   }
   if (GPU_material_has_shader_info_shadow_classification(gpumat)) {
     inst_.shadows.tag_caster_atlas_needed();
@@ -1869,6 +1834,7 @@ void ForwardLayer::render(View &view,
     }
   }
 
+  inst_.raytracing.prepare_forward_shadows(view, depth_tx, extent);
   if (has_opaque_) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardOpaque);
     inst_.manager->submit(opaque_ps_, view);
@@ -1886,6 +1852,7 @@ void ForwardLayer::render(View &view,
                                            TelemetryStageId::MainForwardTransparent);
     inst_.manager->submit(transparent_ps_, view);
   }
+  inst_.raytracing.finish_forward_shadows(view);
 
   if (needs_transparency_resolve) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardResolve);
@@ -2500,6 +2467,11 @@ bool DeferredLayer::bind_shader_info_hardware_shadow(PassMain::Sub &pass, gpu::S
   }
   pass.shader_set(shader);
   pass.bind_texture(slot, inst_.raytracing.hardware_shadow_visibility_tx());
+  const int overlap_slot = GPU_shader_get_sampler_binding(shader,
+                                                          "shader_info_hardware_overlap_tx");
+  if (overlap_slot >= 0) {
+    pass.bind_texture(overlap_slot, inst_.raytracing.hardware_shadow_overlap_tx());
+  }
   pass.push_constant("shader_info_hardware_shadow_layers", &shader_info_hardware_shadow_layers_);
   return true;
 }
@@ -2673,6 +2645,9 @@ gpu::Texture *DeferredLayer::render(View &main_view,
                        !has_stencil_,
                        inst_.pipelines.forward.coverage_enabled());
     inst_.manager->submit(gbuffer_ps_, render_view);
+    if (shader_info_hardware_shadow_layers_ > 0) {
+      inst_.shadows.log_consumer(render_view, "material", "ray_visibility");
+    }
   }
   inst_.lights.eval_light_shaders(render_view, extent);
 
@@ -2735,6 +2710,8 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredEvalLight);
     GPU_framebuffer_bind(combined_fb);
     inst_.manager->submit(eval_light_ps_, render_view);
+    inst_.shadows.log_consumer(render_view, "deferred", *inst_.raytracing.hardware_shadow_ready() ?
+                                                            "ray_visibility" : "native_or_unshadowed");
   }
 
   {
@@ -3126,7 +3103,7 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
                                             const SurfaceDrawState &draw_state)
 {
   if (pipeline_type == MAT_PIPE_SHADOW && draw_state.is_outline_shell) {
-    require_native_shadows("an outline shell casts shadows");
+    require_native_shadows("an outline shell casts shadows", ob->id.name + 2);
   }
   if (probe_capture == MAT_PROBE_NONE && draw_state.color_write &&
       !(ob->visibility_flag & OB_HIDE_CAMERA) &&
@@ -3134,6 +3111,9 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
   {
     const bool forward_hardware_shadow = pipeline_type == MAT_PIPE_FORWARD &&
                                          forward_material_has_hardware_shadow(gpumat);
+    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAW_SHADOW_MAP)) {
+      require_native_shadows("custom shader reads shadow-map texels", blender_mat->id.name + 2);
+    }
     if (GPU_material_has_shader_info_shadow_classification(gpumat)) {
       if (GPU_backend_get_type() == GPU_BACKEND_VULKAN && pipeline_type != MAT_PIPE_FORWARD &&
           ob->type == OB_MESH && draw_state.depth_write &&
@@ -3143,29 +3123,27 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
         has_hardware_shadow_classification = true;
       }
       else if (!forward_hardware_shadow) {
-        require_native_shadows("a material needs unsupported shadow classification");
+        require_native_shadows("a material needs unsupported shadow classification", blender_mat->id.name + 2);
       }
     }
     if (pipeline_type == MAT_PIPE_FORWARD && forward_material_needs_lighting(gpumat) &&
         !forward_hardware_shadow)
     {
-      require_native_shadows("a forward material uses lighting");
+      require_native_shadows("a forward material uses unsupported lighting", blender_mat->id.name + 2);
     }
     else if (!forward_hardware_shadow && GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
              (ob->type != OB_MESH || GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT)))
     {
-      require_native_shadows("Shader Info is used on a transparent or non-mesh surface");
+      require_native_shadows("Shader Info is used on a transparent or non-mesh surface", blender_mat->id.name + 2);
     }
     else if (material_needs_native_shadows(
                  gpumat, *blender_mat, pipeline_type == MAT_PIPE_FORWARD, forward_hardware_shadow))
     {
-      require_native_shadows("a material uses native shadow-map lighting");
+      require_native_shadows("a material uses native shadow-map lighting", blender_mat->id.name + 2);
     }
-    else if (GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS) &&
-             !GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
-             !GPU_material_principled_npr_v2_has(gpumat))
+    else if (GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_SHADOW_ACCESS) && ob->type != OB_MESH)
     {
-      require_native_shadows("a material uses legacy NPR or custom light sampling");
+      require_native_shadows("custom shadow lookup requires a mesh receiver", blender_mat->id.name + 2);
     }
   }
 
