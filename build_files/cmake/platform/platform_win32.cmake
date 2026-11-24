@@ -1095,16 +1095,15 @@ if(WITH_VULKAN_BACKEND)
   endif()
 endif()
 
+set(SHADERC_RUNTIME_DIR "${LIBDIR}/shaderc/bin")
 if(WITH_VULKAN_BACKEND)
   if(EXISTS ${LIBDIR}/shaderc)
     set(SHADERC_FOUND ON)
     set(SHADERC_ROOT_DIR ${LIBDIR}/shaderc)
     set(SHADERC_INCLUDE_DIR ${SHADERC_ROOT_DIR}/include)
     set(SHADERC_INCLUDE_DIRS ${SHADERC_INCLUDE_DIR})
-    set(SHADERC_LIBRARY
-      ${SHADERC_ROOT_DIR}/lib/shaderc_shared.lib
-    )
-    set(SHADERC_LIBRARIES ${SHADERC_LIBRARY})
+    include(${CMAKE_CURRENT_LIST_DIR}/shaderc_win32.cmake)
+    configure_npr_shaderc()
   else()
     message(WARNING "Shaderc was not found, disabling WITH_VULKAN_BACKEND")
     set(WITH_VULKAN_BACKEND OFF)
@@ -1213,7 +1212,7 @@ endif()
 get_filename_component(_msvc_path ${CMAKE_C_COMPILER} DIRECTORY)
 # Environment variables to run precompiled executables that needed libraries.
 list(JOIN PLATFORM_BUNDLED_LIBRARY_DIRS ";" _library_paths)
-set(PLATFORM_ENV_BUILD_DIRS "${_msvc_path}\;${LIBDIR}/epoxy/bin\;${LIBDIR}/tbb/bin\;${LIBDIR}/OpenImageIO/bin\;${LIBDIR}/boost/lib\;${LIBDIR}/openexr/bin\;${LIBDIR}/imath/bin\;${LIBDIR}/shaderc/bin\;${LIBDIR}/opencolorio/bin\;${LIBDIR}/aom/bin\;${LIBDIR}/openjph/bin\;${PATH}")
+set(PLATFORM_ENV_BUILD_DIRS "${_msvc_path}\;${LIBDIR}/epoxy/bin\;${LIBDIR}/tbb/bin\;${LIBDIR}/OpenImageIO/bin\;${LIBDIR}/boost/lib\;${LIBDIR}/openexr/bin\;${LIBDIR}/imath/bin\;${SHADERC_RUNTIME_DIR}\;${LIBDIR}/opencolorio/bin\;${LIBDIR}/aom/bin\;${LIBDIR}/openjph/bin\;${PATH}")
 set(PLATFORM_ENV_BUILD "PATH=${PLATFORM_ENV_BUILD_DIRS}")
 # Install needs the additional folders from PLATFORM_ENV_BUILD_DIRS as well, as tools like:
 # `idiff` and `abcls` use the release mode dlls.

@@ -70,6 +70,9 @@ ExternalProject_Add(external_spirv_tools
   URL_HASH ${SPIRV_TOOLS_HASH_TYPE}=${SPIRV_TOOLS_HASH}
   PREFIX ${BUILD_DIR}/spirv_tools
 
+  PATCH_COMMAND ${PATCH_CMD} -p 1 -d
+    <SOURCE_DIR> < ${PATCH_DIR}/spirv_tools_6962.diff
+
   CMAKE_ARGS
     -DCMAKE_INSTALL_PREFIX=${LIBDIR}/spirv_tools
     -Wno-dev

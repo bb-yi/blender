@@ -1718,7 +1718,7 @@ elseif(WIN32)
   unset(SNDFILE_DLL)
 
   windows_install_shared_manifest(
-    FILES ${LIBDIR}/shaderc/bin/shaderc_shared.dll
+    FILES "${SHADERC_RUNTIME_DIR}/shaderc_shared.dll"
     ALL
   )
 
