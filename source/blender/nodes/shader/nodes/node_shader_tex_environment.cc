@@ -47,11 +47,13 @@ static int node_shader_gpu_tex_environment(GPUMaterial *mat,
   Image *ima = id_cast<Image *>(node->id);
   NodeTexEnvironment *tex = static_cast<NodeTexEnvironment *>(node->storage);
 
-  /* We get the image user from the original node, since GPU image keeps
-   * a pointer to it and the dependency refreshes the original. */
-  bNode *node_original = node->runtime->original ? node->runtime->original : node;
-  NodeTexImage *tex_original = static_cast<NodeTexImage *>(node_original->storage);
-  ImageUser *iuser = &tex_original->iuser;
+  NodeTexEnvironment *user_storage = static_cast<NodeTexEnvironment *>(
+      node_shader_gpu_image_user_storage(mat, *node));
+  if (!ima || !user_storage) {
+    return GPU_stack_link(mat, node, "node_tex_environment_empty", in, out);
+  }
+  ImageUser *iuser = &user_storage->iuser;
+
   /* Setting the GPU_SAMPLER_FILTERING_ANISOTROPIC_ENABLE enables anisotropic filtering. The
    * exact number of samples are being determined at bind time by the engine.
    * See #blender::draw::PassBase<T>::material_set */
@@ -65,10 +67,6 @@ static int node_shader_gpu_tex_environment(GPUMaterial *mat,
   }
 
   GPUNodeLink *outalpha;
-
-  if (!ima) {
-    return GPU_stack_link(mat, node, "node_tex_environment_empty", in, out);
-  }
 
   if (!in[0].link) {
     GPU_link(mat, "node_tex_coord_position", GPU_shading_data(), &in[0].link);

@@ -91,6 +91,7 @@ void node_gpu_stack_from_data(GPUNodeStack *gs, bNodeSocket *socket, bNodeStack 
 void node_data_from_gpu_stack(bNodeStack *ns, GPUNodeStack *gs);
 void node_shader_gpu_bump_tex_coord(GPUMaterial *mat, bNode *node, GPUNodeLink **link);
 void node_shader_gpu_default_tex_coord(GPUMaterial *mat, bNode *node, GPUNodeLink **link);
+void *node_shader_gpu_image_user_storage(GPUMaterial *mat, const bNode &node);
 void node_shader_gpu_tex_mapping(GPUMaterial *mat,
                                  bNode *node,
                                  GPUNodeStack *in,

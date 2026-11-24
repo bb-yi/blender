@@ -19,6 +19,8 @@
 #include "BKE_context.hh"
 #include "BKE_node_runtime.hh"
 
+#include "CLG_log.h"
+
 #include "IMB_colormanagement.hh"
 
 #include "RNA_access.hh"
@@ -754,6 +756,27 @@ void node_shader_gpu_default_tex_coord(GPUMaterial *mat, bNode *node, GPUNodeLin
     *link = GPU_attribute(mat, CD_ORCO, "");
     node_shader_gpu_bump_tex_coord(mat, node, link);
   }
+}
+
+void *node_shader_gpu_image_user_storage(GPUMaterial *mat, const bNode &node)
+{
+  const bNode &original = node.runtime->original ? *node.runtime->original : node;
+  if (node.storage && original.storage) {
+    return original.storage;
+  }
+
+  static CLG_LogRef texture_log = {"node.shader.texture"};
+  CLOG_WARN(&texture_log,
+            "Missing %s storage in GPU shader '%s', node '%s' (%s, id %d), compiled node '%s'. "
+            "%s",
+            node.storage ? "original node" : "compiled node",
+            GPU_material_get_name(mat),
+            original.name,
+            node.idname,
+            original.identifier,
+            node.name,
+            node.storage ? "Using the compiled node's ImageUser." : "Using an empty texture.");
+  return node.storage;
 }
 
 void node_shader_gpu_tex_mapping(GPUMaterial *mat,

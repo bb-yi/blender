@@ -50,15 +50,12 @@ static int node_shader_gpu_tex_image(GPUMaterial *mat,
   Image *ima = id_cast<Image *>(node->id);
   NodeTexImage *tex = static_cast<NodeTexImage *>(node->storage);
 
-  /* We get the image user from the original node, since GPU image keeps
-   * a pointer to it and the dependency refreshes the original. */
-  bNode *node_original = node->runtime->original ? node->runtime->original : node;
-  NodeTexImage *tex_original = static_cast<NodeTexImage *>(node_original->storage);
-  ImageUser *iuser = &tex_original->iuser;
-
-  if (!ima) {
+  NodeTexImage *user_storage = static_cast<NodeTexImage *>(
+      node_shader_gpu_image_user_storage(mat, *node));
+  if (!ima || !user_storage) {
     return GPU_stack_link(mat, node, "node_tex_image_empty", in, out);
   }
+  ImageUser *iuser = &user_storage->iuser;
 
   GPUNodeLink **texco = &in[0].link;
   if (!*texco) {
